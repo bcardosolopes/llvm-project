@@ -2933,7 +2933,7 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
 
       Actions.ActOnStartStmtExpr();
 
-      StmtResult Stmt(ParseCompoundStatement(true));
+      StmtResult Stmt(ParseCompoundStatement(StmtExprKind::GCCExt));
       ExprType = CompoundStmt;
 
       // If the substmt parsed correctly, build the AST node.
