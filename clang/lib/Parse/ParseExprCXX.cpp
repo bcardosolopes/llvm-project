@@ -2358,6 +2358,54 @@ void Parser::ParseCXXSimpleTypeSpecifier(DeclSpec &DS) {
   DS.Finish(Actions, Policy);
 }
 
+/// This parses a do statement expression.
+///
+/// \verbatim
+/// TBD
+/// \endverbatim
+ExprResult Parser::ParseDoStmtExpression() {
+  auto DoLoc = ConsumeToken();
+  ExprResult Result(true);
+
+  // FIXME: do we need this?
+  // checkCompoundToken(OpenLoc, tok::l_paren, CompoundToken::StmtExprBegin);
+
+  if (!getCurScope()->getFnParent() && !getCurScope()->getBlockParent()) {
+    // Differently from statement expressions, if this is done at file
+    Result = ExprError(Diag(DoLoc, diag::err_doexpr_file_scope));
+  } else {
+    // Find the nearest non-record decl context. Variables declared in a
+    // statement expression behave as if they were declared in the enclosing
+    // function, block, or other code construct.
+    DeclContext *CodeDC = Actions.CurContext;
+    while (CodeDC->isRecord() || isa<EnumDecl>(CodeDC)) {
+      CodeDC = CodeDC->getParent();
+      assert(CodeDC && !CodeDC->isFileContext() &&
+             "statement expr not in code context");
+    }
+    Sema::ContextRAII SavedContext(Actions, CodeDC, /*NewThisContext=*/false);
+
+    assert(0 && "not implemented");
+    // Actions.ActOnStartStmtExpr();
+
+    StmtResult Stmt(ParseCompoundStatement(StmtExprKind::Do));
+    // TODO: do we need this? probably not.
+    // ExprType = CompoundStmt;
+
+    // If the substmt parsed correctly, build the AST node.
+    if (!Stmt.isInvalid()) {
+      assert(0 && "not implemented");
+      // Result = Actions.ActOnStmtExpr(getCurScope(), OpenLoc, Stmt.get(),
+      //                                Tok.getLocation());
+    } else {
+      assert(0 && "not implemented");
+      // Actions.ActOnStmtExprError();
+    }
+  }
+
+  return Result;
+}
+
 /// ParseCXXTypeSpecifierSeq - Parse a C++ type-specifier-seq (C++
 /// [dcl.name]), which is a non-empty sequence of type-specifiers,
 /// e.g., "const short int". Note that the DeclSpec is *not* finished

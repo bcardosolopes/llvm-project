@@ -331,6 +331,10 @@ Retry:
     Res = ParseReturnStatement();
     SemiError = "co_return";
     break;
+  case tok::kw_do_yield: // D2806R0: do_yield statement
+    Res = ParseDoYieldStatement();
+    SemiError = "do_yield";
+    break;
 
   case tok::kw_asm: {
     for (const ParsedAttr &AL : CXX11Attrs)
@@ -2347,6 +2351,43 @@ StmtResult Parser::ParseContinueStatement() {
 StmtResult Parser::ParseBreakStatement() {
   SourceLocation BreakLoc = ConsumeToken();  // eat the 'break'.
   return Actions.ActOnBreakStmt(BreakLoc, getCurScope());
+}
+
+///       jump-statement:
+///         'do_yield' expression[opt] ';'
+///         'do_yield' braced-init-list ';'
+StmtResult Parser::ParseDoYieldStatement() {
+  assert(Tok.is(tok::kw_do_yield) && "Not a do_yield stmt!");
+  SourceLocation YieldLoc = ConsumeToken(); // eat the 'return'.
+
+  ExprResult R;
+  if (Tok.isNot(tok::semi)) {
+
+    // TODO: code completion
+    // PreferredType.enterReturn(Actions, Tok.getLocation());
+    // if (Tok.is(tok::code_completion) && !IsCoreturn) {
+    //   cutOffParsing();
+    //   Actions.CodeCompleteExpression(getCurScope(),
+    //                                  PreferredType.get(Tok.getLocation()));
+    //   return StmtError();
+    // }
+
+    if (Tok.is(tok::l_brace) && getLangOpts().CPlusPlus) {
+      R = ParseInitializer();
+      if (R.isUsable())
+        Diag(R.get()->getBeginLoc(),
+             getLangOpts().CPlusPlus11
+                 ? diag::warn_cxx98_compat_generalized_initializer_lists
+                 : diag::ext_generalized_initializer_lists)
+            << R.get()->getSourceRange();
+    } else
+      R = ParseExpression();
+    if (R.isInvalid()) {
+      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+      return StmtError();
+    }
+  }
+  return Actions.ActOnDoYieldStmt(YieldLoc, R.get(), getCurScope());
 }
 
 /// ParseReturnStatement

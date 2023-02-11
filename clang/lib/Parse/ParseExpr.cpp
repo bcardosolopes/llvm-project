@@ -985,6 +985,12 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   }
 
     // primary-expression
+  case tok::kw_do:
+    Res = ParseDoStmtExpression();
+    // TODO: perhaps try detecting a 'while' here for more friendly
+    // diagnostics.
+    break;
+
   case tok::numeric_constant:
     // constant: integer-constant
     // constant: floating-constant

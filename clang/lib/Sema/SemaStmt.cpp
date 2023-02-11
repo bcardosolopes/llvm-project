@@ -3900,6 +3900,31 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
   return R;
 }
 
+StmtResult Sema::ActOnDoYieldStmt(SourceLocation YieldLoc, Expr *YieldValExp,
+                                  Scope *CurScope) {
+  // Correct typos, in case the containing function returns 'auto' and
+  // RetValExp should determine the deduced type.
+  ExprResult RetVal = CorrectDelayedTyposInExpr(
+      YieldValExp, nullptr, /*RecoverUncorrectedTypos=*/true);
+  if (RetVal.isInvalid())
+    return StmtError();
+
+  assert(0 && "not implemented");
+  // StmtResult R =
+  //     BuildReturnStmt(YieldLoc, RetVal.get(), /*AllowRecovery=*/true);
+  // if (R.isInvalid() || ExprEvalContexts.back().isDiscardedStatementContext())
+  //   return R;
+
+  // VarDecl *VD =
+  //     const_cast<VarDecl *>(cast<ReturnStmt>(R.get())->getNRVOCandidate());
+
+  // CurScope->updateNRVOCandidate(VD);
+
+  // CheckJumpOutOfSEHFinally(*this, YieldLoc, *CurScope->getFnParent());
+
+  // return R;
+}
+
 static bool CheckSimplerImplicitMovesMSVCWorkaround(const Sema &S,
                                                     const Expr *E) {
   if (!E || !S.getLangOpts().CPlusPlus2b || !S.getLangOpts().MSVCCompat)

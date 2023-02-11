@@ -5194,6 +5194,8 @@ public:
   StmtResult ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
                                      NamedReturnInfo &NRInfo,
                                      bool SupressSimplerImplicitMoves);
+  StmtResult ActOnDoYieldStmt(SourceLocation YieldLoc, Expr *YieldValExp,
+                              Scope *CurScope);
 
   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                              bool IsVolatile, unsigned NumOutputs,

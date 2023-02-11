@@ -172,6 +172,8 @@ def ext_gnu_address_of_label : Extension<
   "use of GNU address-of-label extension">, InGroup<GNULabelsAsValue>;
 def err_stmtexpr_file_scope : Error<
   "statement expression not allowed at file scope">;
+def err_doexpr_file_scope : Error<
+  "do expression not allowed at file scope">;
 def ext_gnu_statement_expr : Extension<
   "use of GNU statement expression extension">, InGroup<GNUStatementExpression>;
 def ext_gnu_statement_expr_macro : Extension<

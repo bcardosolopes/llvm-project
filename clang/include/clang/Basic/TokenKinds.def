@@ -415,6 +415,10 @@ KEYWORD(char8_t                     , CHAR8SUPPORT)
 // C11 Extension
 KEYWORD(_Float16                    , KEYALL)
 
+// D2806R0: do statement-expressions
+// FIXME: be more specific so we can hide behind a flag?
+KEYWORD(do_yield, KEYALL)
+
 // C2x keywords
 C2X_KEYWORD(typeof                  , KEYGNU)
 C2X_KEYWORD(typeof_unqual           , 0)
