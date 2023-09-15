@@ -657,8 +657,6 @@ void CodeGenFunction::EmitCoroutineBody(const CoroutineBodyStmt &S) {
   CurCoro.Data->CoroBegin = CoroBegin;
 
   GetReturnObjectManager GroManager(*this, S);
-  GroManager.EmitGroAlloca();
-
   CurCoro.Data->CleanupJD = getJumpDestInCurrentScope(RetBB);
   {
     CGDebugInfo *DI = getDebugInfo();
@@ -695,6 +693,12 @@ void CodeGenFunction::EmitCoroutineBody(const CoroutineBodyStmt &S) {
     // Update CoroId to refer to the promise. We could not do it earlier because
     // promise local variable was not emitted yet.
     CoroId->setArgOperand(1, PromiseAddrVoidPtr);
+
+    // Emit the alloca for ` __coro_gro`  *after* it's done for the promise.
+    // This guarantees that while looking at deferred results from calls to
+    // `get_return_object`, the lifetime of ` __coro_gro` is enclosed by the
+    // `__promise` lifetime, and cleanup order is properly respected.
+    GroManager.EmitGroAlloca();
 
     // Now we have the promise, initialize the GRO
     GroManager.EmitGroInit();
@@ -752,22 +756,22 @@ void CodeGenFunction::EmitCoroutineBody(const CoroutineBodyStmt &S) {
       // We don't need FinalBB. Emit it to make sure the block is deleted.
       EmitBlock(FinalBB, /*IsFinished=*/true);
     }
-  }
 
-  EmitBlock(RetBB);
-  // Emit coro.end before getReturnStmt (and parameter destructors), since
-  // resume and destroy parts of the coroutine should not include them.
-  llvm::Function *CoroEnd = CGM.getIntrinsic(llvm::Intrinsic::coro_end);
-  Builder.CreateCall(CoroEnd,
-                     {NullPtr, Builder.getFalse(),
-                      llvm::ConstantTokenNone::get(CoroEnd->getContext())});
+    EmitBlock(RetBB);
+    // Emit coro.end before getReturnStmt (and parameter destructors), since
+    // resume and destroy parts of the coroutine should not include them.
+    llvm::Function *CoroEnd = CGM.getIntrinsic(llvm::Intrinsic::coro_end);
+    Builder.CreateCall(CoroEnd,
+                       {NullPtr, Builder.getFalse(),
+                        llvm::ConstantTokenNone::get(CoroEnd->getContext())});
 
-  if (Stmt *Ret = S.getReturnStmt()) {
-    // Since we already emitted the return value above, so we shouldn't
-    // emit it again here.
-    if (GroManager.DirectEmit)
-      cast<ReturnStmt>(Ret)->setRetValue(nullptr);
-    EmitStmt(Ret);
+    if (Stmt *Ret = S.getReturnStmt()) {
+      // Since we already emitted the return value above, so we shouldn't
+      // emit it again here.
+      if (GroManager.DirectEmit)
+        cast<ReturnStmt>(Ret)->setRetValue(nullptr);
+      EmitStmt(Ret);
+    }
   }
 
   // LLVM require the frontend to mark the coroutine.

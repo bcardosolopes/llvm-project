@@ -29,14 +29,21 @@ void doSomething() noexcept;
 // CHECK: define{{.*}} i32 @_Z1fv(
 int f() {
   // CHECK: %[[RetVal:.+]] = alloca i32
+  // CHECK: %[[Promise:.+]] = alloca %"struct.std::coroutine_traits<int>::promise_type"
   // CHECK: %[[GroActive:.+]] = alloca i1
+  // CHECK: %[[CoroGro:.+]] = alloca %struct.GroType
 
   // CHECK: %[[Size:.+]] = call i64 @llvm.coro.size.i64()
   // CHECK: call noalias noundef nonnull ptr @_Znwm(i64 noundef %[[Size]])
-  // CHECK: store i1 false, ptr %[[GroActive]]
+
+  // GRO lifetime should be bound within promise's lifetime.
+  //
+  // CHECK: call void @llvm.lifetime.start.p0(i64 1, ptr %[[Promise]])
   // CHECK: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeC1Ev(
+  // CHECK: store i1 false, ptr %[[GroActive]]
+  // CHECK: call void @llvm.lifetime.start.p0(i64 1, ptr %[[CoroGro]])
   // CHECK: call void @_ZNSt16coroutine_traitsIiJEE12promise_type17get_return_objectEv(
-  // CHECK: store i1 true, ptr %[[GroActive]]
+  // CHECK: store i1 true, ptr %[[GroActive]], align 1
 
   Cleanup cleanup;
   doSomething();
@@ -45,12 +52,6 @@ int f() {
   // CHECK: call void @_Z11doSomethingv(
   // CHECK: call void @_ZNSt16coroutine_traitsIiJEE12promise_type11return_voidEv(
   // CHECK: call void @_ZN7CleanupD1Ev(
-
-  // Destroy promise and free the memory.
-
-  // CHECK: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
-  // CHECK: %[[Mem:.+]] = call ptr @llvm.coro.free(
-  // CHECK: call void @_ZdlPv(ptr noundef %[[Mem]])
 
   // Initialize retval from Gro and destroy Gro
   // Note this also tests delaying initialization when Gro and function return
@@ -63,9 +64,18 @@ int f() {
 
   // CHECK: [[CleanupGro]]:
   // CHECK:   call void @_ZN7GroTypeD1Ev(
-  // CHECK:   br label %[[Done]]
+  // CHECK:   br label %[[CleanupDone:.+]]
 
-  // CHECK: [[Done]]:
+  // Destroy promise and free the memory.
+
+  // GRO lifetime should be bound within promise's lifetime.
+  // CHECK: [[CleanupDone]]:
+  // CHECK: call void @llvm.lifetime.end.p0(i64 1, ptr %[[CoroGro]])
+  // CHECK: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CHECK: call void @llvm.lifetime.end.p0(i64 1, ptr %[[Promise]])
+  // CHECK: %[[Mem:.+]] = call ptr @llvm.coro.free(
+  // CHECK: call void @_ZdlPv(ptr noundef %[[Mem]])
+
   // CHECK:   %[[LoadRet:.+]] = load i32, ptr %[[RetVal]]
   // CHECK:   ret i32 %[[LoadRet]]
 }
