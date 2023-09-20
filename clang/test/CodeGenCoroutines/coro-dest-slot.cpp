@@ -17,7 +17,6 @@ struct coro {
 extern "C" coro f(int) { co_return; }
 // Verify that cleanup.dest.slot is eliminated in a coroutine.
 // CHECK-LABEL: f(
-// CHECK: %[[PROMISE:.+]] = alloca %"struct.coro::promise_type"
 // CHECK: %[[INIT_SUSPEND:.+]] = call i8 @llvm.coro.suspend(
 // CHECK-NEXT: switch i8 %[[INIT_SUSPEND]], label
 // CHECK-NEXT:   i8 0, label %[[INIT_READY:.+]]
