@@ -512,21 +512,28 @@ struct GetReturnObjectManager {
     }();
   }
 
+  bool shouldEmitAlloca() {
+    if (DirectEmit)
+      return false;
+
+    if (!isa_and_nonnull<DeclStmt>(S.getResultDecl())) {
+      // If get_return_object returns void, no need to do an alloca.
+      return false;
+    }
+
+    return true;
+  }
+
   // The gro variable has to outlive coroutine frame and coroutine promise, but,
   // it can only be initialized after coroutine promise was created, thus, we
   // split its emission in two parts. EmitGroAlloca emits an alloca and sets up
   // cleanups. Later when coroutine promise is available we initialize the gro
   // and sets the flag that the cleanup is now active.
   void EmitGroAlloca() {
-    if (DirectEmit)
+    if (!shouldEmitAlloca())
       return;
 
-    auto *GroDeclStmt = dyn_cast_or_null<DeclStmt>(S.getResultDecl());
-    if (!GroDeclStmt) {
-      // If get_return_object returns void, no need to do an alloca.
-      return;
-    }
-
+    auto *GroDeclStmt = cast<DeclStmt>(S.getResultDecl());
     auto *GroVarDecl = cast<VarDecl>(GroDeclStmt->getSingleDecl());
 
     // Set GRO flag that it is not initialized yet
@@ -658,6 +665,25 @@ void CodeGenFunction::EmitCoroutineBody(const CoroutineBodyStmt &S) {
 
   GetReturnObjectManager GroManager(*this, S);
   CurCoro.Data->CleanupJD = getJumpDestInCurrentScope(RetBB);
+  bool shouldGROEmitAlloca = GroManager.shouldEmitAlloca();
+  auto emitRetBlock = [&]() {
+    EmitBlock(RetBB);
+    // Emit coro.end before getReturnStmt (and parameter destructors), since
+    // resume and destroy parts of the coroutine should not include them.
+    llvm::Function *CoroEnd = CGM.getIntrinsic(llvm::Intrinsic::coro_end);
+    Builder.CreateCall(CoroEnd,
+                       {NullPtr, Builder.getFalse(),
+                        llvm::ConstantTokenNone::get(CoroEnd->getContext())});
+
+    if (Stmt *Ret = S.getReturnStmt()) {
+      // Since we already emitted the return value above, so we shouldn't
+      // emit it again here.
+      if (GroManager.DirectEmit)
+        cast<ReturnStmt>(Ret)->setRetValue(nullptr);
+      EmitStmt(Ret);
+    }
+  };
+
   {
     CGDebugInfo *DI = getDebugInfo();
     ParamReferenceReplacerRAII ParamReplacer(LocalDeclMap);
@@ -757,22 +783,15 @@ void CodeGenFunction::EmitCoroutineBody(const CoroutineBodyStmt &S) {
       EmitBlock(FinalBB, /*IsFinished=*/true);
     }
 
-    EmitBlock(RetBB);
-    // Emit coro.end before getReturnStmt (and parameter destructors), since
-    // resume and destroy parts of the coroutine should not include them.
-    llvm::Function *CoroEnd = CGM.getIntrinsic(llvm::Intrinsic::coro_end);
-    Builder.CreateCall(CoroEnd,
-                       {NullPtr, Builder.getFalse(),
-                        llvm::ConstantTokenNone::get(CoroEnd->getContext())});
-
-    if (Stmt *Ret = S.getReturnStmt()) {
-      // Since we already emitted the return value above, so we shouldn't
-      // emit it again here.
-      if (GroManager.DirectEmit)
-        cast<ReturnStmt>(Ret)->setRetValue(nullptr);
-      EmitStmt(Ret);
-    }
+    // If an alloca is emitted for GRO handling, make sure the ret block
+    // is taken into account within the appropriate cleanup.
+    if (shouldGROEmitAlloca)
+      emitRetBlock();
   }
+
+  // No GRO alloca's, no need for to account for extra cleanups.
+  if (!shouldGROEmitAlloca)
+    emitRetBlock();
 
   // LLVM require the frontend to mark the coroutine.
   CurFn->setPresplitCoroutine();
