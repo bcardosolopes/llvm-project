@@ -34,9 +34,9 @@ int stbind1(s &a) {
       // CHECK: icmp eq i32 {{.*}}, 1
       // CHECK: br i1 {{.*}}, label %patbody, label %pat.wildcard
       // CHECK: patbody:
-      // CHECK: %[[C:.*]] = getelementptr inbounds %struct.s, %struct.s* {{.*}}, i32 0, i32 2
-      // CHECK: load i32, i32* %[[C]], align 4
-      // CEHCK: br label %inspect.epilogue
+      // CHECK: %[[C:.*]] = getelementptr inbounds %struct.s, ptr {{.*}}, i32 0, i32 2
+      // CHECK: load i32, ptr %[[C]], align 4
+      // CHECK: br label %inspect.epilogue
       __ => 0;
   };
 
