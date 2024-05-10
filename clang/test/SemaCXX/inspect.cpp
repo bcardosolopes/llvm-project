@@ -124,10 +124,10 @@ constexpr int Sum(int a = 0, const int &b = 0, const int *c = &z, char d = 0) {
   return a + b + *c + d;
 }
 
-void integral_constants(int x) { // expected-note {{declared here}}
+void integral_constants(int x) { // expected-note 2 {{declared here}}
   const int h = 42;
   struct Y { int a; int b; };
-  const Y y = {2, 3};
+  constexpr Y y = {2, 3};
   Y y2 = {4+x, 3+x}; // expected-note {{declared here}}
   inspect (x) {
     case h => {}
@@ -135,11 +135,11 @@ void integral_constants(int x) { // expected-note {{declared here}}
     case y2.b => {} // expected-error {{expression is not an integral constant expression}}
                     // expected-note@-1 {{read of non-constexpr variable 'y2' is not allowed in a constant expression}}
     case ++x => {} // expected-error {{expression is not an integral constant expression}}
-                   // expected-note@-1 {{a constant expression cannot modify an object that is visible outside that expression}}
+                   //  expected-note@-1 {{function parameter 'x' with unknown value cannot be used in a constant expression}}
     case 0 => {}
     case Sum(3) => {}
     case Sum(x) => {} //  expected-error {{expression is not an integral constant expression}}
-                      //  expected-note@-1 {{read of non-const variable 'x' is not allowed in a constant expression}}
+                      //  expected-note@-1 {{function parameter 'x' with unknown value cannot be used in a constant expression}}
   };
 }
 
@@ -176,7 +176,7 @@ void int_struct(int x) {
   s s1{3,4};
   constexpr s s2{4,5};
   s s3{4,5}; // expected-note {{declared here}}
-  const s s4{4,5};
+  const s s4{4,5}; // expected-note {{declared here}}
   inspect (s1) {
     case s2 => {};
     case s3 => {}; // expected-error {{pattern is not a constant expression}}
