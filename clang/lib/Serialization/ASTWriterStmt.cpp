@@ -275,6 +275,27 @@ void ASTStmtWriter::VisitInspectExpr(InspectExpr *S) {
   Code = serialization::EXPR_INSPECT;
 }
 
+void ASTStmtWriter::VisitMatchExpr(MatchExpr *S) {
+  VisitExpr(S);
+
+  // bool HasInit = S->getInit() != nullptr;
+  // bool HasVar = S->getConditionVariableDeclStmt() != nullptr;
+  // Record.push_back(HasInit);
+  // Record.push_back(HasVar);
+
+  Record.AddStmt(S->getCond());
+  // if (HasInit)
+  //   Record.AddStmt(S->getInit());
+  // if (HasVar)
+  //   Record.AddDeclRef(S->getConditionVariable());
+
+  Record.AddSourceLocation(S->getMatchLoc());
+
+  for (PatternStmt *PS = S->getPatternList(); PS; PS = PS->getNextPattern())
+    Record.push_back(Writer.RecordInspectPatternID(PS));
+  Code = serialization::EXPR_INSPECT;
+}
+
 void ASTStmtWriter::VisitPatternStmt(PatternStmt *S) {
   VisitStmt(S);
 

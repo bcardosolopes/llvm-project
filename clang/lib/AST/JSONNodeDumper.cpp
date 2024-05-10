@@ -1618,6 +1618,11 @@ void JSONNodeDumper::VisitInspectExpr(const InspectExpr *SS) {
   attributeOnlyIfTrue("hasVar", SS->hasVarStorage());
 }
 
+void JSONNodeDumper::VisitMatchExpr(const MatchExpr *SS) {
+  // attributeOnlyIfTrue("hasInit", SS->hasInitStorage());
+  // attributeOnlyIfTrue("hasVar", SS->hasVarStorage());
+}
+
 void JSONNodeDumper::VisitWildcardPatrternStmt(const WildcardPatternStmt *SS) {
   assert(0 && "not implemented");
 }

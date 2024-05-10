@@ -539,6 +539,7 @@ namespace clang {
     ExpectedStmt VisitIfStmt(IfStmt *S);
     ExpectedStmt VisitSwitchStmt(SwitchStmt *S);
     ExpectedStmt VisitInspectExpr(InspectExpr *S);
+    ExpectedStmt VisitMatchExpr(MatchExpr *S);
     ExpectedStmt VisitWildcardPatternStmt(WildcardPatternStmt *S);
     ExpectedStmt VisitIdentifierPatternStmt(IdentifierPatternStmt *S);
     ExpectedStmt VisitExpressionPatternStmt(ExpressionPatternStmt *S);
@@ -6898,6 +6899,39 @@ ExpectedStmt ASTNodeImporter::VisitInspectExpr(InspectExpr *S) {
       InspectExpr::Create(Importer.getToContext(), ToInit, ToConditionVariable,
                           ToCond, ToIsConstexpr, ToHasExplicitResultType);
   ToStmt->setInspectLoc(ToInspectLoc);
+
+  // Now we have to re-chain the patterns.
+  PatternStmt *LastChainedPattern = nullptr;
+  for (PatternStmt *PS = S->getPatternList(); PS != nullptr;
+       PS = PS->getNextPattern()) {
+    Expected<PatternStmt *> ToPatternOrErr = import(PS);
+    if (!ToPatternOrErr)
+      return ToPatternOrErr.takeError();
+    if (LastChainedPattern)
+      LastChainedPattern->setNextPattern(*ToPatternOrErr);
+    else
+      ToStmt->setPatternList(*ToPatternOrErr);
+    LastChainedPattern = *ToPatternOrErr;
+  }
+
+  return ToStmt;
+}
+
+ExpectedStmt ASTNodeImporter::VisitMatchExpr(MatchExpr *S) {
+  Error Err = Error::success();
+  // auto ToInit = importChecked(Err, S->getInit());
+  // auto ToConditionVariable = importChecked(Err, S->getConditionVariable());
+  auto ToCond = importChecked(Err, S->getCond());
+  auto ToInspectLoc = importChecked(Err, S->getMatchLoc());
+  auto ToIsConstexpr = S->isConstexpr();
+  auto ToHasExplicitResultType = S->hasExplicitResultType();
+  if (Err)
+    return std::move(Err);
+
+  auto *ToStmt =
+      MatchExpr::Create(Importer.getToContext(), ToCond, nullptr, nullptr,
+                        ToIsConstexpr, ToHasExplicitResultType);
+  ToStmt->setMatchLoc(ToInspectLoc);
 
   // Now we have to re-chain the patterns.
   PatternStmt *LastChainedPattern = nullptr;

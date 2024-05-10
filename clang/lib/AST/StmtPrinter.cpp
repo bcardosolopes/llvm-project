@@ -380,6 +380,16 @@ void StmtPrinter::VisitInspectExpr(InspectExpr *Node) {
   OS << ")";
 }
 
+void StmtPrinter::VisitMatchExpr(MatchExpr *Node) {
+  // if (Node->getInit())
+  //   PrintInitStmt(Node->getInit(), 8);
+  // if (const DeclStmt *DS = Node->getConditionVariableDeclStmt())
+  //   PrintRawDeclStmt(DS);
+  // else
+  PrintExpr(Node->getCond());
+  OS << " match";
+}
+
 void StmtPrinter::VisitWildcardPatternStmt(WildcardPatternStmt *Node) {
   Indent() << "__ => ";
   if (Node->hasPatternGuard()) {

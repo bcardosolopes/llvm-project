@@ -300,6 +300,32 @@ void ASTStmtReader::VisitInspectExpr(InspectExpr *S) {
   }
 }
 
+void ASTStmtReader::VisitMatchExpr(MatchExpr *S) {
+  VisitStmt(S);
+
+  // bool HasInit = false; // Record.readInt();
+  // bool HasVar = false;  // Record.readInt();
+
+  S->setCond(Record.readSubExpr());
+  // if (HasInit)
+  //   S->setInit(Record.readSubStmt());
+  // if (HasVar)
+  //   S->setConditionVariable(Record.getContext(), readDeclAs<VarDecl>());
+
+  S->setMatchLoc(readSourceLocation());
+
+  PatternStmt *PrevSC = nullptr;
+  for (auto E = Record.size(); Record.getIdx() != E;) {
+    PatternStmt *SC = Record.getInspectPatternWithID(Record.readInt());
+    if (PrevSC)
+      PrevSC->setNextPattern(SC);
+    else
+      S->setPatternList(SC);
+
+    PrevSC = SC;
+  }
+}
+
 void ASTStmtReader::VisitPatternStmt(PatternStmt *S) {
   VisitStmt(S);
 
@@ -2989,6 +3015,12 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
           Context,
           /* HasInit=*/Record[ASTStmtReader::NumStmtFields],
           /* HasVar=*/Record[ASTStmtReader::NumStmtFields + 1]);
+      break;
+
+    case EXPR_MATCH:
+      S = MatchExpr::CreateEmpty(Context,
+                                 /* HasInit=*/false,
+                                 /* HasVar=*/false);
       break;
 
     case STMT_WILDCARDPATTERN:

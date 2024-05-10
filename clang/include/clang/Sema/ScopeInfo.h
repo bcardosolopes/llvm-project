@@ -210,9 +210,16 @@ public:
   /// is incomplete (because we dropped an invalid one while parsing).
   using InspectInfo = llvm::PointerIntPair<InspectExpr *, 1, bool>;
 
+  /// A MatchExpr, along with a flag indicating if its list of patterns
+  /// is incomplete (because we dropped an invalid one while parsing).
+  using MatchInfo = llvm::PointerIntPair<MatchExpr *, 1, bool>;
+
   /// InspectStack - This is the current set of active inspect statements in the
   /// block.
   SmallVector<InspectInfo, 8> InspectStack;
+
+  /// This is the current set of active 'match' expressions in the block.
+  SmallVector<MatchInfo, 8> MatchStack;
 
   /// Track the number of inspect patterns - useful to create names for
   /// temporary bindings on structural bindings pattern. FIXME: is there a

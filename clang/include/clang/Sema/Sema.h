@@ -6275,6 +6275,11 @@ public:
   ExprResult ActOnFinishInspectExpr(SourceLocation InspectLoc, Expr *Inspect,
                                     Stmt *Body);
 
+  ExprResult ActOnStartOfMatchExpr(SourceLocation MatchLoc, Expr *Cond,
+                                   bool IsConstexpr, TypeResult ReturnType);
+  ExprResult ActOnFinishMatchExpr(SourceLocation MatchLoc, Expr *Match,
+                                  Stmt *Body);
+
   //===---------------------------- Clang Extensions ----------------------===//
 
   /// __builtin_convertvector(...)

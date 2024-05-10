@@ -1196,6 +1196,21 @@ protected:
   };
 
   // ===--- Pattern Matching bitfields classes ---===//
+  class MatchExprBitfields {
+    friend class MatchExpr;
+
+    unsigned : NumStmtBits;
+
+    /// True if the InspectExpr has storage for an init statement.
+    unsigned HasInit : 1;
+
+    /// True if the InspectExpr has storage for a condition variable.
+    unsigned HasVar : 1;
+
+    /// The location of the "inspect".
+    SourceLocation MatchLoc;
+  };
+
   class InspectExprBitfields {
     friend class InspectExpr;
 
@@ -1320,6 +1335,7 @@ protected:
 
     // C++ Pattern Matching expressions and statements
     InspectExprBitfields InspectExprBits;
+    MatchExprBitfields MatchExprBits;
     InspectPatternBitfields InspectPatternBits;
 
     // Obj-C Expressions

@@ -192,6 +192,11 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_SwitchStmt;
     break;
 
+  case Stmt::MatchExprClass:
+    llvm_unreachable("NYI");
+    // K = CXCursor_MatchExpr;
+    break;
+
   case Stmt::InspectExprClass:
     K = CXCursor_InspectExpr;
     break;

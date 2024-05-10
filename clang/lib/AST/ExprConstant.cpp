@@ -16346,6 +16346,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
       return ICEDiag(IK_NotICE, E->getBeginLoc());
     return CheckICE(cast<CastExpr>(E)->getSubExpr(), Ctx);
   }
+  case Expr::MatchExprClass:
   case Expr::InspectExprClass:
     assert(0 && "not implemented");
   }

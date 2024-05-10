@@ -7818,6 +7818,11 @@ ExprResult TreeTransform<Derived>::TransformInspectExpr(InspectExpr *S) {
 }
 
 template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformMatchExpr(MatchExpr *S) {
+  return ExprError();
+}
+
+template <typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformWildcardPatternStmt(WildcardPatternStmt *S) {
   return StmtError();

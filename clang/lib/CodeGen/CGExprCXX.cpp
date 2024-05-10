@@ -2429,3 +2429,42 @@ RValue CodeGenFunction::EmitInspectExpr(const InspectExpr &S) {
 
   return convertTempToRValue(InspectResAddr, S.getType(), SourceLocation());
 }
+
+RValue CodeGenFunction::EmitMatchExpr(const MatchExpr &S) {
+  // FIXME: check if we can constant fold to simple integer,
+  // just like switch does.
+
+  Address MatchResAddr = Address::invalid();
+  if (!S.getType()->isVoidType())
+    MatchResAddr = CreateMemTemp(S.getType(), "inspect.result");
+
+  // if (S.getInit())
+  //   EmitStmt(S.getInit());
+
+  // if (S.getConditionVariable())
+  //   EmitDecl(*S.getConditionVariable());
+
+  // FIXME: what do do about empty inspect statements, will
+  // it get to this point?
+
+  // FIXME: for integral types we should use LLVM switch instruction,
+  // just like switch statements do.
+
+  // Save inspect context in order to support multiple nested ones.
+  auto PrevMatchCtx = MatchCtx;
+
+  MatchCtx.MatchResult = MatchResAddr;
+  MatchCtx.MatchExit = createBasicBlock("inspect.epilogue");
+  MatchCtx.NextPattern = createBasicBlock(GetPatternName(S.getPatternList()));
+
+  // Emit inspect body.
+  EmitStmt(S.getBody());
+  EmitBlock(MatchCtx.MatchExit);
+
+  MatchCtx = PrevMatchCtx;
+
+  if (S.getType()->isVoidType())
+    return RValue::getIgnored();
+
+  return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
+}

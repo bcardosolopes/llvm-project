@@ -2109,6 +2109,202 @@ public:
   }
 };
 
+/// Represents an 'match' expression.
+class MatchExpr final : public Expr,
+                        private llvm::TrailingObjects<MatchExpr, Stmt *> {
+  friend TrailingObjects;
+
+  /// Points to a linked list of patterns
+  PatternStmt *FirstPattern;
+
+  // True if this is a constexpr inspect
+  unsigned ConstexprMatch : 1;
+
+  /// Whether this inspect had the result type explicitly specified.
+  unsigned ExplicitResultType : 1;
+
+  // InspectExpr is followed by several trailing objects,
+  // some of which optional. Note that it would be more convenient to
+  // put the optional trailing objects at the end but this would change
+  // the order in children().
+  // The trailing objects are in order:
+  //
+  // * A "Stmt *" for the init statement.
+  //    Present if and only if hasInitStorage().
+  //
+  // * A "Stmt *" for the condition variable.
+  //    Present if and only if hasVarStorage(). This is in fact a "DeclStmt *".
+  //
+  // * A "Stmt *" for the condition.
+  //    Always present. This is in fact an "Expr *".
+  //
+  // * A "Stmt *" for the body.
+  //    Always present.
+  enum { InitOffset = 0, BodyOffsetFromCond = 1 };
+  enum { NumMandatoryStmtPtr = 2 };
+
+  unsigned numTrailingObjects(OverloadToken<Stmt *>) const {
+    return NumMandatoryStmtPtr + hasInitStorage() + hasVarStorage();
+  }
+
+  unsigned initOffset() const { return InitOffset; }
+  unsigned varOffset() const { return InitOffset + hasInitStorage(); }
+  unsigned condOffset() const {
+    return InitOffset + hasInitStorage() + hasVarStorage();
+  }
+  unsigned bodyOffset() const { return condOffset() + BodyOffsetFromCond; }
+
+  /// Build an inspect expression.
+  MatchExpr(const ASTContext &Ctx, Stmt *Init, VarDecl *Var, Expr *Cond,
+            bool IsConstexpr, bool ExplicitResultType);
+
+  /// Build an empty inspect expression.
+  explicit MatchExpr(EmptyShell Empty, bool HasInit, bool HasVar);
+
+public:
+  /// Create an inspect expression.
+  static MatchExpr *Create(const ASTContext &Ctx, Stmt *Init, VarDecl *Var,
+                           Expr *Cond, bool IsConstexpr,
+                           bool ExplicitResultType);
+
+  /// Create an empty inspect expression optionally with storage for
+  /// an init expression and a condition variable.
+  static MatchExpr *CreateEmpty(const ASTContext &Ctx, bool HasInit,
+                                bool HasVar);
+
+  /// True if this SwitchStmt has storage for an init statement.
+  bool hasInitStorage() const { return MatchExprBits.HasInit; }
+
+  /// True if this SwitchStmt has storage for a condition variable.
+  bool hasVarStorage() const { return MatchExprBits.HasVar; }
+
+  Expr *getCond() {
+    return reinterpret_cast<Expr *>(getTrailingObjects<Stmt *>()[condOffset()]);
+  }
+
+  const Expr *getCond() const {
+    return reinterpret_cast<Expr *>(getTrailingObjects<Stmt *>()[condOffset()]);
+  }
+
+  void setCond(Expr *Cond) {
+    getTrailingObjects<Stmt *>()[condOffset()] = reinterpret_cast<Stmt *>(Cond);
+  }
+
+  Stmt *getBody() { return getTrailingObjects<Stmt *>()[bodyOffset()]; }
+  const Stmt *getBody() const {
+    return getTrailingObjects<Stmt *>()[bodyOffset()];
+  }
+
+  void setBody(Stmt *Body) {
+    getTrailingObjects<Stmt *>()[bodyOffset()] = Body;
+  }
+
+  Stmt *getInit() {
+    return hasInitStorage() ? getTrailingObjects<Stmt *>()[initOffset()]
+                            : nullptr;
+  }
+
+  const Stmt *getInit() const {
+    return hasInitStorage() ? getTrailingObjects<Stmt *>()[initOffset()]
+                            : nullptr;
+  }
+
+  void setInit(Stmt *Init) {
+    assert(hasInitStorage() &&
+           "This inspect expression has no storage for an init statement!");
+    getTrailingObjects<Stmt *>()[initOffset()] = Init;
+  }
+
+  /// Retrieve the variable declared in this "inspect" expression, if any.
+  ///
+  /// In the following example, "x" is the condition variable.
+  /// \code
+  /// auto w = inspect (int x = foo()) {
+  ///   case 0: break;
+  ///   // ...
+  /// };
+  /// \endcode
+  VarDecl *getConditionVariable();
+  const VarDecl *getConditionVariable() const {
+    return const_cast<MatchExpr *>(this)->getConditionVariable();
+  }
+
+  /// Set the condition variable in this inspect expression.
+  /// The inspect expression must have storage for it.
+  void setConditionVariable(const ASTContext &Ctx, VarDecl *VD);
+
+  /// If this MatchExpr has a condition variable, return the faux DeclStmt
+  /// associated with the creation of that condition variable.
+  DeclStmt *getConditionVariableDeclStmt() {
+    return hasVarStorage() ? static_cast<DeclStmt *>(
+                                 getTrailingObjects<Stmt *>()[varOffset()])
+                           : nullptr;
+  }
+
+  const DeclStmt *getConditionVariableDeclStmt() const {
+    return hasVarStorage() ? static_cast<DeclStmt *>(
+                                 getTrailingObjects<Stmt *>()[varOffset()])
+                           : nullptr;
+  }
+
+  PatternStmt *getPatternList() { return FirstPattern; }
+  const PatternStmt *getPatternList() const { return FirstPattern; }
+  void setPatternList(PatternStmt *SC) { FirstPattern = SC; }
+
+  SourceLocation getMatchLoc() const { return MatchExprBits.MatchLoc; }
+  void setMatchLoc(SourceLocation L) { MatchExprBits.MatchLoc = L; }
+
+  void setBody(Stmt *S, SourceLocation SL) {
+    setBody(S);
+    setMatchLoc(SL);
+  }
+
+  void addPattern(PatternStmt *SC) {
+    assert(!SC->getNextPattern() && "pattern already added to an inspect");
+
+    if (!FirstPattern) {
+      FirstPattern = SC;
+      return;
+    }
+
+    // iterate to the (current) end of the linked list
+    PatternStmt *current = FirstPattern;
+    while (current->getNextPattern()) {
+      current = current->getNextPattern();
+    }
+
+    current->setNextPattern(SC);
+  }
+
+  SourceLocation getBeginLoc() const { return getMatchLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return getBody() ? getBody()->getEndLoc()
+                     : reinterpret_cast<const Stmt *>(getCond())->getEndLoc();
+  }
+
+  bool isConstexpr() const { return ConstexprMatch; }
+
+  /// Whether this inspect had its result type explicitly specified.
+  bool hasExplicitResultType() const { return ExplicitResultType; }
+
+  // Iterators
+  child_range children() {
+    return child_range(getTrailingObjects<Stmt *>(),
+                       getTrailingObjects<Stmt *>() +
+                           numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  const_child_range children() const {
+    return const_child_range(getTrailingObjects<Stmt *>(),
+                             getTrailingObjects<Stmt *>() +
+                                 numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == MatchExprClass;
+  }
+};
+
 /// A C++ lambda expression, which produces a function object
 /// (of unspecified type) that can be invoked later.
 ///

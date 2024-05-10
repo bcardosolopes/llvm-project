@@ -640,6 +640,7 @@ private:
                                         AddStmtChoice asc);
 
   CFGBlock *VisitInspectExpr(InspectExpr *Terminator);
+  CFGBlock *VisitMatchExpr(MatchExpr *Terminator);
   CFGBlock *VisitWildcardPatternStmt(WildcardPatternStmt *Terminator);
   CFGBlock *VisitIdentifierPatternStmt(IdentifierPatternStmt *Terminator);
   CFGBlock *VisitExpressionPatternStmt(ExpressionPatternStmt *Terminator);
@@ -2413,6 +2414,9 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
 
     case Stmt::InspectExprClass:
       return VisitInspectExpr(cast<InspectExpr>(S));
+
+    case Stmt::MatchExprClass:
+      return VisitMatchExpr(cast<MatchExpr>(S));
 
     case Stmt::UnaryOperatorClass:
       return VisitUnaryOperator(cast<UnaryOperator>(S), asc);
@@ -4679,6 +4683,92 @@ CFGBlock *CFGBuilder::VisitInspectExpr(InspectExpr *IE) {
     autoCreateBlock();
     LastBlock = addStmt(Init);
   }
+
+  return LastBlock;
+}
+
+CFGBlock *CFGBuilder::VisitMatchExpr(MatchExpr *IE) {
+  // "inspect" can be a control-flow-like statement when the resulting type is
+  // void, otherwise it's like any other expression.
+  CFGBlock *InspectSuccessor = nullptr;
+
+  // Save local scope position because in case of condition variable ScopePos
+  // won't be restored when traversing AST.
+  SaveAndRestore<LocalScope::const_iterator> save_scope_pos(ScopePos);
+
+  // Create local scope for inspect init-stmt if one exists.
+  // if (Stmt *Init = IE->getInit())
+  //   addLocalScopeForStmt(Init);
+
+  // Create local scope for possible condition variable.
+  // Store scope position. Add implicit destructor.
+  // if (VarDecl *VD = IE->getConditionVariable())
+  //   addLocalScopeForVarDecl(VD);
+  addAutomaticObjHandling(ScopePos, save_scope_pos.get(), IE);
+
+  if (Block) {
+    if (badCFG)
+      return nullptr;
+    InspectSuccessor = Block;
+  } else
+    InspectSuccessor = Succ;
+
+  // Save the current "switch" context.
+  SaveAndRestore<CFGBlock *> save_inspect(InspectTerminatedBlock);
+  SaveAndRestore<JumpTarget> save_break(BreakJumpTarget);
+
+  // Create a new block that will contain the inspect expression.
+  InspectTerminatedBlock = createBlock(false);
+
+  // Now process the inspect body.  The code after the inspect is the implicit
+  // successor.
+  Succ = InspectSuccessor;
+  BreakJumpTarget = JumpTarget(InspectSuccessor, ScopePos);
+
+  // When visiting the body, the patterns should automatically get linked
+  // up to the inspect.  We also don't keep a pointer to the body, since all
+  // control-flow from the inspect goes to patterns.
+  assert(IE->getBody() && "inspect must contain a non-NULL body");
+  Block = nullptr;
+
+  // FIXME: Determine if the inspect condition can be explicitly evaluated.
+  // See switch handling for examples.
+  assert(IE->getCond() && "inspect condition must be non-NULL");
+
+  SaveAndRestore<CFGBlock *> save_nextpat(LastInspectPattern);
+  addStmt(IE->getBody());
+  if (Block) {
+    if (badCFG)
+      return nullptr;
+  }
+  // The last pattern is actually the first one, given that the CFG is
+  // built bottom-up.
+  addSuccessor(InspectTerminatedBlock, LastInspectPattern);
+
+  // FIXME: create inspectExclusivelyCovered and inspectCond to implement
+  // something along the lines of switchExclusivelyCovered.
+
+  // Add the terminator and condition in the inspect block.
+  InspectTerminatedBlock->setTerminator(IE);
+  Block = InspectTerminatedBlock;
+  CFGBlock *LastBlock = addStmt(IE->getCond());
+
+  // If the InspectExpr contains a condition variable, add both the
+  // InspectExpr and the condition variable initialization to the CFG.
+  // if (VarDecl *VD = IE->getConditionVariable()) {
+  //   if (Expr *Init = VD->getInit()) {
+  //     autoCreateBlock();
+  //     appendStmt(Block, IE->getConditionVariableDeclStmt());
+  //     LastBlock = addStmt(Init);
+  //     maybeAddScopeBeginForVarDecl(LastBlock, VD, Init);
+  //   }
+  // }
+
+  // Finally, if the InspectExpr contains a C++17 init-stmt, add it to the CFG.
+  // if (Stmt *Init = IE->getInit()) {
+  //   autoCreateBlock();
+  //   LastBlock = addStmt(Init);
+  // }
 
   return LastBlock;
 }

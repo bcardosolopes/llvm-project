@@ -295,6 +295,11 @@ void StmtProfiler::VisitInspectExpr(const InspectExpr *S) {
   VisitDecl(S->getConditionVariable());
 }
 
+void StmtProfiler::VisitMatchExpr(const MatchExpr *S) {
+  VisitExpr(S);
+  // VisitDecl(S->getConditionVariable());
+}
+
 void StmtProfiler::VisitWildcardPatternStmt(const WildcardPatternStmt *S) {
   VisitStmt(S);
 }

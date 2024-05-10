@@ -427,6 +427,7 @@ KEYWORD(char8_t                     , CHAR8SUPPORT)
 // C++ 2b / pattern matching keywords
 PATMAT_KEYWORD(inspect)
 PATMAT_KEYWORD(let)
+PATMAT_KEYWORD(match)
 
 // C11 Extension
 KEYWORD(_Float16                    , KEYALL)

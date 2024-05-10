@@ -9342,3 +9342,131 @@ ExprResult Sema::ActOnFinishInspectExpr(SourceLocation InspectLoc,
   // TODO: exaustiveness checking...
   return IE;
 }
+
+ExprResult Sema::ActOnStartOfMatchExpr(SourceLocation MatchLoc, Expr *Cond,
+                                       bool IsConstexpr,
+                                       TypeResult ReturnType) {
+  // Expr *CondExpr = Cond.get().second;
+  // assert((Cond.isInvalid() || CondExpr) && "inspect with no condition");
+
+  setFunctionHasBranchIntoScope();
+
+  auto *IE = MatchExpr::Create(Context, nullptr, nullptr, Cond, IsConstexpr,
+                               !ReturnType.isInvalid());
+  getCurFunction()->MatchStack.push_back(
+      FunctionScopeInfo::MatchInfo(IE, false));
+
+  if (!IE->hasExplicitResultType())
+    return IE;
+
+  TypeSourceInfo *TSI = nullptr;
+  QualType RetTy = GetTypeFromParser(ReturnType.get(), &TSI);
+  assert(TSI && "must be valid at this point");
+  if (TSI->getTypeLoc().getAs<TemplateSpecializationTypeLoc>() ||
+      RetTy->isDependentType()) {
+    assert(0 && "cannot handle templates just yet");
+  }
+  IE->setType(RetTy);
+  return IE;
+}
+
+ExprResult Sema::ActOnFinishMatchExpr(SourceLocation InspectLoc, Expr *Inspect,
+                                      Stmt *BodyStmt) {
+
+  MatchExpr *IE = cast<MatchExpr>(Inspect);
+  assert(IE == getCurFunction()->MatchStack.back().getPointer() &&
+         "inspect stack missing push/pop!");
+
+  getCurFunction()->MatchStack.pop_back();
+
+  if (!BodyStmt)
+    return ExprError();
+  IE->setBody(BodyStmt, InspectLoc);
+
+  // Expr *CondExpr = IE->getCond();
+  // if (!CondExpr)
+  //   return ExprError();
+  llvm_unreachable("NYI");
+
+  const PatternStmt *P = IE->getPatternList();
+
+  // FIXME: instead make all PatternStmt have a substmt as trailing object
+  auto getPatternExprType = [&](const PatternStmt *PS) -> QualType {
+    // Compound statements in patterns yield void and null stmts might be
+    // happen when (1) empty pattern body or (2) error recovery when expression
+    // type does not match the trailing result type. In all cases treat as
+    // the expression has void type.
+    if (PS->excludedFromTypeDeduction())
+      return QualType();
+    if (isa<CompoundStmt>(PS->getSubStmt()) || isa<NullStmt>(P->getSubStmt()))
+      return Context.VoidTy;
+    if (auto *S = dyn_cast<WildcardPatternStmt>(PS))
+      return cast<Expr>(S->getSubStmt())->getType();
+    if (auto *S = dyn_cast<IdentifierPatternStmt>(PS))
+      return cast<Expr>(S->getSubStmt())->getType();
+    if (auto *S = dyn_cast<ExpressionPatternStmt>(PS))
+      return cast<Expr>(S->getSubStmt())->getType();
+    if (auto *S = dyn_cast<StructuredBindingPatternStmt>(PS))
+      return cast<Expr>(S->getSubStmt())->getType();
+    if (auto *S = dyn_cast<AlternativePatternStmt>(PS))
+      return cast<Expr>(S->getSubStmt())->getType();
+    assert(0 && "Not supposed to get here");
+    return QualType();
+  };
+
+  if (!P)
+    return ExprError();
+
+  // See if we can deduce a type for the inspect expression
+  // at this point, using either the explicit return type or the
+  // deduced return type of the first pattern.
+  // If there is no explicit type deduction and the first pattern
+  // is manually excluded from type deduction, we will have to
+  // start deducing the type from the first pattern that is not
+  // excluded from type deduction.
+  QualType ResTy =
+      IE->hasExplicitResultType() ? IE->getType() : getPatternExprType(P);
+  if (!ResTy.isNull())
+    ResTy = ResTy.getUnqualifiedType();
+
+  // Check all patterns return the same type by comparing to either
+  // the trailing result type or resulting type found in first pattern's
+  // expression.
+  for (; P != nullptr; P = P->getNextPattern()) {
+    QualType PatternResTy = getPatternExprType(P);
+
+    // can't proceed meaningfully if the pattern doesn't play
+    // into type deduction
+    if (PatternResTy.isNull())
+      continue;
+
+    if (ResTy.isNull()) {
+      // There is no current candidate return type and this
+      // pattern is providing that type.
+      // FIXME: Should we be looking into the unqualified type here?
+      ResTy = PatternResTy.getUnqualifiedType();
+      continue;
+    }
+
+    // This pattern matches the current candidate type
+    if (Context.getCanonicalType(ResTy) ==
+        Context.getCanonicalType(PatternResTy))
+      continue;
+
+    Diag(P->getSubStmt()->getBeginLoc(),
+         diag::err_typecheck_pattern_type_incompatible)
+        << PatternResTy << ResTy << IE->hasExplicitResultType();
+  }
+
+  // We should know a return type for the inspect expression
+  // by this time. We should provide a diag if this is not the case.
+  if (!IE->hasExplicitResultType() && ResTy.isNull()) {
+    Diag(IE->getBeginLoc(), diag::err_typecheck_no_valid_return_type);
+    return ExprError();
+  }
+
+  IE->setType(ResTy);
+
+  // TODO: exaustiveness checking...
+  return IE;
+}

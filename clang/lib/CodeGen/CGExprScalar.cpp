@@ -908,6 +908,9 @@ public:
   Value *VisitInspectExpr(InspectExpr *IE) {
     return CGF.EmitInspectExpr(*IE).getScalarVal();
   }
+  Value *VisitMatchExpr(MatchExpr *IE) {
+    return CGF.EmitMatchExpr(*IE).getScalarVal();
+  }
 };
 }  // end anonymous namespace.
 

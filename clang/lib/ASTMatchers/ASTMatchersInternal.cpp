@@ -916,6 +916,7 @@ const internal::VariadicDynCastAllOfMatcher<Stmt, SwitchCase> switchCase;
 const internal::VariadicDynCastAllOfMatcher<Stmt, CaseStmt> caseStmt;
 const internal::VariadicDynCastAllOfMatcher<Stmt, DefaultStmt> defaultStmt;
 const internal::VariadicDynCastAllOfMatcher<Stmt, InspectExpr> inspectExpr;
+const internal::VariadicDynCastAllOfMatcher<Stmt, MatchExpr> matchExpr;
 const internal::VariadicDynCastAllOfMatcher<Stmt, PatternStmt> patternStmt;
 const internal::VariadicDynCastAllOfMatcher<Stmt, WildcardPatternStmt>
     wildcardPatternStmt;
