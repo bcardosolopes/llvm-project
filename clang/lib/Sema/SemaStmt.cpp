@@ -608,15 +608,14 @@ StmtResult Sema::ActOnWildcardPattern(SourceLocation WildcardLoc,
                                       SourceLocation ColonLoc, Stmt *SubStmt,
                                       Expr *PatternGuard,
                                       bool ExcludedFromTypeDeduction) {
-
-  if (getCurFunction()->InspectStack.empty())
+  if (getCurFunction()->MatchStack.empty())
     return StmtError();
 
   auto *WPS = WildcardPatternStmt::Create(
       Context, WildcardLoc, ColonLoc, PatternGuard, ExcludedFromTypeDeduction);
   WPS->setPatternGuard(PatternGuard);
   WPS->setSubStmt(SubStmt);
-  getCurFunction()->InspectStack.back().getPointer()->addPattern(WPS);
+  getCurFunction()->MatchStack.back().getPointer()->addPattern(WPS);
   return WPS;
 }
 
@@ -624,9 +623,9 @@ StmtResult Sema::ActOnIdentifierPattern(SourceLocation IdentifierLoc,
                                         SourceLocation ColonLoc, Stmt *NewIdVar,
                                         Stmt *SubStmt, Expr *PatternGuard,
                                         bool ExcludedFromTypeDeduction) {
-  if (getCurFunction()->InspectStack.empty())
+  if (getCurFunction()->MatchStack.empty())
     return StmtError();
-  InspectExpr *Inspect = getCurFunction()->InspectStack.back().getPointer();
+  MatchExpr *Inspect = getCurFunction()->MatchStack.back().getPointer();
 
   auto *IPS =
       IdentifierPatternStmt::Create(Context, IdentifierLoc, ColonLoc,
@@ -703,10 +702,10 @@ StmtResult Sema::ActOnExpressionPattern(SourceLocation MatchExprLoc,
                                         Expr *PatternGuard, bool HasCase,
                                         bool ExcludedFromTypeDeduction) {
 
-  if (getCurFunction()->InspectStack.empty() || !MatchExpr)
+  if (getCurFunction()->MatchStack.empty() || !MatchExpr)
     return StmtError();
 
-  InspectExpr *Inspect = getCurFunction()->InspectStack.back().getPointer();
+  auto *Inspect = getCurFunction()->MatchStack.back().getPointer();
   ExprResult ER = CheckPatternConstantExpr(MatchExpr, MatchExprLoc);
   ExprResult MatchCond = ActOnMatchBinOp(
       Inspect->getCond(), ER.isInvalid() ? MatchExpr : ER.get(), MatchExprLoc);
@@ -729,10 +728,10 @@ Sema::ActOnPatternList(SmallVectorImpl<Sema::ParsedPatEltResult> &PatList,
     return StmtError();
   }
 
-  if (getCurFunction()->InspectStack.empty())
+  if (getCurFunction()->MatchStack.empty())
     return StmtError();
   unsigned &InspectPatCount = getCurFunction()->InspectPatCount;
-  InspectExpr *Inspect = getCurFunction()->InspectStack.back().getPointer();
+  MatchExpr *Inspect = getCurFunction()->MatchStack.back().getPointer();
   Expr *MatchSource = Inspect->getCond()->IgnoreImpCasts();
 
   // There are two steps here:
@@ -826,9 +825,9 @@ StmtResult Sema::ActOnStructuredBindingPattern(
     Expr *Guard, Stmt *DecompStmt, bool ExcludedFromTypeDeduction) {
   auto *DS = static_cast<DeclStmt *>(DecompStmt);
   auto *DecompCond = cast<DecompositionDecl>(DS->getSingleDecl());
-  if (getCurFunction()->InspectStack.empty())
+  if (getCurFunction()->MatchStack.empty())
     return StmtError();
-  InspectExpr *Inspect = getCurFunction()->InspectStack.back().getPointer();
+  MatchExpr *Inspect = getCurFunction()->MatchStack.back().getPointer();
 
   // Now that we got all bindings populated with the proper type, for each
   // element in the pattern list try to ==/match() with the equivalent element

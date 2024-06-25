@@ -4190,7 +4190,7 @@ ExprResult Parser::ParseMatchExpr(ExprResult LHS) {
   if (Body.isInvalid())
     return ExprError();
 
-  return Actions.ActOnFinishInspectExpr(InspectLoc, Inspect.get(), Body.get());
+  return Actions.ActOnFinishMatchExpr(InspectLoc, Inspect.get(), Body.get());
 }
 
 /// ParseInspectExpr

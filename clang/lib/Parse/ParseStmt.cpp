@@ -175,10 +175,13 @@ StmtResult Parser::ParseStatementOrDeclarationAfterAttributes(
   StmtResult Res;
   SourceLocation GNUAttributeLoc;
 
-  auto IsMaybeInspectPattern = [](Scope *S) {
+  auto IsMaybeMatchPattern = [](Scope *S) {
     // Successfully parsing a pattern requires being in a inspect
     // scope but not inside another pattern.
-    if (!S || !S->isInspectScope() || S->isPatternScope())
+    // if (S && S->isMatchScope())
+    //   return true;
+    bool inspectOrMatch = S->isInspectScope() || S->isMatchScope();
+    if (!S || !inspectOrMatch || S->isPatternScope())
       return false;
     return true;
   };
@@ -206,14 +209,14 @@ Retry:
     // C++2b pattern matching: wildcard inspect pattern.
     auto *II = Tok.getIdentifierInfo();
     if (II && getLangOpts().PatternMatching &&
-        IsMaybeInspectPattern(getCurScope())) {
+        IsMaybeMatchPattern(getCurScope())) {
       // Alternatively, we could make wildcard a pattern matching
       // keyword in TokenKinds.td: PATMAT_KEYWORD(__) and then
       // use revertTokenIDToIdentifier to get back a tok::identifier.
       // The down side is that it involves teaching all places that
       // take an identifier to also handle the wildcard, as to apply
       // the revert when necessary.
-      if (II->getName() == "__")
+      if (II->getName() == "__" || II->getName() == "_")
         return ParseWildcardPattern(StmtCtx);
       // This mostly prevents us from considering any qualified names
       // for identifier patterns.
@@ -263,8 +266,8 @@ Retry:
   }
 
   default: {
-    
-    if (Tok.is(tok::l_square) && IsMaybeInspectPattern(getCurScope()))
+
+    if (Tok.is(tok::l_square) && IsMaybeMatchPattern(getCurScope()))
       return ParseStructuralBindingPattern(StmtCtx);
 
     bool HaveAttrs = !CXX11Attrs.empty() || !GNUAttrs.empty();
@@ -312,7 +315,7 @@ Retry:
     default: {
       // Matches expression patterns but only cover literals
       // FIXME: rename the function below and specialize.
-      if (IsMaybeInspectPattern(getCurScope()))
+      if (IsMaybeMatchPattern(getCurScope()))
         return ParseExpressionPattern(StmtCtx, false /*HasCase*/);
 
       return ParseExprStatement(StmtCtx);
@@ -327,7 +330,7 @@ Retry:
   }
 
   case tok::kw_case: {
-    if (IsMaybeInspectPattern(getCurScope()))
+    if (IsMaybeMatchPattern(getCurScope()))
       return ParseExpressionPattern(StmtCtx, true /*HasCase*/);
 
     // C99 6.8.1: labeled-statement
@@ -999,7 +1002,7 @@ bool Parser::ParsePatternList(
 ///
 StmtResult Parser::ParseStructuralBindingPattern(ParsedStmtContext StmtCtx) {
   assert(Tok.is(tok::l_square) && "Not a structural binding pattern!");
-  assert(getCurScope()->isInspectScope() &&
+  assert(getCurScope()->isMatchScope() &&
          "Identifier pattern should be in inspect scope");
   SourceLocation LSquare = Tok.getLocation();
 
@@ -1086,8 +1089,9 @@ StmtResult Parser::ParseStructuralBindingPattern(ParsedStmtContext StmtCtx) {
 ///
 StmtResult Parser::ParseWildcardPattern(ParsedStmtContext StmtCtx) {
   IdentifierInfo *II = Tok.getIdentifierInfo();
-  assert(II && II->getName() == "__" && "Not a wildcard pattern!");
-  assert(getCurScope()->isInspectScope() &&
+  assert(II && (II->getName() == "__" || II->getName() == "_") &&
+         "Not a wildcard pattern!");
+  assert((getCurScope()->isInspectScope() || getCurScope()->isMatchScope()) &&
          "Wildcard pattern should be in inspect scope");
   SourceLocation WildcardLoc = ConsumeToken();
 
@@ -1150,7 +1154,7 @@ StmtResult Parser::ParseWildcardPattern(ParsedStmtContext StmtCtx) {
 ///
 StmtResult Parser::ParseIdentifierPattern(ParsedStmtContext StmtCtx) {
   assert((Tok.is(tok::identifier)) && "Not an identifier pattern!");
-  assert(getCurScope()->isInspectScope() &&
+  assert(getCurScope()->isMatchScope() &&
          "Identifier pattern should be in inspect scope");
   // Get the identifier
   //   identifier pattern-guard[opt] '=>' statement
@@ -1167,11 +1171,11 @@ StmtResult Parser::ParseIdentifierPattern(ParsedStmtContext StmtCtx) {
   // Create binding variable now and allow for it to be visible during pattern
   // guard parsing.
   auto *FSI = Actions.getCurFunction();
-  if (FSI->InspectStack.empty())
+  if (FSI->MatchStack.empty())
     return StmtError();
-  InspectExpr *Inspect = FSI->InspectStack.back().getPointer();
+  MatchExpr *Match = FSI->MatchStack.back().getPointer();
   StmtResult NewIdVar =
-      Actions.CreatePatternIdBindingVar(Inspect->getCond(), II, IdentifierLoc);
+      Actions.CreatePatternIdBindingVar(Match->getCond(), II, IdentifierLoc);
   if (NewIdVar.isInvalid())
     return StmtError();
 
@@ -1228,7 +1232,7 @@ StmtResult Parser::ParseIdentifierPattern(ParsedStmtContext StmtCtx) {
 
 StmtResult Parser::ParseExpressionPattern(ParsedStmtContext StmtCtx,
                                           bool HasCase) {
-  assert(getCurScope()->isInspectScope() &&
+  assert((getCurScope()->isInspectScope() || getCurScope()->isMatchScope()) &&
          "Expression pattern should be in inspect scope");
   if (HasCase) {
     assert(HasCase || !Tok.is(tok::kw_case) && "Not a case pattern stmt!");

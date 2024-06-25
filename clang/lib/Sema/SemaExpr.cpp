@@ -16708,7 +16708,7 @@ ExprResult Sema::ActOnStmtExprResult(ExprResult ER) {
   // If the inspect expr has a trailing return type it's possible
   // to perform implicit conversion during the copy initialization.
   if (getCurScope()->isPatternScope()) {
-    InspectExpr *IE = getCurFunction()->InspectStack.back().getPointer();
+    MatchExpr *IE = getCurFunction()->MatchStack.back().getPointer();
     if (IE->hasExplicitResultType()) {
       QualType ER = IE->getType();
 

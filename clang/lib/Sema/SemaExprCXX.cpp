@@ -9250,7 +9250,7 @@ ExprResult Sema::ActOnFinishInspectExpr(SourceLocation InspectLoc,
   assert(IE == getCurFunction()->InspectStack.back().getPointer() &&
          "inspect stack missing push/pop!");
 
-  getCurFunction()->InspectStack.pop_back();
+  getCurFunction()->MatchStack.pop_back();
 
   if (!BodyStmt)
     return ExprError();
@@ -9386,7 +9386,7 @@ ExprResult Sema::ActOnFinishMatchExpr(SourceLocation InspectLoc, Expr *Inspect,
   // Expr *CondExpr = IE->getCond();
   // if (!CondExpr)
   //   return ExprError();
-  llvm_unreachable("NYI");
+  // llvm_unreachable("NYI");
 
   const PatternStmt *P = IE->getPatternList();
 
