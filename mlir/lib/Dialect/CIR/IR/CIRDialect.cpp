@@ -1212,6 +1212,14 @@ LogicalResult cir::FuncOp::verify() {
 // CallOp
 //===----------------------------------------------------------------------===//
 
+ArrayAttr cir::CallOp::getArgAttrsAttr() { return {}; }
+
+ArrayAttr cir::CallOp::getResAttrsAttr() { return {}; }
+void cir::CallOp::setArgAttrsAttr(ArrayAttr) {}
+void cir::CallOp::setResAttrsAttr(ArrayAttr) {}
+Attribute cir::CallOp::removeArgAttrsAttr() { return {}; }
+Attribute cir::CallOp::removeResAttrsAttr() { return {}; }
+
 /// Get the argument operands to the called function.
 OperandRange cir::CallOp::getArgOperands() {
   return {arg_operand_begin(), arg_operand_end()};
