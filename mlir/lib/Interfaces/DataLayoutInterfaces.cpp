@@ -321,6 +321,15 @@ Attribute mlir::detail::getDefaultFunctionPointerAlignment(
   return entry.getValue();
 }
 
+// Returns the legal int widths if specified in the given entry. If the entry is
+// empty the default alignment zero is returned.
+Attribute
+mlir::detail::getDefaultLegalIntWidths(DataLayoutEntryInterface entry) {
+  if (entry == DataLayoutEntryInterface())
+    return Attribute();
+  return entry.getValue();
+}
+
 std::optional<Attribute>
 mlir::detail::getDevicePropertyValue(DataLayoutEntryInterface entry) {
   if (entry == DataLayoutEntryInterface())
@@ -734,6 +743,22 @@ Attribute mlir::DataLayout::getFunctionPointerAlignment() const {
     functionPointerAlignment =
         detail::getDefaultFunctionPointerAlignment(entry);
   return *functionPointerAlignment;
+}
+
+Attribute mlir::DataLayout::getLegalIntWidths() const {
+  checkValid();
+  if (legalIntWidths)
+    return *legalIntWidths;
+  DataLayoutEntryInterface entry;
+  if (originalLayout)
+    entry = originalLayout.getSpecForIdentifier(
+        originalLayout.getLegalIntWidthsIdentifier(
+            originalLayout.getContext()));
+  if (auto iface = dyn_cast_or_null<DataLayoutOpInterface>(scope))
+    legalIntWidths = iface.getLegalIntWidths(entry);
+  else
+    legalIntWidths = detail::getDefaultLegalIntWidths(entry);
+  return *legalIntWidths;
 }
 
 std::optional<Attribute> mlir::DataLayout::getDevicePropertyValue(

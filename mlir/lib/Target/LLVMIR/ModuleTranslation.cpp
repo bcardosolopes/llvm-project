@@ -52,6 +52,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -248,6 +249,21 @@ translateDataLayout(DataLayoutSpecInterface attribute,
         continue;
       layoutStream << "-F" << (value.getFunctionDependent() ? "n" : "i")
                    << alignment;
+      continue;
+    }
+    if (key.getValue() == DLTIDialect::kDataLayoutLegalIntWidthsKey) {
+      layoutStream << "-n";
+      unsigned idx = 0;
+      auto intList = cast<ArrayAttr>(entry.getValue());
+      if (intList.empty())
+        continue;
+
+      for (auto intWidth : intList.getAsValueRange<IntegerAttr>()) {
+        layoutStream << intWidth.getZExtValue();
+        if (idx < intList.size())
+          layoutStream << ":";
+        idx++;
+      }
       continue;
     }
     emitError(*loc) << "unsupported data layout key " << key;

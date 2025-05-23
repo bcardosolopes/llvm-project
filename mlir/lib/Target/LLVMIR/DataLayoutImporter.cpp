@@ -251,6 +251,31 @@ LogicalResult DataLayoutImporter::tryToEmplaceFunctionPointerAlignmentEntry(
   return success();
 }
 
+LogicalResult
+DataLayoutImporter::tryToEmplaceLegalIntWidthsEntry(StringRef token) {
+  auto key =
+      StringAttr::get(context, DLTIDialect::kDataLayoutLegalIntWidthsKey);
+  if (keyEntries.count(key))
+    return success();
+
+  FailureOr<SmallVector<uint64_t>> intWidths = tryToParseIntList(token);
+  if (failed(intWidths) || intWidths->empty())
+    return failure();
+
+  // TODO: use existing facilities for conversion?
+  OpBuilder builder(context);
+  SmallVector<Attribute> intWidthAttrs(intWidths->size());
+  llvm::for_each(*intWidths, [&](uint64_t width) {
+    intWidthAttrs.push_back(builder.getIntegerAttr(
+        builder.getIntegerType(32, /*isSigned=*/false), width));
+  });
+
+  keyEntries.try_emplace(
+      key, DataLayoutEntryAttr::get(
+               key, ArrayAttr::get(key.getContext(), intWidthAttrs)));
+  return success();
+}
+
 void DataLayoutImporter::translateDataLayout(
     const llvm::DataLayout &llvmDataLayout) {
   dataLayout = {};
@@ -357,6 +382,12 @@ void DataLayoutImporter::translateDataLayout(
 
       auto type = LLVMPointerType::get(context, *space);
       if (failed(tryToEmplacePointerAlignmentEntry(type, token)))
+        return;
+      continue;
+    }
+    // Parse native integer widths specifications.
+    if (*prefix == "n") {
+      if (failed(tryToEmplaceLegalIntWidthsEntry(token)))
         return;
       continue;
     }
