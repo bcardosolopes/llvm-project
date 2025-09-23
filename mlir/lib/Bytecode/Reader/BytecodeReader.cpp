@@ -21,6 +21,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/MemoryBufferRef.h"
 #include "llvm/Support/SourceMgr.h"
@@ -33,6 +34,7 @@
 #include <optional>
 
 #define DEBUG_TYPE "mlir-bytecode-reader"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "] ")
 
 using namespace mlir;
 
@@ -464,6 +466,10 @@ LogicalResult StringSectionReader::initialize(Location fileLoc,
   // Parse each of the strings. The sizes of the strings are encoded in reverse
   // order, so that's the order we populate the table.
   size_t stringDataEndOffset = sectionData.size();
+  LLVM_DEBUG(
+      { DBGS() << "string section, parsing " << numStrings << " strings\n"; });
+  LLVM_DEBUG(
+      { DBGS() << "string section, size: " << stringDataEndOffset << "\n"; });
   for (StringRef &string : llvm::reverse(strings)) {
     uint64_t stringSize;
     if (failed(stringReader.parseVarInt(stringSize)))
@@ -1126,6 +1132,10 @@ public:
     if (!offsetsReader.empty())
       return offsetsReader.emitError()
              << "Broken properties section: didn't exhaust the offsets table";
+
+    LLVM_DEBUG({
+      DBGS() << "properties section, size: " << sectionData.size() << "\n";
+    });
     return success();
   }
 
@@ -1233,7 +1243,17 @@ LogicalResult AttrTypeReader::initialize(
     return offsetReader.emitError(
         "unexpected trailing data in the Attribute/Type offset section");
   }
-
+  LLVM_DEBUG({
+    DBGS() << "type and attribute data, number of types: " << types.size()
+           << "\n";
+  });
+  LLVM_DEBUG({
+    DBGS() << "type and attribute data, number of attrs: " << attributes.size()
+           << "\n";
+  });
+  LLVM_DEBUG({
+    DBGS() << "type and attribute data, size: " << sectionData.size() << "\n";
+  });
   return success();
 }
 
@@ -1737,6 +1757,10 @@ LogicalResult BytecodeReader::Impl::read(
     if (failed(
             reader.parseSection(sectionID, checkSectionAlignment, sectionData)))
       return failure();
+    LLVM_DEBUG({
+      DBGS() << "section: " << (int)sectionID
+             << ", size: " << sectionData.size() << "\n";
+    });
 
     // Check for duplicate sections, we only expect one instance of each.
     if (sectionDatas[sectionID]) {
@@ -1977,6 +2001,9 @@ LogicalResult BytecodeReader::Impl::parseResourceSection(
   if (!resourceData)
     return success();
 
+  LLVM_DEBUG(
+      { DBGS() << "resources data, size: " << resourceData->size() << "\n"; });
+
   // Initialize the resource reader with the resource sections.
   DialectReader dialectReader(attrTypeReader, stringReader, resourceReader,
                               dialectsMap, reader, version);
@@ -2198,6 +2225,8 @@ BytecodeReader::Impl::parseIRSection(ArrayRef<uint8_t> sectionData,
   auto &parsedOps = moduleOp->getBody()->getOperations();
   auto &destOps = block->getOperations();
   destOps.splice(destOps.end(), parsedOps, parsedOps.begin(), parsedOps.end());
+
+  LLVM_DEBUG({ DBGS() << "IR data, size: " << sectionData.size() << "\n"; });
   return success();
 }
 

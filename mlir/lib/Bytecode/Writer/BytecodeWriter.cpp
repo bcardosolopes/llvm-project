@@ -25,6 +25,7 @@
 #include <optional>
 
 #define DEBUG_TYPE "mlir-bytecode-writer"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "] ")
 
 using namespace mlir;
 using namespace mlir::bytecode::detail;
@@ -861,6 +862,7 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
                            "attributes count");
   offsetEmitter.emitVarInt(llvm::size(numberingState.getTypes()),
                            "types count");
+  [[maybe_unused]] uint64_t numberOfEmitted = 0, numberOfCustomEmitted = 0;
 
   // A functor used to emit an attribute or type entry.
   uint64_t prevOffset = 0;
@@ -912,6 +914,12 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
     };
 
     bool hasCustomEncoding = emitAttrOrTypeImpl();
+    LLVM_DEBUG({
+      if (hasCustomEncoding) {
+        numberOfCustomEmitted++;
+      }
+      numberOfEmitted++;
+    });
 
     // Record the offset of this entry.
     uint64_t curOffset = attrTypeEmitter.size();
@@ -930,6 +938,15 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
   emitter.emitSection(bytecode::Section::kAttrTypeOffset,
                       std::move(offsetEmitter));
   emitter.emitSection(bytecode::Section::kAttrType, std::move(attrTypeEmitter));
+
+  DEBUG_WITH_TYPE(DEBUG_TYPE, {
+    DBGS() << "type and attribute data, total entries emitted: "
+           << numberOfEmitted << "\n";
+  });
+  DEBUG_WITH_TYPE(DEBUG_TYPE, {
+    DBGS() << "type and attribute data, custom entries emitted: "
+           << numberOfCustomEmitted << "\n";
+  });
 }
 
 //===----------------------------------------------------------------------===//

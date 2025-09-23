@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "LLVMDialectBytecode.h"
 #include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/IR/Attributes.h"
@@ -4237,6 +4238,7 @@ void LLVMDialect::initialize() {
   // Support unknown operations because not all LLVM operations are registered.
   allowUnknownOperations();
   declarePromisedInterface<DialectInlinerInterface, LLVMDialect>();
+  detail::addBytecodeInterface(this);
 }
 
 #define GET_OP_CLASSES
