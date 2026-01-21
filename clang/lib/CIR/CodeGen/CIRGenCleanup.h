@@ -19,6 +19,7 @@
 #include "EHScopeStack.h"
 #include "mlir/IR/Value.h"
 #include "clang/AST/StmtCXX.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 namespace clang::CIRGen {
 
@@ -195,10 +196,35 @@ class alignas(EHScopeStack::ScopeStackAlignment) EHCleanupScope
   /// created if needed before the cleanup is popped.
   mlir::Block *normalBlock = nullptr;
 
+  /// Extra information required for cleanups that have resolved
+  /// branches through them.  This has to be allocated on the side
+  /// because everything on the cleanup stack has be trivially
+  /// movable.
+  struct ExtInfo {
+    /// The destinations of normal branch-afters and branch-throughs.
+    llvm::SmallPtrSet<mlir::Block *, 4> branches;
+
+    /// Normal branch-afters.
+    llvm::SmallVector<std::pair<mlir::Block *, mlir::Value>, 4> branchAfters;
+  };
+  mutable struct ExtInfo *extInfo = nullptr;
+
   /// The number of fixups required by enclosing scopes (not including
   /// this one).  If this is the top cleanup scope, all the fixups
   /// from this index onwards belong to this scope.
   unsigned fixupDepth = 0;
+
+  struct ExtInfo &getExtInfo() {
+    if (!extInfo)
+      extInfo = new struct ExtInfo();
+    return *extInfo;
+  }
+
+  const struct ExtInfo &getExtInfo() const {
+    if (!extInfo)
+      extInfo = new struct ExtInfo();
+    return *extInfo;
+  }
 
 public:
   /// Gets the size required for a lazy cleanup scope with the given
@@ -211,15 +237,14 @@ public:
     return sizeof(EHCleanupScope) + cleanupBits.cleanupSize;
   }
 
-  EHCleanupScope(unsigned cleanupSize, unsigned fixupDepth,
+  EHCleanupScope(bool isNormal, bool isEH, unsigned cleanupSize,
+                 unsigned fixupDepth,
                  EHScopeStack::stable_iterator enclosingNormal,
                  EHScopeStack::stable_iterator enclosingEH)
       : EHScope(EHScope::Cleanup, enclosingEH),
         enclosingNormal(enclosingNormal), fixupDepth(fixupDepth) {
-    // TODO(cir): When exception handling is upstreamed, isNormalCleanup and
-    // isEHCleanup will be arguments to the constructor.
-    cleanupBits.isNormalCleanup = true;
-    cleanupBits.isEHCleanup = false;
+    cleanupBits.isNormalCleanup = isNormal;
+    cleanupBits.isEHCleanup = isEH;
     cleanupBits.isActive = true;
     cleanupBits.isLifetimeMarker = false;
     cleanupBits.testFlagInNormalCleanup = false;
@@ -229,7 +254,7 @@ public:
     assert(cleanupBits.cleanupSize == cleanupSize && "cleanup size overflow");
   }
 
-  void destroy() {}
+  void destroy() { delete extInfo; }
   // Objects of EHCleanupScope are not destructed. Use destroy().
   ~EHCleanupScope() = delete;
 
@@ -243,6 +268,40 @@ public:
   void setActive(bool isActive) { cleanupBits.isActive = isActive; }
 
   bool isLifetimeMarker() const { return cleanupBits.isLifetimeMarker; }
+
+  /// True if this cleanup scope has any branch-afters or branch-throughs.
+  bool hasBranches() const { return extInfo && !extInfo->branches.empty(); }
+
+  /// Add a branch-after to this cleanup scope.  A branch-after is a
+  /// branch from a point protected by this (normal) cleanup to a
+  /// point in the normal cleanup scope immediately containing it.
+  void addBranchAfter(mlir::Value index, mlir::Block *block) {
+    struct ExtInfo &info = getExtInfo();
+    if (info.branches.insert(block).second)
+      info.branchAfters.push_back(std::make_pair(block, index));
+  }
+
+  /// Return the number of unique branch-afters on this scope.
+  unsigned getNumBranchAfters() const {
+    return extInfo ? extInfo->branchAfters.size() : 0;
+  }
+
+  /// Add a branch-through to this cleanup scope.  A branch-through is
+  /// a branch from a scope protected by this (normal) cleanup to an
+  /// enclosing scope other than the immediately-enclosing normal
+  /// cleanup scope.
+  ///
+  /// \return true if the branch-through was new to this scope
+  bool addBranchThrough(mlir::Block *block) {
+    return getExtInfo().branches.insert(block).second;
+  }
+
+  /// Determines if this cleanup scope has any branch throughs.
+  bool hasBranchThroughs() const {
+    if (!extInfo)
+      return false;
+    return (extInfo->branchAfters.size() != extInfo->branches.size());
+  }
 
   unsigned getFixupDepth() const { return fixupDepth; }
   EHScopeStack::stable_iterator getEnclosingNormalCleanup() const {
@@ -291,7 +350,7 @@ public:
       break;
 
     case EHScope::Cleanup:
-      llvm_unreachable("EHScopeStack::iterator Cleanup");
+      size = static_cast<const EHCleanupScope *>(get())->getAllocatedSize();
       break;
 
     case EHScope::Terminate:

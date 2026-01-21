@@ -9,10 +9,10 @@
 
 typedef __attribute__(( ext_vector_type(2) )) int int2;
 
-// CIR: %[[LHS:.*]] = cir.const #cir.const_vector<[#cir.int<3> : !s32i, #cir.int<3> : !s32i]> : !cir.vector<!s32i x 2>
-// CIR: %[[WIDTH:.*]] = cir.const #cir.const_vector<[#cir.int<31> : !s32i, #cir.int<31> : !s32i]> : !cir.vector<!s32i x 2>
-// CIR: %[[MASK:.*]] = cir.binop(and, %[[LHS]], %[[WIDTH]]) : !cir.vector<!s32i x 2>
-// CIR: cir.shift(right, %{{.*}} : !cir.vector<!s32i x 2>, %[[MASK]] : !cir.vector<!s32i x 2>) -> !cir.vector<!s32i x 2>
+// CIR: %[[LHS:.*]] = cir.const #cir.const_vector<[#cir.int<3> : !s32i, #cir.int<3> : !s32i]> : !cir.vector<2 x !s32i>
+// CIR: %[[WIDTH:.*]] = cir.const #cir.const_vector<[#cir.int<31> : !s32i, #cir.int<31> : !s32i]> : !cir.vector<2 x !s32i>
+// CIR: %[[MASK:.*]] = cir.binop(and, %[[LHS]], %[[WIDTH]]) : !cir.vector<2 x !s32i>
+// CIR: cir.shift(right, %{{.*}} : !cir.vector<2 x !s32i>, %[[MASK]] : !cir.vector<2 x !s32i>) -> !cir.vector<2 x !s32i>
 // LLVM: ashr <2 x i32> %{{.*}}, splat (i32 3)
 // OG-LLVM: ashr <2 x i32> %x, splat (i32 3)
 int2 shr(int2 x)

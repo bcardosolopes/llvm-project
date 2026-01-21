@@ -16,6 +16,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Support/LogicalResult.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
+#include "clang/CIR/Interfaces/ASTAttrInterfaces.h"
 #include "llvm/ADT/Hashing.h"
 
 namespace cir {
@@ -34,12 +35,13 @@ struct RecordTypeStorage : public mlir::TypeStorage {
     bool packed;
     bool padded;
     RecordType::RecordKind kind;
+    cir::ASTRecordDeclInterface ast;
 
     KeyTy(llvm::ArrayRef<mlir::Type> members, mlir::StringAttr name,
           bool incomplete, bool packed, bool padded,
-          RecordType::RecordKind kind)
+          RecordType::RecordKind kind, cir::ASTRecordDeclInterface ast = {})
         : members(members), name(name), incomplete(incomplete), packed(packed),
-          padded(padded), kind(kind) {}
+          padded(padded), kind(kind), ast(ast) {}
   };
 
   llvm::ArrayRef<mlir::Type> members;
@@ -48,17 +50,19 @@ struct RecordTypeStorage : public mlir::TypeStorage {
   bool packed;
   bool padded;
   RecordType::RecordKind kind;
+  cir::ASTRecordDeclInterface ast;
 
   RecordTypeStorage(llvm::ArrayRef<mlir::Type> members, mlir::StringAttr name,
                     bool incomplete, bool packed, bool padded,
-                    RecordType::RecordKind kind)
+                    RecordType::RecordKind kind,
+                    cir::ASTRecordDeclInterface ast = {})
       : members(members), name(name), incomplete(incomplete), packed(packed),
-        padded(padded), kind(kind) {
+        padded(padded), kind(kind), ast(ast) {
     assert((name || !incomplete) && "Incomplete records must have a name");
   }
 
   KeyTy getAsKey() const {
-    return KeyTy(members, name, incomplete, packed, padded, kind);
+    return KeyTy(members, name, incomplete, packed, padded, kind, ast);
   }
 
   bool operator==(const KeyTy &key) const {
@@ -78,9 +82,9 @@ struct RecordTypeStorage : public mlir::TypeStorage {
 
   static RecordTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                       const KeyTy &key) {
-    return new (allocator.allocate<RecordTypeStorage>())
-        RecordTypeStorage(allocator.copyInto(key.members), key.name,
-                          key.incomplete, key.packed, key.padded, key.kind);
+    return new (allocator.allocate<RecordTypeStorage>()) RecordTypeStorage(
+        allocator.copyInto(key.members), key.name, key.incomplete, key.packed,
+        key.padded, key.kind, key.ast);
   }
 
   /// Mutates the members and attributes an identified record.
@@ -91,23 +95,55 @@ struct RecordTypeStorage : public mlir::TypeStorage {
   /// change the record.
   llvm::LogicalResult mutate(mlir::TypeStorageAllocator &allocator,
                              llvm::ArrayRef<mlir::Type> members, bool packed,
-                             bool padded) {
+                             bool padded,
+                             cir::ASTRecordDeclInterface ast = {}) {
     // Anonymous records cannot mutate.
     if (!name)
       return llvm::failure();
 
-    // Mutation of complete records are allowed if they change nothing.
-    if (!incomplete)
-      return mlir::success((this->members == members) &&
-                           (this->packed == packed) &&
-                           (this->padded == padded));
+    // Mutation of complete records are allowed if they change nothing, or
+    // if they only update member types (e.g., during CXX ABI lowering where
+    // MethodType/DataMemberType members are replaced with their lowered forms).
+    if (!incomplete) {
+      if ((this->members == members) && (this->packed == packed) &&
+          (this->padded == padded))
+        return mlir::success();
+      // Allow re-mutation if only member types changed (same count, same
+      // packed/padded).
+      if ((this->members.size() == members.size()) &&
+          (this->packed == packed) && (this->padded == padded)) {
+        this->members = allocator.copyInto(members);
+        return mlir::success();
+      }
+      return mlir::failure();
+    }
 
     // Mutate incomplete record.
     this->members = allocator.copyInto(members);
     this->packed = packed;
     this->padded = padded;
+    this->ast = ast;
 
     incomplete = false;
+    return llvm::success();
+  }
+
+  /// Replace member types for a complete identified record. This is used by
+  /// the CXX ABI lowering pass to update member types (e.g., lowering
+  /// MethodType and DataMemberType) within record types. Unlike the primary
+  /// mutate() overload, this allows modifying members of complete records.
+  llvm::LogicalResult mutate(mlir::TypeStorageAllocator &allocator,
+                             llvm::ArrayRef<mlir::Type> newMembers) {
+    // Only named, complete records can have their members replaced.
+    if (!name || incomplete)
+      return llvm::failure();
+    // The number of members must match.
+    if (newMembers.size() != members.size())
+      return llvm::failure();
+    // If nothing changed, this is a no-op.
+    if (this->members == newMembers)
+      return llvm::success();
+    this->members = allocator.copyInto(newMembers);
     return llvm::success();
   }
 };

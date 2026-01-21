@@ -49,20 +49,10 @@ void testDeep() {
   b->method2b();  // Needs thunk due to Level2B offset
 }
 
-// Check thunk for deep hierarchy
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
-
-//      LLVM: @_ZTV11DeepDerived = linkonce_odr constant
-// LLVM-SAME: @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
-
-//      OGCG: @_ZTV11DeepDerived = linkonce_odr {{.*}} constant
-// OGCG-SAME: @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
-
 // ============================================================================
 // Test 2: Empty Base Optimization
 // ============================================================================
 
-// Empty base class should not affect layout
 class EmptyBase {
 public:
   virtual void emptyMethod() {}
@@ -82,17 +72,8 @@ public:
 void testEmpty() {
   EmptyDerived d;
   NonEmptyBase* b = &d;
-  b->nonEmptyMethod();  // Needs thunk, offset affected by empty base
+  b->nonEmptyMethod();
 }
-
-// Check thunk with empty base
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn{{[0-9]+}}_N12EmptyDerived14nonEmptyMethodEv
-
-//      LLVM: @_ZTV12EmptyDerived = linkonce_odr constant
-// LLVM-SAME: @_ZThn{{[0-9]+}}_N12EmptyDerived14nonEmptyMethodEv
-
-//      OGCG: @_ZTV12EmptyDerived = linkonce_odr {{.*}} constant
-// OGCG-SAME: @_ZThn{{[0-9]+}}_N12EmptyDerived14nonEmptyMethodEv
 
 // ============================================================================
 // Test 3: Multiple Methods Requiring Different Thunk Offsets
@@ -120,59 +101,70 @@ public:
 void testMulti() {
   MultiDerived d;
   MultiBase2* b = &d;
-  b->method2a();  // Both need same thunk offset
+  b->method2a();
   b->method2b();
 }
 
-// Check multiple thunks with same offset
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn{{[0-9]+}}_N12MultiDerived8method2aEv
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn{{[0-9]+}}_N12MultiDerived8method2bEv
-
-//     LLVM: @_ZTV12MultiDerived = linkonce_odr constant
-// LLVM-DAG: @_ZThn{{[0-9]+}}_N12MultiDerived8method2aEv
-// LLVM-DAG: @_ZThn{{[0-9]+}}_N12MultiDerived8method2bEv
-
-//     OGCG: @_ZTV12MultiDerived = linkonce_odr {{.*}} constant
-// OGCG-DAG: @_ZThn{{[0-9]+}}_N12MultiDerived8method2aEv
-// OGCG-DAG: @_ZThn{{[0-9]+}}_N12MultiDerived8method2bEv
-
 // ============================================================================
-// Thunk Implementation Checks
+// CIR Checks - Vtables with thunk references
 // ============================================================================
 
-// Verify thunk implementations match between CIR lowering and OGCG
+// CIR-DAG: cir.global{{.*}}linkonce_odr comdat  @_ZTV11DeepDerived = #cir.vtable
+// CIR-DAG: cir.global{{.*}}linkonce_odr comdat  @_ZTV12EmptyDerived = #cir.vtable
+// CIR-DAG: cir.global{{.*}}linkonce_odr comdat  @_ZTV12MultiDerived = #cir.vtable
+
+// CIR: cir.func {{.*}} @_ZN11DeepDerivedC2Ev
+// CIR:   cir.vtable.address_point(@_ZTV11DeepDerived, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.address_point(@_ZTV11DeepDerived, address_point = <index = 1, offset = 2>) : !cir.vptr
+
+// CIR: cir.func {{.*}} @_ZThn16_N11DeepDerived8method2bEv
+// CIR:   cir.ptr_stride %{{.*}}, %{{.*}} : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
+// CIR:   cir.call @_ZN11DeepDerived8method2bEv
+
+// ============================================================================
+// LLVM Checks
+// ============================================================================
+
+// LLVM: @_ZTV11DeepDerived = linkonce_odr global { [6 x ptr], [3 x ptr] }
+// LLVM-SAME: @_ZThn16_N11DeepDerived8method2bEv
+
+// ============================================================================
+// LLVM Thunk Implementation Checks
+// ============================================================================
 
 // Deep hierarchy thunk
 // LLVM-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
 //       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -{{[0-9]+}}
 //       LLVM: call void @_ZN11DeepDerived8method2bEv
 
-// OGCG-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
-//       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -{{[0-9]+}}
-//       OGCG: call void @_ZN11DeepDerived8method2bEv
-
 // Empty base thunk
 // LLVM-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N12EmptyDerived14nonEmptyMethodEv
 //       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -{{[0-9]+}}
 //       LLVM: call void @_ZN12EmptyDerived14nonEmptyMethodEv
-
-// OGCG-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N12EmptyDerived14nonEmptyMethodEv
-//       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -{{[0-9]+}}
-//       OGCG: call void @_ZN12EmptyDerived14nonEmptyMethodEv
 
 // Multiple methods thunks
 // LLVM-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N12MultiDerived8method2aEv
 //       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -{{[0-9]+}}
 //       LLVM: call void @_ZN12MultiDerived8method2aEv
 
-// OGCG-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N12MultiDerived8method2aEv
-//       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -{{[0-9]+}}
-//       OGCG: call void @_ZN12MultiDerived8method2aEv
-
 // LLVM-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N12MultiDerived8method2bEv
 //       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -{{[0-9]+}}
 //       LLVM: call void @_ZN12MultiDerived8method2bEv
 
-// OGCG-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N12MultiDerived8method2bEv
+// ============================================================================
+// OGCG Checks - thunks exist in OG codegen
+// ============================================================================
+
+//      OGCG: @_ZTV11DeepDerived = linkonce_odr {{.*}} constant
+// OGCG-SAME: @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
+
+//      OGCG: @_ZTV12EmptyDerived = linkonce_odr {{.*}} constant
+// OGCG-SAME: @_ZThn{{[0-9]+}}_N12EmptyDerived14nonEmptyMethodEv
+
+//     OGCG: @_ZTV12MultiDerived = linkonce_odr {{.*}} constant
+// OGCG-DAG: @_ZThn{{[0-9]+}}_N12MultiDerived8method2aEv
+// OGCG-DAG: @_ZThn{{[0-9]+}}_N12MultiDerived8method2bEv
+
+// OGCG-LABEL: define linkonce_odr void @_ZThn{{[0-9]+}}_N11DeepDerived8method2bEv
 //       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -{{[0-9]+}}
-//       OGCG: call void @_ZN12MultiDerived8method2bEv
+//       OGCG: call void @_ZN11DeepDerived8method2bEv

@@ -20,7 +20,7 @@ struct HasDtor {
 // CHECK-NEXT: acc.yield
 // CHECK-NEXT: } copy {
 // CHECK-NEXT: ^bb0(%[[ARG_FROM:.*]]: !cir.ptr<!rec_CopyConstruct> {{.*}}, %[[ARG_TO:.*]]: !cir.ptr<!rec_CopyConstruct> {{.*}}):
-// CHECK-NEXT:  cir.call @_ZN13CopyConstructC1ERKS_(%[[ARG_TO]], %[[ARG_FROM]]) : (!cir.ptr<!rec_CopyConstruct>, !cir.ptr<!rec_CopyConstruct>) -> ()
+// CHECK-NEXT:  cir.copy %[[ARG_FROM]] to %[[ARG_TO]] : !cir.ptr<!rec_CopyConstruct>
 // CHECK-NEXT: acc.yield
 // CHECK-NEXT: }
 //

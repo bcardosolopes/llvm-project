@@ -54,8 +54,8 @@ void add() {
 // CLANG:   @add
 // CPPLANG: @_Z3addv
 
-// CIRGEN: %{{.+}} = cir.binop(add, %{{.+}}, %{{.+}}) : !cir.complex<!cir.double>
-// CIRGEN: %{{.+}} = cir.binop(add, %{{.+}}, %{{.+}}) : !cir.complex<!s32i>
+// CIRGEN: %{{.+}} = cir.complex.add %{{.+}}, %{{.+}} : !cir.complex<!cir.double>
+// CIRGEN: %{{.+}} = cir.complex.add %{{.+}}, %{{.+}} : !cir.complex<!s32i>
 
 //      CIR: %[[#LHS_REAL:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-NEXT: %[[#LHS_IMAG:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -101,8 +101,8 @@ void sub() {
 // CLANG:   @sub
 // CPPLANG: @_Z3subv
 
-// CIRGEN: %{{.+}} = cir.binop(sub, %{{.+}}, %{{.+}}) : !cir.complex<!cir.double>
-// CIRGEN: %{{.+}} = cir.binop(sub, %{{.+}}, %{{.+}}) : !cir.complex<!s32i>
+// CIRGEN: %{{.+}} = cir.complex.sub %{{.+}}, %{{.+}} : !cir.complex<!cir.double>
+// CIRGEN: %{{.+}} = cir.complex.sub %{{.+}}, %{{.+}} : !cir.complex<!s32i>
 
 //      CIR: %[[#LHS_REAL:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-NEXT: %[[#LHS_IMAG:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -148,8 +148,8 @@ void mul() {
 // CLANG:   @mul
 // CPPLANG: @_Z3mulv
 
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
 
 //      CIR-BASIC: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-BASIC-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -201,8 +201,8 @@ void mul() {
 // LLVM-BASIC-NEXT: %[[#G:]] = insertvalue { i32, i32 } undef, i32 %[[#E]], 0
 // LLVM-BASIC-NEXT: %{{.+}} = insertvalue { i32, i32 } %[[#G]], i32 %[[#F]], 1
 
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
 
 //      CIR-IMPROVED: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-IMPROVED-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -254,8 +254,8 @@ void mul() {
 // LLVM-IMPROVED-NEXT: %[[#G:]] = insertvalue { i32, i32 } undef, i32 %[[#E]], 0
 // LLVM-IMPROVED-NEXT: %{{.+}} = insertvalue { i32, i32 } %[[#G]], i32 %[[#F]], 1
 
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
+// CIRGEN-FULL: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
+// CIRGEN-FULL: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
 
 //      CIR-FULL: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-FULL-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -273,8 +273,11 @@ void mul() {
 // CIR-FULL-NEXT: %[[#G:]] = cir.const #false
 // CIR-FULL-NEXT: %[[#H:]] = cir.select if %[[#COND]] then %[[#COND2]] else %[[#G]] : (!cir.bool, !cir.bool, !cir.bool) -> !cir.bool
 // CIR-FULL-NEXT: %{{.+}} = cir.ternary(%[[#H]], true {
-// CIR-FULL-NEXT:   %[[#RES2:]] = cir.call @__muldc3(%[[#LHSR]], %[[#LHSI]], %[[#RHSR]], %[[#RHSI]]) : (!cir.double, !cir.double, !cir.double, !cir.double) -> !cir.complex<!cir.double>
-// CIR-FULL-NEXT:   cir.yield %[[#RES2]] : !cir.complex<!cir.double>
+// CIR-FULL-NEXT:   %[[#RES2:]] = cir.call @__muldc3(%[[#LHSR]], %[[#LHSI]], %[[#RHSR]], %[[#RHSI]]) : (!cir.double, !cir.double, !cir.double, !cir.double) -> !rec_anon_struct
+// CIR-FULL-NEXT:   cir.store %[[#RES2]], %{{.+}} : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
+// CIR-FULL-NEXT:   %{{.+}} = cir.cast bitcast %{{.+}} : !cir.ptr<!rec_anon_struct> -> !cir.ptr<!cir.complex<!cir.double>>
+// CIR-FULL-NEXT:   %[[#RES3:]] = cir.load %{{.+}} : !cir.ptr<!cir.complex<!cir.double>>, !cir.complex<!cir.double>
+// CIR-FULL-NEXT:   cir.yield %[[#RES3]] : !cir.complex<!cir.double>
 // CIR-FULL-NEXT: }, false {
 // CIR-FULL-NEXT:   cir.yield %[[#RES]] : !cir.complex<!cir.double>
 // CIR-FULL-NEXT: }) : (!cir.bool) -> !cir.complex<!cir.double>
@@ -335,8 +338,8 @@ void div() {
 // CLANG:   @div
 // CPPLANG: @_Z3divv
 
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
 
 //      CIR-BASIC: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-BASIC-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -408,8 +411,8 @@ void div() {
 // LLVM-BASIC-NEXT: %[[#L:]] = insertvalue { i32, i32 } undef, i32 %[[#G]], 0
 // LLVM-BASIC-NEXT: %{{.+}} = insertvalue { i32, i32 } %[[#L]], i32 %[[#K]], 1
 
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
 
 //      CIR-IMPROVED: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-IMPROVED-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
@@ -516,14 +519,14 @@ void div() {
 // LLVM-IMPROVED-NEXT: %[[#L:]] = insertvalue { i32, i32 } undef, i32 %[[#G]], 0
 // LLVM-IMPROVED-NEXT: %{{.+}} = insertvalue { i32, i32 } %[[#L]], i32 %[[#K]], 1
 
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
+// CIRGEN-FULL: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
+// CIRGEN-FULL: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
 
 //      CIR-FULL: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-FULL-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-FULL-NEXT: %[[#RHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!cir.double> -> !cir.double
 // CIR-FULL-NEXT: %[[#RHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!cir.double> -> !cir.double
-// CIR-FULL-NEXT: %{{.+}} = cir.call @__divdc3(%[[#LHSR]], %[[#LHSI]], %[[#RHSR]], %[[#RHSI]]) : (!cir.double, !cir.double, !cir.double, !cir.double) -> !cir.complex<!cir.double>
+// CIR-FULL-NEXT: %{{.+}} = cir.call @__divdc3(%[[#LHSR]], %[[#LHSI]], %[[#RHSR]], %[[#RHSI]]) : (!cir.double, !cir.double, !cir.double, !cir.double) -> !rec_anon_struct
 
 //      CIR-FULL: %[[#LHSR:]] = cir.complex.real %{{.+}} : !cir.complex<!s32i> -> !s32i
 // CIR-FULL-NEXT: %[[#LHSI:]] = cir.complex.imag %{{.+}} : !cir.complex<!s32i> -> !s32i
@@ -576,8 +579,8 @@ void add_assign() {
 // CLANG:   @add_assign
 // CPPLANG: @_Z10add_assignv
 
-// CIRGEN: %{{.+}} = cir.binop(add, %{{.+}}, %{{.+}}) : !cir.complex<!cir.double>
-// CIRGEN: %{{.+}} = cir.binop(add, %{{.+}}, %{{.+}}) : !cir.complex<!s32i>
+// CIRGEN: %{{.+}} = cir.complex.add %{{.+}}, %{{.+}} : !cir.complex<!cir.double>
+// CIRGEN: %{{.+}} = cir.complex.add %{{.+}}, %{{.+}} : !cir.complex<!s32i>
 
 // CHECK: }
 
@@ -606,13 +609,15 @@ void add_assign_float16() {
 // CIR: %[[A_REAL_F32:.*]] = cir.cast floating %[[A_REAL]] : !cir.f16 -> !cir.float
 // CIR: %[[A_IMAG_F32:.*]] = cir.cast floating %[[A_IMAG]] : !cir.f16 -> !cir.float
 // CIR: %[[A_F32_COMPLEX:.*]] = cir.complex.create %[[A_REAL_F32]], %[[A_IMAG_F32]] : !cir.float -> !cir.complex<!cir.float>
-// CIR: %[[A_F32_REAL:.*]] = cir.complex.real %[[A_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
-// CIR: %[[A_F32_IMAG:.*]] = cir.complex.imag %[[A_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
-// CIR: %[[B_F32_REAL:.*]] = cir.complex.real %[[B_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
-// CIR: %[[B_F32_IMAG:.*]] = cir.complex.imag %[[B_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
-// CIR: %[[ADD_REAL:.*]] = cir.binop(add, %[[A_F32_REAL]], %[[B_F32_REAL]]) : !cir.float
-// CIR: %[[ADD_IMAG:.*]] = cir.binop(add, %[[A_F32_IMAG]], %[[B_F32_IMAG]]) : !cir.float
-// CIR: %[[RESULT:.*]] = cir.complex.create %[[ADD_REAL]], %[[ADD_IMAG]] : !cir.float -> !cir.complex<!cir.float>
+// CIR: %[[#A_REAL2:]] = cir.complex.real %[[A_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
+// CIR-NEXT: %[[#A_IMAG2:]] = cir.complex.imag %[[A_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
+// CIR-NEXT: %[[#B_REAL2:]] = cir.complex.real %[[B_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
+// CIR-NEXT: %[[#B_IMAG2:]] = cir.complex.imag %[[B_F32_COMPLEX]] : !cir.complex<!cir.float> -> !cir.float
+// CIR-NEXT: %[[#RES_REAL:]] = cir.binop(add, %[[#A_REAL2]], %[[#B_REAL2]]) : !cir.float
+// CIR-NEXT: %[[#RES_IMAG:]] = cir.binop(add, %[[#A_IMAG2]], %[[#B_IMAG2]]) : !cir.float
+// CIR-NEXT: %[[RESULT:.*]] = cir.complex.create %[[#RES_REAL]], %[[#RES_IMAG]] : !cir.float -> !cir.complex<!cir.float>
+// CIR: %[[ADD_REAL:.*]] = cir.complex.real %[[RESULT]] : !cir.complex<!cir.float> -> !cir.float
+// CIR: %[[ADD_IMAG:.*]] = cir.complex.imag %[[RESULT]] : !cir.complex<!cir.float> -> !cir.float
 
 // LLVM: %[[A_ADDR:.*]] = alloca { half, half }, i64 1, align 2
 // LLVM: %[[B_ADDR:.*]] = alloca { half, half }, i64 1, align 2
@@ -621,19 +626,13 @@ void add_assign_float16() {
 // LLVM: %[[B_IMAG:.*]] = extractvalue { half, half } %[[TMP_B]], 1
 // LLVM: %[[B_REAL_F32:.*]] = fpext half %[[B_REAL]] to float
 // LLVM: %[[B_IMAG_F32:.*]] = fpext half %[[B_IMAG]] to float
-// LLVM: %[[TMP_B_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[B_REAL_F32]], 0
-// LLVM: %[[B_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_B_COMPLEX_F32]], float %[[B_IMAG_F32]], 1
 // LLVM: %[[TMP_A:.*]] = load { half, half }, ptr %[[A_ADDR]], align 2
 // LLVM: %[[A_REAL:.*]] = extractvalue { half, half } %[[TMP_A]], 0
 // LLVM: %[[A_IMAG:.*]] = extractvalue { half, half } %[[TMP_A]], 1
 // LLVM: %[[A_REAL_F32:.*]] = fpext half %[[A_REAL]] to float
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
-// LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
-// LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
 // LLVM: %[[RESULT_REAL_F32:.*]] = fadd float %[[A_REAL_F32]], %[[B_REAL_F32]]
 // LLVM: %[[RESULT_IMAG_F32:.*]] = fadd float %[[A_IMAG_F32]], %[[B_IMAG_F32]]
-// LLVM: %[[TMP_RESULT:.*]] = insertvalue { float, float } {{.*}}, float %[[RESULT_REAL_F32]], 0
-// LLVM: %[[RESULT:.*]] = insertvalue { float, float } %[[TMP_RESULT]], float %[[RESULT_IMAG_F32]], 1
 // LLVM: %[[RESULT_REAL_F16:.*]] = fptrunc float %[[RESULT_REAL_F32]] to half
 // LLVM: %[[RESULT_IMAG_F16:.*]] = fptrunc float %[[RESULT_IMAG_F32]] to half
 // LLVM: %[[TMP_RESULT_F16:.*]] = insertvalue { half, half } {{.*}}, half %[[RESULT_REAL_F16]], 0
@@ -650,8 +649,8 @@ void sub_assign() {
 //   CLANG: @sub_assign
 // CPPLANG: @_Z10sub_assignv
 
-// CIRGEN: %{{.+}} = cir.binop(sub, %{{.+}}, %{{.+}}) : !cir.complex<!cir.double>
-// CIRGEN: %{{.+}} = cir.binop(sub, %{{.+}}, %{{.+}}) : !cir.complex<!s32i>
+// CIRGEN: %{{.+}} = cir.complex.sub %{{.+}}, %{{.+}} : !cir.complex<!cir.double>
+// CIRGEN: %{{.+}} = cir.complex.sub %{{.+}}, %{{.+}} : !cir.complex<!s32i>
 
 // CHECK: }
 
@@ -663,14 +662,14 @@ void mul_assign() {
 //   CLANG: @mul_assign
 // CPPLANG: @_Z10mul_assignv
 
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
 
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
 
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
+// CIRGEN-FULL: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
+// CIRGEN-FULL: %{{.+}} = cir.complex.mul %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
 
 // CHECK: }
 
@@ -682,14 +681,14 @@ void div_assign() {
 //   CLANG: @div_assign
 // CPPLANG: @_Z10div_assignv
 
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
-// CIRGEN-BASIC: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!cir.double>
+// CIRGEN-BASIC: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(basic) : !cir.complex<!s32i>
 
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
-// CIRGEN-IMPROVED: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!cir.double>
+// CIRGEN-IMPROVED: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(improved) : !cir.complex<!s32i>
 
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
-// CIRGEN-FULL: %{{.+}} = cir.complex.binop div %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
+// CIRGEN-FULL: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(full) : !cir.complex<!cir.double>
+// CIRGEN-FULL: %{{.+}} = cir.complex.div %{{.+}}, %{{.+}} range(full) : !cir.complex<!s32i>
 
 // CHECK: }
 

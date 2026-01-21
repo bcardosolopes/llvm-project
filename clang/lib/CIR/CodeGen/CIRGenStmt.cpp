@@ -16,6 +16,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Location.h"
 #include "mlir/Support/LLVM.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/StmtOpenACC.h"
@@ -379,8 +380,9 @@ mlir::LogicalResult CIRGenFunction::emitStmt(const Stmt *s,
     return emitOMPMaskedDirective(cast<OMPMaskedDirective>(*s));
   case Stmt::OMPStripeDirectiveClass:
     return emitOMPStripeDirective(cast<OMPStripeDirective>(*s));
-  case Stmt::LabelStmtClass:
   case Stmt::AttributedStmtClass:
+    return emitAttributedStmt(cast<AttributedStmt>(*s));
+  case Stmt::LabelStmtClass:
   case Stmt::GotoStmtClass:
   case Stmt::DefaultStmtClass:
   case Stmt::CaseStmtClass:
@@ -449,6 +451,35 @@ mlir::LogicalResult CIRGenFunction::emitLabelStmt(const clang::LabelStmt &s) {
 
   if (getContext().getLangOpts().EHAsynch && s.isSideEntry())
     getCIRGenModule().errorNYI(s.getSourceRange(), "IsEHa: not implemented.");
+
+  return emitStmt(s.getSubStmt(), /*useCurrentScope*/ true);
+}
+
+mlir::LogicalResult
+CIRGenFunction::emitAttributedStmt(const AttributedStmt &s) {
+  for (const auto *a : s.getAttrs()) {
+    switch (a->getKind()) {
+    case attr::NoMerge:
+    case attr::NoInline:
+    case attr::AlwaysInline:
+    case attr::MustTail:
+      cgm.errorNYI(s.getSourceRange(), "statement attributes");
+      return mlir::failure();
+    case attr::CXXAssume: {
+      const Expr *assumption = cast<CXXAssumeAttr>(a)->getAssumption();
+      if (getLangOpts().CXXAssumptions &&
+          !assumption->HasSideEffects(getContext())) {
+        mlir::Value argValue = emitCheckedArgForAssume(assumption);
+        cir::AssumeOp::create(builder, getLoc(s.getSourceRange()), argValue);
+      }
+      break;
+    }
+    default:
+      // For fallthrough and other attributes that don't need special handling,
+      // just continue to emit the substatement.
+      break;
+    }
+  }
 
   return emitStmt(s.getSubStmt(), /*useCurrentScope*/ true);
 }
@@ -815,27 +846,59 @@ CIRGenFunction::emitCaseDefaultCascade(const T *stmt, mlir::Type condType,
   return result;
 }
 
+const CaseStmt *CIRGenFunction::foldCaseStmt(const clang::CaseStmt &s,
+                                             mlir::Type condType,
+                                             mlir::ArrayAttr &value,
+                                             cir::CaseOpKind &kind) {
+  const CaseStmt *caseStmt = &s;
+  const CaseStmt *lastCase = &s;
+  SmallVector<mlir::Attribute, 4> caseEltValueListAttr;
+
+  // Fold cascading cases whenever possible to simplify codegen a bit.
+  while (caseStmt) {
+    lastCase = caseStmt;
+
+    auto intVal = caseStmt->getLHS()->EvaluateKnownConstInt(getContext());
+
+    if (auto *rhs = caseStmt->getRHS()) {
+      auto endVal = rhs->EvaluateKnownConstInt(getContext());
+      SmallVector<mlir::Attribute, 4> rangeCaseAttr = {
+          cir::IntAttr::get(condType, intVal),
+          cir::IntAttr::get(condType, endVal)};
+      value = builder.getArrayAttr(rangeCaseAttr);
+      kind = cir::CaseOpKind::Range;
+
+      // We may not be able to fold ranges. Due to we can't present range case
+      // with other trivial cases now.
+      return caseStmt;
+    }
+
+    caseEltValueListAttr.push_back(cir::IntAttr::get(condType, intVal));
+
+    caseStmt = dyn_cast_or_null<CaseStmt>(caseStmt->getSubStmt());
+
+    // Break early if we found ranges. We can't fold ranges due to the same
+    // reason above.
+    if (caseStmt && caseStmt->getRHS())
+      break;
+  }
+
+  if (!caseEltValueListAttr.empty()) {
+    value = builder.getArrayAttr(caseEltValueListAttr);
+    kind = caseEltValueListAttr.size() > 1 ? cir::CaseOpKind::Anyof
+                                           : cir::CaseOpKind::Equal;
+  }
+
+  return lastCase;
+}
+
 mlir::LogicalResult CIRGenFunction::emitCaseStmt(const CaseStmt &s,
                                                  mlir::Type condType,
                                                  bool buildingTopLevelCase) {
-  cir::CaseOpKind kind;
   mlir::ArrayAttr value;
-  llvm::APSInt intVal = s.getLHS()->EvaluateKnownConstInt(getContext());
-
-  // If the case statement has an RHS value, it is representing a GNU
-  // case range statement, where LHS is the beginning of the range
-  // and RHS is the end of the range.
-  if (const Expr *rhs = s.getRHS()) {
-    llvm::APSInt endVal = rhs->EvaluateKnownConstInt(getContext());
-    value = builder.getArrayAttr({cir::IntAttr::get(condType, intVal),
-                                  cir::IntAttr::get(condType, endVal)});
-    kind = cir::CaseOpKind::Range;
-  } else {
-    value = builder.getArrayAttr({cir::IntAttr::get(condType, intVal)});
-    kind = cir::CaseOpKind::Equal;
-  }
-
-  return emitCaseDefaultCascade(&s, condType, value, kind,
+  CaseOpKind kind;
+  auto *caseStmt = foldCaseStmt(s, condType, value, kind);
+  return emitCaseDefaultCascade(caseStmt, condType, value, kind,
                                 buildingTopLevelCase);
 }
 

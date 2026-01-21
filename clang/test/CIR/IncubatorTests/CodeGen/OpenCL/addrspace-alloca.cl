@@ -1,8 +1,10 @@
-// RUN: %clang_cc1 -cl-std=CL3.0 -O0 -fclangir -emit-cir -triple spirv64-unknown-unknown %s -o %t.cir
+// RUN: %clang_cc1 -cl-std=CL3.0 -O0 -fclangir -emit-cir -fno-clangir-call-conv-lowering -triple spirv64-unknown-unknown %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s --check-prefix=CIR
 // RUN: %clang_cc1 -cl-std=CL3.0 -O0 -fclangir -emit-llvm -fno-clangir-call-conv-lowering -triple spirv64-unknown-unknown %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s --check-prefix=LLVM
 
+// CIR:  cir.global "private" constant cir_private lang_address_space(offload_constant) @__const.func2.s1 = #cir.const_array<"Hello\00" : !cir.array<!s8i x 6>> : !cir.array<!s8i x 6>
+// LLVM: @__const.func2.s1 = private addrspace(2) constant [6 x i8] c"Hello\00"
 
 // CIR: cir.func{{.*}} @func(%arg0: !cir.ptr<!s32i, lang_address_space(offload_local)>
 // LLVM: @func(ptr addrspace(3)
@@ -30,5 +32,18 @@ kernel void func(local int *p) {
   // CIR-NEXT: cir.store{{.*}} %[[#ALLOCA_X]], %[[#ALLOCA_PTR]] : !cir.ptr<!s32i, lang_address_space(offload_private)>, !cir.ptr<!cir.ptr<!s32i, lang_address_space(offload_private)>, lang_address_space(offload_private)>
   // LLVM-NEXT: store ptr %[[#ALLOCA_X]], ptr %[[#ALLOCA_PTR]]
 
+  return;
+}
+
+// CIR: cir.func{{.*}} @func2()
+// LLVM: @func2()
+kernel void func2() {
+  char s1[] = "Hello";
+  // CIR-DAG:  %[[#ALLOCA_STR:]] = cir.alloca !cir.array<!s8i x 6>, !cir.ptr<!cir.array<!s8i x 6>, lang_address_space(offload_private)>, ["s1", init] {alignment = 1 : i64}
+  // CIR-DAG:  %[[#GET_GLOBAL:]] = cir.get_global @__const.func2.s1 : !cir.ptr<!cir.array<!s8i x 6>, lang_address_space(offload_constant)>
+  // CIR:  cir.cast address_space %[[#GET_GLOBAL]] : !cir.ptr<!cir.array<!s8i x 6>, lang_address_space(offload_constant)> -> !cir.ptr<!cir.array<!s8i x 6>, lang_address_space(offload_private)>
+
+  // LLVM-NEXT: %[[#ALLOCA_STR:]] = alloca [6 x i8], i64 1, align 1
+  // LLVM-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr %[[#ALLOCA_STR]], ptr addrspacecast (ptr addrspace(2) @__const.func2.s1 to ptr), i64 6, i1 false)
   return;
 }

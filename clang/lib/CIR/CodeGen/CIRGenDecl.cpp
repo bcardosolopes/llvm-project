@@ -18,16 +18,33 @@
 #include "clang/AST/DeclOpenACC.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/MissingFeatures.h"
 
 using namespace clang;
 using namespace clang::CIRGen;
 
+/// Look through an address space cast (if any) to find the AllocaOp.
+/// This is needed because in CUDA/HIP/OpenCL the alloca may be in a
+/// non-default address space, and we cast it to the default address space
+/// for use in the function body.
+static cir::AllocaOp findAllocaOp(mlir::Value val) {
+  if (auto allocaOp = val.getDefiningOp<cir::AllocaOp>())
+    return allocaOp;
+  if (auto castOp = val.getDefiningOp<cir::CastOp>()) {
+    if (castOp.getKind() == cir::CastKind::address_space)
+      return castOp.getSrc().getDefiningOp<cir::AllocaOp>();
+  }
+  return nullptr;
+}
+
 CIRGenFunction::AutoVarEmission
 CIRGenFunction::emitAutoVarAlloca(const VarDecl &d,
                                   mlir::OpBuilder::InsertPoint ip) {
   QualType ty = d.getType();
-  if (ty.getAddressSpace() != LangAS::Default)
+  if (ty.getAddressSpace() != LangAS::Default &&
+      !(ty.getAddressSpace() == LangAS::opencl_private &&
+        getContext().getLangOpts().OpenCL))
     cgm.errorNYI(d.getSourceRange(), "emitAutoVarAlloca: address space");
 
   mlir::Location loc = getLoc(d.getSourceRange());
@@ -119,9 +136,12 @@ CIRGenFunction::emitAutoVarAlloca(const VarDecl &d,
       // A normal fixed sized variable becomes an alloca in the entry block,
       mlir::Type allocaTy = convertTypeForMem(ty);
       // Create the temp alloca and declare variable using it.
+      // allocaAddr gets the raw alloca (in alloca address space), while
+      // address gets the address-space-casted value for the default AS.
+      Address allocaAddr = Address::invalid();
       address = createTempAlloca(allocaTy, alignment, loc, d.getName(),
-                                 /*arraySize=*/nullptr, /*alloca=*/nullptr, ip);
-      declare(address.getPointer(), &d, ty, getLoc(d.getSourceRange()),
+                                 /*arraySize=*/nullptr, &allocaAddr, ip);
+      declare(allocaAddr.getPointer(), &d, ty, getLoc(d.getSourceRange()),
               alignment);
     }
   } else {
@@ -162,6 +182,9 @@ CIRGenFunction::emitAutoVarAlloca(const VarDecl &d,
   emission.addr = address;
   setAddrOfLocalVar(&d, address);
 
+  if (d.hasAttr<AnnotateAttr>())
+    emitVarAnnotations(&d, address.emitRawPointer());
+
   return emission;
 }
 
@@ -194,22 +217,15 @@ static void emitStoresForConstant(CIRGenModule &cgm, const VarDecl &d,
   assert(!cir::MissingFeatures::shouldUseBZeroPlusStoresToInitialize());
   assert(!cir::MissingFeatures::shouldUseMemSetToInitialize());
   assert(!cir::MissingFeatures::shouldSplitConstantStore());
-  assert(!cir::MissingFeatures::shouldCreateMemCpyFromGlobal());
-  // In CIR we want to emit a store for the whole thing, later lowering
-  // prepare to LLVM should unwrap this into the best policy (see asserts
-  // above).
-  //
-  // FIXME(cir): This is closer to memcpy behavior but less optimal, instead of
-  // copy from a global, we just create a cir.const out of it.
 
   if (addr.getElementType() != ty)
     addr = addr.withElementType(builder, ty);
 
   // If the address is an alloca, set the init attribute.
-  // The address is usually and alloca, but there is at least one case where
+  // The address is usually an alloca, but there is at least one case where
   // emitAutoVarInit is called from the OpenACC codegen with an address that
-  // is not an alloca.
-  auto allocaOp = addr.getDefiningOp<cir::AllocaOp>();
+  // is not an alloca. For CUDA/HIP/OpenCL, there may be an address space cast.
+  auto allocaOp = findAllocaOp(addr.getPointer());
   if (allocaOp)
     allocaOp.setInitAttr(mlir::UnitAttr::get(&cgm.getMLIRContext()));
 
@@ -218,7 +234,21 @@ static void emitStoresForConstant(CIRGenModule &cgm, const VarDecl &d,
   mlir::Location loc = builder.getUnknownLoc();
   if (d.getSourceRange().isValid())
     loc = cgm.getLoc(d.getSourceRange());
-  builder.createStore(loc, builder.getConstant(loc, constant), addr);
+
+  // Create a global constant and use cir.copy to initialize the local.
+  CharUnits align = addr.getAlignment();
+  Address src = cgm.createUnnamedGlobalFrom(d, constant, align);
+
+  // The source (unnamed global) may have a different address space than the
+  // destination (local variable). For example, in OpenCL the global constant
+  // is in the constant address space while the local is in the private address
+  // space. Insert an address space cast if needed.
+  mlir::Value srcPtr = src.getPointer();
+  if (srcPtr.getType() != addr.getPointer().getType())
+    srcPtr =
+        builder.createAddrSpaceCast(loc, srcPtr, addr.getPointer().getType());
+
+  cir::CopyOp::create(builder, loc, addr.getPointer(), srcPtr);
 }
 
 void CIRGenFunction::emitAutoVarInit(
@@ -270,6 +300,15 @@ void CIRGenFunction::emitAutoVarInit(
   };
 
   if (isTrivialInitializer(init)) {
+    // Only set init for EXPLICIT initializers, not implicit constructor calls.
+    // CXXTemporaryObjectExpr represents explicit functional-notation like
+    // Type(), while plain CXXConstructExpr may be implicit from declarations
+    // like "Derived d;" which shouldn't have init.
+    if (init && isa<CXXTemporaryObjectExpr>(init)) {
+      mlir::Value val = addr.getPointer();
+      if (auto allocaOp = findAllocaOp(val))
+        allocaOp.setInitAttr(mlir::UnitAttr::get(&getMLIRContext()));
+    }
     initializeWhatIsTechnicallyUninitialized(addr);
     return;
   }
@@ -301,15 +340,13 @@ void CIRGenFunction::emitAutoVarInit(
     emitExprAsInit(init, &d, lv);
 
     if (!emission.wasEmittedAsOffloadClause()) {
-      // In case lv has uses it means we indeed initialized something
-      // out of it while trying to build the expression, mark it as such.
+      // Mark as initialized - we have an init expression even if no code was
+      // generated (e.g., trivial constructor with zero-initialization).
       mlir::Value val = lv.getAddress().getPointer();
       assert(val && "Should have an address");
-      auto allocaOp = val.getDefiningOp<cir::AllocaOp>();
+      auto allocaOp = findAllocaOp(val);
       assert(allocaOp && "Address should come straight out of the alloca");
-
-      if (!allocaOp.use_empty())
-        allocaOp.setInitAttr(mlir::UnitAttr::get(&getMLIRContext()));
+      allocaOp.setInitAttr(mlir::UnitAttr::get(&getMLIRContext()));
     }
 
     return;
@@ -382,7 +419,7 @@ void CIRGenFunction::emitVarDecl(const VarDecl &d) {
   }
 
   if (d.getType().getAddressSpace() == LangAS::opencl_local)
-    cgm.errorNYI(d.getSourceRange(), "emitVarDecl openCL address space");
+    return emitStaticVarDecl(d, cir::GlobalLinkageKind::InternalLinkage);
 
   assert(d.hasLocalStorage());
 
@@ -435,17 +472,25 @@ CIRGenModule::getOrCreateStaticVarDecl(const VarDecl &d,
   std::string name = getStaticDeclName(*this, d);
 
   mlir::Type lty = getTypes().convertTypeForMem(ty);
-  assert(!cir::MissingFeatures::addressSpace());
+  mlir::ptr::MemorySpaceAttrInterface addrSpace =
+      cir::toCIRLangAddressSpaceAttr(&getMLIRContext(),
+                                     getGlobalVarAddressSpace(&d));
 
-  if (d.hasAttr<LoaderUninitializedAttr>() || d.hasAttr<CUDASharedAttr>())
+  // OpenCL variables in local address space and CUDA shared
+  // variables cannot have an initializer.
+  mlir::Attribute init;
+  if (d.hasAttr<LoaderUninitializedAttr>())
     errorNYI(d.getSourceRange(),
              "getOrCreateStaticVarDecl: LoaderUninitializedAttr");
-  assert(!cir::MissingFeatures::addressSpace());
-
-  mlir::Attribute init = builder.getZeroInitAttr(convertType(ty));
+  else if (d.hasAttr<CUDASharedAttr>())
+    ; // no initializer for shared vars
+  else if (ty.getAddressSpace() != LangAS::opencl_local)
+    init = builder.getZeroInitAttr(convertType(ty));
 
   cir::GlobalOp gv = builder.createVersionedGlobal(
       getModule(), getLoc(d.getLocation()), name, lty, false, linkage);
+  if (addrSpace)
+    gv.setAddrSpaceAttr(addrSpace);
   // TODO(cir): infer visibility from linkage in global op builder.
   gv.setVisibility(getMLIRVisibilityFromCIRLinkage(linkage));
   gv.setInitialValueAttr(init);
@@ -455,7 +500,7 @@ CIRGenModule::getOrCreateStaticVarDecl(const VarDecl &d,
     gv.setComdat(true);
 
   if (d.getTLSKind())
-    errorNYI(d.getSourceRange(), "getOrCreateStaticVarDecl: TLS");
+    setTLSMode(gv, d);
 
   setGVProperties(gv, &d);
 
@@ -589,18 +634,17 @@ void CIRGenFunction::emitStaticVarDecl(const VarDecl &d,
 
   cir::GlobalOp var = globalOp;
 
-  assert(!cir::MissingFeatures::cudaSupport());
-
+  // CUDA's local and local static __shared__ variables should not
+  // have any non-empty initializers. This is ensured by Sema.
+  // Whatever initializer such variable may have when it gets here is
+  // a no-op and should not be emitted.
+  bool isCudaSharedVar = getLangOpts().CUDA && getLangOpts().CUDAIsDevice &&
+                         d.hasAttr<CUDASharedAttr>();
   // If this value has an initializer, emit it.
-  if (d.getInit())
+  if (d.getInit() && !isCudaSharedVar)
     var = addInitializerToStaticVarDecl(d, var, getAddrOp);
 
   var.setAlignment(alignment.getAsAlign().value());
-
-  // There are a lot of attributes that need to be handled here. Until
-  // we start to support them, we just report an error if there are any.
-  if (d.hasAttrs())
-    cgm.errorNYI(d.getSourceRange(), "static var with attrs");
 
   if (cgm.getCodeGenOpts().KeepPersistentStorageVariables)
     cgm.errorNYI(d.getSourceRange(), "static var keep persistent storage");
@@ -898,6 +942,27 @@ struct CallStackRestore final : EHScopeStack::Cleanup {
     cgf.getBuilder().createStackRestore(loc, v);
   }
 };
+
+/// A cleanup which performs a partial array destroy where the end pointer is
+/// irregularly determined and must be loaded from a local.
+struct IrregularPartialArrayDestroy final : EHScopeStack::Cleanup {
+  mlir::Value arrayBegin;
+  Address arrayEndPointer;
+  QualType elementType;
+  CIRGenFunction::Destroyer *destroyer;
+  CharUnits elementAlign;
+
+  IrregularPartialArrayDestroy(mlir::Value arrayBegin, Address arrayEndPointer,
+                               QualType elementType, CharUnits elementAlign,
+                               CIRGenFunction::Destroyer *destroyer)
+      : arrayBegin(arrayBegin), arrayEndPointer(arrayEndPointer),
+        elementType(elementType), destroyer(destroyer),
+        elementAlign(elementAlign) {}
+
+  void emit(CIRGenFunction &cgf, Flags flags) override {
+    llvm_unreachable("NYI");
+  }
+};
 } // namespace
 
 /// Push the standard destructor for the given type as
@@ -913,6 +978,22 @@ void CIRGenFunction::pushDestroy(QualType::DestructionKind dtorKind,
 void CIRGenFunction::pushDestroy(CleanupKind cleanupKind, Address addr,
                                  QualType type, Destroyer *destroyer) {
   pushFullExprCleanup<DestroyObject>(cleanupKind, addr, type, destroyer);
+}
+
+/// Push an EH cleanup to destroy already-constructed elements of the given
+/// array.  The cleanup may be popped with DeactivateCleanupBlock or
+/// PopCleanupBlock.
+///
+/// \param elementType - the immediate element type of the array;
+///   possibly still an array type
+void CIRGenFunction::pushIrregularPartialArrayCleanup(mlir::Value arrayBegin,
+                                                      Address arrayEndPointer,
+                                                      QualType elementType,
+                                                      CharUnits elementAlign,
+                                                      Destroyer *destroyer) {
+  pushFullExprCleanup<IrregularPartialArrayDestroy>(
+      EHCleanup, arrayBegin, arrayEndPointer, elementType, elementAlign,
+      destroyer);
 }
 
 /// Destroys all the elements of the given array, beginning from last to first.

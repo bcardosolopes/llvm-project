@@ -21,6 +21,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "mlir/Dialect/LLVMIR/Transforms/Passes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -38,6 +39,8 @@
 #include "clang/CIR/LoweringHelpers.h"
 #include "clang/CIR/MissingFeatures.h"
 #include "clang/CIR/Passes.h"
+#include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -48,6 +51,10 @@ using namespace llvm;
 
 namespace cir {
 namespace direct {
+
+void createLLVMFuncOpIfNotExist(mlir::ConversionPatternRewriter &rewriter,
+                                mlir::Operation *srcOp, llvm::StringRef fnName,
+                                mlir::Type fnTy);
 
 //===----------------------------------------------------------------------===//
 // Helper Methods
@@ -64,6 +71,32 @@ mlir::Type elementTypeIfVector(mlir::Type type) {
 }
 } // namespace
 
+static unsigned
+getGlobalOpTargetAddrSpace(mlir::ConversionPatternRewriter &rewriter,
+                           const mlir::TypeConverter *converter,
+                           cir::GlobalOp op) {
+  auto tempPtrTy = cir::PointerType::get(rewriter.getContext(), op.getSymType(),
+                                         op.getAddrSpaceAttr());
+  return cast<mlir::LLVM::LLVMPointerType>(converter->convertType(tempPtrTy))
+      .getAddressSpace();
+}
+
+/// Convert either a TargetAddressSpaceAttr or LangAddressSpaceAttr to a
+/// numeric target address space using the LowerModule's target info.
+static unsigned getTargetAddrSpace(mlir::Attribute addrSpaceAttr,
+                                   cir::LowerModule *lowerModule) {
+  if (auto targetAS =
+          mlir::dyn_cast<cir::TargetAddressSpaceAttr>(addrSpaceAttr))
+    return targetAS.getValue();
+  if (auto langAS = mlir::dyn_cast<cir::LangAddressSpaceAttr>(addrSpaceAttr)) {
+    assert(lowerModule && "CIR AS map is not available");
+    return lowerModule->getTargetLoweringInfo()
+        .getTargetAddrSpaceFromCIRAddrSpace(langAS.getValue());
+  }
+  llvm_unreachable(
+      "lowering of unknown address space kind is not yet supported");
+}
+
 /// Given a type convertor and a data layout, convert the given type to a type
 /// that is suitable for memory operations. For example, this can be used to
 /// lower cir.bool accesses to i8.
@@ -78,6 +111,22 @@ static mlir::Type convertTypeForMemory(const mlir::TypeConverter &converter,
   }
 
   return converter.convertType(type);
+}
+
+/// Convert from a CIR PtrStrideOp kind to an LLVM IR equivalent of GEP.
+static mlir::LLVM::GEPNoWrapFlags
+convertPtrStrideKindToGEPFlags(cir::GEPNoWrapFlags flags) {
+  using CIRFlags = cir::GEPNoWrapFlags;
+  using LLVMFlags = mlir::LLVM::GEPNoWrapFlags;
+
+  LLVMFlags x = LLVMFlags::none;
+  if ((flags & CIRFlags::inboundsFlag) == CIRFlags::inboundsFlag)
+    x = x | LLVMFlags::inboundsFlag;
+  if ((flags & CIRFlags::nusw) == CIRFlags::nusw)
+    x = x | LLVMFlags::nusw;
+  if ((flags & CIRFlags::nuw) == CIRFlags::nuw)
+    x = x | LLVMFlags::nuw;
+  return x;
 }
 
 static mlir::Value createIntCast(mlir::OpBuilder &bld, mlir::Value src,
@@ -180,10 +229,125 @@ mlir::LogicalResult CIRToLLVMCopyOpLowering::matchAndRewrite(
     mlir::ConversionPatternRewriter &rewriter) const {
   mlir::DataLayout layout(op->getParentOfType<mlir::ModuleOp>());
   const mlir::Value length = mlir::LLVM::ConstantOp::create(
-      rewriter, op.getLoc(), rewriter.getI32Type(), op.getLength(layout));
+      rewriter, op.getLoc(), rewriter.getI64Type(), op.getLength(layout));
   assert(!cir::MissingFeatures::aggValueSlotVolatile());
   rewriter.replaceOpWithNewOp<mlir::LLVM::MemcpyOp>(
       op, adaptor.getDst(), adaptor.getSrc(), length, op.getIsVolatile());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMMemCpyInlineOpLowering::matchAndRewrite(
+    cir::MemCpyInlineOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  auto lengthAttr =
+      mlir::IntegerAttr::get(rewriter.getI64Type(), op.getLength());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MemcpyInlineOp>(
+      op, adaptor.getDst(), adaptor.getSrc(), lengthAttr, op.getIsVolatile());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMMemSetInlineOpLowering::matchAndRewrite(
+    cir::MemSetInlineOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  auto lengthAttr =
+      mlir::IntegerAttr::get(rewriter.getI64Type(), op.getLength());
+  // Truncate the value to i8 as required by llvm.memset.inline
+  mlir::Value val = adaptor.getVal();
+  mlir::Value truncVal = mlir::LLVM::TruncOp::create(rewriter, op.getLoc(),
+                                                     rewriter.getI8Type(), val);
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MemsetInlineOp>(
+      op, adaptor.getDst(), truncVal, lengthAttr, op.getIsVolatile());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMMemSetOpLowering::matchAndRewrite(
+    cir::MemSetOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  auto converted = mlir::LLVM::TruncOp::create(
+      rewriter, op.getLoc(), mlir::IntegerType::get(op.getContext(), 8),
+      adaptor.getVal());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MemsetOp>(op, adaptor.getDst(),
+                                                    converted, adaptor.getLen(),
+                                                    /*isVolatile=*/false);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMMemCpyOpLowering::matchAndRewrite(
+    cir::MemCpyOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MemcpyOp>(
+      op, adaptor.getDst(), adaptor.getSrc(), adaptor.getLen(),
+      /*isVolatile=*/false);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMMemChrOpLowering::matchAndRewrite(
+    cir::MemChrOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(rewriter.getContext());
+  const mlir::TypeConverter *converter = getTypeConverter();
+  mlir::Type srcTy = converter->convertType(op.getSrc().getType());
+  mlir::Type patternTy = converter->convertType(op.getPattern().getType());
+  mlir::Type lenTy = converter->convertType(op.getLen().getType());
+  auto fnTy =
+      mlir::LLVM::LLVMFunctionType::get(llvmPtrTy, {srcTy, patternTy, lenTy},
+                                        /*isVarArg=*/false);
+  llvm::StringRef fnName = "memchr";
+  createLLVMFuncOpIfNotExist(rewriter, op, fnName, fnTy);
+  rewriter.replaceOpWithNewOp<mlir::LLVM::CallOp>(
+      op, mlir::TypeRange{llvmPtrTy}, fnName,
+      mlir::ValueRange{adaptor.getSrc(), adaptor.getPattern(),
+                       adaptor.getLen()});
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMMemMoveOpLowering::matchAndRewrite(
+    cir::MemMoveOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MemmoveOp>(
+      op, adaptor.getDst(), adaptor.getSrc(), adaptor.getLen(),
+      /*isVolatile=*/false);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMIterBeginOpLowering::matchAndRewrite(
+    cir::IterBeginOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  llvm::report_fatal_error(
+      "cir.std.begin should have been lowered in LoweringPrepare");
+  return mlir::failure();
+}
+
+mlir::LogicalResult CIRToLLVMIterEndOpLowering::matchAndRewrite(
+    cir::IterEndOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  llvm::report_fatal_error(
+      "cir.std.end should have been lowered in LoweringPrepare");
+  return mlir::failure();
+}
+
+mlir::LogicalResult CIRToLLVMStdFindOpLowering::matchAndRewrite(
+    cir::StdFindOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  llvm::report_fatal_error(
+      "cir.std.find should have been lowered in LoweringPrepare");
+  return mlir::failure();
+}
+
+mlir::LogicalResult CIRToLLVMStrLenOpLowering::matchAndRewrite(
+    cir::StrLenOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  llvm::report_fatal_error(
+      "cir.std.strlen should have been lowered in LoweringPrepare");
+  return mlir::failure();
+}
+
+mlir::LogicalResult CIRToLLVMLinkerOptionsOpLowering::matchAndRewrite(
+    cir::LinkerOptionsOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  auto newOp = mlir::LLVM::LinkerOptionsOp::create(rewriter, op.getLoc(),
+                                                   op.getOptionsAttr());
+  rewriter.replaceOp(op, newOp);
   return mlir::success();
 }
 
@@ -257,16 +421,18 @@ public:
 
   mlir::Value visit(mlir::Attribute attr) {
     return llvm::TypeSwitch<mlir::Attribute, mlir::Value>(attr)
-        .Case<cir::IntAttr, cir::FPAttr, cir::ConstComplexAttr,
+        .Case<cir::IntAttr, cir::FPAttr, cir::BoolAttr, cir::ConstComplexAttr,
               cir::ConstArrayAttr, cir::ConstRecordAttr, cir::ConstVectorAttr,
               cir::ConstPtrAttr, cir::GlobalViewAttr, cir::TypeInfoAttr,
-              cir::UndefAttr, cir::VTableAttr, cir::ZeroAttr>(
+              cir::UndefAttr, cir::PoisonAttr, cir::VTableAttr, cir::ZeroAttr,
+              cir::BlockAddrAttr, cir::BlockAddrDiffAttr>(
             [&](auto attrT) { return visitCirAttr(attrT); })
         .Default([&](auto attrT) { return mlir::Value(); });
   }
 
   mlir::Value visitCirAttr(cir::IntAttr intAttr);
   mlir::Value visitCirAttr(cir::FPAttr fltAttr);
+  mlir::Value visitCirAttr(cir::BoolAttr boolAttr);
   mlir::Value visitCirAttr(cir::ConstComplexAttr complexAttr);
   mlir::Value visitCirAttr(cir::ConstPtrAttr ptrAttr);
   mlir::Value visitCirAttr(cir::ConstArrayAttr attr);
@@ -275,8 +441,11 @@ public:
   mlir::Value visitCirAttr(cir::GlobalViewAttr attr);
   mlir::Value visitCirAttr(cir::TypeInfoAttr attr);
   mlir::Value visitCirAttr(cir::UndefAttr attr);
+  mlir::Value visitCirAttr(cir::PoisonAttr attr);
   mlir::Value visitCirAttr(cir::VTableAttr attr);
   mlir::Value visitCirAttr(cir::ZeroAttr attr);
+  mlir::Value visitCirAttr(cir::BlockAddrAttr attr);
+  mlir::Value visitCirAttr(cir::BlockAddrDiffAttr attr);
 
 private:
   mlir::Operation *parentOp;
@@ -298,6 +467,27 @@ mlir::Value lowerCirAttrAsValue(mlir::Operation *parentOp,
   return value;
 }
 
+mlir::LLVM::CConv convertCallingConv(cir::CallingConv callingConv) {
+  using CIR = cir::CallingConv;
+  using LLVM = mlir::LLVM::CConv;
+
+  switch (callingConv) {
+  case CIR::C:
+    return LLVM::C;
+  case CIR::SpirKernel:
+    return LLVM::SPIR_KERNEL;
+  case CIR::SpirFunction:
+    return LLVM::SPIR_FUNC;
+  case CIR::OpenCLKernel:
+    llvm_unreachable("NYI");
+  case CIR::PTXKernel:
+    return LLVM::PTX_Kernel;
+  case CIR::AMDGPUKernel:
+    return LLVM::AMDGPU_KERNEL;
+  }
+  llvm_unreachable("Unknown calling convention");
+}
+
 void convertSideEffectForCall(mlir::Operation *callOp, bool isNothrow,
                               cir::SideEffect sideEffect,
                               mlir::LLVM::MemoryEffectsAttr &memoryEffect,
@@ -316,7 +506,7 @@ void convertSideEffectForCall(mlir::Operation *callOp, bool isNothrow,
         callOp->getContext(), /*other=*/ModRefInfo::Ref,
         /*argMem=*/ModRefInfo::Ref,
         /*inaccessibleMem=*/ModRefInfo::Ref,
-        /*errnoMem=*/ModRefInfo::Ref,
+        /*errnoMem=*/ModRefInfo::NoModRef,
         /*targetMem0=*/ModRefInfo::Ref,
         /*targetMem1=*/ModRefInfo::Ref);
     noUnwind = true;
@@ -360,11 +550,98 @@ static mlir::LLVM::CallIntrinsicOp replaceOpWithCallLLVMIntrinsicOp(
 mlir::LogicalResult CIRToLLVMLLVMIntrinsicCallOpLowering::matchAndRewrite(
     cir::LLVMIntrinsicCallOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
-  mlir::Type llvmResTy =
-      getTypeConverter()->convertType(op->getResultTypes()[0]);
-  if (!llvmResTy)
-    return op.emitError("expected LLVM result type");
+  mlir::Type llvmResTy;
+  bool hasResult = op->getNumResults() > 0;
+  if (hasResult) {
+    llvmResTy = getTypeConverter()->convertType(op->getResultTypes()[0]);
+    if (!llvmResTy)
+      return op.emitError("expected LLVM result type");
+  } else {
+    // Void-returning intrinsic
+    llvmResTy = mlir::LLVM::LLVMVoidType::get(op->getContext());
+  }
   StringRef name = op.getIntrinsicName();
+
+  // masked.store requires special handling: the alignment operand must be
+  // stripped and converted to an llvm.align attribute on the pointer argument.
+  // CIR representation: (val, ptr, alignment, mask)
+  // LLVM representation: @llvm.masked.store(val, ptr align N, mask)
+  if (name == "masked.store") {
+    auto operands = adaptor.getOperands();
+    if (operands.size() == 4) {
+      if (auto ptrTy = mlir::dyn_cast<mlir::LLVM::LLVMPointerType>(
+              operands[1].getType())) {
+        (void)ptrTy;
+        auto valueTy = operands[0].getType();
+        auto elementTypeAttr = mlir::TypeAttr::get(valueTy);
+        mlir::IntegerAttr alignAttr;
+        if (auto constOp =
+                operands[2].getDefiningOp<mlir::LLVM::ConstantOp>()) {
+          if (auto intAttr =
+                  mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
+            alignAttr = intAttr;
+        }
+        if (alignAttr) {
+          auto alignment =
+              rewriter.getI64IntegerAttr(alignAttr.getValue().getZExtValue());
+          mlir::DictionaryAttr ptrAttr = rewriter.getDictionaryAttr(
+              {rewriter.getNamedAttr("llvm.elementtype", elementTypeAttr),
+               rewriter.getNamedAttr("llvm.align", alignment)});
+          auto emptyDict = rewriter.getDictionaryAttr({});
+          mlir::ArrayAttr argAttrs =
+              rewriter.getArrayAttr({emptyDict, ptrAttr, emptyDict});
+
+          llvm::SmallVector<mlir::Value, 3> callOperands = {
+              operands[0], operands[1], operands[3]};
+          auto callIntrinOp = createCallLLVMIntrinsicOp(
+              rewriter, op->getLoc(), "llvm." + name, llvmResTy, callOperands);
+          callIntrinOp.setArgAttrsAttr(argAttrs);
+          rewriter.eraseOp(op);
+          return mlir::success();
+        }
+      }
+    }
+  }
+
+  // masked.load requires special handling: the alignment operand must be
+  // stripped and converted to an llvm.align attribute on the pointer argument.
+  // CIR representation: (ptr, alignment, mask, passthru)
+  // LLVM representation: @llvm.masked.load(ptr align N, mask, passthru)
+  if (name == "masked.load") {
+    auto operands = adaptor.getOperands();
+    if (operands.size() == 4) {
+      if (auto ptrTy = mlir::dyn_cast<mlir::LLVM::LLVMPointerType>(
+              operands[0].getType())) {
+        (void)ptrTy;
+        auto elementTyAttr = mlir::TypeAttr::get(llvmResTy);
+        mlir::IntegerAttr alignAttr;
+        if (auto constOp =
+                operands[1].getDefiningOp<mlir::LLVM::ConstantOp>()) {
+          if (auto intAttr =
+                  mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
+            alignAttr = intAttr;
+        }
+        if (alignAttr) {
+          auto alignment =
+              rewriter.getI64IntegerAttr(alignAttr.getValue().getZExtValue());
+          mlir::DictionaryAttr ptrAttr = rewriter.getDictionaryAttr(
+              {rewriter.getNamedAttr("llvm.elementtype", elementTyAttr),
+               rewriter.getNamedAttr("llvm.align", alignment)});
+          auto emptyDict = rewriter.getDictionaryAttr({});
+          mlir::ArrayAttr argAttrs =
+              rewriter.getArrayAttr({ptrAttr, emptyDict, emptyDict});
+
+          llvm::SmallVector<mlir::Value, 3> callOperands = {
+              operands[0], operands[2], operands[3]};
+          auto callIntrinOp = createCallLLVMIntrinsicOp(
+              rewriter, op->getLoc(), "llvm." + name, llvmResTy, callOperands);
+          callIntrinOp.setArgAttrsAttr(argAttrs);
+          rewriter.replaceOp(op, callIntrinOp->getResults());
+          return mlir::success();
+        }
+      }
+    }
+  }
 
   // Some LLVM intrinsics require ElementType attribute to be attached to
   // the argument of pointer type. That prevents us from generating LLVM IR
@@ -376,8 +653,17 @@ mlir::LogicalResult CIRToLLVMLLVMIntrinsicCallOpLowering::matchAndRewrite(
   // TODO(cir): MLIR LLVM dialect should handle this part as CIR has no way
   // to set LLVM IR attribute.
   assert(!cir::MissingFeatures::intrinsicElementTypeSupport());
-  replaceOpWithCallLLVMIntrinsicOp(rewriter, op, "llvm." + name, llvmResTy,
-                                   adaptor.getOperands());
+
+  if (hasResult) {
+    replaceOpWithCallLLVMIntrinsicOp(rewriter, op, "llvm." + name, llvmResTy,
+                                     adaptor.getOperands());
+  } else {
+    // For void-returning intrinsics, create the call but erase the original op
+    // instead of replacing it (since there are no results to replace).
+    createCallLLVMIntrinsicOp(rewriter, op->getLoc(), "llvm." + name, llvmResTy,
+                              adaptor.getOperands());
+    rewriter.eraseOp(op);
+  }
   return mlir::success();
 }
 
@@ -395,6 +681,14 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::FPAttr fltAttr) {
   return mlir::LLVM::ConstantOp::create(
       rewriter, loc, converter->convertType(fltAttr.getType()),
       fltAttr.getValue());
+}
+
+/// BoolAttr visitor.
+mlir::Value CIRAttrToValue::visitCirAttr(cir::BoolAttr boolAttr) {
+  mlir::Location loc = parentOp->getLoc();
+  return mlir::LLVM::ConstantOp::create(
+      rewriter, loc, converter->convertType(boolAttr.getType()),
+      boolAttr.getValue());
 }
 
 /// ConstComplexAttr visitor.
@@ -459,15 +753,21 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::ConstArrayAttr attr) {
   // Iteratively lower each constant element of the array.
   if (auto arrayAttr = mlir::dyn_cast<mlir::ArrayAttr>(attr.getElts())) {
     for (auto [idx, elt] : llvm::enumerate(arrayAttr)) {
-      mlir::DataLayout dataLayout(parentOp->getParentOfType<mlir::ModuleOp>());
       mlir::Value init = visit(elt);
+      // Bool values need to be converted to their memory representation (i8).
+      if (mlir::isa<cir::BoolAttr>(elt)) {
+        mlir::DataLayout dataLayout(
+            parentOp->getParentOfType<mlir::ModuleOp>());
+        init = emitToMemory(rewriter, dataLayout,
+                            mlir::cast<cir::BoolAttr>(elt).getType(), init);
+      }
       result =
           mlir::LLVM::InsertValueOp::create(rewriter, loc, result, init, idx);
     }
   } else if (auto strAttr = mlir::dyn_cast<mlir::StringAttr>(attr.getElts())) {
     // TODO(cir): this diverges from traditional lowering. Normally the string
     // would be a global constant that is memcopied.
-    auto arrayTy = mlir::dyn_cast<cir::ArrayType>(strAttr.getType());
+    auto arrayTy = mlir::dyn_cast<cir::ArrayType>(attr.getType());
     assert(arrayTy && "String attribute must have an array type");
     mlir::Type eltTy = arrayTy.getElementType();
     for (auto [idx, elt] : llvm::enumerate(strAttr)) {
@@ -492,6 +792,12 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::ConstRecordAttr constRecord) {
   // Iteratively lower each constant element of the record.
   for (auto [idx, elt] : llvm::enumerate(constRecord.getMembers())) {
     mlir::Value init = visit(elt);
+    // Bool values need to be converted to their memory representation (i8).
+    if (mlir::isa<cir::BoolAttr>(elt)) {
+      mlir::DataLayout dataLayout(parentOp->getParentOfType<mlir::ModuleOp>());
+      init = emitToMemory(rewriter, dataLayout,
+                          mlir::cast<cir::BoolAttr>(elt).getType(), init);
+    }
     result =
         mlir::LLVM::InsertValueOp::create(rewriter, loc, result, init, idx);
   }
@@ -531,33 +837,40 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::GlobalViewAttr globalAttr) {
   auto moduleOp = parentOp->getParentOfType<mlir::ModuleOp>();
   mlir::DataLayout dataLayout(moduleOp);
   mlir::Type sourceType;
-  assert(!cir::MissingFeatures::addressSpace());
+  unsigned sourceAddrSpace = 0;
   llvm::StringRef symName;
   mlir::Operation *sourceSymbol =
       mlir::SymbolTable::lookupSymbolIn(moduleOp, globalAttr.getSymbol());
   if (auto llvmSymbol = dyn_cast<mlir::LLVM::GlobalOp>(sourceSymbol)) {
     sourceType = llvmSymbol.getType();
     symName = llvmSymbol.getSymName();
+    sourceAddrSpace = llvmSymbol.getAddrSpace();
   } else if (auto cirSymbol = dyn_cast<cir::GlobalOp>(sourceSymbol)) {
     sourceType =
         convertTypeForMemory(*converter, dataLayout, cirSymbol.getSymType());
     symName = cirSymbol.getSymName();
+    sourceAddrSpace =
+        getGlobalOpTargetAddrSpace(rewriter, converter, cirSymbol);
   } else if (auto llvmFun = dyn_cast<mlir::LLVM::LLVMFuncOp>(sourceSymbol)) {
     sourceType = llvmFun.getFunctionType();
     symName = llvmFun.getSymName();
+    sourceAddrSpace = 0;
   } else if (auto fun = dyn_cast<cir::FuncOp>(sourceSymbol)) {
     sourceType = converter->convertType(fun.getFunctionType());
     symName = fun.getSymName();
+    sourceAddrSpace = 0;
   } else if (auto alias = dyn_cast<mlir::LLVM::AliasOp>(sourceSymbol)) {
     sourceType = alias.getType();
     symName = alias.getSymName();
+    sourceAddrSpace = 0;
   } else {
     llvm_unreachable("Unexpected GlobalOp type");
   }
 
   mlir::Location loc = parentOp->getLoc();
   mlir::Value addrOp = mlir::LLVM::AddressOfOp::create(
-      rewriter, loc, mlir::LLVM::LLVMPointerType::get(rewriter.getContext()),
+      rewriter, loc,
+      mlir::LLVM::LLVMPointerType::get(rewriter.getContext(), sourceAddrSpace),
       symName);
 
   if (globalAttr.getIndices()) {
@@ -589,13 +902,21 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::GlobalViewAttr globalAttr) {
   }
 
   if (auto ptrTy = mlir::dyn_cast<cir::PointerType>(globalAttr.getType())) {
+    auto llvmDstTy = converter->convertType<mlir::LLVM::LLVMPointerType>(ptrTy);
+    unsigned dstAddrSpace = llvmDstTy.getAddressSpace();
+
+    // Check if address spaces differ - need addrspacecast
+    if (sourceAddrSpace != dstAddrSpace) {
+      return mlir::LLVM::AddrSpaceCastOp::create(rewriter, parentOp->getLoc(),
+                                                 llvmDstTy, addrOp);
+    }
+
     mlir::Type llvmEltTy =
         convertTypeForMemory(*converter, dataLayout, ptrTy.getPointee());
 
     if (llvmEltTy == sourceType)
       return addrOp;
 
-    mlir::Type llvmDstTy = converter->convertType(globalAttr.getType());
     return mlir::LLVM::BitcastOp::create(rewriter, parentOp->getLoc(),
                                          llvmDstTy, addrOp);
   }
@@ -625,6 +946,13 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::UndefAttr undefAttr) {
       rewriter, loc, converter->convertType(undefAttr.getType()));
 }
 
+/// PoisonAttr visitor.
+mlir::Value CIRAttrToValue::visitCirAttr(cir::PoisonAttr poisonAttr) {
+  mlir::Location loc = parentOp->getLoc();
+  return mlir::LLVM::PoisonOp::create(
+      rewriter, loc, converter->convertType(poisonAttr.getType()));
+}
+
 // VTableAttr visitor.
 mlir::Value CIRAttrToValue::visitCirAttr(cir::VTableAttr vtableArr) {
   mlir::Type llvmTy = converter->convertType(vtableArr.getType());
@@ -645,6 +973,57 @@ mlir::Value CIRAttrToValue::visitCirAttr(cir::ZeroAttr attr) {
   mlir::Location loc = parentOp->getLoc();
   return mlir::LLVM::ZeroOp::create(rewriter, loc,
                                     converter->convertType(attr.getType()));
+}
+
+// Helper to create an LLVM BlockAddressOp from a BlockAddrInfoAttr.
+// This should only be called when the referenced function already exists
+// as llvm.func with matching llvm.blocktag ops (e.g., from
+// fixupBlockAddressGlobals, which runs after all conversions).
+static mlir::Value createBlockAddressValue(cir::BlockAddrInfoAttr blockAddrInfo,
+                                           mlir::Operation *parentOp,
+                                           mlir::OpBuilder &builder) {
+  mlir::FlatSymbolRefAttr funcRef = blockAddrInfo.getFunc();
+  llvm::StringRef labelName = blockAddrInfo.getLabel().getValue();
+
+  // Use hash-based tag ID for consistency across all block address lowering
+  // paths (LabelOp, BlockAddressOp, and global initializer block addresses).
+  uint32_t tagId = llvm::hash_value(labelName) & 0xFFFFFF;
+
+  mlir::LLVM::BlockTagAttr tagAttr =
+      mlir::LLVM::BlockTagAttr::get(builder.getContext(), tagId);
+  mlir::LLVM::BlockAddressAttr llvmBlockAddrAttr =
+      mlir::LLVM::BlockAddressAttr::get(builder.getContext(), funcRef, tagAttr);
+  mlir::Type llvmPtrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  return mlir::LLVM::BlockAddressOp::create(builder, parentOp->getLoc(),
+                                            llvmPtrTy, llvmBlockAddrAttr);
+}
+
+mlir::Value CIRAttrToValue::visitCirAttr(cir::BlockAddrAttr attr) {
+  return createBlockAddressValue(attr.getInfo(), parentOp, rewriter);
+}
+
+mlir::Value CIRAttrToValue::visitCirAttr(cir::BlockAddrDiffAttr attr) {
+  mlir::Location loc = parentOp->getLoc();
+
+  mlir::Value lhs = createBlockAddressValue(attr.getLhs(), parentOp, rewriter);
+  mlir::Value rhs = createBlockAddressValue(attr.getRhs(), parentOp, rewriter);
+
+  // Convert pointers to integers (ptrtoint)
+  mlir::Type intPtrTy = rewriter.getI64Type();
+  mlir::Value lhsInt =
+      mlir::LLVM::PtrToIntOp::create(rewriter, loc, intPtrTy, lhs);
+  mlir::Value rhsInt =
+      mlir::LLVM::PtrToIntOp::create(rewriter, loc, intPtrTy, rhs);
+
+  // Compute difference
+  mlir::Value diff = mlir::LLVM::SubOp::create(rewriter, loc, lhsInt, rhsInt);
+
+  // Truncate to the result type if needed
+  mlir::Type resultType = converter->convertType(attr.getType());
+  if (resultType != intPtrTy)
+    diff = mlir::LLVM::TruncOp::create(rewriter, loc, resultType, diff);
+
+  return diff;
 }
 
 // This class handles rewriting initializer attributes for types that do not
@@ -679,6 +1058,165 @@ private:
   mlir::ConversionPatternRewriter &rewriter;
 };
 
+static constexpr StringRef llvmMetadataSectionName = "llvm.metadata";
+
+// Create a string global for annotation related string.
+static mlir::LLVM::GlobalOp
+getAnnotationStringGlobal(mlir::StringAttr strAttr, mlir::ModuleOp &module,
+                          llvm::StringMap<mlir::LLVM::GlobalOp> &globalsMap,
+                          mlir::OpBuilder &globalVarBuilder,
+                          mlir::Location &loc, bool isArg = false) {
+  llvm::StringRef str = strAttr.getValue();
+  if (!globalsMap.contains(str)) {
+    auto llvmStrTy = mlir::LLVM::LLVMArrayType::get(
+        mlir::IntegerType::get(module.getContext(), 8), str.size() + 1);
+    auto strGlobalOp = mlir::LLVM::GlobalOp::create(
+        globalVarBuilder, loc, llvmStrTy,
+        /*isConstant=*/true, mlir::LLVM::Linkage::Private,
+        ".str" +
+            (globalsMap.empty() ? ""
+                                : "." + std::to_string(globalsMap.size())) +
+            ".annotation" + (isArg ? ".arg" : ""),
+        mlir::StringAttr::get(module.getContext(), std::string(str) + '\0'),
+        /*alignment=*/isArg ? 1 : 0);
+    if (!isArg)
+      strGlobalOp.setSection(llvmMetadataSectionName);
+    strGlobalOp.setUnnamedAddr(mlir::LLVM::UnnamedAddr::Global);
+    strGlobalOp.setDsoLocal(true);
+    globalsMap[str] = strGlobalOp;
+  }
+  return globalsMap[str];
+}
+
+static mlir::LLVM::GlobalOp getOrCreateAnnotationArgsVar(
+    mlir::Location &loc, mlir::ModuleOp &module,
+    mlir::OpBuilder &globalVarBuilder,
+    llvm::StringMap<mlir::LLVM::GlobalOp> &argStringGlobalsMap,
+    llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> &argsVarMap,
+    mlir::ArrayAttr argsAttr) {
+  if (argsVarMap.contains(argsAttr))
+    return argsVarMap[argsAttr];
+
+  mlir::LLVM::LLVMPointerType annoPtrTy =
+      mlir::LLVM::LLVMPointerType::get(globalVarBuilder.getContext());
+  llvm::SmallVector<mlir::Type> argStructFldTypes;
+  for (mlir::Attribute arg : argsAttr) {
+    if (mlir::isa<mlir::StringAttr>(arg)) {
+      getAnnotationStringGlobal(mlir::cast<mlir::StringAttr>(arg), module,
+                                argStringGlobalsMap, globalVarBuilder, loc,
+                                true);
+      argStructFldTypes.push_back(annoPtrTy);
+    } else if (auto intArgAttr = mlir::dyn_cast<mlir::IntegerAttr>(arg)) {
+      argStructFldTypes.push_back(intArgAttr.getType());
+    } else {
+      llvm_unreachable("Unsupported annotation arg type");
+    }
+  }
+
+  mlir::LLVM::LLVMStructType argsStructTy =
+      mlir::LLVM::LLVMStructType::getLiteral(globalVarBuilder.getContext(),
+                                             argStructFldTypes);
+  auto argsGlobalOp = mlir::LLVM::GlobalOp::create(
+      globalVarBuilder, loc, argsStructTy, true, mlir::LLVM::Linkage::Private,
+      ".args" +
+          (argsVarMap.empty() ? "" : "." + std::to_string(argsVarMap.size())) +
+          ".annotation",
+      mlir::Attribute());
+  argsGlobalOp.setSection(llvmMetadataSectionName);
+  argsGlobalOp.setUnnamedAddr(mlir::LLVM::UnnamedAddr::Global);
+  argsGlobalOp.setDsoLocal(true);
+
+  // Create the initializer for this args global
+  argsGlobalOp.getRegion().push_back(new mlir::Block());
+  mlir::OpBuilder argsInitBuilder(module.getContext());
+  argsInitBuilder.setInsertionPointToEnd(argsGlobalOp.getInitializerBlock());
+
+  mlir::Value argsStructInit =
+      mlir::LLVM::UndefOp::create(argsInitBuilder, loc, argsStructTy);
+  int idx = 0;
+  for (mlir::Attribute arg : argsAttr) {
+    if (auto strArgAttr = mlir::dyn_cast<mlir::StringAttr>(arg)) {
+      mlir::LLVM::GlobalOp argStrVar = getAnnotationStringGlobal(
+          strArgAttr, module, argStringGlobalsMap, globalVarBuilder, loc, true);
+      auto argStrVarAddr = mlir::LLVM::AddressOfOp::create(
+          argsInitBuilder, loc, annoPtrTy, argStrVar.getSymName());
+      argsStructInit = mlir::LLVM::InsertValueOp::create(
+          argsInitBuilder, loc, argsStructInit, argStrVarAddr, idx++);
+    } else if (auto intArgAttr = mlir::dyn_cast<mlir::IntegerAttr>(arg)) {
+      auto intArgFld = mlir::LLVM::ConstantOp::create(
+          argsInitBuilder, loc, intArgAttr.getType(), intArgAttr.getValue());
+      argsStructInit = mlir::LLVM::InsertValueOp::create(
+          argsInitBuilder, loc, argsStructInit, intArgFld, idx++);
+    } else {
+      llvm_unreachable("Unsupported annotation arg type");
+    }
+  }
+  mlir::LLVM::ReturnOp::create(argsInitBuilder, loc, argsStructInit);
+  argsVarMap[argsAttr] = argsGlobalOp;
+  return argsGlobalOp;
+}
+
+/// Lower an annotation value to a series of LLVM globals, `outVals` contains
+/// all values which are either used to build other globals or for intrinsic
+/// call arguments.
+static void lowerAnnotationValue(
+    mlir::Location &localLoc, mlir::Location annotLoc,
+    cir::AnnotationAttr annotation, mlir::ModuleOp &module,
+    mlir::OpBuilder &varInitBuilder, mlir::OpBuilder &globalVarBuilder,
+    llvm::StringMap<mlir::LLVM::GlobalOp> &stringGlobalsMap,
+    llvm::StringMap<mlir::LLVM::GlobalOp> &argStringGlobalsMap,
+    llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> &argsVarMap,
+    SmallVectorImpl<mlir::Value> &outVals) {
+  mlir::LLVM::LLVMPointerType annoPtrTy =
+      mlir::LLVM::LLVMPointerType::get(globalVarBuilder.getContext());
+
+  // The second field is ptr to the annotation name
+  mlir::StringAttr annotationName = annotation.getName();
+  auto annotationNameFld = mlir::LLVM::AddressOfOp::create(
+      varInitBuilder, localLoc, annoPtrTy,
+      getAnnotationStringGlobal(annotationName, module, stringGlobalsMap,
+                                globalVarBuilder, localLoc)
+          .getSymName());
+  outVals.push_back(annotationNameFld->getResult(0));
+
+  // The third field is ptr to the translation unit name,
+  // and the fourth field is the line number
+  if (mlir::isa<mlir::FusedLoc>(annotLoc)) {
+    auto fusedLoc = mlir::cast<mlir::FusedLoc>(annotLoc);
+    annotLoc = fusedLoc.getLocations()[0];
+  }
+  auto annotFileLoc = mlir::cast<mlir::FileLineColLoc>(annotLoc);
+  assert(annotFileLoc && "annotation value has to be FileLineColLoc");
+  auto fileName = mlir::StringAttr::get(
+      module.getContext(), std::string(annotFileLoc.getFilename().getValue()));
+  auto fileNameFld = mlir::LLVM::AddressOfOp::create(
+      varInitBuilder, localLoc, annoPtrTy,
+      getAnnotationStringGlobal(fileName, module, stringGlobalsMap,
+                                globalVarBuilder, localLoc)
+          .getSymName());
+  outVals.push_back(fileNameFld->getResult(0));
+
+  unsigned int lineNo = annotFileLoc.getLine();
+  auto lineNoFld = mlir::LLVM::ConstantOp::create(
+      varInitBuilder, localLoc, globalVarBuilder.getI32Type(), lineNo);
+  outVals.push_back(lineNoFld->getResult(0));
+
+  // The fifth field is ptr to the annotation args var, it could be null
+  if (annotation.isNoArgs()) {
+    auto nullPtrFld =
+        mlir::LLVM::ZeroOp::create(varInitBuilder, localLoc, annoPtrTy);
+    outVals.push_back(nullPtrFld->getResult(0));
+  } else {
+    mlir::ArrayAttr argsAttr = annotation.getArgs();
+    mlir::LLVM::GlobalOp annotArgsVar =
+        getOrCreateAnnotationArgsVar(localLoc, module, globalVarBuilder,
+                                     argStringGlobalsMap, argsVarMap, argsAttr);
+    auto argsVarView = mlir::LLVM::AddressOfOp::create(
+        varInitBuilder, localLoc, annoPtrTy, annotArgsVar.getSymName());
+    outVals.push_back(argsVarView->getResult(0));
+  }
+}
+
 // This pass requires the CIR to be in a "flat" state. All blocks in each
 // function must belong to the parent region. Once scopes and control flow
 // are implemented in CIR, a pass will be run before this one to flatten
@@ -694,11 +1232,52 @@ struct ConvertCIRToLLVMPass
 
   void processCIRAttrs(mlir::ModuleOp module);
 
+  void buildGlobalAnnotationsVar();
+  void emitAllocaAnnotations();
+
+  // Annotation-related string/args maps shared between AllocaOp lowering
+  // and buildGlobalAnnotationsVar for deduplication.
+  llvm::StringMap<mlir::LLVM::GlobalOp> stringGlobalsMap;
+  llvm::StringMap<mlir::LLVM::GlobalOp> argStringGlobalsMap;
+  llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> argsVarMap;
+
+  // Saved alloca annotations to be emitted after conversion.
+  struct AllocaAnnotation {
+    mlir::LLVM::AllocaOp allocaOp;
+    mlir::ArrayAttr annotations;
+    mlir::Location loc;
+  };
+  llvm::SmallVector<AllocaAnnotation> allocaAnnotations;
+
+  // Fix up globals whose initializers reference block addresses.
+  // Called after applyPartialConversion when all functions are llvm.func.
+  void fixupBlockAddressGlobals();
+
   StringRef getDescription() const override {
     return "Convert the prepared CIR dialect module to LLVM dialect";
   }
 
   StringRef getArgument() const override { return "cir-flat-to-llvm"; }
+};
+
+// Custom AllocaOp lowering pattern that saves annotation info to the pass
+// for post-processing with shared annotation string/args maps.
+class CIRToLLVMAllocaOpWithAnnotationsLowering
+    : public mlir::OpConversionPattern<cir::AllocaOp> {
+  mlir::DataLayout const &dataLayout;
+  ConvertCIRToLLVMPass &pass;
+
+public:
+  CIRToLLVMAllocaOpWithAnnotationsLowering(
+      mlir::TypeConverter const &typeConverter,
+      mlir::DataLayout const &dataLayout, ConvertCIRToLLVMPass &pass,
+      mlir::MLIRContext *context)
+      : OpConversionPattern<cir::AllocaOp>(typeConverter, context),
+        dataLayout(dataLayout), pass(pass) {}
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::AllocaOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override;
 };
 
 mlir::LogicalResult CIRToLLVMACosOpLowering::matchAndRewrite(
@@ -727,6 +1306,32 @@ mlir::LogicalResult CIRToLLVMIsFPClassOpLowering::matchAndRewrite(
 
   rewriter.replaceOpWithNewOp<mlir::LLVM::IsFPClass>(
       op, retTy, src, static_cast<uint32_t>(flags));
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMSignBitOpLowering::matchAndRewrite(
+    cir::SignBitOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::DataLayout layout(op->getParentOfType<mlir::ModuleOp>());
+  int width = layout.getTypeSizeInBits(op.getInput().getType());
+  if (auto longDoubleType =
+          mlir::dyn_cast<cir::LongDoubleType>(op.getInput().getType())) {
+    if (mlir::isa<cir::FP80Type>(longDoubleType.getUnderlying())) {
+      // If the underlying type of LongDouble is FP80Type,
+      // DataLayout::getTypeSizeInBits returns 128.
+      // See https://github.com/llvm/clangir/issues/1057.
+      // Set the width to 80 manually.
+      width = 80;
+    }
+  }
+  auto intTy = mlir::IntegerType::get(rewriter.getContext(), width);
+  auto bitcast = mlir::LLVM::BitcastOp::create(rewriter, op->getLoc(), intTy,
+                                               adaptor.getInput());
+  auto zero = mlir::LLVM::ConstantOp::create(rewriter, op->getLoc(), intTy, 0);
+  auto cmpResult = mlir::LLVM::ICmpOp::create(rewriter, op.getLoc(),
+                                              mlir::LLVM::ICmpPredicate::slt,
+                                              bitcast.getResult(), zero);
+  rewriter.replaceOp(op, cmpResult);
   return mlir::success();
 }
 
@@ -811,7 +1416,7 @@ mlir::LogicalResult CIRToLLVMAtomicCmpXchgOpLowering::matchAndRewrite(
       rewriter, op.getLoc(), adaptor.getPtr(), expected, desired,
       getLLVMMemOrder(adaptor.getSuccOrder()),
       getLLVMMemOrder(adaptor.getFailOrder()));
-  assert(!cir::MissingFeatures::atomicScope());
+  cmpxchg.setSyncscope(getLLVMSyncScope(adaptor.getSyncScope()));
   cmpxchg.setAlignment(adaptor.getAlignment());
   cmpxchg.setWeak(adaptor.getWeak());
   cmpxchg.setVolatile_(adaptor.getIsVolatile());
@@ -1168,6 +1773,80 @@ mlir::Type CIRToLLVMCastOpLowering::convertTy(mlir::Type ty) const {
   return getTypeConverter()->convertType(ty);
 }
 
+// Lower a bool-to-integer cast for either scalar or vector types.
+// Mirrors LLVM IR semantics:
+//   - Same width: bitcast
+//   - Different width: zero-extend
+mlir::LogicalResult CIRToLLVMCastOpLowering::lowerBoolToIntCast(
+    cir::CastOp castOp, mlir::Value srcValue, mlir::Type dstType,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type srcType = srcValue.getType();
+  mlir::Type dstElemTy = dstType;
+
+  // If it's a vector, get the element type to check signedness
+  if (auto vt = mlir::dyn_cast<mlir::VectorType>(dstType))
+    dstElemTy = vt.getElementType();
+
+  bool isSigned =
+      mlir::isa<cir::VectorType>(castOp.getType())
+          ? mlir::cast<cir::IntType>(elementTypeIfVector(castOp.getType()))
+                .isSigned()
+          : false;
+
+  // Scalar case: i1 -> iN
+  if (auto srcIntTy = mlir::dyn_cast<mlir::IntegerType>(srcType)) {
+    auto dstIntTy = mlir::cast<mlir::IntegerType>(dstType);
+    if (srcIntTy.getWidth() == dstIntTy.getWidth()) {
+      rewriter.replaceOpWithNewOp<mlir::LLVM::BitcastOp>(castOp, dstType,
+                                                         srcValue);
+    } else {
+      if (isSigned)
+        rewriter.replaceOpWithNewOp<mlir::LLVM::SExtOp>(castOp, dstType,
+                                                        srcValue);
+      else
+        rewriter.replaceOpWithNewOp<mlir::LLVM::ZExtOp>(castOp, dstType,
+                                                        srcValue);
+    }
+    return mlir::success();
+  }
+
+  // Vector case: vector<i1> -> vector<iN>
+  if (auto srcVecTy = mlir::dyn_cast<mlir::VectorType>(srcType)) {
+    auto dstVecTy = mlir::dyn_cast<mlir::VectorType>(dstType);
+    if (!dstVecTy)
+      return rewriter.notifyMatchFailure(castOp, "Target must be vector");
+
+    // Shape check
+    if (srcVecTy.getShape() != dstVecTy.getShape())
+      return rewriter.notifyMatchFailure(castOp, "Vector shape mismatch");
+
+    auto srcElemTy =
+        mlir::dyn_cast<mlir::IntegerType>(srcVecTy.getElementType());
+    auto dstElemTy2 =
+        mlir::dyn_cast<mlir::IntegerType>(dstVecTy.getElementType());
+
+    if (!srcElemTy || !dstElemTy2)
+      return rewriter.notifyMatchFailure(castOp, "Elements must be integers");
+
+    if (srcElemTy.getWidth() == dstElemTy2.getWidth()) {
+      rewriter.replaceOpWithNewOp<mlir::LLVM::BitcastOp>(castOp, dstType,
+                                                         srcValue);
+    } else {
+      // If destination is signed, use SExt to get -1 for true (matches OG)
+      // If destination is unsigned/bool, use ZExt to get 1 for true
+      if (isSigned)
+        rewriter.replaceOpWithNewOp<mlir::LLVM::SExtOp>(castOp, dstType,
+                                                        srcValue);
+      else
+        rewriter.replaceOpWithNewOp<mlir::LLVM::ZExtOp>(castOp, dstType,
+                                                        srcValue);
+    }
+    return mlir::success();
+  }
+
+  return rewriter.notifyMatchFailure(castOp, "Unsupported type combination");
+}
+
 mlir::LogicalResult CIRToLLVMCastOpLowering::matchAndRewrite(
     cir::CastOp castOp, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
@@ -1265,18 +1944,9 @@ mlir::LogicalResult CIRToLLVMCastOpLowering::matchAndRewrite(
     return mlir::success();
   }
   case cir::CastKind::bool_to_int: {
-    auto dstTy = mlir::cast<cir::IntType>(castOp.getType());
-    mlir::Value llvmSrcVal = adaptor.getSrc();
-    auto llvmSrcTy = mlir::cast<mlir::IntegerType>(llvmSrcVal.getType());
-    auto llvmDstTy =
-        mlir::cast<mlir::IntegerType>(getTypeConverter()->convertType(dstTy));
-    if (llvmSrcTy.getWidth() == llvmDstTy.getWidth())
-      rewriter.replaceOpWithNewOp<mlir::LLVM::BitcastOp>(castOp, llvmDstTy,
-                                                         llvmSrcVal);
-    else
-      rewriter.replaceOpWithNewOp<mlir::LLVM::ZExtOp>(castOp, llvmDstTy,
-                                                      llvmSrcVal);
-    return mlir::success();
+    mlir::Value srcValue = adaptor.getSrc();
+    mlir::Type dstType = getTypeConverter()->convertType(castOp.getType());
+    return lowerBoolToIntCast(castOp, srcValue, dstType, rewriter);
   }
   case cir::CastKind::bool_to_float: {
     mlir::Type dstTy = castOp.getType();
@@ -1374,12 +2044,14 @@ static mlir::Value convertToIndexTy(mlir::ConversionPatternRewriter &rewriter,
   auto sub = dyn_cast<mlir::LLVM::SubOp>(indexOp);
   bool rewriteSub = false;
   if (sub) {
-    if (auto lhsConst =
-            dyn_cast<mlir::LLVM::ConstantOp>(sub.getLhs().getDefiningOp())) {
-      auto lhsConstInt = mlir::dyn_cast<mlir::IntegerAttr>(lhsConst.getValue());
-      if (lhsConstInt && lhsConstInt.getValue() == 0) {
-        index = sub.getRhs();
-        rewriteSub = true;
+    if (auto *lhsDefOp = sub.getLhs().getDefiningOp()) {
+      if (auto lhsConst = dyn_cast<mlir::LLVM::ConstantOp>(lhsDefOp)) {
+        auto lhsConstInt =
+            mlir::dyn_cast<mlir::IntegerAttr>(lhsConst.getValue());
+        if (lhsConstInt && lhsConstInt.getValue() == 0) {
+          index = sub.getRhs();
+          rewriteSub = true;
+        }
       }
     }
   }
@@ -1426,7 +2098,8 @@ mlir::LogicalResult CIRToLLVMPtrStrideOpLowering::matchAndRewrite(
       dyn_cast<cir::IntType>(ptrStrideOp.getOperand(1).getType()));
 
   rewriter.replaceOpWithNewOp<mlir::LLVM::GEPOp>(
-      ptrStrideOp, resultTy, elementTy, adaptor.getBase(), index);
+      ptrStrideOp, resultTy, elementTy, adaptor.getBase(), index,
+      convertPtrStrideKindToGEPFlags(adaptor.getNoWrapFlags()));
   return mlir::success();
 }
 
@@ -1552,6 +2225,10 @@ mlir::LogicalResult CIRToLLVMCeilOpLowering::matchAndRewrite(
 mlir::LogicalResult CIRToLLVMAllocaOpLowering::matchAndRewrite(
     cir::AllocaOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
+  // This auto-generated pattern is overridden by
+  // CIRToLLVMAllocaOpWithAnnotationsLowering when annotations are present.
+  // This path should not be reached when
+  // CIRToLLVMAllocaOpWithAnnotationsLowering is registered with higher benefit.
   mlir::Value size =
       op.isDynamic()
           ? adaptor.getDynAllocSize()
@@ -1563,11 +2240,81 @@ mlir::LogicalResult CIRToLLVMAllocaOpLowering::matchAndRewrite(
   mlir::Type resultTy =
       convertTypeForMemory(*getTypeConverter(), dataLayout, op.getType());
 
-  assert(!cir::MissingFeatures::addressSpace());
-  assert(!cir::MissingFeatures::opAllocaAnnotations());
+  // Get the alloca address space from the data layout.
+  unsigned allocaAddrSpace = 0;
+  if (auto allocaAS = mlir::cast_if_present<mlir::IntegerAttr>(
+          dataLayout.getAllocaMemorySpace()))
+    allocaAddrSpace = static_cast<unsigned>(allocaAS.getValue().getZExtValue());
 
-  rewriter.replaceOpWithNewOp<mlir::LLVM::AllocaOp>(op, resultTy, elementTy,
-                                                    size, op.getAlignment());
+  // Determine the expected result address space.
+  unsigned resultAddrSpace = 0;
+  if (auto ptrTy = mlir::dyn_cast<mlir::LLVM::LLVMPointerType>(resultTy))
+    resultAddrSpace = ptrTy.getAddressSpace();
+
+  // Create the alloca in the data layout's alloca address space.
+  mlir::Type allocaPtrTy =
+      mlir::LLVM::LLVMPointerType::get(op.getContext(), allocaAddrSpace);
+  auto llvmAlloca = mlir::LLVM::AllocaOp::create(
+      rewriter, op.getLoc(), allocaPtrTy, elementTy, size, op.getAlignment());
+
+  // If the expected pointer type has a different address space, insert a cast.
+  if (allocaAddrSpace != resultAddrSpace) {
+    rewriter.replaceOpWithNewOp<mlir::LLVM::AddrSpaceCastOp>(op, resultTy,
+                                                             llvmAlloca);
+  } else {
+    rewriter.replaceOp(op, llvmAlloca.getResult());
+  }
+
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMAllocaOpWithAnnotationsLowering::matchAndRewrite(
+    cir::AllocaOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Value size =
+      op.isDynamic()
+          ? adaptor.getDynAllocSize()
+          : mlir::LLVM::ConstantOp::create(
+                rewriter, op.getLoc(),
+                typeConverter->convertType(rewriter.getIndexType()), 1);
+  mlir::Type elementTy =
+      convertTypeForMemory(*getTypeConverter(), dataLayout, op.getAllocaType());
+  mlir::Type resultTy =
+      convertTypeForMemory(*getTypeConverter(), dataLayout, op.getType());
+
+  // Get the alloca address space from the data layout.
+  unsigned allocaAddrSpace = 0;
+  if (auto allocaAS = mlir::cast_if_present<mlir::IntegerAttr>(
+          dataLayout.getAllocaMemorySpace()))
+    allocaAddrSpace = static_cast<unsigned>(allocaAS.getValue().getZExtValue());
+
+  // Determine the expected result address space.
+  unsigned resultAddrSpace = 0;
+  if (auto ptrTy = mlir::dyn_cast<mlir::LLVM::LLVMPointerType>(resultTy))
+    resultAddrSpace = ptrTy.getAddressSpace();
+
+  // If there are annotations available, save them for post-processing.
+  mlir::ArrayAttr annotations;
+  if (op.getAnnotations())
+    annotations = op.getAnnotationsAttr();
+
+  // Create the alloca in the data layout's alloca address space.
+  mlir::Type allocaPtrTy =
+      mlir::LLVM::LLVMPointerType::get(op.getContext(), allocaAddrSpace);
+  auto llvmAlloca = mlir::LLVM::AllocaOp::create(
+      rewriter, op->getLoc(), allocaPtrTy, elementTy, size, op.getAlignment());
+
+  if (annotations && !annotations.empty()) {
+    pass.allocaAnnotations.push_back({llvmAlloca, annotations, op.getLoc()});
+  }
+
+  // If the expected pointer type has a different address space, insert a cast.
+  if (allocaAddrSpace != resultAddrSpace) {
+    rewriter.replaceOpWithNewOp<mlir::LLVM::AddrSpaceCastOp>(op, resultTy,
+                                                             llvmAlloca);
+  } else {
+    rewriter.replaceOp(op, llvmAlloca.getResult());
+  }
 
   return mlir::success();
 }
@@ -1598,7 +2345,9 @@ static mlir::LogicalResult
 rewriteCallOrInvoke(mlir::Operation *op, mlir::ValueRange callOperands,
                     mlir::ConversionPatternRewriter &rewriter,
                     const mlir::TypeConverter *converter,
-                    mlir::FlatSymbolRefAttr calleeAttr) {
+                    mlir::FlatSymbolRefAttr calleeAttr,
+                    mlir::Block *continueBlock = nullptr,
+                    mlir::Block *landingPadBlock = nullptr) {
   llvm::SmallVector<mlir::Type, 8> llvmResults;
   mlir::ValueTypeRange<mlir::ResultRange> cirResults = op->getResultTypes();
   auto call = cast<cir::CIRCallOpInterface>(op);
@@ -1606,7 +2355,7 @@ rewriteCallOrInvoke(mlir::Operation *op, mlir::ValueRange callOperands,
   if (converter->convertTypes(cirResults, llvmResults).failed())
     return mlir::failure();
 
-  assert(!cir::MissingFeatures::opCallCallConv());
+  auto cconv = convertCallingConv(call.getCallingConv());
 
   mlir::LLVM::MemoryEffectsAttr memoryEffects;
   bool noUnwind = false;
@@ -1665,16 +2414,22 @@ rewriteCallOrInvoke(mlir::Operation *op, mlir::ValueRange callOperands,
         converter->convertType(calleeFuncTy));
   }
 
-  assert(!cir::MissingFeatures::opCallLandingPad());
-  assert(!cir::MissingFeatures::opCallContinueBlock());
-  assert(!cir::MissingFeatures::opCallCallConv());
-
-  auto newOp = rewriter.replaceOpWithNewOp<mlir::LLVM::CallOp>(
-      op, llvmFnTy, calleeAttr, callOperands);
-  if (memoryEffects)
-    newOp.setMemoryEffectsAttr(memoryEffects);
-  newOp.setNoUnwind(noUnwind);
-  newOp.setWillReturn(willReturn);
+  if (continueBlock) {
+    // Create an invoke instead of a call.
+    assert(landingPadBlock && "expected landing pad block for invoke");
+    auto newOp = rewriter.replaceOpWithNewOp<mlir::LLVM::InvokeOp>(
+        op, llvmFnTy, calleeAttr, callOperands, continueBlock,
+        mlir::ValueRange{}, landingPadBlock, mlir::ValueRange{});
+    newOp.setCConv(cconv);
+  } else {
+    auto newOp = rewriter.replaceOpWithNewOp<mlir::LLVM::CallOp>(
+        op, llvmFnTy, calleeAttr, callOperands);
+    newOp.setCConv(cconv);
+    if (memoryEffects)
+      newOp.setMemoryEffectsAttr(memoryEffects);
+    newOp.setNoUnwind(noUnwind);
+    newOp.setWillReturn(willReturn);
+  }
 
   return mlir::success();
 }
@@ -1713,6 +2468,14 @@ mlir::LogicalResult CIRToLLVMAddrOfReturnAddrOpLowering::matchAndRewrite(
   return mlir::success();
 }
 
+static bool isLoadOrStoreInvariant(mlir::Value addr) {
+  if (auto addrAllocaOp = addr.getDefiningOp<cir::AllocaOp>())
+    return addrAllocaOp.getConstant();
+  if (addr.getDefiningOp<cir::InvariantGroupOp>())
+    return true;
+  return false;
+}
+
 mlir::LogicalResult CIRToLLVMLoadOpLowering::matchAndRewrite(
     cir::LoadOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
@@ -1725,8 +2488,11 @@ mlir::LogicalResult CIRToLLVMLoadOpLowering::matchAndRewrite(
 
   assert(!cir::MissingFeatures::lowerModeOptLevel());
 
-  // TODO: nontemporal.
-  assert(!cir::MissingFeatures::opLoadStoreNontemporal());
+  // Under -O1 or higher optimization levels, add the invariant group metadata
+  // if the load operation loads from a constant object.
+  bool invariant = false;
+  if (lowerMod && lowerMod->getContext().getCodeGenOpts().OptimizationLevel > 0)
+    invariant = isLoadOrStoreInvariant(op.getAddr());
 
   std::optional<std::string> llvmSyncScope;
   if (std::optional<cir::SyncScopeKind> syncScope = op.getSyncScope())
@@ -1735,15 +2501,18 @@ mlir::LogicalResult CIRToLLVMLoadOpLowering::matchAndRewrite(
 
   mlir::LLVM::LoadOp newLoad = mlir::LLVM::LoadOp::create(
       rewriter, op->getLoc(), llvmTy, adaptor.getAddr(), alignment,
-      op.getIsVolatile(), /*isNonTemporal=*/false,
-      /*isInvariant=*/false, /*isInvariantGroup=*/false, ordering,
+      op.getIsVolatile(), /*isNonTemporal=*/op.getIsNontemporal(),
+      /*isInvariant=*/false, /*isInvariantGroup=*/invariant, ordering,
       llvmSyncScope.value_or(std::string()));
 
   // Convert adapted result to its original type if needed.
   mlir::Value result =
       emitFromMemory(rewriter, dataLayout, op, newLoad.getResult());
   rewriter.replaceOp(op, result);
-  assert(!cir::MissingFeatures::opLoadStoreTbaa());
+  if (auto tbaa = op.getTbaa()) {
+    if (auto tbaaArr = lowerCIRTBAAAttr(*tbaa, rewriter, lowerMod))
+      newLoad.setTbaaAttr(tbaaArr);
+  }
   return mlir::LogicalResult::success();
 }
 
@@ -1759,12 +2528,15 @@ mlir::LogicalResult CIRToLLVMStoreOpLowering::matchAndRewrite(
 
   assert(!cir::MissingFeatures::lowerModeOptLevel());
 
+  // Under -O1 or higher optimization levels, add the invariant group metadata
+  // if the store operation stores to a constant object.
+  bool invariant = false;
+  if (lowerMod && lowerMod->getContext().getCodeGenOpts().OptimizationLevel > 0)
+    invariant = isLoadOrStoreInvariant(op.getAddr());
+
   // Convert adapted value to its memory type if needed.
   mlir::Value value = emitToMemory(rewriter, dataLayout,
                                    op.getValue().getType(), adaptor.getValue());
-  // TODO: nontemporal.
-  assert(!cir::MissingFeatures::opLoadStoreNontemporal());
-  assert(!cir::MissingFeatures::opLoadStoreTbaa());
 
   std::optional<std::string> llvmSyncScope;
   if (std::optional<cir::SyncScopeKind> syncScope = op.getSyncScope())
@@ -1774,10 +2546,13 @@ mlir::LogicalResult CIRToLLVMStoreOpLowering::matchAndRewrite(
   mlir::LLVM::StoreOp storeOp = mlir::LLVM::StoreOp::create(
       rewriter, op->getLoc(), value, adaptor.getAddr(), alignment,
       op.getIsVolatile(),
-      /*isNonTemporal=*/false, /*isInvariantGroup=*/false, memorder,
-      llvmSyncScope.value_or(std::string()));
+      /*isNonTemporal=*/op.getIsNontemporal(), /*isInvariantGroup=*/invariant,
+      memorder, llvmSyncScope.value_or(std::string()));
   rewriter.replaceOp(op, storeOp);
-  assert(!cir::MissingFeatures::opLoadStoreTbaa());
+  if (auto tbaa = op.getTbaa()) {
+    if (auto tbaaArr = lowerCIRTBAAAttr(*tbaa, rewriter, lowerMod))
+      storeOp.setTbaaAttr(tbaaArr);
+  }
   return mlir::LogicalResult::success();
 }
 
@@ -1814,13 +2589,17 @@ mlir::LogicalResult CIRToLLVMConstantOpLowering::matchAndRewrite(
   } else if (mlir::isa<cir::IntType>(op.getType())) {
     // Lower GlobalViewAttr to llvm.mlir.addressof + llvm.mlir.ptrtoint
     if (auto ga = mlir::dyn_cast<cir::GlobalViewAttr>(op.getValue())) {
-      // We can have a global view with an integer type in the case of method
-      // pointers, but the lowering of those doesn't go through this path.
-      // They are handled in the visitCirAttr. This is left as an error until
-      // we have a test case that reaches it.
-      assert(!cir::MissingFeatures::globalViewIntLowering());
-      op.emitError() << "global view with integer type";
-      return mlir::failure();
+      auto newOp =
+          lowerCirAttrAsValue(op, ga, rewriter, getTypeConverter(), lowerMod);
+      rewriter.replaceOp(op, newOp);
+      return mlir::success();
+    }
+    // Lower BlockAddrDiffAttr to ptrtoint(lhs) - ptrtoint(rhs)
+    if (auto bad = mlir::dyn_cast<cir::BlockAddrDiffAttr>(op.getValue())) {
+      auto newOp =
+          lowerCirAttrAsValue(op, bad, rewriter, getTypeConverter(), lowerMod);
+      rewriter.replaceOp(op, newOp);
+      return mlir::success();
     }
 
     attr = rewriter.getIntegerAttr(
@@ -1843,6 +2622,13 @@ mlir::LogicalResult CIRToLLVMConstantOpLowering::matchAndRewrite(
     if (auto gv = mlir::dyn_cast<cir::GlobalViewAttr>(op.getValue())) {
       auto newOp =
           lowerCirAttrAsValue(op, gv, rewriter, getTypeConverter(), lowerMod);
+      rewriter.replaceOp(op, newOp);
+      return mlir::success();
+    }
+    // Lower BlockAddrAttr to llvm.blockaddress
+    if (auto ba = mlir::dyn_cast<cir::BlockAddrAttr>(op.getValue())) {
+      auto newOp =
+          lowerCirAttrAsValue(op, ba, rewriter, getTypeConverter(), lowerMod);
       rewriter.replaceOp(op, newOp);
       return mlir::success();
     }
@@ -1918,6 +2704,13 @@ mlir::LogicalResult CIRToLLVMConstantOpLowering::matchAndRewrite(
     }
 
     attr = rewriter.getArrayAttr(components);
+  } else if (mlir::isa<cir::OpaqueType>(op.getType())) {
+    if (mlir::isa<cir::ZeroAttr>(op.getValue())) {
+      rewriter.replaceOpWithNewOp<mlir::LLVM::ZeroOp>(
+          op, typeConverter->convertType(op.getType()));
+      return mlir::success();
+    }
+    return op.emitError() << "unsupported constant type " << op.getType();
   } else {
     return op.emitError() << "unsupported constant type " << op.getType();
   }
@@ -2010,6 +2803,171 @@ mlir::LogicalResult CIRToLLVMFAbsOpLowering::matchAndRewrite(
   return mlir::success();
 }
 
+mlir::LogicalResult CIRToLLVMRoundOpLowering::matchAndRewrite(
+    cir::RoundOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::RoundOp>(op, resTy,
+                                                   adaptor.getOperands()[0]);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMRoundEvenOpLowering::matchAndRewrite(
+    cir::RoundEvenOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::RoundEvenOp>(
+      op, resTy, adaptor.getOperands()[0]);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMAbsOpLowering::matchAndRewrite(
+    cir::AbsOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::AbsOp>(
+      op, resTy, adaptor.getOperands()[0], op.getPoison());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMTruncOpLowering::matchAndRewrite(
+    cir::TruncOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::FTruncOp>(op, resTy,
+                                                    adaptor.getOperands()[0]);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMFMaximumOpLowering::matchAndRewrite(
+    cir::FMaximumOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MaximumOp>(
+      op, resTy, adaptor.getLhs(), adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMFMinimumOpLowering::matchAndRewrite(
+    cir::FMinimumOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MinimumOp>(
+      op, resTy, adaptor.getLhs(), adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMLogOpLowering::matchAndRewrite(
+    cir::LogOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::LogOp>(op, resTy, adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMLog10OpLowering::matchAndRewrite(
+    cir::Log10Op op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::Log10Op>(op, resTy, adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMLog2OpLowering::matchAndRewrite(
+    cir::Log2Op op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::Log2Op>(op, resTy, adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMNearbyintOpLowering::matchAndRewrite(
+    cir::NearbyintOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::NearbyintOp>(op, resTy,
+                                                       adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMRintOpLowering::matchAndRewrite(
+    cir::RintOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::RintOp>(op, resTy, adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMSinOpLowering::matchAndRewrite(
+    cir::SinOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::SinOp>(op, resTy, adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMTanOpLowering::matchAndRewrite(
+    cir::TanOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::TanOp>(op, resTy, adaptor.getSrc());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMCopysignOpLowering::matchAndRewrite(
+    cir::CopysignOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::CopySignOp>(
+      op, resTy, adaptor.getLhs(), adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMFMaxNumOpLowering::matchAndRewrite(
+    cir::FMaxNumOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MaxNumOp>(op, resTy, adaptor.getLhs(),
+                                                    adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMFMinNumOpLowering::matchAndRewrite(
+    cir::FMinNumOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::MinNumOp>(op, resTy, adaptor.getLhs(),
+                                                    adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMFModOpLowering::matchAndRewrite(
+    cir::FModOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::FRemOp>(op, resTy, adaptor.getLhs(),
+                                                  adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMATan2OpLowering::matchAndRewrite(
+    cir::ATan2Op op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::ATan2Op>(op, resTy, adaptor.getLhs(),
+                                                   adaptor.getRhs());
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMPowOpLowering::matchAndRewrite(
+    cir::PowOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Type resTy = typeConverter->convertType(op.getType());
+  rewriter.replaceOpWithNewOp<mlir::LLVM::PowOp>(op, resTy, adaptor.getLhs(),
+                                                 adaptor.getRhs());
+  return mlir::success();
+}
+
 /// Convert the `cir.func` attributes to `llvm.func` attributes.
 /// Only retain those attributes that are not constructed by
 /// `LLVMFuncOp::build`. If `filterArgAttrs` is set, also filter out
@@ -2017,19 +2975,55 @@ mlir::LogicalResult CIRToLLVMFAbsOpLowering::matchAndRewrite(
 void CIRToLLVMFuncOpLowering::lowerFuncAttributes(
     cir::FuncOp func, bool filterArgAndResAttrs,
     SmallVectorImpl<mlir::NamedAttribute> &result) const {
-  assert(!cir::MissingFeatures::opFuncCallingConv());
   for (mlir::NamedAttribute attr : func->getAttrs()) {
-    assert(!cir::MissingFeatures::opFuncCallingConv());
     if (attr.getName() == mlir::SymbolTable::getSymbolAttrName() ||
         attr.getName() == func.getFunctionTypeAttrName() ||
         attr.getName() == getLinkageAttrNameString() ||
-        attr.getName() == func.getGlobalVisibilityAttrName() ||
         attr.getName() == func.getDsoLocalAttrName() ||
         attr.getName() == func.getInlineKindAttrName() ||
+        attr.getName() == func.getCallingConvAttrName() ||
         (filterArgAndResAttrs &&
          (attr.getName() == func.getArgAttrsAttrName() ||
           attr.getName() == func.getResAttrsAttrName())))
       continue;
+
+    // `CIRDialectLLVMIRTranslationInterface` requires "cir." prefix for
+    // dialect specific attributes, rename extra_attrs to cir.extra_attrs.
+    if (attr.getName() == func.getExtraAttrsAttrName()) {
+      std::string cirName = "cir." + func.getExtraAttrsAttrName().str();
+      attr = mlir::NamedAttribute(mlir::StringAttr::get(getContext(), cirName),
+                                  attr.getValue());
+    }
+
+    // Lower OpenCL kernel metadata types from CIR to LLVM dialect types.
+    if (attr.getName() == "cir." + func.getExtraAttrsAttrName().str()) {
+      auto oldExtraAttrs =
+          mlir::cast<cir::ExtraFuncAttributesAttr>(attr.getValue());
+      const auto attrKey = cir::OpenCLKernelMetadataAttr::getMnemonic();
+      if (oldExtraAttrs.getElements().contains(attrKey)) {
+        mlir::NamedAttrList newExtraAttrs;
+        for (auto entry : oldExtraAttrs.getElements()) {
+          if (entry.getName() == attrKey) {
+            auto clKernelMetadata =
+                mlir::cast<cir::OpenCLKernelMetadataAttr>(entry.getValue());
+            if (auto vecTypeHint = clKernelMetadata.getVecTypeHint()) {
+              auto newType = typeConverter->convertType(vecTypeHint.getValue());
+              auto newTypeHint = mlir::TypeAttr::get(newType);
+              auto newCLKMAttr = cir::OpenCLKernelMetadataAttr::get(
+                  getContext(), clKernelMetadata.getWorkGroupSizeHint(),
+                  clKernelMetadata.getReqdWorkGroupSize(), newTypeHint,
+                  clKernelMetadata.getVecTypeHintSignedness(),
+                  clKernelMetadata.getIntelReqdSubGroupSize());
+              entry = mlir::NamedAttribute(entry.getName(), newCLKMAttr);
+            }
+          }
+          newExtraAttrs.push_back(entry);
+        }
+        attr = mlir::NamedAttribute(
+            attr.getName(), cir::ExtraFuncAttributesAttr::get(
+                                newExtraAttrs.getDictionary(getContext())));
+      }
+    }
 
     assert(!cir::MissingFeatures::opFuncExtraAttrs());
     result.push_back(attr);
@@ -2099,8 +3093,7 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
          "expected single location or unknown location here");
 
   mlir::LLVM::Linkage linkage = convertLinkage(op.getLinkage());
-  assert(!cir::MissingFeatures::opFuncCallingConv());
-  mlir::LLVM::CConv cconv = mlir::LLVM::CConv::C;
+  mlir::LLVM::CConv cconv = convertCallingConv(op.getCallingConv());
   SmallVector<mlir::NamedAttribute, 4> attributes;
   lowerFuncAttributes(op, /*filterArgAndResAttrs=*/false, attributes);
 
@@ -2116,11 +3109,83 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
     fn.setAlwaysInline(*inlineKind == cir::InlineKind::AlwaysInline);
   }
 
+  if (op.getOptNone())
+    fn.setOptimizeNone(true);
+
+  // Handle extra function attributes
+  mlir::SmallVector<mlir::Attribute> passThroughAttrs;
+  if (auto extraAttrs = op.getExtraAttrs()) {
+    auto elements = extraAttrs->getElements();
+    if (elements.get("nothrow"))
+      fn.setNoUnwind(true);
+    if (elements.get("convergent"))
+      fn.setConvergent(true);
+    if (auto uwTableAttr =
+            mlir::dyn_cast_or_null<cir::UWTableAttr>(elements.get("uwtable"))) {
+      mlir::LLVM::uwtable::UWTableKind llvmKind;
+      switch (uwTableAttr.getValue()) {
+      case cir::UWTableKind::None:
+        llvmKind = mlir::LLVM::uwtable::UWTableKind::None;
+        break;
+      case cir::UWTableKind::Sync:
+        llvmKind = mlir::LLVM::uwtable::UWTableKind::Sync;
+        break;
+      case cir::UWTableKind::Async:
+        llvmKind = mlir::LLVM::uwtable::UWTableKind::Async;
+        break;
+      }
+      fn.setUwtableKindAttr(
+          mlir::LLVM::UWTableKindAttr::get(fn.getContext(), llvmKind));
+    }
+    if (elements.get("hot"))
+      passThroughAttrs.push_back(mlir::StringAttr::get(getContext(), "hot"));
+    if (auto dontCallAttr = mlir::dyn_cast_or_null<cir::DontCallAttr>(
+            elements.get("dontcall"))) {
+      const char *attrName =
+          dontCallAttr.getIsError() ? "dontcall-error" : "dontcall-warn";
+      passThroughAttrs.push_back(mlir::ArrayAttr::get(
+          getContext(),
+          {mlir::StringAttr::get(getContext(), attrName),
+           mlir::StringAttr::get(getContext(),
+                                 dontCallAttr.getMessage().getValue())}));
+    }
+  }
+
+  // Handle cold attribute
+  if (op.getCold())
+    passThroughAttrs.push_back(mlir::StringAttr::get(getContext(), "cold"));
+
+  // Apply collected passthrough attributes.
+  if (!passThroughAttrs.empty()) {
+    auto existingAttrs = fn.getPassthrough();
+    if (existingAttrs)
+      passThroughAttrs.append(existingAttrs->begin(), existingAttrs->end());
+    fn.setPassthroughAttr(mlir::ArrayAttr::get(getContext(), passThroughAttrs));
+  }
+
   if (std::optional<llvm::StringRef> personality = op.getPersonality())
     fn.setPersonality(*personality);
 
   fn.setVisibility_(
       lowerCIRVisibilityToLLVMVisibility(op.getGlobalVisibility()));
+
+  // Propagate argument attributes (e.g. zeroext, signext) from CIR to LLVM.
+  for (unsigned i = 0, e = op.getNumArguments(); i < e; ++i) {
+    if (op.getArgAttr(i, "cir.zeroext"))
+      fn.setArgAttr(i, "llvm.zeroext", mlir::UnitAttr::get(getContext()));
+    if (op.getArgAttr(i, "cir.signext"))
+      fn.setArgAttr(i, "llvm.signext", mlir::UnitAttr::get(getContext()));
+  }
+  // Propagate result attributes (e.g. zeroext, signext) from CIR to LLVM.
+  if (op.getNumResults() > 0) {
+    mlir::DictionaryAttr resultAttrs = op.getResultAttrDict(0);
+    if (resultAttrs) {
+      if (resultAttrs.get("cir.zeroext"))
+        fn.setResultAttr(0, "llvm.zeroext", mlir::UnitAttr::get(getContext()));
+      if (resultAttrs.get("cir.signext"))
+        fn.setResultAttr(0, "llvm.signext", mlir::UnitAttr::get(getContext()));
+    }
+  }
 
   rewriter.inlineRegionBefore(op.getBody(), fn.getBody(), fn.end());
   if (failed(rewriter.convertRegionTypes(&fn.getBody(), *typeConverter,
@@ -2156,6 +3221,30 @@ mlir::LogicalResult CIRToLLVMGetGlobalOpLowering::matchAndRewrite(
   return mlir::success();
 }
 
+/// Recursively check whether a CIR attribute contains block address references.
+static bool containsBlockAddrAttr(mlir::Attribute attr) {
+  if (mlir::isa<cir::BlockAddrAttr, cir::BlockAddrDiffAttr>(attr))
+    return true;
+  if (auto constArr = mlir::dyn_cast<cir::ConstArrayAttr>(attr)) {
+    if (auto elts =
+            mlir::dyn_cast_if_present<mlir::ArrayAttr>(constArr.getElts())) {
+      for (mlir::Attribute elt : elts) {
+        if (containsBlockAddrAttr(elt))
+          return true;
+      }
+    }
+    return false;
+  }
+  if (auto constRec = mlir::dyn_cast<cir::ConstRecordAttr>(attr)) {
+    for (mlir::Attribute member : constRec.getMembers()) {
+      if (containsBlockAddrAttr(member))
+        return true;
+    }
+    return false;
+  }
+  return false;
+}
+
 /// Replace CIR global with a region initialized LLVM global and update
 /// insertion point to the end of the initializer block.
 void CIRToLLVMGlobalOpLowering::setupRegionInitializedLLVMGlobalOp(
@@ -2168,8 +3257,9 @@ void CIRToLLVMGlobalOpLowering::setupRegionInitializedLLVMGlobalOp(
   //        in CIRToLLVMGlobalOpLowering::matchAndRewrite() but that will go
   //        away when the placeholders are no longer needed.
   const bool isConst = op.getConstant();
-  assert(!cir::MissingFeatures::addressSpace());
-  const unsigned addrSpace = 0;
+  unsigned addrSpace = 0;
+  if (auto addrSpaceAttr = op.getAddrSpaceAttr())
+    addrSpace = getTargetAddrSpace(addrSpaceAttr, lowerMod);
   const bool isDsoLocal = op.getDsoLocal();
   const bool isThreadLocal = (bool)op.getTlsModelAttr();
   const uint64_t alignment = op.getAlignment().value_or(0);
@@ -2178,10 +3268,18 @@ void CIRToLLVMGlobalOpLowering::setupRegionInitializedLLVMGlobalOp(
   mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
 
   SmallVector<mlir::NamedAttribute> attributes;
+  if (op->getAttr(cir::CUDAExternallyInitializedAttr::getMnemonic())) {
+    attributes.push_back(rewriter.getNamedAttr("externally_initialized",
+                                               rewriter.getUnitAttr()));
+  }
   mlir::LLVM::GlobalOp newGlobalOp =
       rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
           op, llvmType, isConst, linkage, symbol, nullptr, alignment, addrSpace,
           isDsoLocal, isThreadLocal, comdatAttr, attributes);
+  newGlobalOp.setVisibility_(
+      lowerCIRVisibilityToLLVMVisibility(op.getGlobalVisibility()));
+  if (op.getSection())
+    newGlobalOp.setSection(*op.getSection());
   newGlobalOp.getRegion().emplaceBlock();
   rewriter.setInsertionPointToEnd(newGlobalOp.getInitializerBlock());
 }
@@ -2228,14 +3326,19 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
   // FIXME: These default values are placeholders until the the equivalent
   //        attributes are available on cir.global ops.
   const bool isConst = op.getConstant();
-  assert(!cir::MissingFeatures::addressSpace());
-  const unsigned addrSpace = 0;
+  unsigned addrSpace = 0;
+  if (auto addrSpaceAttr = op.getAddrSpaceAttr())
+    addrSpace = getTargetAddrSpace(addrSpaceAttr, lowerMod);
   const bool isDsoLocal = op.getDsoLocal();
   const bool isThreadLocal = (bool)op.getTlsModelAttr();
   const uint64_t alignment = op.getAlignment().value_or(0);
   const mlir::LLVM::Linkage linkage = convertLinkage(op.getLinkage());
   const StringRef symbol = op.getSymName();
   SmallVector<mlir::NamedAttribute> attributes;
+  if (op->getAttr(cir::CUDAExternallyInitializedAttr::getMnemonic())) {
+    attributes.push_back(rewriter.getNamedAttr("externally_initialized",
+                                               rewriter.getUnitAttr()));
+  }
 
   if (init.has_value()) {
     if (mlir::isa<cir::FPAttr, cir::IntAttr, cir::BoolAttr>(init.value())) {
@@ -2249,6 +3352,25 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
         op.emitError() << "unsupported initializer '" << init.value() << "'";
         return mlir::failure();
       }
+    } else if (containsBlockAddrAttr(init.value())) {
+      // Block address globals are deferred: create the LLVM global with no
+      // initializer now, and attach the original CIR initializer as a
+      // discardable attribute. After applyPartialConversion completes (and
+      // all functions have been converted to llvm.func with llvm.blocktag
+      // ops), fixupBlockAddressGlobals() will create the proper region
+      // initializer with llvm.blockaddress ops.
+      mlir::LLVM::Visibility visibility =
+          lowerCIRVisibilityToLLVMVisibility(op.getGlobalVisibility());
+      mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
+      auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+          op, llvmType, isConst, linkage, symbol, mlir::Attribute(), alignment,
+          addrSpace, isDsoLocal, isThreadLocal, comdatAttr, attributes);
+      newGlobalOp.setVisibility_(visibility);
+      if (op.getSection())
+        newGlobalOp.setSection(*op.getSection());
+      // Attach the original CIR initializer for deferred processing.
+      newGlobalOp->setAttr("cir.deferred_block_addr_init", init.value());
+      return mlir::success();
     } else if (mlir::isa<cir::ConstArrayAttr, cir::ConstVectorAttr,
                          cir::ConstRecordAttr, cir::ConstPtrAttr,
                          cir::ConstComplexAttr, cir::GlobalViewAttr,
@@ -2273,6 +3395,8 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
       op, llvmType, isConst, linkage, symbol, init.value_or(mlir::Attribute()),
       alignment, addrSpace, isDsoLocal, isThreadLocal, comdatAttr, attributes);
   newOp.setVisibility_(visibility);
+  if (op.getSection())
+    newOp.setSection(*op.getSection());
 
   return mlir::success();
 }
@@ -2609,6 +3733,9 @@ convertCmpKindToICmpPredicate(cir::CmpOpKind kind, bool isSigned) {
     return (isSigned ? LLVMICmp::sgt : LLVMICmp::ugt);
   case CIR::ge:
     return (isSigned ? LLVMICmp::sge : LLVMICmp::uge);
+  case CIR::fone:
+  case CIR::funo:
+    llvm_unreachable("float-only predicate for integer comparison");
   }
   llvm_unreachable("Unknown CmpOpKind");
 }
@@ -2632,6 +3759,10 @@ convertCmpKindToFCmpPredicate(cir::CmpOpKind kind) {
     return LLVMFCmp::ogt;
   case CIR::ge:
     return LLVMFCmp::oge;
+  case CIR::fone:
+    return LLVMFCmp::one;
+  case CIR::funo:
+    return LLVMFCmp::uno;
   }
   llvm_unreachable("Unknown CmpOpKind");
 }
@@ -2734,6 +3865,60 @@ mlir::LogicalResult CIRToLLVMCmpOpLowering::matchAndRewrite(
   }
 
   return cmpOp.emitError() << "unsupported type for CmpOp: " << type;
+}
+
+static std::string getCmpThreeWayLLVMIntrinsicName(bool signedCmp,
+                                                   unsigned operandWidth,
+                                                   unsigned resultWidth) {
+  // The intrinsic's name takes the form:
+  // `llvm.<scmp|ucmp>.i<resultWidth>.i<operandWidth>`
+
+  std::string result = "llvm.";
+
+  if (signedCmp)
+    result.append("scmp.");
+  else
+    result.append("ucmp.");
+
+  // Result type part.
+  result.push_back('i');
+  result.append(std::to_string(resultWidth));
+  result.push_back('.');
+
+  // Operand type part.
+  result.push_back('i');
+  result.append(std::to_string(operandWidth));
+
+  return result;
+}
+
+mlir::LogicalResult CIRToLLVMCmpThreeWayOpLowering::matchAndRewrite(
+    cir::CmpThreeWayOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  if (!op.isIntegralComparison() || !op.isStrongOrdering()) {
+    op.emitError() << "unsupported three-way comparison type";
+    return mlir::failure();
+  }
+
+  auto cmpInfo = op.getInfo();
+  assert(cmpInfo.getLt() == -1 && cmpInfo.getEq() == 0 && cmpInfo.getGt() == 1);
+
+  auto operandTy = mlir::cast<cir::IntType>(op.getLhs().getType());
+  auto resultTy = op.getType();
+  auto llvmIntrinsicName = getCmpThreeWayLLVMIntrinsicName(
+      operandTy.isSigned(), operandTy.getWidth(), resultTy.getWidth());
+
+  rewriter.setInsertionPoint(op);
+
+  auto llvmLhs = adaptor.getLhs();
+  auto llvmRhs = adaptor.getRhs();
+  auto llvmResultTy = getTypeConverter()->convertType(resultTy);
+  auto callIntrinsicOp =
+      createCallLLVMIntrinsicOp(rewriter, op.getLoc(), llvmIntrinsicName,
+                                llvmResultTy, {llvmLhs, llvmRhs});
+
+  rewriter.replaceOp(op, callIntrinsicOp);
+  return mlir::success();
 }
 
 mlir::LogicalResult CIRToLLVMBinOpOverflowOpLowering::matchAndRewrite(
@@ -2948,11 +4133,13 @@ std::unique_ptr<cir::LowerModule> prepareLowerModule(mlir::ModuleOp module) {
 static void prepareTypeConverter(mlir::LLVMTypeConverter &converter,
                                  mlir::DataLayout &dataLayout,
                                  cir::LowerModule *lowerModule) {
-  converter.addConversion([&](cir::PointerType type) -> mlir::Type {
-    unsigned addrSpace =
-        type.getAddrSpace() ? type.getAddrSpace().getValue().getUInt() : 0;
-    return mlir::LLVM::LLVMPointerType::get(type.getContext(), addrSpace);
-  });
+  converter.addConversion(
+      [&, lowerModule](cir::PointerType type) -> mlir::Type {
+        unsigned addrSpace = 0;
+        if (auto addrSpaceAttr = type.getAddrSpace())
+          addrSpace = getTargetAddrSpace(addrSpaceAttr, lowerModule);
+        return mlir::LLVM::LLVMPointerType::get(type.getContext(), addrSpace);
+      });
   converter.addConversion([&](cir::VPtrType type) -> mlir::Type {
     assert(!cir::MissingFeatures::addressSpace());
     return mlir::LLVM::LLVMPointerType::get(type.getContext());
@@ -3052,6 +4239,10 @@ static void prepareTypeConverter(mlir::LLVMTypeConverter &converter,
   });
   converter.addConversion([&](cir::VoidType type) -> mlir::Type {
     return mlir::LLVM::LLVMVoidType::get(type.getContext());
+  });
+  converter.addConversion([&, lowerModule](cir::OpaqueType type) -> mlir::Type {
+    assert(lowerModule && "LowerModule is not available");
+    return lowerModule->getTargetLoweringInfo().getOpaqueType(type);
   });
 }
 
@@ -3208,6 +4399,174 @@ mlir::LogicalResult CIRToLLVMObjSizeOpLowering::matchAndRewrite(
   return mlir::LogicalResult::success();
 }
 
+static void getOrCreateLLVMFuncOp(mlir::ConversionPatternRewriter &rewriter,
+                                  mlir::Operation *srcOp,
+                                  llvm::StringRef fnName, mlir::Type fnTy) {
+  auto llvmFnTy = mlir::dyn_cast<mlir::LLVM::LLVMFunctionType>(fnTy);
+  assert(llvmFnTy && "expected LLVM function type");
+  auto modOp = srcOp->getParentOfType<mlir::ModuleOp>();
+  assert(modOp && "expected parent module");
+  auto enclosingFnOp = srcOp->getParentOfType<mlir::LLVM::LLVMFuncOp>();
+  assert(enclosingFnOp && "expected parent LLVM function");
+  auto *sourceSymbol = mlir::SymbolTable::lookupSymbolIn(modOp, fnName);
+  if (!sourceSymbol) {
+    mlir::OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPoint(enclosingFnOp);
+    mlir::LLVM::LLVMFuncOp::create(rewriter, srcOp->getLoc(), fnName, llvmFnTy);
+  }
+}
+
+// Custom lowering for EhSetjmpOp since it has hasLLVMLowering = false.
+class CIRToLLVMEhSetjmpOpLowering
+    : public mlir::OpConversionPattern<cir::EhSetjmpOp> {
+public:
+  using mlir::OpConversionPattern<cir::EhSetjmpOp>::OpConversionPattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::EhSetjmpOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    mlir::Type returnType = typeConverter->convertType(op.getType());
+    if (op.getIsBuiltin()) {
+      mlir::LLVM::CallIntrinsicOp newOp = createCallLLVMIntrinsicOp(
+          rewriter, op.getLoc(), "llvm.eh.sjlj.setjmp", returnType,
+          adaptor.getEnv());
+      rewriter.replaceOp(op, newOp);
+      return mlir::success();
+    }
+
+    StringRef fnName = "_setjmp";
+    auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(rewriter.getContext());
+    auto fnType = mlir::LLVM::LLVMFunctionType::get(returnType, llvmPtrTy,
+                                                    /*isVarArg=*/false);
+    getOrCreateLLVMFuncOp(rewriter, op, fnName, fnType);
+    rewriter.replaceOpWithNewOp<mlir::LLVM::CallOp>(op, returnType, fnName,
+                                                    adaptor.getEnv());
+    return mlir::success();
+  }
+};
+
+// Custom lowering for EhLongjmpOp since it has hasLLVMLowering = false.
+class CIRToLLVMEhLongjmpOpLowering
+    : public mlir::OpConversionPattern<cir::EhLongjmpOp> {
+public:
+  using mlir::OpConversionPattern<cir::EhLongjmpOp>::OpConversionPattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::EhLongjmpOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    replaceOpWithCallLLVMIntrinsicOp(rewriter, op, "llvm.eh.sjlj.longjmp",
+                                     /*resultTy=*/{}, adaptor.getOperands());
+    return mlir::success();
+  }
+};
+
+// Custom lowering for LabelOp since it has hasLLVMLowering = false.
+// Converts cir.label to llvm.blocktag with a consistent tag ID.
+class CIRToLLVMLabelOpLowering
+    : public mlir::OpConversionPattern<cir::LabelOp> {
+public:
+  using mlir::OpConversionPattern<cir::LabelOp>::OpConversionPattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::LabelOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    llvm::StringRef labelName = op.getLabel();
+
+    // Use hash-based tag ID for consistency across all block address
+    // lowering paths (LabelOp, BlockAddressOp, and global initializer
+    // block addresses). This avoids ordering issues where getLabelTagId
+    // fails due to partially-converted functions.
+    uint32_t tagId = llvm::hash_value(labelName) & 0xFFFFFF;
+
+    // Create the BlockTagAttr with the computed ID
+    mlir::LLVM::BlockTagAttr tagAttr =
+        mlir::LLVM::BlockTagAttr::get(rewriter.getContext(), tagId);
+
+    // Replace cir.label with llvm.blocktag
+    rewriter.replaceOpWithNewOp<mlir::LLVM::BlockTagOp>(op, tagAttr);
+    return mlir::success();
+  }
+};
+
+// Custom lowering for TryCallOp since it has hasLLVMLowering = false.
+// Converts cir.try_call to llvm.invoke with normal and unwind destinations.
+class CIRToLLVMTryCallOpLowering
+    : public mlir::OpConversionPattern<cir::TryCallOp> {
+public:
+  using mlir::OpConversionPattern<cir::TryCallOp>::OpConversionPattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::TryCallOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    return rewriteCallOrInvoke(op.getOperation(), adaptor.getOperands(),
+                               rewriter, getTypeConverter(), op.getCalleeAttr(),
+                               op.getNormalDest(), op.getUnwindDest());
+  }
+};
+
+// Custom lowering for CatchParamOp since it has hasLLVMLowering = false.
+// Converts cir.catch_param begin to __cxa_begin_catch and
+// cir.catch_param end to __cxa_end_catch.
+class CIRToLLVMCatchParamOpLowering
+    : public mlir::OpConversionPattern<cir::CatchParamOp> {
+public:
+  using mlir::OpConversionPattern<cir::CatchParamOp>::OpConversionPattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::CatchParamOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    if (op.isBegin()) {
+      // Get or create `declare ptr @__cxa_begin_catch(ptr)`
+      StringRef fnName = "__cxa_begin_catch";
+      auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(rewriter.getContext());
+      auto fnTy = mlir::LLVM::LLVMFunctionType::get(llvmPtrTy, {llvmPtrTy},
+                                                    /*isVarArg=*/false);
+      createLLVMFuncOpIfNotExist(rewriter, op, fnName, fnTy);
+      rewriter.replaceOpWithNewOp<mlir::LLVM::CallOp>(
+          op, mlir::TypeRange{llvmPtrTy}, fnName,
+          mlir::ValueRange{adaptor.getExceptionPtr()});
+      return mlir::success();
+    } else if (op.isEnd()) {
+      StringRef fnName = "__cxa_end_catch";
+      auto fnTy = mlir::LLVM::LLVMFunctionType::get(
+          mlir::LLVM::LLVMVoidType::get(rewriter.getContext()), {},
+          /*isVarArg=*/false);
+      createLLVMFuncOpIfNotExist(rewriter, op, fnName, fnTy);
+      mlir::LLVM::CallOp::create(rewriter, op.getLoc(), mlir::TypeRange{},
+                                 fnName, mlir::ValueRange{});
+      rewriter.eraseOp(op);
+      return mlir::success();
+    }
+    llvm_unreachable("only begin/end supposed to make to lowering stage");
+    return mlir::failure();
+  }
+};
+
+class CIRToLLVMInvariantGroupOpLowering
+    : public mlir::OpConversionPattern<cir::InvariantGroupOp> {
+  cir::LowerModule *lowerMod;
+
+public:
+  CIRToLLVMInvariantGroupOpLowering(const mlir::TypeConverter &typeConverter,
+                                    mlir::MLIRContext *context,
+                                    cir::LowerModule *lowerModule)
+      : OpConversionPattern(typeConverter, context), lowerMod(lowerModule) {}
+
+  mlir::LogicalResult
+  matchAndRewrite(cir::InvariantGroupOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    if (!lowerMod ||
+        lowerMod->getContext().getCodeGenOpts().OptimizationLevel == 0) {
+      rewriter.replaceOp(op, adaptor.getPtr());
+      return mlir::success();
+    }
+
+    rewriter.replaceOpWithNewOp<mlir::LLVM::LaunderInvariantGroupOp>(
+        op, adaptor.getPtr());
+    return mlir::success();
+  }
+};
+
 void ConvertCIRToLLVMPass::processCIRAttrs(mlir::ModuleOp module) {
   // Lower the module attributes to LLVM equivalents.
   if (mlir::Attribute tripleAttr =
@@ -3238,6 +4597,25 @@ void ConvertCIRToLLVMPass::runOnOperation() {
 #undef GET_LLVM_LOWERING_PATTERNS_LIST
       >(converter, patterns.getContext(), lowerModule.get(), dl);
 
+  // Add custom patterns for operations with hasLLVMLowering = false
+  patterns.insert(std::make_unique<CIRToLLVMLabelOpLowering>(
+      converter, patterns.getContext()));
+  patterns.insert(std::make_unique<CIRToLLVMTryCallOpLowering>(
+      converter, patterns.getContext()));
+  patterns.insert(std::make_unique<CIRToLLVMCatchParamOpLowering>(
+      converter, patterns.getContext()));
+  patterns.insert(std::make_unique<CIRToLLVMEhSetjmpOpLowering>(
+      converter, patterns.getContext()));
+  patterns.insert(std::make_unique<CIRToLLVMEhLongjmpOpLowering>(
+      converter, patterns.getContext()));
+  patterns.insert(std::make_unique<CIRToLLVMInvariantGroupOpLowering>(
+      converter, patterns.getContext(), lowerModule.get()));
+
+  // Override the auto-generated AllocaOp lowering with one that captures
+  // annotation info for post-processing. Use higher benefit to take priority.
+  patterns.add<CIRToLLVMAllocaOpWithAnnotationsLowering>(converter, dl, *this,
+                                                         patterns.getContext());
+
   processCIRAttrs(module);
 
   mlir::ConversionTarget target(getContext());
@@ -3246,12 +4624,37 @@ void ConvertCIRToLLVMPass::runOnOperation() {
   target.addIllegalDialect<mlir::BuiltinDialect, cir::CIRDialect,
                            mlir::func::FuncDialect>();
 
+  // Pre-convert all cir.label ops to llvm.blocktag before partial conversion.
+  // Labels in unreachable blocks are collected by collectUnreachable but may
+  // be silently erased during applyPartialConversion since they have no
+  // results and AlwaysSpeculatable trait. Pre-converting them ensures
+  // blocktags exist for block address references in global initializers.
+  {
+    llvm::SmallVector<cir::LabelOp> labelOps;
+    module.walk([&](cir::LabelOp labelOp) { labelOps.push_back(labelOp); });
+    mlir::OpBuilder preBuilder(module.getContext());
+    for (cir::LabelOp labelOp : labelOps) {
+      llvm::StringRef labelName = labelOp.getLabel();
+      uint32_t tagId = llvm::hash_value(labelName) & 0xFFFFFF;
+      mlir::LLVM::BlockTagAttr tagAttr =
+          mlir::LLVM::BlockTagAttr::get(preBuilder.getContext(), tagId);
+      preBuilder.setInsertionPoint(labelOp);
+      mlir::LLVM::BlockTagOp::create(preBuilder, labelOp.getLoc(), tagAttr);
+      labelOp->erase();
+    }
+  }
+
   llvm::SmallVector<mlir::Operation *> ops;
   ops.push_back(module);
   collectUnreachable(module, ops);
 
   if (failed(applyPartialConversion(ops, target, std::move(patterns))))
     signalPassFailure();
+
+  // Fix up globals with deferred block address initializers. This must
+  // happen after applyPartialConversion so that all functions have been
+  // converted to llvm.func with llvm.blocktag ops.
+  fixupBlockAddressGlobals();
 
   // Emit the llvm.global_ctors array.
   buildCtorDtorList(module, cir::CIRDialect::getGlobalCtorsAttrName(),
@@ -3267,6 +4670,205 @@ void ConvertCIRToLLVMPass::runOnOperation() {
                       return std::make_pair(dtorAttr.getName(),
                                             dtorAttr.getPriority());
                     });
+
+  // Emit local variable annotation intrinsic calls.
+  emitAllocaAnnotations();
+
+  // Emit the llvm.global.annotations array.
+  buildGlobalAnnotationsVar();
+}
+
+void ConvertCIRToLLVMPass::buildGlobalAnnotationsVar() {
+  mlir::ModuleOp module = getOperation();
+  mlir::Attribute attr =
+      module->getAttr(cir::CIRDialect::getGlobalAnnotationsAttrName());
+  if (!attr)
+    return;
+  if (auto globalAnnotValues =
+          mlir::dyn_cast<cir::GlobalAnnotationValuesAttr>(attr)) {
+    auto annotationValuesArray =
+        mlir::dyn_cast<mlir::ArrayAttr>(globalAnnotValues.getAnnotations());
+    if (!annotationValuesArray || annotationValuesArray.empty())
+      return;
+    mlir::OpBuilder globalVarBuilder(module.getContext());
+    globalVarBuilder.setInsertionPointToEnd(&module.getBodyRegion().front());
+
+    // Create a global array for annotation values with element type of
+    // struct { ptr, ptr, ptr, i32, ptr }
+    mlir::LLVM::LLVMPointerType annoPtrTy =
+        mlir::LLVM::LLVMPointerType::get(globalVarBuilder.getContext());
+    llvm::SmallVector<mlir::Type> annoStructFields;
+    annoStructFields.push_back(annoPtrTy);
+    annoStructFields.push_back(annoPtrTy);
+    annoStructFields.push_back(annoPtrTy);
+    annoStructFields.push_back(globalVarBuilder.getI32Type());
+    annoStructFields.push_back(annoPtrTy);
+
+    mlir::LLVM::LLVMStructType annoStructTy =
+        mlir::LLVM::LLVMStructType::getLiteral(globalVarBuilder.getContext(),
+                                               annoStructFields);
+    mlir::LLVM::LLVMArrayType annoStructArrayTy =
+        mlir::LLVM::LLVMArrayType::get(annoStructTy,
+                                       annotationValuesArray.size());
+    mlir::Location moduleLoc = module.getLoc();
+    auto annotationGlobalOp = mlir::LLVM::GlobalOp::create(
+        globalVarBuilder, moduleLoc, annoStructArrayTy, false,
+        mlir::LLVM::Linkage::Appending, "llvm.global.annotations",
+        mlir::Attribute());
+    annotationGlobalOp.setSection(llvmMetadataSectionName);
+    annotationGlobalOp.getRegion().push_back(new mlir::Block());
+    mlir::OpBuilder varInitBuilder(module.getContext());
+    varInitBuilder.setInsertionPointToEnd(
+        annotationGlobalOp.getInitializerBlock());
+    // Globals created for annotation strings and args to be
+    // placed before the var llvm.global.annotations.
+    // This is consistent with clang code gen.
+    globalVarBuilder.setInsertionPoint(annotationGlobalOp);
+
+    mlir::Value result = mlir::LLVM::UndefOp::create(varInitBuilder, moduleLoc,
+                                                     annoStructArrayTy);
+
+    int idx = 0;
+    for (mlir::Attribute entry : annotationValuesArray) {
+      auto annotValue = cast<mlir::ArrayAttr>(entry);
+      mlir::Value valueEntry =
+          mlir::LLVM::UndefOp::create(varInitBuilder, moduleLoc, annoStructTy);
+      SmallVector<mlir::Value, 4> vals;
+
+      auto globalValueName = mlir::cast<mlir::StringAttr>(annotValue[0]);
+      mlir::Operation *globalValue =
+          mlir::SymbolTable::lookupSymbolIn(module, globalValueName);
+      // The first field is ptr to the global value
+      auto globalValueFld = mlir::LLVM::AddressOfOp::create(
+          varInitBuilder, moduleLoc, annoPtrTy, globalValueName);
+      vals.push_back(globalValueFld->getResult(0));
+
+      cir::AnnotationAttr annot =
+          mlir::cast<cir::AnnotationAttr>(annotValue[1]);
+      lowerAnnotationValue(moduleLoc, globalValue->getLoc(), annot, module,
+                           varInitBuilder, globalVarBuilder, stringGlobalsMap,
+                           argStringGlobalsMap, argsVarMap, vals);
+      for (unsigned valIdx = 0, endIdx = vals.size(); valIdx != endIdx;
+           ++valIdx) {
+        valueEntry = mlir::LLVM::InsertValueOp::create(
+            varInitBuilder, moduleLoc, valueEntry, vals[valIdx], valIdx);
+      }
+      result = mlir::LLVM::InsertValueOp::create(varInitBuilder, moduleLoc,
+                                                 result, valueEntry, idx++);
+    }
+    mlir::LLVM::ReturnOp::create(varInitBuilder, moduleLoc, result);
+  }
+}
+
+void ConvertCIRToLLVMPass::emitAllocaAnnotations() {
+  if (allocaAnnotations.empty())
+    return;
+
+  mlir::ModuleOp module = getOperation();
+  mlir::OpBuilder globalVarBuilder(module.getContext());
+  globalVarBuilder.setInsertionPointToEnd(&module.getBodyRegion().front());
+
+  auto intrinRetTy = mlir::LLVM::LLVMVoidType::get(&getContext());
+  constexpr const char *intrinNameAttr = "llvm.var.annotation.p0.p0";
+
+  for (auto &entry : allocaAnnotations) {
+    mlir::OpBuilder varInitBuilder(&getContext());
+    varInitBuilder.setInsertionPointAfter(entry.allocaOp);
+
+    mlir::Location loc = entry.loc;
+    for (mlir::Attribute annot : entry.annotations) {
+      SmallVector<mlir::Value, 4> intrinsicArgs;
+      intrinsicArgs.push_back(entry.allocaOp.getRes());
+      auto annotation = cast<cir::AnnotationAttr>(annot);
+      lowerAnnotationValue(loc, loc, annotation, module, varInitBuilder,
+                           globalVarBuilder, stringGlobalsMap,
+                           argStringGlobalsMap, argsVarMap, intrinsicArgs);
+      mlir::LLVM::CallIntrinsicOp::create(
+          varInitBuilder, loc, intrinRetTy,
+          mlir::StringAttr::get(&getContext(), intrinNameAttr), intrinsicArgs);
+    }
+  }
+}
+
+void ConvertCIRToLLVMPass::fixupBlockAddressGlobals() {
+  mlir::ModuleOp module = getOperation();
+  mlir::LLVMTypeConverter converter(&getContext());
+  mlir::DataLayout dl(module);
+  std::unique_ptr<cir::LowerModule> lowerModule = prepareLowerModule(module);
+  prepareTypeConverter(converter, dl, lowerModule.get());
+
+  // Recursive helper to lower a CIR initializer attribute to an LLVM value.
+  // Handles BlockAddrAttr, BlockAddrDiffAttr, ConstArrayAttr, IntAttr, etc.
+  std::function<mlir::Value(mlir::Attribute, mlir::OpBuilder &,
+                            mlir::Operation *, mlir::Location)>
+      lowerInitAttr = [&](mlir::Attribute attr, mlir::OpBuilder &builder,
+                          mlir::Operation *parentOp,
+                          mlir::Location loc) -> mlir::Value {
+    if (auto blockAddrAttr = mlir::dyn_cast<cir::BlockAddrAttr>(attr)) {
+      return createBlockAddressValue(blockAddrAttr.getInfo(), parentOp,
+                                     builder);
+    }
+    if (auto blockAddrDiffAttr = mlir::dyn_cast<cir::BlockAddrDiffAttr>(attr)) {
+      mlir::Value lhs = createBlockAddressValue(blockAddrDiffAttr.getLhs(),
+                                                parentOp, builder);
+      mlir::Value rhs = createBlockAddressValue(blockAddrDiffAttr.getRhs(),
+                                                parentOp, builder);
+      mlir::Type intPtrTy = builder.getI64Type();
+      mlir::Value lhsInt =
+          mlir::LLVM::PtrToIntOp::create(builder, loc, intPtrTy, lhs);
+      mlir::Value rhsInt =
+          mlir::LLVM::PtrToIntOp::create(builder, loc, intPtrTy, rhs);
+      mlir::Value diff =
+          mlir::LLVM::SubOp::create(builder, loc, lhsInt, rhsInt);
+      mlir::Type resultType =
+          converter.convertType(blockAddrDiffAttr.getType());
+      if (resultType != intPtrTy)
+        diff = mlir::LLVM::TruncOp::create(builder, loc, resultType, diff);
+      return diff;
+    }
+    if (auto constArr = mlir::dyn_cast<cir::ConstArrayAttr>(attr)) {
+      mlir::Type llvmTy = converter.convertType(constArr.getType());
+      mlir::Value result = mlir::LLVM::UndefOp::create(builder, loc, llvmTy);
+      if (auto elts =
+              mlir::dyn_cast_if_present<mlir::ArrayAttr>(constArr.getElts())) {
+        for (auto [idx, elt] : llvm::enumerate(elts)) {
+          mlir::Value init = lowerInitAttr(elt, builder, parentOp, loc);
+          result = mlir::LLVM::InsertValueOp::create(builder, loc, result, init,
+                                                     idx);
+        }
+      }
+      return result;
+    }
+    if (auto intAttr = mlir::dyn_cast<cir::IntAttr>(attr)) {
+      mlir::Type llvmTy = converter.convertType(intAttr.getType());
+      return mlir::LLVM::ConstantOp::create(
+          builder, loc, llvmTy,
+          builder.getIntegerAttr(llvmTy, intAttr.getValue()));
+    }
+    if (auto zeroAttr = mlir::dyn_cast<cir::ZeroAttr>(attr)) {
+      return mlir::LLVM::ZeroOp::create(
+          builder, loc, converter.convertType(zeroAttr.getType()));
+    }
+    llvm_unreachable("unexpected attribute type in block address global fixup");
+  };
+
+  module.walk([&](mlir::LLVM::GlobalOp globalOp) {
+    auto initAttr = globalOp->getAttr("cir.deferred_block_addr_init");
+    if (!initAttr)
+      return;
+
+    // Remove the marker attribute.
+    globalOp->removeAttr("cir.deferred_block_addr_init");
+
+    // Create a region initializer for this global.
+    globalOp.getRegion().emplaceBlock();
+    mlir::OpBuilder builder(module.getContext());
+    builder.setInsertionPointToEnd(globalOp.getInitializerBlock());
+    mlir::Location loc = globalOp.getLoc();
+
+    mlir::Value value = lowerInitAttr(initAttr, builder, globalOp, loc);
+    mlir::LLVM::ReturnOp::create(builder, loc, value);
+  });
 }
 
 mlir::LogicalResult CIRToLLVMBrOpLowering::matchAndRewrite(
@@ -3321,6 +4923,27 @@ mlir::LogicalResult CIRToLLVMExtractMemberOpLowering::matchAndRewrite(
 
   case cir::RecordType::Union:
     op.emitError("cir.extract_member cannot extract member from a union");
+    return mlir::failure();
+  }
+  llvm_unreachable("Unexpected record kind");
+}
+
+mlir::LogicalResult CIRToLLVMInsertMemberOpLowering::matchAndRewrite(
+    cir::InsertMemberOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  std::int64_t indices[1] = {static_cast<std::int64_t>(op.getIndex())};
+
+  mlir::Type recordTy = op.getRecord().getType();
+  auto cirRecordTy = mlir::cast<cir::RecordType>(recordTy);
+  switch (cirRecordTy.getKind()) {
+  case cir::RecordType::Struct:
+  case cir::RecordType::Class:
+    rewriter.replaceOpWithNewOp<mlir::LLVM::InsertValueOp>(
+        op, adaptor.getRecord(), adaptor.getValue(), indices);
+    return mlir::success();
+
+  case cir::RecordType::Union:
+    op.emitError("cir.insert_member cannot insert member into a union");
     return mlir::failure();
   }
   llvm_unreachable("Unexpected record kind");
@@ -3392,6 +5015,26 @@ mlir::LogicalResult CIRToLLVMThrowOpLowering::matchAndRewrite(
       mlir::ValueRange{adaptor.getExceptionPtr(), typeInfo, dtor});
 
   rewriter.replaceOp(op, cxaThrowCall);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRToLLVMDeleteArrayOpLowering::matchAndRewrite(
+    cir::DeleteArrayOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  StringRef fnName = "_ZdaPv";
+
+  auto voidTy = mlir::LLVM::LLVMVoidType::get(rewriter.getContext());
+  auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(rewriter.getContext());
+
+  auto fnTy = mlir::LLVM::LLVMFunctionType::get(voidTy, {llvmPtrTy},
+                                                /*isVarArg=*/false);
+
+  createLLVMFuncOpIfNotExist(rewriter, op, fnName, fnTy);
+
+  // Replace the operation with a call to _ZdaPv with the pointer argument
+  rewriter.replaceOpWithNewOp<mlir::LLVM::CallOp>(
+      op, mlir::TypeRange{}, fnName, mlir::ValueRange{adaptor.getAddress()});
+
   return mlir::success();
 }
 
@@ -3480,6 +5123,22 @@ mlir::LogicalResult CIRToLLVMEhInflightOpLowering::matchAndRewrite(
   mlir::Value selector =
       mlir::LLVM::ExtractValueOp::create(rewriter, loc, landingPadOp, 1);
   rewriter.replaceOp(op, mlir::ValueRange{slot, selector});
+
+  // Landing pads are required to be in LLVM functions with personality
+  // attribute. FIXME: for now hardcode personality creation in order to start
+  // adding exception tests, once we annotate CIR with such information,
+  // change it to be in FuncOp lowering instead.
+  {
+    mlir::OpBuilder::InsertionGuard guard(rewriter);
+    // Insert personality decl before the current function.
+    rewriter.setInsertionPoint(llvmFn);
+    auto personalityFnTy = mlir::LLVM::LLVMFunctionType::get(
+        rewriter.getI32Type(), {}, /*isVarArg=*/true);
+    // Get or create `__gxx_personality_v0`
+    StringRef fnName = "__gxx_personality_v0";
+    createLLVMFuncOpIfNotExist(rewriter, op, fnName, personalityFnTy);
+    llvmFn.setPersonality(fnName);
+  }
 
   return mlir::success();
 }
@@ -3705,14 +5364,18 @@ mlir::LogicalResult CIRToLLVMVecCmpOpLowering::matchAndRewrite(
   }
 
   // LLVM IR vector comparison returns a vector of i1. This one-bit vector
-  // must be sign-extended to the correct result type, unless a vector of i1 is
-  // the type we need.
-  if (cast<cir::IntType>(cast<cir::VectorType>(op.getType()).getElementType())
-          .getWidth() > 1)
+  // must be sign-extended to the correct result type, unless a vector of i1
+  // (bool) is the type we need.
+  auto resultElemType = cast<cir::VectorType>(op.getType()).getElementType();
+  if (mlir::isa<cir::BoolType>(resultElemType)) {
+    // Result is vector<bool>, which maps to vector<i1> - no extension needed
+    rewriter.replaceOp(op, bitResult);
+  } else if (cast<cir::IntType>(resultElemType).getWidth() > 1) {
     rewriter.replaceOpWithNewOp<mlir::LLVM::SExtOp>(
         op, typeConverter->convertType(op.getType()), bitResult);
-  else
+  } else {
     rewriter.replaceOp(op, bitResult);
+  }
   return mlir::success();
 }
 
@@ -4282,13 +5945,52 @@ mlir::LogicalResult CIRToLLVMVAArgOpLowering::matchAndRewrite(
 mlir::LogicalResult CIRToLLVMBlockAddressOpLowering::matchAndRewrite(
     cir::BlockAddressOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
-  return mlir::failure();
+  cir::BlockAddrInfoAttr blockAddrInfo = op.getBlockAddrInfo();
+  mlir::FlatSymbolRefAttr funcRef = blockAddrInfo.getFunc();
+  llvm::StringRef labelName = blockAddrInfo.getLabel().getValue();
+
+  // Use hash-based tag ID for consistency across all block address lowering
+  // paths (LabelOp, BlockAddressOp, and global initializer block addresses).
+  uint32_t tagId = llvm::hash_value(labelName) & 0xFFFFFF;
+
+  mlir::LLVM::BlockTagAttr tagAttr =
+      mlir::LLVM::BlockTagAttr::get(rewriter.getContext(), tagId);
+  mlir::LLVM::BlockAddressAttr blockAddrAttr =
+      mlir::LLVM::BlockAddressAttr::get(rewriter.getContext(), funcRef,
+                                        tagAttr);
+
+  // The result type is a pointer
+  mlir::Type llvmPtrTy =
+      mlir::LLVM::LLVMPointerType::get(rewriter.getContext());
+
+  rewriter.replaceOpWithNewOp<mlir::LLVM::BlockAddressOp>(op, llvmPtrTy,
+                                                          blockAddrAttr);
+  return mlir::success();
 }
 
 mlir::LogicalResult CIRToLLVMIndirectBrOpLowering::matchAndRewrite(
     cir::IndirectBrOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
-  return mlir::failure();
+  mlir::Value addr = adaptor.getAddr();
+
+  // If the poison attribute is set, use llvm.mlir.poison as the address.
+  // This happens when the block has no predecessors and is essentially
+  // unreachable.
+  if (op.getPoison()) {
+    mlir::Type llvmPtrTy =
+        mlir::LLVM::LLVMPointerType::get(rewriter.getContext());
+    addr = mlir::LLVM::PoisonOp::create(rewriter, op.getLoc(), llvmPtrTy);
+  }
+
+  // Get successor operands - need to convert the variadic operand groups
+  llvm::SmallVector<mlir::ValueRange> succOperandGroups;
+  for (unsigned i = 0; i < op.getSuccessors().size(); ++i) {
+    succOperandGroups.push_back(adaptor.getSuccOperands()[i]);
+  }
+
+  rewriter.replaceOpWithNewOp<mlir::LLVM::IndirectBrOp>(
+      op, addr, succOperandGroups, op.getSuccessors());
+  return mlir::success();
 }
 
 mlir::LogicalResult CIRToLLVMAwaitOpLowering::matchAndRewrite(
@@ -4362,6 +6064,7 @@ mlir::LogicalResult CIRToLLVMCpuIdOpLowering::matchAndRewrite(
   return mlir::success();
 }
 
+
 std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass() {
   return std::make_unique<ConvertCIRToLLVMPass>();
 }
@@ -4372,13 +6075,20 @@ void populateCIRToLLVMPasses(mlir::OpPassManager &pm) {
 }
 
 std::unique_ptr<llvm::Module>
-lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx) {
+lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
+                             bool disableDebugInfo) {
   llvm::TimeTraceScope scope("lower from CIR to LLVM directly");
 
   mlir::MLIRContext *mlirCtx = mlirModule.getContext();
 
   mlir::PassManager pm(mlirCtx);
   populateCIRToLLVMPasses(pm);
+
+  // This is necessary to have line tables emitted and basic
+  // debugger working. In the future we will add proper debug information
+  // emission directly from our frontend.
+  if (!disableDebugInfo)
+    pm.addPass(mlir::LLVM::createDIScopeForLLVMFuncOpPass());
 
   (void)mlir::applyPassManagerCLOptions(pm);
 

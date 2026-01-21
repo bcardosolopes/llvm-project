@@ -22,26 +22,31 @@ struct S f1() {
   return s;
 }
 
-// CIR:      cir.func{{.*}} @_Z2f1v() -> !rec_S
+// CIR:      cir.func{{.*}} @_Z2f1v() -> !u64i
 // CIR-NEXT:   %[[RETVAL:.*]] = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["__retval", init]
 // CIR-NEXT:   cir.call @_ZN1SC1Ev(%[[RETVAL]]) : (!cir.ptr<!rec_S>) -> ()
 // CIR-NEXT:   %[[RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!rec_S>, !rec_S
-// CIR-NEXT:   cir.return %[[RET]]
+// CIR-NEXT:   %[[RETCAST:.*]] = cir.cast bitcast %[[RETVAL]] : !cir.ptr<!rec_S> -> !cir.ptr<!u64i>
+// CIR-NEXT:   %[[RETCOERCED:.*]] = cir.load %[[RETCAST]] : !cir.ptr<!u64i>, !u64i
+// CIR-NEXT:   cir.return %[[RETCOERCED]]
 
-// CIR-NOELIDE:      cir.func{{.*}} @_Z2f1v() -> !rec_S
+// CIR-NOELIDE:      cir.func{{.*}} @_Z2f1v() -> !u64i
 // CIR-NOELIDE-NEXT:   %[[RETVAL:.*]] = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["__retval"]
 // CIR-NOELIDE-NEXT:   %[[S:.*]] = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["s", init]
 // CIR-NOELIDE-NEXT:   cir.call @_ZN1SC1Ev(%[[S]]) : (!cir.ptr<!rec_S>) -> ()
 // CIR-NOELIDE-NEXT:   cir.call @_ZN1SC1EOS_(%[[RETVAL]], %[[S]]){{.*}} : (!cir.ptr<!rec_S>, !cir.ptr<!rec_S>) -> ()
 // CIR-NOELIDE-NEXT:   %[[RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!rec_S>, !rec_S
-// CIR-NOELIDE-NEXT:   cir.return %[[RET]]
+// CIR-NOELIDE-NEXT:   %[[RETCAST:.*]] = cir.cast bitcast %[[RETVAL]] : !cir.ptr<!rec_S> -> !cir.ptr<!u64i>
+// CIR-NOELIDE-NEXT:   %[[RETCOERCED:.*]] = cir.load %[[RETCAST]] : !cir.ptr<!u64i>, !u64i
+// CIR-NOELIDE-NEXT:   cir.return %[[RETCOERCED]]
 
-// FIXME: Update this when calling convetnion lowering is implemented.
-// LLVM:      define{{.*}} %struct.S @_Z2f1v()
+// FIXME: Update this when calling convention lowering is implemented.
+// LLVM:      define{{.*}} i64 @_Z2f1v()
 // LLVM-NEXT:   %[[RETVAL:.*]] = alloca %struct.S
 // LLVM-NEXT:   call void @_ZN1SC1Ev(ptr %[[RETVAL]])
 // LLVM-NEXT:   %[[RET:.*]] = load %struct.S, ptr %[[RETVAL]]
-// LLVM-NEXT:   ret %struct.S %[[RET]]
+// LLVM-NEXT:   %[[RETCOERCED:.*]] = load i64, ptr %[[RETVAL]]
+// LLVM-NEXT:   ret i64 %[[RETCOERCED]]
 
 // OGCG:      define{{.*}} i64 @_Z2f1v()
 // OGCG-NEXT: entry:
@@ -64,7 +69,7 @@ NonTrivial test_nrvo() {
 
 // TODO(cir): Handle normal cleanup properly.
 
-// CIR: cir.func {{.*}} @_Z9test_nrvov()
+// CIR: cir.func {{.*}} @_Z9test_nrvov() -> !u8i
 // CIR:   %[[RESULT:.*]] = cir.alloca !rec_NonTrivial, !cir.ptr<!rec_NonTrivial>, ["__retval"]
 // CIR:   %[[NRVO_FLAG:.*]] = cir.alloca !cir.bool, !cir.ptr<!cir.bool>, ["nrvo"]
 // CIR:   %[[FALSE:.*]] = cir.const #false
@@ -78,9 +83,11 @@ NonTrivial test_nrvo() {
 // CIR:     cir.call @_ZN10NonTrivialD1Ev(%[[RESULT]])
 // CIR:   }
 // CIR:   %[[RET:.*]] = cir.load %[[RESULT]]
-// CIR:   cir.return %[[RET]]
+// CIR:   %[[RETCAST:.*]] = cir.cast bitcast %[[RESULT]] : !cir.ptr<!rec_NonTrivial> -> !cir.ptr<!u8i>
+// CIR:   %[[RETCOERCED:.*]] = cir.load %[[RETCAST]]
+// CIR:   cir.return %[[RETCOERCED]]
 
-// LLVM: define {{.*}} %struct.NonTrivial @_Z9test_nrvov()
+// LLVM: define {{.*}} i8 @_Z9test_nrvov()
 // LLVM:   %[[RESULT:.*]] = alloca %struct.NonTrivial
 // LLVM:   %[[NRVO_FLAG:.*]] = alloca i8
 // LLVM:   store i8 0, ptr %[[NRVO_FLAG]]
@@ -94,8 +101,8 @@ NonTrivial test_nrvo() {
 // LLVM:   call void @_ZN10NonTrivialD1Ev(ptr %[[RESULT]])
 // LLVM:   br label %[[NRVO_USED]]
 // LLVM: [[NRVO_USED]]:
-// LLVM:   %[[RET:.*]] = load %struct.NonTrivial, ptr %[[RESULT]]
-// LLVM:   ret %struct.NonTrivial %[[RET]]
+// LLVM:   %[[RETCOERCED:.*]] = load i8, ptr %[[RESULT]]
+// LLVM:   ret i8 %[[RETCOERCED]]
 
 // OGCG: define {{.*}} void @_Z9test_nrvov(ptr {{.*}} sret(%struct.NonTrivial) {{.*}} %[[RESULT:.*]])
 // OGCG:   %[[RESULT_ADDR:.*]] = alloca ptr

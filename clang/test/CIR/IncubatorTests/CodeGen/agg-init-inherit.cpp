@@ -59,7 +59,7 @@ void f3() {
 // CIR:     %0 = cir.alloca !rec_D, !cir.ptr<!rec_D>, ["v", init]
 // CIR:     %1 = cir.base_class_addr %0 : !cir.ptr<!rec_D> nonnull [0] -> !cir.ptr<!rec_A3>
 // CIR:     cir.call @_ZN2A3C2Ev(%1) : (!cir.ptr<!rec_A3>) -> ()
-// CIR:     cir.call @_ZN1DD1Ev(%0) : (!cir.ptr<!rec_D>) -> ()
+// CIR:     cir.call @_ZN1DD1Ev(%0) {{.*}}: (!cir.ptr<!rec_D>) -> ()
 // CIR:     cir.return
 // LLVM: define dso_local void @_Z2f3v()
 // LLVM:    %1 = alloca %class.D, i64 1, align 1

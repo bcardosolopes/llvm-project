@@ -78,7 +78,7 @@ void C3::Layer::Initialize() {
 // CHECK-DAG: !rec_C23A3ALayer = !cir.record<class "C2::Layer"
 // CHECK-DAG: !rec_C33A3ALayer = !cir.record<struct "C3::Layer"
 // CHECK-DAG: !rec_A = !cir.record<class "A"
-// CHECK-DAG: !rec_A2Ebase = !cir.record<class "A.base"
+// CHECK-DAG: !rec_A2Ebase = !cir.record<struct "A.base" packed
 // CHECK-DAG: !rec_B = !cir.record<class "B" {!rec_A2Ebase
 
 // CHECK: cir.func {{.*}} @_ZN2C35Layer10InitializeEv
@@ -113,16 +113,24 @@ void vcall(C1 &c1) {
 // CHECK:   %1 = cir.alloca !rec_buffy, !cir.ptr<!rec_buffy>, ["b"] {alignment = 8 : i64}
 // CHECK:   %2 = cir.alloca !s32i, !cir.ptr<!s32i>, ["e"] {alignment = 4 : i64}
 // CHECK:   %3 = cir.alloca !rec_buffy, !cir.ptr<!rec_buffy>, ["agg.tmp0"] {alignment = 8 : i64}
+// CHECK:   %4 = cir.alloca !rec_buffy, !cir.ptr<!rec_buffy>, ["tmp"] {alignment = 8 : i64}
 // CHECK:   cir.store %arg0, %0 : !cir.ptr<!rec_C1>, !cir.ptr<!cir.ptr<!rec_C1>>
-// CHECK:   %4 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!rec_C1>>, !cir.ptr<!rec_C1>
-// CHECK:   %5 = cir.load{{.*}} %2 : !cir.ptr<!s32i>, !s32i
+// CHECK:   %5 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!rec_C1>>, !cir.ptr<!rec_C1>
+// CHECK:   %6 = cir.load{{.*}} %2 : !cir.ptr<!s32i>, !s32i
 // CHECK:   cir.copy %1 to %3 : !cir.ptr<!rec_buffy>
-// CHECK:   %6 = cir.load{{.*}} %3 : !cir.ptr<!rec_buffy>, !rec_buffy
-// CHECK:   %7 = cir.vtable.get_vptr %4 : !cir.ptr<!rec_C1> -> !cir.ptr<!cir.vptr>
-// CHECK:   %8 = cir.load{{.*}} %7 : !cir.ptr<!cir.vptr>, !cir.vptr
-// CHECK:   %9 = cir.vtable.get_virtual_fn_addr %8[2] : !cir.vptr -> !cir.ptr<!cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>>
-// CHECK:   %10 = cir.load align(8) %9 : !cir.ptr<!cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>>, !cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>
-// CHECK:   %11 = cir.call %10(%4, %5, %6) : (!cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>, !cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i
+// CHECK:   %7 = cir.load{{.*}} %3 : !cir.ptr<!rec_buffy>, !rec_buffy
+// CHECK:   %8 = cir.vtable.get_vptr %5 : !cir.ptr<!rec_C1> -> !cir.ptr<!cir.vptr>
+// CHECK:   %9 = cir.load{{.*}} %8 : !cir.ptr<!cir.vptr>, !cir.vptr
+// CHECK:   %10 = cir.vtable.get_virtual_fn_addr %9[2] : !cir.vptr -> !cir.ptr<!cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>>
+// CHECK:   %11 = cir.load align(8) %10 : !cir.ptr<!cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>>, !cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>>
+// CHECK:   cir.store %7, %4 : !rec_buffy, !cir.ptr<!rec_buffy>
+// CHECK:   %12 = cir.cast bitcast %4 : !cir.ptr<!rec_buffy> -> !cir.ptr<!rec_anon_struct>
+// CHECK:   %13 = cir.get_member %12[0] {name = ""} : !cir.ptr<!rec_anon_struct> -> !cir.ptr<!u64i>
+// CHECK:   %14 = cir.load %13 : !cir.ptr<!u64i>, !u64i
+// CHECK:   %15 = cir.get_member %12[1] {name = ""} : !cir.ptr<!rec_anon_struct> -> !cir.ptr<!u64i>
+// CHECK:   %16 = cir.load %15 : !cir.ptr<!u64i>, !u64i
+// CHECK:   %17 = cir.cast bitcast %11 : !cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !rec_buffy) -> !s32i>> -> !cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !u64i, !u64i) -> !s32i>>
+// CHECK:   %18 = cir.call %17(%5, %6, %14, %16) : (!cir.ptr<!cir.func<(!cir.ptr<!rec_C1>, !s32i, !u64i, !u64i) -> !s32i>>, !cir.ptr<!rec_C1>, !s32i, !u64i, !u64i) -> !s32i
 // CHECK:   cir.return
 // CHECK: }
 

@@ -105,7 +105,7 @@ void if1(int a, bool b, bool c) {
   }
 }
 
-// CHECK: cir.func {{.*}} @_Z3if1ibb(%arg0: !s32i loc({{.*}}), %arg1: !cir.bool loc({{.*}}), %arg2: !cir.bool loc({{.*}}))
+// CHECK: cir.func {{.*}} @_Z3if1ibb(%arg0: !s32i loc({{.*}}), %arg1: !cir.bool {cir.zeroext} loc({{.*}}), %arg2: !cir.bool {cir.zeroext} loc({{.*}}))
 // CHECK: cir.scope {
 // CHECK:   %5 = cir.load{{.*}} %0 : !cir.ptr<!s32i>, !s32i
 // CHECK:   %6 = cir.cast int_to_bool %5 : !s32i -> !cir.bool
@@ -171,11 +171,10 @@ size_type max_size() {
 
 // CHECK: cir.func {{.*}} @_Z8max_sizev()
 // CHECK:   %0 = cir.alloca !u64i, !cir.ptr<!u64i>, ["__retval"] {alignment = 8 : i64}
-// CHECK:   %1 = cir.const #cir.int<0> : !s32i
-// CHECK:   %2 = cir.unary(not, %1) : !s32i, !s32i
-// CHECK:   %3 = cir.cast integral %2 : !s32i -> !u64i
-// CHECK:   %4 = cir.const #cir.int<8> : !u64i
-// CHECK:   %5 = cir.binop(div, %3, %4) : !u64i
+// Upstream constant-folds size_type(~0) directly to UINT64_MAX
+// CHECK:   %1 = cir.const #cir.int<18446744073709551615> : !u64i
+// CHECK:   %2 = cir.const #cir.int<8> : !u64i
+// CHECK:   %3 = cir.binop(div, %1, %2) : !u64i
 
 // CHECK-DAG: #[[locScope]] = loc(fused[#[[locScopeA:loc[0-9]+]], #[[locScopeB:loc[0-9]+]]])
 // CHECK-DAG: #[[locScopeA]] = loc("{{.*}}basic.cpp":27:3)

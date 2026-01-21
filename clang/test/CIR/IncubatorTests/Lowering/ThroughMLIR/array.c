@@ -6,7 +6,7 @@
 int test_array1() {
     // CIR-LABEL: cir.func {{.*}} @test_array1
     // CIR: %[[ARRAY:.*]] = cir.alloca !cir.array<!s32i x 3>, !cir.ptr<!cir.array<!s32i x 3>>, ["a"] {alignment = 4 : i64}
-    // CIR: %{{.*}} = cir.get_element %[[ARRAY]][{{.*}}] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!s32i>
+    // CIR: %{{.*}} = cir.get_element %[[ARRAY]][{{.*}} : !s32i] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
 
     // MLIR-LABEL: func @test_array1
     // MLIR: %{{.*}} = memref.alloca() {alignment = 4 : i64} : memref<1xi32>
@@ -19,8 +19,8 @@ int test_array1() {
 int test_array2() {
     // CIR-LABEL: cir.func {{.*}} @test_array2
     // CIR: %[[ARRAY:.*]] = cir.alloca !cir.array<!cir.array<!s32i x 4> x 3>, !cir.ptr<!cir.array<!cir.array<!s32i x 4> x 3>>, ["a"] {alignment = 16 : i64}
-    // CIR: %{{.*}} = cir.get_element %[[ARRAY]][%{{.*}}] : (!cir.ptr<!cir.array<!cir.array<!s32i x 4> x 3>>, !s32i) -> !cir.ptr<!cir.array<!s32i x 4>>
-    // CIR: %{{.*}} = cir.get_element %{{.*}}[%{{.*}}] : (!cir.ptr<!cir.array<!s32i x 4>>, !s32i) -> !cir.ptr<!s32i>
+    // CIR: %{{.*}} = cir.get_element %[[ARRAY]][%{{.*}} : !s32i] : !cir.ptr<!cir.array<!cir.array<!s32i x 4> x 3>> -> !cir.ptr<!cir.array<!s32i x 4>>
+    // CIR: %{{.*}} = cir.get_element %{{.*}}[%{{.*}} : !s32i] : !cir.ptr<!cir.array<!s32i x 4>> -> !cir.ptr<!s32i>
 
     // MLIR-LABEL: func @test_array2
     // MLIR: %{{.*}} = memref.alloca() {alignment = 4 : i64} : memref<1xi32>
@@ -33,12 +33,12 @@ int test_array2() {
 int test_array3() {
     // CIR-LABEL: cir.func {{.*}} @test_array3()
     // CIR: %[[ARRAY:.*]] = cir.alloca !cir.array<!s32i x 3>, !cir.ptr<!cir.array<!s32i x 3>>, ["a"] {alignment = 4 : i64}
-    // CIR: %[[ELEM1:.*]] = cir.get_element %[[ARRAY]][{{.*}}] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!s32i>
+    // CIR: %[[ELEM1:.*]] = cir.get_element %[[ARRAY]][{{.*}} : !s32i] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
     // CIR: {{.*}} = cir.load align(4) %[[ELEM1]] : !cir.ptr<!s32i>, !s32i
-    // CIR: %[[ELEM2:.*]] = cir.get_element %[[ARRAY]][{{.*}}] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!s32i>
+    // CIR: %[[ELEM2:.*]] = cir.get_element %[[ARRAY]][{{.*}} : !s32i] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
     // CIR: %{{.*}} = cir.load align(4) %[[ELEM2]] : !cir.ptr<!s32i>, !s32i
     // CIR: cir.store align(4) {{.*}}, %[[ELEM2]] : !s32i, !cir.ptr<!s32i>
-    // CIR: %[[ELEM3:.*]] = cir.get_element %[[ARRAY]][{{.*}}] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!s32i>
+    // CIR: %[[ELEM3:.*]] = cir.get_element %[[ARRAY]][{{.*}} : !s32i] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
     // CIR: %{{.*}} = cir.load align(4) %[[ELEM3]] : !cir.ptr<!s32i>, !s32i
 
     // MLIR-LABEL: func @test_array3

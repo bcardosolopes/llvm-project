@@ -1,6 +1,9 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s
 
+// CHECK: cir.global external @a = #cir.zero : !rec_A
+// CHECK: cir.global external @vol_a = #cir.zero : !rec_A
+
 typedef struct {} S;
 
 typedef struct {
@@ -14,12 +17,12 @@ typedef struct {
 // CHECK:   [[TMP1:%.*]] = cir.alloca !cir.ptr<!rec_A>, !cir.ptr<!cir.ptr<!rec_A>>, ["a2", init]
 // CHECK:   cir.store{{.*}} %arg0, [[TMP0]] : !cir.ptr<!rec_A>, !cir.ptr<!cir.ptr<!rec_A>>
 // CHECK:   cir.store{{.*}} %arg1, [[TMP1]] : !cir.ptr<!rec_A>, !cir.ptr<!cir.ptr<!rec_A>>
-// CHECK:   [[TMP2:%.*]] = cir.load{{.*}} [[TMP0]] : !cir.ptr<!cir.ptr<!rec_A>>, !cir.ptr<!rec_A>
-// CHECK:   [[TMP3:%.*]] = cir.const #cir.int<1> : !s32i
-// CHECK:   [[TMP4:%.*]] = cir.ptr_stride [[TMP2]], [[TMP3]] : (!cir.ptr<!rec_A>, !s32i) -> !cir.ptr<!rec_A>
-// CHECK:   [[TMP5:%.*]] = cir.load{{.*}} [[TMP1]] : !cir.ptr<!cir.ptr<!rec_A>>, !cir.ptr<!rec_A>
-// CHECK:   [[TMP6:%.*]] = cir.const #cir.int<1> : !s32i
-// CHECK:   [[TMP7:%.*]] = cir.ptr_stride [[TMP5]], [[TMP6]] : (!cir.ptr<!rec_A>, !s32i) -> !cir.ptr<!rec_A>
+// CHECK:   [[TMP2:%.*]] = cir.const #cir.int<1> : !s32i
+// CHECK:   [[TMP3:%.*]] = cir.load{{.*}} [[TMP0]] : !cir.ptr<!cir.ptr<!rec_A>>, !cir.ptr<!rec_A>
+// CHECK:   [[TMP4:%.*]] = cir.ptr_stride [[TMP3]], [[TMP2]] : (!cir.ptr<!rec_A>, !s32i) -> !cir.ptr<!rec_A>
+// CHECK:   [[TMP5:%.*]] = cir.const #cir.int<1> : !s32i
+// CHECK:   [[TMP6:%.*]] = cir.load{{.*}} [[TMP1]] : !cir.ptr<!cir.ptr<!rec_A>>, !cir.ptr<!rec_A>
+// CHECK:   [[TMP7:%.*]] = cir.ptr_stride [[TMP6]], [[TMP5]] : (!cir.ptr<!rec_A>, !s32i) -> !cir.ptr<!rec_A>
 // CHECK:   cir.copy [[TMP7]] to [[TMP4]] : !cir.ptr<!rec_A>
 void foo1(A* a1, A* a2) {
     a1[1] = a2[1];
@@ -39,23 +42,24 @@ void foo2(A* a1, A* a2) {
     a1->s = a2->s;
 }
 
-// CHECK: cir.global external @a = #cir.zero : !rec_A
-// CHECK: cir.func {{.*}} @foo3
-// CHECK:    [[TMP0]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["__retval"] {alignment = 4 : i64}
-// CHECK:    [[TMP1]] = cir.get_global @a : !cir.ptr<!rec_A>
+// CHECK: cir.func {{.*}} @foo3() -> !u64i
+// CHECK:    [[TMP0:%.*]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["__retval"] {alignment = 4 : i64}
+// CHECK:    [[TMP1:%.*]] = cir.get_global @a : !cir.ptr<!rec_A>
 // CHECK:    cir.copy [[TMP1]] to [[TMP0]] : !cir.ptr<!rec_A>
-// CHECK:    [[TMP2]] = cir.load{{.*}} [[TMP0]] : !cir.ptr<!rec_A>, !rec_A
-// CHECK:    cir.return [[TMP2]] : !rec_A
+// CHECK:    {{%.*}} = cir.load [[TMP0]] : !cir.ptr<!rec_A>, !rec_A
+// CHECK:    [[TMP3:%.*]] = cir.cast bitcast [[TMP0]] : !cir.ptr<!rec_A> -> !cir.ptr<!u64i>
+// CHECK:    [[TMP4:%.*]] = cir.load [[TMP3]] : !cir.ptr<!u64i>, !u64i
+// CHECK:    cir.return [[TMP4]] : !u64i
 A a;
 A foo3(void) {
     return a;
 }
 
 // CHECK: cir.func {{.*}} @foo4
-// CHECK:    [[TMP0]] = cir.alloca !cir.ptr<!rec_A>, !cir.ptr<!cir.ptr<!rec_A>>, ["a1", init]
-// CHECK:    [[TMP1]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["a2", init]
+// CHECK:    [[TMP0:%.*]] = cir.alloca !cir.ptr<!rec_A>, !cir.ptr<!cir.ptr<!rec_A>>, ["a1", init]
+// CHECK:    [[TMP1:%.*]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["a2", init]
 // CHECK:    cir.store{{.*}} %arg0, [[TMP0]] : !cir.ptr<!rec_A>, !cir.ptr<!cir.ptr<!rec_A>>
-// CHECK:    [[TMP2]] = cir.load deref{{.*}}  [[TMP0]] : !cir.ptr<!cir.ptr<!rec_A>>, !cir.ptr<!rec_A>
+// CHECK:    [[TMP2:%.*]] = cir.load deref{{.*}}  [[TMP0]] : !cir.ptr<!cir.ptr<!rec_A>>, !cir.ptr<!rec_A>
 // CHECK:    cir.copy [[TMP2]] to [[TMP1]] : !cir.ptr<!rec_A>
 void foo4(A* a1) {
     A a2 = *a1;
@@ -64,11 +68,11 @@ void foo4(A* a1) {
 A create() { A a; return a; }
 
 // CHECK: cir.func {{.*@foo5}}
-// CHECK:   [[TMP0:%.*]] = cir.alloca !rec_A, !cir.ptr<!rec_A>,
-// CHECK:   [[TMP1:%.*]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["tmp"] {alignment = 4 : i64}
-// CHECK:   [[TMP2:%.*]] = cir.call @create() : () -> !rec_A
-// CHECK:   cir.store{{.*}} [[TMP2]], [[TMP1]] : !rec_A, !cir.ptr<!rec_A>
-// CHECK:   cir.copy [[TMP1]] to [[TMP0]] : !cir.ptr<!rec_A>
+// CHECK:   [[TMP0:%.*]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["a"]
+// CHECK:   {{%.*}} = cir.get_global @create
+// CHECK:   [[TMP1:%.*]] = cir.call @create() : () -> !u64i
+// CHECK:   [[TMP2:%.*]] = cir.cast bitcast [[TMP0]] : !cir.ptr<!rec_A> -> !cir.ptr<!u64i>
+// CHECK:   cir.store{{.*}} [[TMP1]], [[TMP2]] : !u64i, !cir.ptr<!u64i>
 void foo5() {
     A a;
     a = create();
@@ -88,7 +92,7 @@ volatile A vol_a;
 A foo7() {
   return vol_a;
 }
-// CHECK: cir.func {{.*@foo7}}
+// CHECK: cir.func {{.*@foo7}}() -> !u64i
 // CHECK:   %0 = cir.alloca
 // CHECK:   %1 = cir.get_global @vol_a
 // CHECK:   cir.copy %1 to %0 volatile

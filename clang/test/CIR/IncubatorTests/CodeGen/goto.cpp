@@ -86,7 +86,7 @@ err:
   return -1;
 }
 // NOFLAT:  cir.func {{.*}} @_Z21shouldNotGenBranchReti
-// NOFLAT:    cir.if %8 {
+// NOFLAT:    cir.if {{%[0-9]+}} {
 // NOFLAT:      cir.goto "err"
 // NOFLAT:    }
 // NOFLAT:  ^bb1:
@@ -103,7 +103,7 @@ err:
   return -1;
 }
 // NOFLAT:  cir.func {{.*}} @_Z15shouldGenBranchi
-// NOFLAT:    cir.if %9 {
+// NOFLAT:    cir.if {{%[0-9]+}} {
 // NOFLAT:      cir.goto "err"
 // NOFLAT:    }
 // NOFLAT:    cir.br ^bb1

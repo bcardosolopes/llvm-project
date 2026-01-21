@@ -25,8 +25,8 @@ void acc_compute() {
 // CHECK: acc.reduction.recipe @reduction_add__ZTS16DefaultOperators : !cir.ptr<!rec_DefaultOperators> reduction_operator <add> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperators>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !rec_DefaultOperators
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperators>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -71,8 +71,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_mul__ZTS16DefaultOperators : !cir.ptr<!rec_DefaultOperators> reduction_operator <mul> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperators>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ONE:.*]] = cir.const #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators
-// CHECK-NEXT: cir.store{{.*}} %[[ONE]], %[[ALLOCA]] : !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: %[[ONE:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: cir.copy %[[ONE]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperators>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -117,8 +117,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_max__ZTS16DefaultOperators : !cir.ptr<!rec_DefaultOperators> reduction_operator <max> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperators>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[LEAST:.*]] = cir.const #cir.const_record<{#cir.int<-2147483648> : !s32i, #cir.int<0> : !u32i, #cir.fp<-3.4{{.*}}E+38> : !cir.float, #cir.fp<-1.7{{.*}}E+308> : !cir.double, #false}> : !rec_DefaultOperators
-// CHECK-NEXT: cir.store{{.*}} %[[LEAST]], %[[ALLOCA]] : !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: %[[LEAST:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: cir.copy %[[LEAST]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperators>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -202,8 +202,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_min__ZTS16DefaultOperators : !cir.ptr<!rec_DefaultOperators> reduction_operator <min> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperators>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[LARGEST:.*]] = cir.const #cir.const_record<{#cir.int<2147483647> : !s32i, #cir.int<4294967295> : !u32i, #cir.fp<3.4{{.*}}E+38> : !cir.float, #cir.fp<1.7{{.*}}E+308> : !cir.double, #true}> : !rec_DefaultOperators
-// CHECK-NEXT: cir.store{{.*}} %[[LARGEST]], %[[ALLOCA]] : !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: %[[LARGEST:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: cir.copy %[[LARGEST]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperators>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -287,8 +287,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_iand__ZTS24DefaultOperatorsNoFloats : !cir.ptr<!rec_DefaultOperatorsNoFloats> reduction_operator <iand> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperatorsNoFloats>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperatorsNoFloats, !cir.ptr<!rec_DefaultOperatorsNoFloats>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ALL_ONES:.*]] = cir.const #cir.const_record<{#cir.int<-1> : !s32i, #cir.int<4294967295> : !u32i, #true}> : !rec_DefaultOperatorsNoFloats
-// CHECK-NEXT: cir.store{{.*}} %[[ALL_ONES]], %[[ALLOCA]] : !rec_DefaultOperatorsNoFloats, !cir.ptr<!rec_DefaultOperatorsNoFloats>
+// CHECK-NEXT: %[[ALL_ONES:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperatorsNoFloats>
+// CHECK-NEXT: cir.copy %[[ALL_ONES]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperatorsNoFloats>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -321,8 +321,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_ior__ZTS24DefaultOperatorsNoFloats : !cir.ptr<!rec_DefaultOperatorsNoFloats> reduction_operator <ior> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperatorsNoFloats>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperatorsNoFloats, !cir.ptr<!rec_DefaultOperatorsNoFloats>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !rec_DefaultOperatorsNoFloats
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !rec_DefaultOperatorsNoFloats, !cir.ptr<!rec_DefaultOperatorsNoFloats>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperatorsNoFloats>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperatorsNoFloats>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -355,8 +355,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_xor__ZTS24DefaultOperatorsNoFloats : !cir.ptr<!rec_DefaultOperatorsNoFloats> reduction_operator <xor> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperatorsNoFloats>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperatorsNoFloats, !cir.ptr<!rec_DefaultOperatorsNoFloats>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !rec_DefaultOperatorsNoFloats
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !rec_DefaultOperatorsNoFloats, !cir.ptr<!rec_DefaultOperatorsNoFloats>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperatorsNoFloats>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperatorsNoFloats>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -389,8 +389,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_land__ZTS16DefaultOperators : !cir.ptr<!rec_DefaultOperators> reduction_operator <land> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperators>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ONE:.*]] = cir.const #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators
-// CHECK-NEXT: cir.store{{.*}} %[[ONE]], %[[ALLOCA]] : !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: %[[ONE:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: cir.copy %[[ONE]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperators>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -473,8 +473,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_lor__ZTS16DefaultOperators : !cir.ptr<!rec_DefaultOperators> reduction_operator <lor> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!rec_DefaultOperators>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !rec_DefaultOperators
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !rec_DefaultOperators, !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!rec_DefaultOperators>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!rec_DefaultOperators>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -558,8 +558,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_add__ZTSA5_16DefaultOperators : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>> reduction_operator <add> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !cir.array<!rec_DefaultOperators x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -627,8 +627,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_mul__ZTSA5_16DefaultOperators : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>> reduction_operator <mul> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.const #cir.const_array<[#cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators]> : !cir.array<!rec_DefaultOperators x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[CONST_ARR]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: cir.copy %[[CONST_ARR]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -697,8 +697,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_max__ZTSA5_16DefaultOperators : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>> reduction_operator <max> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.const #cir.const_array<[#cir.const_record<{#cir.int<-2147483648> : !s32i, #cir.int<0> : !u32i, #cir.fp<-3.4{{.*}}E+38> : !cir.float, #cir.fp<-1.7{{.*}}E+308> : !cir.double, #false}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<-2147483648> : !s32i, #cir.int<0> : !u32i, #cir.fp<-3.4{{.*}}E+38> : !cir.float, #cir.fp<-1.7{{.*}}E+308> : !cir.double, #false}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<-2147483648> : !s32i, #cir.int<0> : !u32i, #cir.fp<-3.4{{.*}}E+38> : !cir.float, #cir.fp<-1.7{{.*}}E+308> : !cir.double, #false}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<-2147483648> : !s32i, #cir.int<0> : !u32i, #cir.fp<-3.4{{.*}}E+38> : !cir.float, #cir.fp<-1.7{{.*}}E+308> : !cir.double, #false}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<-2147483648> : !s32i, #cir.int<0> : !u32i, #cir.fp<-3.4{{.*}}E+38> : !cir.float, #cir.fp<-1.7{{.*}}E+308> : !cir.double, #false}> : !rec_DefaultOperators]> : !cir.array<!rec_DefaultOperators x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[CONST_ARR]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: cir.copy %[[CONST_ARR]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -804,8 +804,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_min__ZTSA5_16DefaultOperators : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>> reduction_operator <min> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.const #cir.const_array<[#cir.const_record<{#cir.int<2147483647> : !s32i, #cir.int<4294967295> : !u32i, #cir.fp<3.4{{.*}}E+38> : !cir.float, #cir.fp<1.7{{.*}}E+308> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<2147483647> : !s32i, #cir.int<4294967295> : !u32i, #cir.fp<3.4{{.*}}E+38> : !cir.float, #cir.fp<1.7{{.*}}E+308> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<2147483647> : !s32i, #cir.int<4294967295> : !u32i, #cir.fp<3.4{{.*}}E+38> : !cir.float, #cir.fp<1.7{{.*}}E+308> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<2147483647> : !s32i, #cir.int<4294967295> : !u32i, #cir.fp<3.4{{.*}}E+38> : !cir.float, #cir.fp<1.7{{.*}}E+308> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<2147483647> : !s32i, #cir.int<4294967295> : !u32i, #cir.fp<3.4{{.*}}E+38> : !cir.float, #cir.fp<1.7{{.*}}E+308> : !cir.double, #true}> : !rec_DefaultOperators]> : !cir.array<!rec_DefaultOperators x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[CONST_ARR]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: cir.copy %[[CONST_ARR]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -911,8 +911,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_iand__ZTSA5_24DefaultOperatorsNoFloats : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>> reduction_operator <iand> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperatorsNoFloats x 5>, !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.const #cir.const_array<[#cir.const_record<{#cir.int<-1> : !s32i, #cir.int<4294967295> : !u32i, #true}> : !rec_DefaultOperatorsNoFloats, #cir.const_record<{#cir.int<-1> : !s32i, #cir.int<4294967295> : !u32i, #true}> : !rec_DefaultOperatorsNoFloats, #cir.const_record<{#cir.int<-1> : !s32i, #cir.int<4294967295> : !u32i, #true}> : !rec_DefaultOperatorsNoFloats, #cir.const_record<{#cir.int<-1> : !s32i, #cir.int<4294967295> : !u32i, #true}> : !rec_DefaultOperatorsNoFloats, #cir.const_record<{#cir.int<-1> : !s32i, #cir.int<4294967295> : !u32i, #true}> : !rec_DefaultOperatorsNoFloats]> : !cir.array<!rec_DefaultOperatorsNoFloats x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[CONST_ARR]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperatorsNoFloats x 5>, !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
+// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
+// CHECK-NEXT: cir.copy %[[CONST_ARR]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -968,8 +968,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_ior__ZTSA5_24DefaultOperatorsNoFloats : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>> reduction_operator <ior> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperatorsNoFloats x 5>, !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !cir.array<!rec_DefaultOperatorsNoFloats x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperatorsNoFloats x 5>, !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -1025,8 +1025,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_xor__ZTSA5_24DefaultOperatorsNoFloats : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>> reduction_operator <xor> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperatorsNoFloats x 5>, !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !cir.array<!rec_DefaultOperatorsNoFloats x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperatorsNoFloats x 5>, !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperatorsNoFloats x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -1082,8 +1082,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_land__ZTSA5_16DefaultOperators : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>> reduction_operator <land> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.const #cir.const_array<[#cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators, #cir.const_record<{#cir.int<1> : !s32i, #cir.int<1> : !u32i, #cir.fp<1{{.*}}> : !cir.float, #cir.fp<1{{.*}}> : !cir.double, #true}> : !rec_DefaultOperators]> : !cir.array<!rec_DefaultOperators x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[CONST_ARR]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: %[[CONST_ARR:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: cir.copy %[[CONST_ARR]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -1190,8 +1190,8 @@ void acc_compute() {
 // CHECK: acc.reduction.recipe @reduction_lor__ZTSA5_16DefaultOperators : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>> reduction_operator <lor> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[ZERO:.*]] = cir.const #cir.zero : !cir.array<!rec_DefaultOperators x 5>
-// CHECK-NEXT: cir.store{{.*}} %[[ZERO]], %[[ALLOCA]] : !cir.array<!rec_DefaultOperators x 5>, !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: %[[ZERO:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
+// CHECK-NEXT: cir.copy %[[ZERO]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!rec_DefaultOperators x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {

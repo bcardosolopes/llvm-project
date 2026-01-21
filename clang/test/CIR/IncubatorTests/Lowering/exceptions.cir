@@ -59,7 +59,7 @@ module @"try-catch.cpp" attributes {cir.lang = #cir.lang<cxx>, cir.sob = #cir.si
     %19 = cir.cmp(eq, %17, %18) : !u32i, !cir.bool
     cir.brcond %19 ^bb6(%16 : !cir.ptr<!void>), ^bb7(%16, %17 : !cir.ptr<!void>, !u32i)
   ^bb6(%20: !cir.ptr<!void>):
-    %21 = cir.catch_param begin %20 -> !cir.ptr<!s32i>
+    %21 = cir.catch_param begin %20 : !cir.ptr<!s32i>
     // LLVM: %[[EH_IDX:.*]] = phi ptr
     // LLVM: call ptr @__cxa_begin_catch(ptr %[[EH_IDX]])
     %22 = cir.load %21 : !cir.ptr<!s32i>, !s32i
@@ -79,7 +79,7 @@ module @"try-catch.cpp" attributes {cir.lang = #cir.lang<cxx>, cir.sob = #cir.si
     %30 = cir.cmp(eq, %28, %29) : !u32i, !cir.bool
     cir.brcond %30 ^bb8(%27 : !cir.ptr<!void>), ^bb9(%27, %28 : !cir.ptr<!void>, !u32i)
   ^bb8(%31: !cir.ptr<!void>):
-    %32 = cir.catch_param begin %31 -> !cir.ptr<!s8i>
+    %32 = cir.catch_param begin %31 : !cir.ptr<!s8i>
     // LLVM: %[[EH_MSG:.*]] = phi ptr
     // LLVM: call ptr @__cxa_begin_catch(ptr %[[EH_MSG]])
     cir.store %32, %6 : !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>

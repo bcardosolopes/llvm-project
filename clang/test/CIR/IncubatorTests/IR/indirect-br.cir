@@ -7,14 +7,14 @@ cir.func @E() {
   %1 = cir.alloca !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>, ["ptr2", init] {alignment = 8 : i64}
   %2 = cir.alloca !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>, ["ptr3", init] {alignment = 8 : i64}
   %3 = cir.alloca !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>, ["ptr4", init] {alignment = 8 : i64}
-  %4 = cir.blockaddress <@E, "D"> -> !cir.ptr<!void>
+  %4 = cir.block_address <@E, "D"> : !cir.ptr<!void>
   cir.store align(8) %4, %0 : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
-  %5 = cir.blockaddress <@E, "C"> -> !cir.ptr<!void>
+  %5 = cir.block_address <@E, "C"> : !cir.ptr<!void>
   cir.store align(8) %5, %1 : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
   %6 = cir.load align(8) %0 : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
   cir.br ^bb1(%6 : !cir.ptr<!void>)
 ^bb1(%7: !cir.ptr<!void>):  // pred: ^bb0
-  cir.indirectbr %7 : <!void>, [
+  cir.indirect_br %7 : !cir.ptr<!void>, [
   ^bb5,
   ^bb4,
   ^bb3,
@@ -25,9 +25,9 @@ cir.func @E() {
   cir.br ^bb3
 ^bb3:  // 2 preds: ^bb1, ^bb2
   cir.label "B"
-  %8 = cir.blockaddress <@E, "B"> -> !cir.ptr<!void>
+  %8 = cir.block_address <@E, "B"> : !cir.ptr<!void>
   cir.store align(8) %8, %2 : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
-  %9 = cir.blockaddress <@E, "A"> -> !cir.ptr<!void>
+  %9 = cir.block_address <@E, "A"> : !cir.ptr<!void>
   cir.store align(8) %9, %3 : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
   cir.br ^bb4
 ^bb4:  // 2 preds: ^bb1, ^bb3
@@ -38,7 +38,7 @@ cir.func @E() {
   cir.return
 }
 
-// CHECK: cir.indirectbr %7 : <!void>, [
+// CHECK: cir.indirect_br %7 : !cir.ptr<!void>, [
 // CHECK:  ^bb5,
 // CHECK:  ^bb4,
 // CHECK:  ^bb3,

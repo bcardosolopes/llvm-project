@@ -27,7 +27,7 @@ void test1() {
 // CIR:     cir.scope {
 // CIR:       %[[A:.+]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["a", init]
 // CIR:       cir.call @_ZN1AC2Ev(%[[A]]) : (!cir.ptr<!rec_A>) -> ()
-// CIR:       cir.call @_ZN1AC2ERS_(%[[REF_TMP0]], %[[A]]) : (!cir.ptr<!rec_A>, !cir.ptr<!rec_A>) -> ()
+// CIR:       cir.copy %[[A]] to %[[REF_TMP0]] : !cir.ptr<!rec_A>
 // CIR:     }
 // CIR:     cir.call @_ZN1A3FooEv(%[[REF_TMP0]]) : (!cir.ptr<!rec_A>) -> ()
 // CIR:   }
@@ -42,7 +42,7 @@ void test1() {
 // LLVM:     br label %[[LBL5:.+]]
 // LLVM: [[LBL5]]:
 // LLVM:     call void @_ZN1AC2Ev(ptr %[[VAR3]])
-// LLVM:     call void @_ZN1AC2ERS_(ptr %[[VAR1]], ptr %[[VAR3]])
+// LLVM:     call void @llvm.memcpy.p0.p0.i64(ptr %[[VAR1]], ptr %[[VAR3]], i64 4, i1 false)
 // LLVM:     br label %[[LBL6:.+]]
 // LLVM: [[LBL6]]:
 // LLVM:     call void @_ZN1A3FooEv(ptr %[[VAR1]])

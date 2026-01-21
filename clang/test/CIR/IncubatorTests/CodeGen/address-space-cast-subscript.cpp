@@ -21,8 +21,7 @@ void test_cast_then_subscript(AS1 int *p1) {
   int val = ((AS2 int *)p1)[0];
   // CIR:      %[[#LOAD:]] = cir.load {{.*}} : !cir.ptr<!cir.ptr<!s32i, target_address_space(1)>>, !cir.ptr<!s32i, target_address_space(1)>
   // CIR-NEXT: %[[#CAST:]] = cir.cast address_space %[[#LOAD]] : !cir.ptr<!s32i, target_address_space(1)> -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR-NEXT: %[[#IDX:]] = cir.const #cir.int<0> : !s32i
-  // CIR-NEXT: %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %[[#IDX]] : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
+  // CIR:      %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %{{.+}} : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
   // CIR-NEXT: %{{.+}} = cir.load {{.*}} %[[#PTR]] : !cir.ptr<!s32i, target_address_space(2)>, !s32i
 
   // LLVM:      %[[#LOAD:]] = load ptr addrspace(1), ptr %{{.+}}, align 8
@@ -60,8 +59,7 @@ void test_cast_then_subscript_nonzero_index(AS1 int *p1) {
   // Cast then subscript with non-zero index
   int val = ((AS2 int *)p1)[5];
   // CIR:      %[[#CAST:]] = cir.cast address_space %{{.+}} : !cir.ptr<!s32i, target_address_space(1)> -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR:      %[[#IDX:]] = cir.const #cir.int<5> : !s32i
-  // CIR-NEXT: %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %[[#IDX]] : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
+  // CIR:      %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %{{.+}} : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
   // CIR-NEXT: %{{.+}} = cir.load {{.*}} %[[#PTR]] : !cir.ptr<!s32i, target_address_space(2)>, !s32i
 
   // LLVM:      %[[#CAST:]] = addrspacecast ptr addrspace(1) %{{.+}} to ptr addrspace(2)

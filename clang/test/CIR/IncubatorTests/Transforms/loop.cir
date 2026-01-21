@@ -108,10 +108,6 @@ module {
 // CHECK:  ^bb[[#COND]]:
 // CHECK:    cir.brcond %arg0 ^bb[[#BODY:]], ^bb[[#EXIT:]]
 // CHECK:  ^bb[[#BODY]]:
-// CHECK:    cir.br ^bb[[#EX_SCOPE_IN:]]
-// CHECK:  ^bb[[#EX_SCOPE_IN]]:
-// CHECK:    cir.br ^bb[[#EXIT:]]
-// CHECK:  ^bb[[#EX_SCOPE_EXIT:]]:
 // CHECK:    cir.br ^bb[[#STEP:]]
 // CHECK:  ^bb[[#STEP]]:
 // CHECK:    cir.br ^bb[[#COND:]]

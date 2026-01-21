@@ -14,7 +14,6 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/Passes.h"
-#include "clang/CIR/MissingFeatures.h"
 #include "llvm/Support/TimeProfiler.h"
 
 using namespace mlir;
@@ -33,37 +32,122 @@ struct HoistAllocasPass : public impl::HoistAllocasBase<HoistAllocasPass> {
   void runOnOperation() override;
 };
 
+static bool isOpInLoop(mlir::Operation *op) {
+  return op->getParentOfType<cir::LoopOpInterface>();
+}
+
+static bool hasStoreToAllocaInWhileCond(cir::AllocaOp alloca) {
+  // This function determines whether the given alloca operation represents
+  // a variable defined as a while loop's condition.
+  //
+  // Specifically, C/C++ allows the condition of a while loop be a variable
+  // declaration:
+  //
+  //   while (const int x = foo()) { /* body... */ }
+  //
+  // CIRGen would emit the following CIR for the above code:
+  //
+  //   cir.scope {
+  //     %x.slot = cir.alloca !s32i [init, const]
+  //     cir.while {
+  //       %0 = cir.call @foo()
+  //       cir.store %0, %x
+  //       %1 = cir.load %x
+  //       %2 = cir.cast int_to_bool %1
+  //       cir.condition(%2)
+  //     } do {
+  //       // loop body goes here.
+  //     }
+  //   }
+  //
+  // Note that %x.slot is emitted outside the cir.while operation. Ideally, the
+  // cir.while operation should cover this cir.alloca operation, but currently
+  // CIR does not work this way. When hoisting such an alloca operation, one
+  // must remove the "const" flag from it, otherwise LLVM lowering code will
+  // mistakenly attach invariant group metadata to the load and store operations
+  // in the while body, indicating that all loads and stores across all
+  // iterations of the loop are constant.
+
+  for (mlir::Operation *user : alloca->getUsers()) {
+    if (!mlir::isa<cir::StoreOp>(user))
+      continue;
+
+    auto store = mlir::cast<cir::StoreOp>(user);
+    mlir::Operation *storeParentOp = store->getParentOp();
+    if (!mlir::isa<cir::WhileOp>(storeParentOp))
+      continue;
+
+    auto whileOp = mlir::cast<cir::WhileOp>(storeParentOp);
+    return &whileOp.getCond() == store->getParentRegion();
+  }
+
+  return false;
+}
+
+static void processConstAlloca(cir::AllocaOp alloca) {
+  // When optimization is enabled, LLVM lowering would start emitting invariant
+  // group metadata for loads and stores to alloca-ed objects with "const"
+  // attribute. For alloca operations inside loops, we need to use
+  // cir.invariant_group to refresh invariant information on each iteration.
+
+  if (isOpInLoop(alloca)) {
+    // Mark the alloca-ed pointer as invariant via the cir.invariant_group
+    // operation.
+    mlir::OpBuilder builder(alloca);
+    auto invariantGroupOp =
+        cir::InvariantGroupOp::create(builder, alloca.getLoc(), alloca);
+
+    // And replace all uses of the original alloca-ed pointer with the marked
+    // pointer (which carries invariant group information).
+    alloca->replaceUsesWithIf(
+        invariantGroupOp,
+        [op = invariantGroupOp.getOperation()](mlir::OpOperand &use) {
+          return use.getOwner() != op;
+        });
+  } else if (hasStoreToAllocaInWhileCond(alloca)) {
+    // The alloca represents a variable declared as the condition of a while
+    // loop. We have to remove the constant flag during hoisting, otherwise
+    // we would be telling the optimizer that the alloca-ed value is constant
+    // across all iterations of the while loop.
+    alloca.setConstant(false);
+  }
+}
+
 static void process(mlir::ModuleOp mod, cir::FuncOp func) {
   if (func.getRegion().empty())
     return;
 
   // Hoist all static allocas to the entry block.
   mlir::Block &entryBlock = func.getRegion().front();
-  mlir::Operation *insertPoint = &*entryBlock.begin();
-
-  // Post-order is the default, but the code below requires it, so
-  // let's not depend on the default staying that way.
-  func.getBody().walk<mlir::WalkOrder::PostOrder>([&](cir::AllocaOp alloca) {
+  llvm::SmallVector<cir::AllocaOp> allocas;
+  func.getBody().walk([&](cir::AllocaOp alloca) {
     if (alloca->getBlock() == &entryBlock)
       return;
     // Don't hoist allocas with dynamic alloca size.
     if (alloca.getDynAllocSize())
       return;
+    allocas.push_back(alloca);
+  });
+  if (allocas.empty())
+    return;
 
-    // Hoist allocas into the entry block.
+  mlir::Operation *insertPoint = &*entryBlock.begin();
+  auto optInfoAttr = mlir::cast_if_present<cir::OptInfoAttr>(
+      mod->getAttr(cir::CIRDialect::getOptInfoAttrName()));
+  unsigned optLevel = optInfoAttr ? optInfoAttr.getLevel() : 0;
 
-    // Preserving the `const` attribute on hoisted allocas can cause LLVM to
-    // incorrectly introduce invariant group metadata in some circumstances.
-    // The incubator performs some analysis to determine whether the attribute
-    // can be preserved, but it only runs this analysis when optimizations are
-    // enabled. Until we start tracking the optimization level, we can just
-    // always remove the `const` attribute.
-    assert(!cir::MissingFeatures::optInfoAttr());
-    if (alloca.getConstant())
-      alloca.setConstant(false);
+  for (auto alloca : allocas) {
+    if (alloca.getConstant()) {
+      if (optLevel == 0) {
+        // Under non-optimized builds, just remove the constant flag.
+        alloca.setConstant(false);
+      } else {
+        processConstAlloca(alloca);
+      }
+    }
 
     alloca->moveBefore(insertPoint);
-  });
+  }
 }
 
 void HoistAllocasPass::runOnOperation() {

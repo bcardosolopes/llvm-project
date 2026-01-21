@@ -21,12 +21,11 @@ module {
     cir.try {
       // Normal execution path
       cir.return
-    } catch [#cir.unwind {
+    } unwind {
       // Cleanup/unwind region - not a real exception handler
-      // Before the fix: "undefined symbol alias id 'loc1'"
       // CHECK: cir.resume
       cir.resume loc(#loc1)
-    }]
+    }
     cir.return
   }
 
@@ -40,11 +39,11 @@ module {
   cir.func @rethrow_example() -> !void {
     cir.try {
       cir.return
-    } catch [#cir.unwind {
+    } unwind {
       // Rethrow - continue unwinding to find real handler
       // CHECK: cir.resume rethrow
       cir.resume rethrow loc(#loc2)
-    }]
+    }
     cir.return
   }
 
@@ -52,10 +51,10 @@ module {
   cir.func @test_unwind_catch_parsing() -> !void {
     cir.try {
       cir.return
-    } catch [#cir.unwind {
+    } unwind {
       // CHECK: cir.resume
       cir.resume
-    }]
+    }
     // CHECK: cir.return
     cir.return
   }

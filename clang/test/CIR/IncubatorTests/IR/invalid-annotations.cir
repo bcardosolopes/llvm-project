@@ -28,5 +28,5 @@ module attributes {cir.global_annotations = #cir<global_annotations [[2,[1,2]]]>
 
 // -----
 
-// expected-error @below {{The second element of GlobalAnnotationValuesAttrannotations array element must be of type AnnotationValueAttr}}
+// expected-error @below {{The second element of GlobalAnnotationValuesAttrannotations array element must be of type AnnotationAttr}}
 module attributes {cir.global_annotations = #cir<global_annotations [["2",[1,2]]]>} {}

@@ -4,7 +4,7 @@
 !s8i = !cir.int<s, 8>
 !s32i = !cir.int<s, 32>
 !s64i = !cir.int<s, 64>
-!rec_anon2E1_ = !cir.record<struct "anon.1" {!cir.int<s, 32>, !cir.int<s, 32>} #cir.record.decl.ast>
+!rec_anon2E1_ = !cir.record<struct "anon.1" {!cir.int<s, 32>, !cir.int<s, 32>}>
 module {
   cir.func @testConstArrInit() {
     %0 = cir.const #cir.const_array<"string\00" : !cir.array<!s8i x 7>> : !cir.array<!s8i x 7>
@@ -46,7 +46,7 @@ module {
     cir.return
   }
   // CHECK:  llvm.func @testConstArrayOfStructs()
-  // CHECK:    %0 = llvm.mlir.constant(1 : index) : i64
+  // CHECK:    %0 = llvm.mlir.constant(1 : i64) : i64
   // CHECK:    %1 = llvm.alloca %0 x !llvm.array<1 x struct<"struct.anon.1", (i32, i32)>> {alignment = 4 : i64} : (i64) -> !llvm.ptr
   // CHECK:    %2 = llvm.mlir.undef : !llvm.array<1 x struct<"struct.anon.1", (i32, i32)>>
   // CHECK:    %3 = llvm.mlir.undef : !llvm.struct<"struct.anon.1", (i32, i32)>
@@ -65,7 +65,7 @@ module {
     cir.return
   }
   // CHECK: llvm.func @testArrWithTrailingZeros()
-  // CHECK:   %0 = llvm.mlir.constant(1 : index) : i64
+  // CHECK:   %0 = llvm.mlir.constant(1 : i64) : i64
   // CHECK:   %1 = llvm.alloca %0 x !llvm.array<10 x i32> {alignment = 16 : i64} : (i64) -> !llvm.ptr
   // CHECK:   %2 = llvm.mlir.zero : !llvm.array<10 x i32>
   // CHECK:   %3 = llvm.mlir.constant(1 : i32) : i32

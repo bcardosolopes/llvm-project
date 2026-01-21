@@ -18,9 +18,9 @@ struct Derived final : Base1 {};
 Derived *ptr_cast(Base1 *ptr) {
   return dynamic_cast<Derived *>(ptr);
   //      CHECK: %[[#SRC:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!rec_Base1>>, !cir.ptr<!rec_Base1>
-  // CHECK-NEXT: %[[#SRC_IS_NONNULL:]] = cir.cast ptr_to_bool %[[#SRC]] : !cir.ptr<!rec_Base1> -> !cir.bool
-  // CHECK-NEXT: %[[#SRC_IS_NULL:]] = cir.unary(not, %[[#SRC_IS_NONNULL]]) : !cir.bool, !cir.bool
-  // CHECK-NEXT: %[[#RESULT:]] = cir.ternary(%4, true {
+  // CHECK-NEXT: %[[#NULL:]] = cir.const #cir.ptr<null> : !cir.ptr<!rec_Base1>
+  // CHECK-NEXT: %[[#SRC_IS_NULL:]] = cir.cmp(eq, %[[#SRC]], %[[#NULL]]) : !cir.ptr<!rec_Base1>, !cir.bool
+  // CHECK-NEXT: %[[#RESULT:]] = cir.ternary(%[[#SRC_IS_NULL]], true {
   // CHECK-NEXT:   %[[#NULL_DEST_PTR:]] = cir.const #cir.ptr<null> : !cir.ptr<!rec_Derived>
   // CHECK-NEXT:   cir.yield %[[#NULL_DEST_PTR]] : !cir.ptr<!rec_Derived>
   // CHECK-NEXT: }, false {
@@ -42,12 +42,12 @@ Derived *ptr_cast(Base1 *ptr) {
 //      LLVM: define dso_local ptr @_Z8ptr_castP5Base1(ptr {{.*}} %[[#SRC:]])
 // LLVM-NEXT:   %[[SRC_IS_NULL:.*]] = icmp eq ptr %[[#SRC]], null
 // LLVM-NEXT:   br i1 %[[SRC_IS_NULL]], label %[[#LABEL_END:]], label %[[#LABEL_NONNULL:]]
-//      LLVM: [[#LABEL_NONNULL]]
+//      LLVM: [[#LABEL_NONNULL]]:
 // LLVM-NEXT:   %[[#VPTR:]] = load ptr, ptr %[[#SRC]], align 8
 // LLVM-NEXT:   %[[#SUCCESS:]] = icmp eq ptr %[[#VPTR]], getelementptr inbounds nuw (i8, ptr @_ZTV7Derived, i64 16)
 // LLVM-NEXT:   %[[EXACT_RESULT:.*]] = select i1 %[[#SUCCESS]], ptr %[[#SRC]], ptr null
 // LLVM-NEXT:   br label %[[#LABEL_END]]
-//      LLVM: [[#LABEL_END]]
+//      LLVM: [[#LABEL_END]]:
 // LLVM-NEXT:   %[[#RESULT:]] = phi ptr [ %[[EXACT_RESULT]], %[[#LABEL_NONNULL]] ], [ null, %{{.*}} ]
 // LLVM-NEXT:   ret ptr %[[#RESULT]]
 // LLVM-NEXT: }
@@ -119,12 +119,11 @@ Derived *ptr_cast_always_fail(Base2 *ptr) {
 Derived &ref_cast_always_fail(Base2 &ref) {
   return dynamic_cast<Derived &>(ref);
   //      CHECK: %{{.+}} = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!rec_Base2>>, !cir.ptr<!rec_Base2>
-  // CHECK-NEXT: %{{.+}} = cir.const #cir.ptr<null> : !cir.ptr<!rec_Derived>
   // CHECK-NEXT: cir.call @__cxa_bad_cast() : () -> ()
   // CHECK-NEXT: cir.unreachable
 }
 
-//      LLVM: define dso_local noalias noundef nonnull ptr @_Z20ref_cast_always_failR5Base2(ptr  readnone captures(none) %{{.+}})
+//      LLVM: define dso_local noalias noundef nonnull ptr @_Z20ref_cast_always_failR5Base2(ptr readnone captures(none) %{{.+}})
 // LLVM-NEXT:   tail call void @__cxa_bad_cast()
 // LLVM-NEXT:   unreachable
 // LLVM-NEXT: }

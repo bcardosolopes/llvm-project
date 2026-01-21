@@ -22,6 +22,10 @@
 #include <memory>
 #include <utility>
 
+namespace clang {
+class VarDecl;
+} // namespace clang
+
 namespace clang::CIRGen {
 
 /// isEmptyFieldForLayout - Return true if the field is "empty", that is,
@@ -35,6 +39,7 @@ bool isEmptyFieldForLayout(const ASTContext &context, const FieldDecl *fd);
 bool isEmptyRecordForLayout(const ASTContext &context, QualType t);
 
 class CIRGenFunction;
+class CIRGenModule;
 
 class TargetCIRGenInfo {
   std::unique_ptr<ABIInfo> info;
@@ -48,7 +53,7 @@ public:
   const ABIInfo &getABIInfo() const { return *info; }
 
   /// Get the address space for alloca.
-  virtual cir::TargetAddressSpaceAttr getCIRAllocaAddressSpace() const {
+  virtual mlir::ptr::MemorySpaceAttrInterface getCIRAllocaAddressSpace() const {
     return {};
   }
   /// Perform address space cast of an expression of pointer type.
@@ -56,10 +61,10 @@ public:
   /// \param DestTy is the destination pointer type.
   /// \param srcAS is theaddress space of \p V.
   /// \param IsNonNull is the flag indicating \p V is known to be non null.
-  virtual mlir::Value performAddrSpaceCast(CIRGenFunction &cgf, mlir::Value v,
-                                           cir::TargetAddressSpaceAttr srcAddr,
-                                           mlir::Type destTy,
-                                           bool isNonNull = false) const;
+  virtual mlir::Value
+  performAddrSpaceCast(CIRGenFunction &cgf, mlir::Value v,
+                       mlir::ptr::MemorySpaceAttrInterface srcAddr,
+                       mlir::Type destTy, bool isNonNull = false) const;
 
   /// Determine whether a call to an unprototyped functions under
   /// the given calling convention should use the variadic
@@ -120,9 +125,28 @@ public:
                                          mlir::Type ty) const {
     return ty;
   }
+
+  virtual void setCUDAKernelCallingConvention(const FunctionType *&ft) const {}
+
+  virtual cir::CallingConv getOpenCLKernelCallingConv() const {
+    // OpenCL kernels use the default calling convention by default.
+    return cir::CallingConv::C;
+  }
+
+  virtual void setTargetAttributes(const clang::Decl *decl,
+                                   mlir::Operation *global,
+                                   CIRGenModule &cgm) const {}
+
+  /// Determines the address space for a global variable.
+  virtual LangAS getGlobalVarAddressSpace(CIRGenModule &cgm,
+                                          const VarDecl *d) const;
 };
 
 std::unique_ptr<TargetCIRGenInfo> createX8664TargetCIRGenInfo(CIRGenTypes &cgt);
+std::unique_ptr<TargetCIRGenInfo> createNVPTXTargetCIRGenInfo(CIRGenTypes &cgt);
+std::unique_ptr<TargetCIRGenInfo>
+createAMDGPUTargetCIRGenInfo(CIRGenTypes &cgt);
+std::unique_ptr<TargetCIRGenInfo> createSPIRVTargetCIRGenInfo(CIRGenTypes &cgt);
 
 } // namespace clang::CIRGen
 

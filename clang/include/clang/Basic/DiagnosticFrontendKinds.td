@@ -474,4 +474,7 @@ def err_cir_to_cir_transform_failed : Error<
 def err_cir_verification_failed_pre_passes : Error<
     "CIR module verification error before running CIR-to-CIR passes">,
     DefaultFatal;
+
+def err_drv_cir_pass_opt_parsing : Error<
+    "clangir pass option '%0' not recognized">, DefaultFatal;
 }

@@ -191,7 +191,7 @@ __device__ void test_struct() {
 // LLVM-DEVICE: store ptr {{.*}}, ptr {{.*}}
 // LLVM-DEVICE: call void @llvm.memcpy
 // LLVM-DEVICE: load %struct.S
-// LLVM-DEVICE: call void @takeS(%struct.S {{.*}})
+// LLVM-DEVICE: call void @takeS(ptr {{.*}})
 // LLVM-DEVICE: ret void
 
 // OGCG-DEVICE-LABEL: @_Z11test_structv
@@ -245,7 +245,7 @@ __device__ void foo() {
 // LLVM-DEVICE-LABEL: @_Z3foov
 // LLVM-DEVICE: alloca [13 x i8]
 // LLVM-DEVICE: addrspacecast ptr addrspace(5) {{.*}} to ptr
-// LLVM-DEVICE: call void @llvm.memcpy.p0.p0.i32
+// LLVM-DEVICE: call void @llvm.memcpy.p0.p0.i64
 // LLVM-DEVICE: getelementptr i8
 // LLVM-DEVICE: call void @bar(ptr {{.*}})
 // LLVM-DEVICE: ret void

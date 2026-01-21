@@ -14,7 +14,7 @@ module {
   }
 
 //      MLIR: llvm.func @foo()
-// MLIR:   [[v2:%[0-9]]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:   [[v2:%[0-9]]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:   [[v3:%[0-9]]] = llvm.alloca [[v2]] x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
 // MLIR:   llvm.br ^bb1
 // MLIR: ^bb1:
@@ -62,7 +62,7 @@ module {
   }
 
   //      MLIR: llvm.func @scope_with_return()
-  // MLIR-NEXT:  [[v0:%.*]] = llvm.mlir.constant(1 : index) : i64
+  // MLIR-NEXT:  [[v0:%.*]] = llvm.mlir.constant(1 : i64) : i64
   // MLIR-NEXT:  [[v1:%.*]] = llvm.alloca [[v0]] x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
   // MLIR-NEXT:  llvm.br ^bb1
   // MLIR-NEXT: ^bb1:  // pred: ^bb0

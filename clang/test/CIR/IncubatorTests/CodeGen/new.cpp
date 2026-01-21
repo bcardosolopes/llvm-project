@@ -22,15 +22,15 @@ void m(int a, int b) {
 // CHECK:   cir.store{{.*}} %arg0, %0 : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
 // CHECK:   cir.store{{.*}} %arg1, %1 : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
 // CHECK:   cir.scope {
-// CHECK:     %4 = cir.const #cir.int<1> : !u64i
-// CHECK:     %5 = cir.call @_Znwm(%4) : (!u64i) -> !cir.ptr<!void>
-// CHECK:     %6 = cir.cast bitcast %5 : !cir.ptr<!void> -> !cir.ptr<!rec_S>
-// CHECK:     %7 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK:     %8 = cir.load{{.*}} %7 : !cir.ptr<!s32i>, !s32i
-// CHECK:     %9 = cir.load{{.*}} %1 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK:     %10 = cir.load{{.*}} %9 : !cir.ptr<!s32i>, !s32i
-// CHECK:     cir.call @_ZN1SC1Eii(%6, %8, %10) : (!cir.ptr<!rec_S>, !s32i, !s32i) -> ()
-// CHECK:     cir.call @_ZNSt10shared_ptrI1SEC1EPS0_(%2, %6) : (!cir.ptr<!rec_std3A3Ashared_ptr3CS3E>, !cir.ptr<!rec_S>) -> ()
+// CHECK:     %[[CONST_1:.*]] = cir.const #cir.int<1> : !u64i
+// CHECK:     %[[NEW_PTR:.*]] = cir.call @_Znwm(%[[CONST_1]]) : (!u64i) -> !cir.ptr<!void>
+// CHECK:     %[[S_PTR:.*]] = cir.cast bitcast %[[NEW_PTR]] : !cir.ptr<!void> -> !cir.ptr<!rec_S>
+// CHECK:     %[[ARG0_PTR:.*]] = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// CHECK:     %[[ARG0_VAL:.*]] = cir.load{{.*}} %[[ARG0_PTR]] : !cir.ptr<!s32i>, !s32i
+// CHECK:     %[[ARG1_PTR:.*]] = cir.load{{.*}} %1 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// CHECK:     %[[ARG1_VAL:.*]] = cir.load{{.*}} %[[ARG1_PTR]] : !cir.ptr<!s32i>, !s32i
+// CHECK:     cir.call @_ZN1SC1Eii(%[[S_PTR]], %[[ARG0_VAL]], %[[ARG1_VAL]]) : (!cir.ptr<!rec_S>, !s32i, !s32i) -> ()
+// CHECK:     cir.call @_ZNSt10shared_ptrI1SEC1EPS0_(%2, %[[S_PTR]]) : (!cir.ptr<!rec_std3A3Ashared_ptr3CS3E>, !cir.ptr<!rec_S>) -> ()
 // CHECK:   }
 
 class B {
@@ -46,10 +46,6 @@ public:
 // CHECK:   cir.store{{.*}} %arg0, %0 : !cir.ptr<!rec_B>, !cir.ptr<!cir.ptr<!rec_B>>
 // CHECK:   cir.store{{.*}} %arg1, %1 : !cir.ptr<!rec_B>, !cir.ptr<!cir.ptr<!rec_B>>
 // CHECK:   %2 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!rec_B>>, !cir.ptr<!rec_B>
-// CHECK:   %3 = cir.const #cir.int<1> : !u64i
-// CHECK:   %4 = cir.load{{.*}} %1 : !cir.ptr<!cir.ptr<!rec_B>>, !cir.ptr<!rec_B>
-// CHECK:   %5 = cir.cast bitcast %4 : !cir.ptr<!rec_B> -> !cir.ptr<!void>
-// CHECK:   %6 = cir.cast bitcast %5 : !cir.ptr<!void> -> !cir.ptr<!rec_B>
 
 // Trivial default constructor call is lowered away.
 // CHECK:   cir.return
@@ -77,12 +73,11 @@ void t_new_constant_size() {
 //   are no constructor calls needed.
 
 // CHECK:   cir.func {{.*}} @_Z19t_new_constant_sizev()
-// CHECK:    %0 = cir.alloca !cir.ptr<!cir.double>, !cir.ptr<!cir.ptr<!cir.double>>, ["p", init] {alignment = 8 : i64}
-// CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<16> : !u64i
+// CHECK:    %[[P:.*]] = cir.alloca !cir.ptr<!cir.double>, !cir.ptr<!cir.ptr<!cir.double>>, ["p", init] {alignment = 8 : i64}
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<128> : !u64i
-// CHECK:    %3 = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %4 = cir.cast bitcast %3 : !cir.ptr<!void> -> !cir.ptr<!cir.double>
-// CHECK:    cir.store{{.*}} %4, %0 : !cir.ptr<!cir.double>, !cir.ptr<!cir.ptr<!cir.double>>
+// CHECK:    %[[ALLOC_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
+// CHECK:    %[[CAST_PTR:.*]] = cir.cast bitcast %[[ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!cir.double>
+// CHECK:    cir.store{{.*}} %[[CAST_PTR]], %[[P]] : !cir.ptr<!cir.double>, !cir.ptr<!cir.ptr<!cir.double>>
 // CHECK:    cir.return
 // CHECK:  }
 
@@ -93,13 +88,11 @@ void t_new_multidim_constant_size() {
 // As above, NUM_ELEMENTS isn't used.
 
 // CHECK:   cir.func {{.*}} @_Z28t_new_multidim_constant_sizev()
-// CHECK:    %0 = cir.alloca !cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>, !cir.ptr<!cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>>, ["p", init] {alignment = 8 : i64}
-// CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<24> : !u64i
+// CHECK:    %[[P:.*]] = cir.alloca !cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>, !cir.ptr<!cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>>, ["p", init] {alignment = 8 : i64}
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<192> : !u64i
-// CHECK:    %3 = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %4 = cir.cast bitcast %3 : !cir.ptr<!void> -> !cir.ptr<!cir.double>
-// CHECK:    %5 = cir.cast bitcast %0 : !cir.ptr<!cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>> -> !cir.ptr<!cir.ptr<!cir.double>>
-// CHECK:    cir.store{{.*}} %4, %5 : !cir.ptr<!cir.double>, !cir.ptr<!cir.ptr<!cir.double>>
+// CHECK:    %[[ALLOC_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
+// CHECK:    %[[CAST_PTR:.*]] = cir.cast bitcast %[[ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>
+// CHECK:    cir.store{{.*}} %[[CAST_PTR]], %[[P]] : !cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>, !cir.ptr<!cir.ptr<!cir.array<!cir.array<!cir.double x 4> x 3>>>
 // CHECK:  }
 
 class C {
@@ -112,18 +105,18 @@ void t_constant_size_nontrivial() {
 }
 
 // CHECK:  cir.func {{.*}} @_Z26t_constant_size_nontrivialv()
-// CHECK:    %0 = cir.alloca !cir.ptr<!rec_C>, !cir.ptr<!cir.ptr<!rec_C>>, ["p", init] {alignment = 8 : i64}
+// CHECK:    %[[P:.*]] = cir.alloca !cir.ptr<!rec_C>, !cir.ptr<!cir.ptr<!rec_C>>, ["p", init] {alignment = 8 : i64}
 // CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<3> : !u64i
-// CHECK:    %[[SIZE_WITHOUT_COOKIE:.*]] = cir.const #cir.int<3> : !u64i
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<11> : !u64i
-// CHECK:    %4 = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %5 = cir.cast bitcast %4 : !cir.ptr<!void> -> !cir.ptr<!u64i>
-// CHECK:    cir.store{{.*}} %[[NUM_ELEMENTS]], %5 : !u64i, !cir.ptr<!u64i>
-// CHECK:    %6 = cir.cast bitcast %4 : !cir.ptr<!void> -> !cir.ptr<!u8i>
+// CHECK:    %[[ALLOC_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
+// CHECK:    %[[U8_PTR:.*]] = cir.cast bitcast %[[ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!u8i>
+// CHECK:    %[[COOKIE_PTR:.*]] = cir.cast bitcast %[[U8_PTR]] : !cir.ptr<!u8i> -> !cir.ptr<!u64i>
+// CHECK:    cir.store{{.*}} %[[NUM_ELEMENTS]], %[[COOKIE_PTR]] : !u64i, !cir.ptr<!u64i>
 // CHECK:    %[[COOKIE_SIZE:.*]] = cir.const #cir.int<8> : !s32i
-// CHECK:    %8 = cir.ptr_stride %6, %[[COOKIE_SIZE]] : (!cir.ptr<!u8i>, !s32i) -> !cir.ptr<!u8i>
-// CHECK:    %9 = cir.cast bitcast %8 : !cir.ptr<!u8i> -> !cir.ptr<!rec_C>
-// CHECK:    cir.store{{.*}} %9, %0 : !cir.ptr<!rec_C>, !cir.ptr<!cir.ptr<!rec_C>>
+// CHECK:    %[[OBJ_PTR:.*]] = cir.ptr_stride %[[U8_PTR]], %[[COOKIE_SIZE]] : (!cir.ptr<!u8i>, !s32i) -> !cir.ptr<!u8i>
+// CHECK:    %[[VOID_PTR:.*]] = cir.cast bitcast %[[OBJ_PTR]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
+// CHECK:    %[[RESULT:.*]] = cir.cast bitcast %[[VOID_PTR]] : !cir.ptr<!void> -> !cir.ptr<!rec_C>
+// CHECK:    cir.store{{.*}} %[[RESULT]], %[[P]] : !cir.ptr<!rec_C>, !cir.ptr<!cir.ptr<!rec_C>>
 // CHECK:    cir.return
 // CHECK:  }
 
@@ -141,18 +134,18 @@ void t_constant_size_nontrivial2() {
 // an initializer.
 
 // CHECK:  cir.func {{.*}} @_Z27t_constant_size_nontrivial2v()
-// CHECK:    %0 = cir.alloca !cir.ptr<!rec_D>, !cir.ptr<!cir.ptr<!rec_D>>, ["p", init] {alignment = 8 : i64}
+// CHECK:    %[[P:.*]] = cir.alloca !cir.ptr<!rec_D>, !cir.ptr<!cir.ptr<!rec_D>>, ["p", init] {alignment = 8 : i64}
 // CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<3> : !u64i
-// CHECK:    %[[SIZE_WITHOUT_COOKIE:.*]] = cir.const #cir.int<12> : !u64i
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<20> : !u64i
-// CHECK:    %4 = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %5 = cir.cast bitcast %4 : !cir.ptr<!void> -> !cir.ptr<!u64i>
-// CHECK:    cir.store{{.*}} %[[NUM_ELEMENTS]], %5 : !u64i, !cir.ptr<!u64i>
-// CHECK:    %6 = cir.cast bitcast %4 : !cir.ptr<!void> -> !cir.ptr<!u8i>
+// CHECK:    %[[ALLOC_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
+// CHECK:    %[[U8_PTR:.*]] = cir.cast bitcast %[[ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!u8i>
+// CHECK:    %[[COOKIE_PTR:.*]] = cir.cast bitcast %[[U8_PTR]] : !cir.ptr<!u8i> -> !cir.ptr<!u64i>
+// CHECK:    cir.store{{.*}} %[[NUM_ELEMENTS]], %[[COOKIE_PTR]] : !u64i, !cir.ptr<!u64i>
 // CHECK:    %[[COOKIE_SIZE:.*]] = cir.const #cir.int<8> : !s32i
-// CHECK:    %8 = cir.ptr_stride %6, %[[COOKIE_SIZE]] : (!cir.ptr<!u8i>, !s32i) -> !cir.ptr<!u8i>
-// CHECK:    %9 = cir.cast bitcast %8 : !cir.ptr<!u8i> -> !cir.ptr<!rec_D>
-// CHECK:    cir.store{{.*}} %9, %0 : !cir.ptr<!rec_D>, !cir.ptr<!cir.ptr<!rec_D>>
+// CHECK:    %[[OBJ_PTR:.*]] = cir.ptr_stride %[[U8_PTR]], %[[COOKIE_SIZE]] : (!cir.ptr<!u8i>, !s32i) -> !cir.ptr<!u8i>
+// CHECK:    %[[VOID_PTR:.*]] = cir.cast bitcast %[[OBJ_PTR]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
+// CHECK:    %[[RESULT:.*]] = cir.cast bitcast %[[VOID_PTR]] : !cir.ptr<!void> -> !cir.ptr<!rec_D>
+// CHECK:    cir.store{{.*}} %[[RESULT]], %[[P]] : !cir.ptr<!rec_D>, !cir.ptr<!cir.ptr<!rec_D>>
 // CHECK:    cir.return
 // CHECK:  }
 
@@ -164,21 +157,18 @@ void t_constant_size_memset_init() {
 //   are no constructor calls needed.
 
 // CHECK:  cir.func {{.*}} @_Z27t_constant_size_memset_initv()
-// CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<16> : !u64i
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<64> : !u64i
 // CHECK:    %[[ALLOC_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
 // CHECK:    %[[ELEM_PTR:.*]] = cir.cast bitcast %[[ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!s32i>
 // CHECK:    %[[VOID_PTR:.*]] = cir.cast bitcast %[[ELEM_PTR]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CHECK:    %[[ZERO:.*]] = cir.const #cir.int<0> : !u8i
-// CHECK:    %[[ZERO_I32:.*]] = cir.cast integral %[[ZERO]] : !u8i -> !s32i
-// CHECK:    cir.libc.memset %[[ALLOCATION_SIZE]] bytes from %[[VOID_PTR]] set to %[[ZERO_I32]] : !cir.ptr<!void>, !s32i, !u64i
+// CHECK:    %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
+// CHECK:    cir.libc.memset %[[ALLOCATION_SIZE]] bytes from %[[VOID_PTR]] set to %[[ZERO]] : !cir.ptr<!void>, !s32i, !u64i
 
 void t_constant_size_partial_init() {
   auto p = new int[16] { 1, 2, 3 };
 }
 
 // CHECK:  cir.func {{.*}} @_Z28t_constant_size_partial_initv()
-// CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<16> : !u64i
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<64> : !u64i
 // CHECK:    %[[ALLOC_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
 // CHECK:    %[[ELEM_0_PTR:.*]] = cir.cast bitcast %[[ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!s32i>
@@ -197,9 +187,8 @@ void t_constant_size_partial_init() {
 // CHECK:    %[[INIT_SIZE:.*]] = cir.const #cir.int<12> : !u64i
 // CHECK:    %[[REMAINING_SIZE:.*]] = cir.binop(sub, %[[ALLOCATION_SIZE]], %[[INIT_SIZE]]) : !u64i
 // CHECK:    %[[VOID_PTR:.*]] = cir.cast bitcast %[[ELEM_3_PTR]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CHECK:    %[[ZERO:.*]] = cir.const #cir.int<0> : !u8i
-// CHECK:    %[[ZERO_I32:.*]] = cir.cast integral %[[ZERO]] : !u8i -> !s32i
-// CHECK:    cir.libc.memset %[[REMAINING_SIZE]] bytes from %[[VOID_PTR]] set to %[[ZERO_I32]] : !cir.ptr<!void>, !s32i, !u64i
+// CHECK:    %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
+// CHECK:    cir.libc.memset %[[REMAINING_SIZE]] bytes from %[[VOID_PTR]] set to %[[ZERO]] : !cir.ptr<!void>, !s32i, !u64i
 
 void t_new_var_size(size_t n) {
   auto p = new char[n];
@@ -309,35 +298,31 @@ void t_multidim_init() {
 }
 
 // CHECK:  cir.func {{.*}} @_Z15t_multidim_initv()
-// CHECK:    %[[NUM_ELEMENTS:.*]] = cir.const #cir.int<6> : !u64i
 // CHECK:    %[[ALLOCATION_SIZE:.*]] = cir.const #cir.int<24> : !u64i
-// CHECK:    %[[NEW_PTR:.*]] = cir.call @_Znam(%2) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %[[ELEMENT_PTR:.*]] = cir.cast bitcast %[[NEW_PTR]] : !cir.ptr<!void> -> !cir.ptr<!s32i>
-// CHECK:    %[[ARRAY_ELEM0_PTR:.*]] = cir.cast bitcast %[[ELEMENT_PTR]] : !cir.ptr<!s32i> -> !cir.ptr<!cir.array<!s32i x 3>>
-// CHECK:    %[[OFFSET0:.*]] = cir.const #cir.int<0> : !s32i
-// CHECK:    %[[ELEM_00_PTR:.*]] = cir.get_element %[[ARRAY_ELEM0_PTR]][%[[OFFSET0]]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!s32i>
+// CHECK:    %[[NEW_PTR:.*]] = cir.call @_Znam(%[[ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
+// CHECK:    %[[ARRAY_PTR:.*]] = cir.cast bitcast %[[NEW_PTR]] : !cir.ptr<!void> -> !cir.ptr<!cir.array<!s32i x 3>>
+// CHECK:    %[[DECAY0:.*]] = cir.cast array_to_ptrdecay %[[ARRAY_PTR]] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
 // CHECK:    %[[ELEM_00_VAL:.*]] = cir.const #cir.int<1> : !s32i
-// CHECK:    cir.store{{.*}} %[[ELEM_00_VAL]], %[[ELEM_00_PTR]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[OFFSET1:.*]] = cir.const #cir.int<1> : !s64i
-// CHECK:    %[[ELEM_01_PTR:.*]] = cir.get_element %[[ARRAY_ELEM0_PTR]][%[[OFFSET1]]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s64i) -> !cir.ptr<!s32i>
+// CHECK:    cir.store{{.*}} %[[ELEM_00_VAL]], %[[DECAY0]] : !s32i, !cir.ptr<!s32i>
+// CHECK:    %[[OFF_1:.*]] = cir.const #cir.int<1> : !s64i
+// CHECK:    %[[ELEM_01_PTR:.*]] = cir.ptr_stride %[[DECAY0]], %[[OFF_1]] : (!cir.ptr<!s32i>, !s64i) -> !cir.ptr<!s32i>
 // CHECK:    %[[ELEM_01_VAL:.*]] = cir.const #cir.int<2> : !s32i
 // CHECK:    cir.store{{.*}} %[[ELEM_01_VAL]], %[[ELEM_01_PTR]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[OFFSET2:.*]] = cir.const #cir.int<2> : !s64i
-// CHECK:    %[[ELEM_02_PTR:.*]] = cir.get_element %[[ARRAY_ELEM0_PTR]][%[[OFFSET2]]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s64i) -> !cir.ptr<!s32i>
+// CHECK:    %[[OFF_2:.*]] = cir.const #cir.int<2> : !s64i
+// CHECK:    %[[ELEM_02_PTR:.*]] = cir.ptr_stride %[[DECAY0]], %[[OFF_2]] : (!cir.ptr<!s32i>, !s64i) -> !cir.ptr<!s32i>
 // CHECK:    %[[ELEM_02_VAL:.*]] = cir.const #cir.int<3> : !s32i
 // CHECK:    cir.store{{.*}} %[[ELEM_02_VAL]], %[[ELEM_02_PTR]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[OFFSET3:.*]] = cir.const #cir.int<1> : !s32i
-// CHECK:    %[[ARRAY_ELEM1_PTR:.*]] = cir.ptr_stride %[[ARRAY_ELEM0_PTR]], %[[OFFSET3]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!cir.array<!s32i x 3>>
-// CHECK:    %[[OFFSET4:.*]] = cir.const #cir.int<0> : !s32i
-// CHECK:    %[[ELEM_10_PTR:.*]] = cir.get_element %[[ARRAY_ELEM1_PTR]][%[[OFFSET4]]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!s32i>
+// CHECK:    %[[STRIDE_1:.*]] = cir.const #cir.int<1> : !s32i
+// CHECK:    %[[ARRAY_ELEM1:.*]] = cir.ptr_stride %[[ARRAY_PTR]], %[[STRIDE_1]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s32i) -> !cir.ptr<!cir.array<!s32i x 3>>
+// CHECK:    %[[DECAY1:.*]] = cir.cast array_to_ptrdecay %[[ARRAY_ELEM1]] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
 // CHECK:    %[[ELEM_10_VAL:.*]] = cir.const #cir.int<4> : !s32i
-// CHECK:    cir.store{{.*}} %[[ELEM_10_VAL]], %[[ELEM_10_PTR]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[OFFSET5:.*]] = cir.const #cir.int<1> : !s64i
-// CHECK:    %[[ELEM_11_PTR:.*]] = cir.get_element %[[ARRAY_ELEM1_PTR]][%[[OFFSET5]]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s64i) -> !cir.ptr<!s32i>
+// CHECK:    cir.store{{.*}} %[[ELEM_10_VAL]], %[[DECAY1]] : !s32i, !cir.ptr<!s32i>
+// CHECK:    %[[OFF_1B:.*]] = cir.const #cir.int<1> : !s64i
+// CHECK:    %[[ELEM_11_PTR:.*]] = cir.ptr_stride %[[DECAY1]], %[[OFF_1B]] : (!cir.ptr<!s32i>, !s64i) -> !cir.ptr<!s32i>
 // CHECK:    %[[ELEM_11_VAL:.*]] = cir.const #cir.int<5> : !s32i
 // CHECK:    cir.store{{.*}} %[[ELEM_11_VAL]], %[[ELEM_11_PTR]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[OFFSET6:.*]] = cir.const #cir.int<2> : !s64i
-// CHECK:    %[[ELEM_12_PTR:.*]] = cir.get_element %[[ARRAY_ELEM1_PTR]][%[[OFFSET6]]] : (!cir.ptr<!cir.array<!s32i x 3>>, !s64i) -> !cir.ptr<!s32i>
+// CHECK:    %[[OFF_2B:.*]] = cir.const #cir.int<2> : !s64i
+// CHECK:    %[[ELEM_12_PTR:.*]] = cir.ptr_stride %[[DECAY1]], %[[OFF_2B]] : (!cir.ptr<!s32i>, !s64i) -> !cir.ptr<!s32i>
 // CHECK:    %[[ELEM_12_VAL:.*]] = cir.const #cir.int<6> : !s32i
 // CHECK:    cir.store{{.*}} %[[ELEM_12_VAL]], %[[ELEM_12_PTR]] : !s32i, !cir.ptr<!s32i>
 
@@ -350,7 +335,7 @@ void test_new_with_complex_type() {
 // CHECK:   %[[COMPLEX_SIZE:.*]] = cir.const #cir.int<8> : !u64i
 // CHECK:   %[[NEW_COMPLEX:.*]] = cir.call @_Znwm(%[[COMPLEX_SIZE]]) : (!u64i) -> !cir.ptr<!void>
 // CHECK:   %[[COMPLEX_PTR:.*]] = cir.cast bitcast %[[NEW_COMPLEX]] : !cir.ptr<!void> -> !cir.ptr<!cir.complex<!cir.float>>
-// CHECK:   %[[COMPLEX_VAL:.*]] = cir.const #cir.complex<#cir.fp<1.000000e+00> : !cir.float, #cir.fp<2.000000e+00> : !cir.float> : !cir.complex<!cir.float>
+// CHECK:   %[[COMPLEX_VAL:.*]] = cir.const #cir.const_complex<#cir.fp<1.000000e+00> : !cir.float, #cir.fp<2.000000e+00> : !cir.float> : !cir.complex<!cir.float>
 // CHECK:   cir.store{{.*}} %[[COMPLEX_VAL]], %[[COMPLEX_PTR]] : !cir.complex<!cir.float>, !cir.ptr<!cir.complex<!cir.float>>
 // CHECK:   cir.store{{.*}} %[[COMPLEX_PTR]], %[[A_ADDR]] : !cir.ptr<!cir.complex<!cir.float>>, !cir.ptr<!cir.ptr<!cir.complex<!cir.float>>>
 

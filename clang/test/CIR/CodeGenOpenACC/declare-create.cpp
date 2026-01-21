@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fopenacc -Wno-openacc-self-if-potential-conflict -emit-cir -fclangir %s -o - | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fopenacc -Wno-openacc-self-if-potential-conflict -emit-cir -fclangir %s -o - | FileCheck %s
 
 struct HasSideEffects {
   HasSideEffects();
@@ -260,15 +260,16 @@ struct Struct {
 // CHECK-NEXT: }
 
   void MemFunc1(HasSideEffects ArgHSE, int ArgInt, HasSideEffects *ArgHSEPtr) {
-    // CHECK: cir.func {{.*}}MemFunc1{{.*}}(%{{.*}}: !cir.ptr<!rec_Struct>{{.*}}, %[[ARG_HSE:.*]]: !rec_HasSideEffects{{.*}}, %[[ARG_INT:.*]]: !s32i {{.*}}, %[[ARG_HSE_PTR:.*]]: !cir.ptr<!rec_HasSideEffects>{{.*}})
+    // CHECK: cir.func {{.*}}MemFunc1{{.*}}(%{{.*}}: !cir.ptr<!rec_Struct>{{.*}}, %[[ARG_HSE:.*]]: !u8i{{.*}}, %[[ARG_INT:.*]]: !s32i {{.*}}, %[[ARG_HSE_PTR:.*]]: !cir.ptr<!rec_HasSideEffects>{{.*}})
+    // CHECK-NEXT: %[[ARG_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}[""]
+    // CHECK-NEXT: %[[ARG_HSE_CAST:.*]] = cir.cast bitcast %[[ARG_HSE_ALLOCA]] : !cir.ptr<!rec_HasSideEffects> -> !cir.ptr<!u8i>
+    // CHECK-NEXT: cir.store %[[ARG_HSE]], %[[ARG_HSE_CAST]] : !u8i, !cir.ptr<!u8i>
     // CHECK-NEXT: cir.alloca{{.*}}["this"
-    // CHECK-NEXT: %[[ARG_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}["ArgHSE"
     // CHECK-NEXT: %[[ARG_INT_ALLOCA:.*]] = cir.alloca !s32i{{.*}}["ArgInt
     // CHECK-NEXT: %[[ARG_HSE_PTR_ALLOCA:.*]] = cir.alloca !cir.ptr<!rec_HasSideEffects>{{.*}}["ArgHSEPtr"
     // CHECK-NEXT: %[[LOC_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}["LocalHSE
     // CHECK-NEXT: %[[LOC_HSE_ARR_ALLOCA:.*]] = cir.alloca !cir.array<!rec_HasSideEffects x 5>{{.*}}["LocalHSEArr
     // CHECK-NEXT: %[[LOC_INT_ALLOCA:.*]] = cir.alloca !s32i{{.*}}["LocalInt
-    // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
@@ -319,15 +320,16 @@ void use() {
 }
 
 void Struct::MemFunc2(HasSideEffects ArgHSE, int ArgInt, HasSideEffects *ArgHSEPtr) {
-    // CHECK: cir.func {{.*}}MemFunc2{{.*}}(%{{.*}}: !cir.ptr<!rec_Struct>{{.*}}, %[[ARG_HSE:.*]]: !rec_HasSideEffects{{.*}}, %[[ARG_INT:.*]]: !s32i {{.*}}, %[[ARG_HSE_PTR:.*]]: !cir.ptr<!rec_HasSideEffects>{{.*}})
+    // CHECK: cir.func {{.*}}MemFunc2{{.*}}(%{{.*}}: !cir.ptr<!rec_Struct>{{.*}}, %[[ARG_HSE:.*]]: !u8i{{.*}}, %[[ARG_INT:.*]]: !s32i {{.*}}, %[[ARG_HSE_PTR:.*]]: !cir.ptr<!rec_HasSideEffects>{{.*}})
+    // CHECK-NEXT: %[[ARG_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}[""]
+    // CHECK-NEXT: %[[ARG_HSE_CAST:.*]] = cir.cast bitcast %[[ARG_HSE_ALLOCA]] : !cir.ptr<!rec_HasSideEffects> -> !cir.ptr<!u8i>
+    // CHECK-NEXT: cir.store %[[ARG_HSE]], %[[ARG_HSE_CAST]] : !u8i, !cir.ptr<!u8i>
     // CHECK-NEXT: cir.alloca{{.*}}["this"
-    // CHECK-NEXT: %[[ARG_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}["ArgHSE"
     // CHECK-NEXT: %[[ARG_INT_ALLOCA:.*]] = cir.alloca !s32i{{.*}}["ArgInt
     // CHECK-NEXT: %[[ARG_HSE_PTR_ALLOCA:.*]] = cir.alloca !cir.ptr<!rec_HasSideEffects>{{.*}}["ArgHSEPtr"
     // CHECK-NEXT: %[[LOC_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}["LocalHSE
     // CHECK-NEXT: %[[LOC_HSE_ARR_ALLOCA:.*]] = cir.alloca !cir.array<!rec_HasSideEffects x 5>{{.*}}["LocalHSEArr
     // CHECK-NEXT: %[[LOC_INT_ALLOCA:.*]] = cir.alloca !s32i{{.*}}["LocalInt
-    // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
@@ -379,14 +381,15 @@ void Struct::MemFunc2(HasSideEffects ArgHSE, int ArgInt, HasSideEffects *ArgHSEP
 extern "C" void do_thing();
 
 extern "C" void NormalFunc(HasSideEffects ArgHSE, int ArgInt, HasSideEffects *ArgHSEPtr) {
-    // CHECK: cir.func {{.*}}NormalFunc(%[[ARG_HSE:.*]]: !rec_HasSideEffects{{.*}}, %[[ARG_INT:.*]]: !s32i {{.*}}, %[[ARG_HSE_PTR:.*]]: !cir.ptr<!rec_HasSideEffects>{{.*}})
-    // CHECK-NEXT: %[[ARG_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}["ArgHSE"
+    // CHECK: cir.func {{.*}}NormalFunc(%[[ARG_HSE:.*]]: !u8i{{.*}}, %[[ARG_INT:.*]]: !s32i {{.*}}, %[[ARG_HSE_PTR:.*]]: !cir.ptr<!rec_HasSideEffects>{{.*}})
+    // CHECK-NEXT: %[[ARG_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}[""]
+    // CHECK-NEXT: %[[ARG_HSE_CAST:.*]] = cir.cast bitcast %[[ARG_HSE_ALLOCA]] : !cir.ptr<!rec_HasSideEffects> -> !cir.ptr<!u8i>
+    // CHECK-NEXT: cir.store %[[ARG_HSE]], %[[ARG_HSE_CAST]] : !u8i, !cir.ptr<!u8i>
     // CHECK-NEXT: %[[ARG_INT_ALLOCA:.*]] = cir.alloca !s32i{{.*}}["ArgInt
     // CHECK-NEXT: %[[ARG_HSE_PTR_ALLOCA:.*]] = cir.alloca !cir.ptr<!rec_HasSideEffects>{{.*}}["ArgHSEPtr"
     // CHECK-NEXT: %[[LOC_HSE_ALLOCA:.*]] = cir.alloca !rec_HasSideEffects{{.*}}["LocalHSE
     // CHECK-NEXT: %[[LOC_HSE_ARR_ALLOCA:.*]] = cir.alloca !cir.array<!rec_HasSideEffects x 5>{{.*}}["LocalHSEArr
     // CHECK-NEXT: %[[LOC_INT_ALLOCA:.*]] = cir.alloca !s32i{{.*}}["LocalInt
-    // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
     // CHECK-NEXT: cir.store
     HasSideEffects LocalHSE;

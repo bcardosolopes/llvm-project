@@ -58,7 +58,6 @@ void copy_c(C &c1, C &c2) {
 }
 
 // CIR: cir.func private @_ZN1AaSERKS_(!cir.ptr<!rec_A>, !cir.ptr<!rec_A>) -> !cir.ptr<!rec_A>
-// CIR: cir.func private @memcpy(!cir.ptr<!void>, !cir.ptr<!void>, !u64i) -> !cir.ptr<!void>
 
 // Implicit assignment operator for C.
 
@@ -78,8 +77,7 @@ void copy_c(C &c1, C &c2) {
 // CIR:   %[[RET_LOAD:.*]] = cir.load %[[ARG1_ADDR]]
 // CIR:   %[[B_MEMBER_2:.*]] = cir.get_member %[[RET_LOAD]][1] {name = "b"}
 // CIR:   %[[B_VOID_PTR_2:.*]] = cir.cast bitcast %[[B_MEMBER_2]] : !cir.ptr<!cir.array<!rec_B x 16>> -> !cir.ptr<!void>
-// CIR:   %[[SIZE:.*]] = cir.const #cir.int<64> : !u64i
-// CIR:   %[[COUNT:.*]] = cir.call @memcpy(%[[B_VOID_PTR]], %[[B_VOID_PTR_2]], %[[SIZE]])
+// CIR:   cir.libc.memcpy %[[SIZE:.*]] bytes from %{{.*}} to %{{.*}}
 // CIR:   cir.store %[[THIS]], %[[RET_ADDR]]
 // CIR:   %[[RET_VAL:.*]] = cir.load{{.*}} %[[RET_ADDR]]
 // CIR:   cir.return %[[RET_VAL]]

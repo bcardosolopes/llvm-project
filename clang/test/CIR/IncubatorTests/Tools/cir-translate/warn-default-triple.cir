@@ -1,4 +1,5 @@
 // RUN: cir-translate -verify-diagnostics --cir-to-llvmir --disable-cc-lowering %s
+// REQUIRES: system-linux
 
 // expected-warning@below {{no target triple provided, assuming x86_64-unknown-linux-gnu}}
 module {

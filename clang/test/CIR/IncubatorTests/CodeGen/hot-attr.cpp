@@ -14,3 +14,4 @@ __attribute__((hot)) int s0(int a, int b) {
 
 // LLVM: define dso_local i32 @_Z2s0ii({{.*}} #[[#ATTR1:]] {
 // LLVM: attributes #[[#ATTR1]] = {{.*}} hot
+

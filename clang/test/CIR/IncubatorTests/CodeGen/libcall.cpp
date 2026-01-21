@@ -43,21 +43,23 @@ void t(const char* fmt, ...) {
 // CHECK:   %0 = cir.alloca !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>, ["m", init] {alignment = 8 : i64}
 
 // CHECK:   %3 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!s8i>
-// CHECK:   %4 = cir.objsize max %3 : !cir.ptr<!s8i> -> !u64i
+// CHECK:   %4 = cir.objsize max nullunknown %3 : !cir.ptr<!s8i> -> !u64i
 // CHECK:   %5 = cir.call @_ZL6strlenPKcU17pass_object_size0(%3, %4) : (!cir.ptr<!s8i>, !u64i) -> !u64i
 
 // CHECK: cir.func {{.*}} @__vsnprintf_chk
 // CHECK: cir.func {{.*}} @_ZL9vsnprintfPcU17pass_object_size1iPKcP13__va_list_tag
 
-// Implicit size parameter in arg %1
+// Implicit size parameter in arg %arg1
 //
 // FIXME: tag the param with an attribute to designate the size information.
 //
-// CHECK: %1 = cir.alloca !u64i, !cir.ptr<!u64i>, ["", init] {alignment = 8 : i64}
+// CHECK: %0 = cir.alloca !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>, ["dest", init, const] {alignment = 8 : i64}
 
-// CHECK: cir.store %arg1, %1 : !u64i, !cir.ptr<!u64i>
+// CHECK: cir.store %arg0, %0 : !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>
 
-// CHECK: %10 = cir.load{{.*}} %1 : !cir.ptr<!u64i>, !u64i
-// CHECK: %11 = cir.load{{.*}} %3 : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!s8i>
-// CHECK: %12 = cir.load{{.*}} %4 : !cir.ptr<!cir.ptr<!rec___va_list_tag>>, !cir.ptr<!rec___va_list_tag>
-// CHECK: %13 = cir.call @__vsnprintf_chk(%6, %8, %9, %10, %11, %12)
+// CHECK: %9 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!s8i>
+// CHECK: %10 = cir.cast bitcast %9 : !cir.ptr<!s8i> -> !cir.ptr<!void>
+// CHECK: %11 = cir.objsize max nullunknown %10 : !cir.ptr<!void> -> !u64i
+// CHECK: %12 = cir.load{{.*}} %2 : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!s8i>
+// CHECK: %13 = cir.load{{.*}} %3 : !cir.ptr<!cir.ptr<!rec___va_list_tag>>, !cir.ptr<!rec___va_list_tag>
+// CHECK: %14 = cir.call @__vsnprintf_chk(%5, %7, %8, %11, %12, %13)

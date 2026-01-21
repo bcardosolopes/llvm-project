@@ -315,22 +315,10 @@ void sw6(int a) {
 
 // CIR: cir.func{{.*}} @_Z3sw6i
 // CIR: cir.switch(%[[A:.*]] : !s32i) {
-// CIR-NEXT: cir.case(equal, [#cir.int<0> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<1> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<2> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
 // CIR-NEXT:     cir.break
 // CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<3> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<4> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<5> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<3> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i]) {
 // CIR-NEXT:     cir.break
 // CIR-NEXT: }
 
@@ -339,32 +327,16 @@ void sw6(int a) {
 // LLVM:   br label %[[SWITCH:.*]]
 // LLVM: [[SWITCH]]:
 // LLVM:   switch i32 %[[A_VAL]], label %[[EXIT:.*]] [
-// LLVM-DAG:     i32 0, label %[[CASE0:.*]]
-// LLVM-DAG:     i32 1, label %[[CASE1:.*]]
-// LLVM-DAG:     i32 2, label %[[CASE2:.*]]
-// LLVM-DAG:     i32 3, label %[[CASE3:.*]]
-// LLVM-DAG:     i32 4, label %[[CASE4:.*]]
-// LLVM-DAG:     i32 5, label %[[CASE5:.*]]
+// LLVM-DAG:     i32 0, label %[[CASE012:.*]]
+// LLVM-DAG:     i32 1, label %[[CASE012]]
+// LLVM-DAG:     i32 2, label %[[CASE012]]
+// LLVM-DAG:     i32 3, label %[[CASE345:.*]]
+// LLVM-DAG:     i32 4, label %[[CASE345]]
+// LLVM-DAG:     i32 5, label %[[CASE345]]
 // LLVM:   ]
-// LLVM: [[CASE0]]:
-// LLVM:   br label %[[CASE0_CONT:.*]]
-// LLVM: [[CASE0_CONT]]:
-// LLVM:   br label %[[CASE1]]
-// LLVM: [[CASE1]]:
-// LLVM:   br label %[[CASE1_CONT:.*]]
-// LLVM: [[CASE1_CONT]]:
-// LLVM:   br label %[[CASE2]]
-// LLVM: [[CASE2]]:
-// LLVM:   br label %[[EXIT:.*]]
-// LLVM: [[CASE3]]:
-// LLVM:   br label %[[CASE3_CONT:.*]]
-// LLVM: [[CASE3_CONT]]:
-// LLVM:   br label %[[CASE4]]
-// LLVM: [[CASE4]]:
-// LLVM:   br label %[[CASE4_CONT:.*]]
-// LLVM: [[CASE4_CONT]]:
-// LLVM:   br label %[[CASE5]]
-// LLVM: [[CASE5]]:
+// LLVM: [[CASE012]]:
+// LLVM:   br label %[[EXIT]]
+// LLVM: [[CASE345]]:
 // LLVM:   br label %[[EXIT]]
 // LLVM: [[EXIT]]:
 // LLVM:   br label %[[RET:.*]]
@@ -407,22 +379,10 @@ void sw7(int a) {
 // CIR: cir.func{{.*}} @_Z3sw7i
 // CIR: %[[X:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["x"]
 // CIR: cir.switch(%[[A:.*]] : !s32i)
-// CIR-NEXT: cir.case(equal, [#cir.int<0> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
 // CIR-NEXT:     cir.yield
 // CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<1> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<2> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<3> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<4> : !s32i]) {
-// CIR-NEXT:     cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<5> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<3> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i]) {
 // CIR-NEXT:     cir.break
 // CIR-NEXT: }
 // CIR-NEXT: cir.yield
@@ -433,34 +393,18 @@ void sw7(int a) {
 // LLVM:   br label %[[SWITCH:.*]]
 // LLVM: [[SWITCH]]:
 // LLVM:   switch i32 %[[A_VAL]], label %[[EXIT:.*]] [
-// LLVM-DAG:     i32 0, label %[[CASE0:.*]]
-// LLVM-DAG:     i32 1, label %[[CASE1:.*]]
-// LLVM-DAG:     i32 2, label %[[CASE2:.*]]
-// LLVM-DAG:     i32 3, label %[[CASE3:.*]]
-// LLVM-DAG:     i32 4, label %[[CASE4:.*]]
-// LLVM-DAG:     i32 5, label %[[CASE5:.*]]
+// LLVM-DAG:     i32 0, label %[[CASE012:.*]]
+// LLVM-DAG:     i32 1, label %[[CASE012]]
+// LLVM-DAG:     i32 2, label %[[CASE012]]
+// LLVM-DAG:     i32 3, label %[[CASE345:.*]]
+// LLVM-DAG:     i32 4, label %[[CASE345]]
+// LLVM-DAG:     i32 5, label %[[CASE345]]
 // LLVM:   ]
-// LLVM: [[CASE0]]:
-// LLVM:   br label %[[CASE0_CONT:.*]]
-// LLVM: [[CASE0_CONT]]:
-// LLVM:   br label %[[CASE1]]
-// LLVM: [[CASE1]]:
-// LLVM:   br label %[[CASE1_CONT:.*]]
-// LLVM: [[CASE1_CONT]]:
-// LLVM:   br label %[[CASE2]]
-// LLVM: [[CASE2]]:
-// LLVM:   br label %[[CASE2_CONT:.*]]
-// LLVM: [[CASE2_CONT]]:
-// LLVM:   br label %[[CASE3]]
-// LLVM: [[CASE3]]:
-// LLVM:   br label %[[CASE3_CONT:.*]]
-// LLVM: [[CASE3_CONT]]:
-// LLVM:   br label %[[CASE4]]
-// LLVM: [[CASE4]]:
-// LLVM:   br label %[[CASE4_CONT:.*]]
-// LLVM: [[CASE4_CONT]]:
-// LLVM:   br label %[[CASE5]]
-// LLVM: [[CASE5]]:
+// LLVM: [[CASE012]]:
+// LLVM:   br label %[[CASE012_CONT:.*]]
+// LLVM: [[CASE012_CONT]]:
+// LLVM:   br label %[[CASE345]]
+// LLVM: [[CASE345]]:
 // LLVM:   br label %[[EXIT]]
 // LLVM: [[EXIT]]:
 // LLVM:   br label %[[RET:.*]]
@@ -692,49 +636,35 @@ void sw11(int a) {
 // CIR-NEXT: cir.case(equal, [#cir.int<3> : !s32i]) {
 // CIR-NEXT:   cir.break
 // CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<4> : !s32i]) {
-// CIR-NEXT:   cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<5> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<4> : !s32i, #cir.int<5> : !s32i]) {
 // CIR-NEXT:   cir.yield
 // CIR-NEXT: }
 // CIR-NEXT: cir.case(default, []) {
 // CIR-NEXT:   cir.yield
 // CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<6> : !s32i]) {
-// CIR-NEXT:   cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<7> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<6> : !s32i, #cir.int<7> : !s32i]) {
 // CIR-NEXT:   cir.break
 // CIR-NEXT: }
 
 // LLVM: define{{.*}} void @_Z4sw11i
 // LLVM:   switch i32 %[[COND:.*]], label %[[DEFAULT:.*]] [
 // LLVM-DAG:     i32 3, label %[[CASE_3:.*]]
-// LLVM-DAG:     i32 4, label %[[CASE_4:.*]]
-// LLVM-DAG:     i32 5, label %[[CASE_5:.*]]
-// LLVM-DAG:     i32 6, label %[[CASE_6:.*]]
-// LLVM-DAG:     i32 7, label %[[CASE_7:.*]]
+// LLVM-DAG:     i32 4, label %[[CASE_45:.*]]
+// LLVM-DAG:     i32 5, label %[[CASE_45]]
+// LLVM-DAG:     i32 6, label %[[CASE_67:.*]]
+// LLVM-DAG:     i32 7, label %[[CASE_67]]
 // LLVM:   ]
 // LLVM: [[CASE_3]]:
 // LLVM:   br label %[[EXIT:.*]]
-// LLVM: [[CASE_4]]:
-// LLVM:   br label %[[CASE4_CONT:.*]]
-// LLVM: [[CASE4_CONT]]:
-// LLVM:   br label %[[CASE_5]]
-// LLVM: [[CASE_5]]:
-// LLVM:   br label %[[CASE5_CONT:.*]]
-// LLVM: [[CASE5_CONT]]:
+// LLVM: [[CASE_45]]:
+// LLVM:   br label %[[CASE45_CONT:.*]]
+// LLVM: [[CASE45_CONT]]:
 // LLVM:   br label %[[DEFAULT]]
 // LLVM: [[DEFAULT]]:
 // LLVM:   br label %[[DEFAULT_CONT:.*]]
 // LLVM: [[DEFAULT_CONT]]:
-// LLVM:   br label %[[CASE_6]]
-// LLVM: [[CASE_6]]:
-// LLVM:   br label %[[CASE6_CONT:.*]]
-// LLVM: [[CASE6_CONT]]:
-// LLVM:   br label %[[CASE_7]]
-// LLVM: [[CASE_7]]:
+// LLVM:   br label %[[CASE_67]]
+// LLVM: [[CASE_67]]:
 // LLVM:   br label %[[EXIT]]
 // LLVM: [[EXIT]]:
 // LLVM:   br label %[[RET:.*]]
@@ -892,10 +822,7 @@ void sw14(int x) {
 
 // CIR:      cir.func{{.*}} @_Z4sw14i
 // CIR:      cir.switch
-// CIR-NEXT: cir.case(equal, [#cir.int<1> : !s32i]) {
-// CIR-NEXT:   cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<2> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
 // CIR-NEXT:   cir.yield
 // CIR-NEXT: }
 // CIR-NEXT: cir.case(range, [#cir.int<3> : !s32i, #cir.int<6> : !s32i]) {
@@ -910,21 +837,17 @@ void sw14(int x) {
 
 // LLVM: define{{.*}} void @_Z4sw14i
 // LLVM:   switch i32 %[[COND:.*]], label %[[DEFAULT:.*]] [
-// LLVM-DAG:     i32 1, label %[[CASE1:.*]]
-// LLVM-DAG:     i32 2, label %[[CASE2:.*]]
+// LLVM-DAG:     i32 1, label %[[CASE12:.*]]
+// LLVM-DAG:     i32 2, label %[[CASE12]]
+// LLVM-DAG:     i32 7, label %[[CASE7:.*]]
 // LLVM-DAG:     i32 3, label %[[CASE3_TO_6:.*]]
 // LLVM-DAG:     i32 4, label %[[CASE3_TO_6]]
 // LLVM-DAG:     i32 5, label %[[CASE3_TO_6]]
 // LLVM-DAG:     i32 6, label %[[CASE3_TO_6]]
-// LLVM-DAG:     i32 7, label %[[CASE7:.*]]
 // LLVM:   ]
-// LLVM: [[CASE1]]:
-// LLVM:   br label %[[AFTER1:.*]]
-// LLVM: [[AFTER1]]:
-// LLVM:   br label %[[CASE2]]
-// LLVM: [[CASE2]]:
-// LLVM:   br label %[[AFTER2:.*]]
-// LLVM: [[AFTER2]]:
+// LLVM: [[CASE12]]:
+// LLVM:   br label %[[AFTER12:.*]]
+// LLVM: [[AFTER12]]:
 // LLVM:   br label %[[CASE3_TO_6]]
 // LLVM: [[CASE3_TO_6]]:
 // LLVM:   br label %[[AFTER3_6:.*]]
@@ -980,10 +903,7 @@ void sw15(int x) {
 // CIR:      cir.func{{.*}} @_Z4sw15i
 // CIR:      %[[Y:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["y"]
 // CIR:      cir.switch
-// CIR-NEXT: cir.case(equal, [#cir.int<1> : !s32i]) {
-// CIR-NEXT:   cir.yield
-// CIR-NEXT: }
-// CIR-NEXT: cir.case(equal, [#cir.int<2> : !s32i]) {
+// CIR-NEXT: cir.case(anyof, [#cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
 // CIR-NEXT:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
 // CIR-NEXT:   cir.store{{.*}} %[[ZERO]], %[[Y]] : !s32i, !cir.ptr<!s32i>
 // CIR-NEXT:   cir.yield
@@ -997,18 +917,14 @@ void sw15(int x) {
 
 // LLVM: define{{.*}} void @_Z4sw15i
 // LLVM:   switch i32 %[[COND:.*]], label %[[DEFAULT:.*]] [
-// LLVM-DAG:     i32 1, label %[[CASE1:.*]]
-// LLVM-DAG:     i32 2, label %[[CASE2:.*]]
+// LLVM-DAG:     i32 1, label %[[CASE12:.*]]
+// LLVM-DAG:     i32 2, label %[[CASE12]]
 // LLVM-DAG:     i32 3, label %[[CASE3:.*]]
 // LLVM:   ]
-// LLVM: [[CASE1]]:
-// LLVM:   br label %[[CASE1_CONT:.*]]
-// LLVM: [[CASE1_CONT]]:
-// LLVM:   br label %[[CASE2]]
-// LLVM: [[CASE2]]:
+// LLVM: [[CASE12]]:
 // LLVM:   store i32 0, ptr %[[Y_ADDR:.*]], align 4
-// LLVM:   br label %[[CASE2_CONT:.*]]
-// LLVM: [[CASE2_CONT]]:
+// LLVM:   br label %[[CASE12_CONT:.*]]
+// LLVM: [[CASE12_CONT]]:
 // LLVM:   br label %[[CASE3]]
 // LLVM: [[CASE3]]:
 // LLVM:   br label %[[EXIT:.*]]

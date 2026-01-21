@@ -190,8 +190,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_add__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <add> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -228,8 +228,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_mul__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <mul> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -266,8 +266,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_max__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <max> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -311,8 +311,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_min__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <min> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -356,8 +356,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_iand__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <iand> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -394,8 +394,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_ior__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <ior> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -432,8 +432,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_xor__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <xor> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -470,8 +470,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_land__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <land> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {
@@ -518,8 +518,8 @@ void acc_compute() {
 // CHECK-NEXT: acc.reduction.recipe @reduction_lor__ZTSA5_i : !cir.ptr<!cir.array<!s32i x 5>> reduction_operator <lor> init {
 // CHECK-NEXT: ^bb0(%[[ARG:.*]]: !cir.ptr<!cir.array<!s32i x 5>>{{.*}})
 // CHECK-NEXT: %[[ALLOCA:.*]] = cir.alloca !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>, ["openacc.reduction.init", init]
-// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.const {{.*}} : !cir.array<!s32i x 5>
-// CHECK-NEXT: cir.store {{.*}} %[[INIT_VAL]], %[[ALLOCA]] : !cir.array<!s32i x 5>, !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: %[[INIT_VAL:.*]] = cir.get_global @{{.*}} : !cir.ptr<!cir.array<!s32i x 5>>
+// CHECK-NEXT: cir.copy %[[INIT_VAL]] to %[[ALLOCA]] : !cir.ptr<!cir.array<!s32i x 5>>
 // CHECK-NEXT: acc.yield
 //
 // CHECK-NEXT: } combiner {

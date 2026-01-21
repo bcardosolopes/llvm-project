@@ -1,8 +1,6 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
-// XFAIL: *
 //
-// Branch-through cleanups NYI
-// Location: CIRGenCleanup.cpp:527
+// Branch-through cleanups - previously NYI, now supported
 //
 // Original failure: cleanup_527 from LLVM build
 // Reduced from /tmp/MicrosoftDemangleNodes-acf44f.cpp

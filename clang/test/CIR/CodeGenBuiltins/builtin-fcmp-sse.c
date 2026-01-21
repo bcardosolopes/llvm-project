@@ -9,8 +9,8 @@ typedef float __m128 __attribute__((__vector_size__(16), __aligned__(16)));
 typedef double __m128d __attribute__((__vector_size__(16), __aligned__(16)));
 
 __m128 test_cmpnleps(__m128 A, __m128 B) {
-  // CIR-LABEL:   cir.func no_inline dso_local @test_cmpnleps(
-  // CIR:           %[[ARG0:.*]]: !cir.vector<4 x !cir.float> {{.*}}, %[[ARG1:.*]]: !cir.vector<4 x !cir.float> {{.*}}) -> !cir.vector<4 x !cir.float> {
+  // CIR-LABEL:   cir.func no_inline optnone dso_local @test_cmpnleps(
+  // CIR:           %[[ARG0:.*]]: !cir.vector<4 x !cir.float> {{.*}}, %[[ARG1:.*]]: !cir.vector<4 x !cir.float> {{.*}}) -> !cir.vector<4 x !cir.float> extra(#fn_attr) {
   // CIR:           %[[ALLOCA_0:.*]] = cir.alloca !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>, ["A", init] {alignment = 16 : i64}
   // CIR:           %[[ALLOCA_1:.*]] = cir.alloca !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>, ["B", init] {alignment = 16 : i64}
   // CIR:           %[[ALLOCA_2:.*]] = cir.alloca !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>, ["__retval"] {alignment = 16 : i64}
@@ -24,7 +24,7 @@ __m128 test_cmpnleps(__m128 A, __m128 B) {
   // CIR:           cir.store %[[CAST_0]], %[[ALLOCA_2]] : !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>
   // CIR:           %[[LOAD_2:.*]] = cir.load %[[ALLOCA_2]] : !cir.ptr<!cir.vector<4 x !cir.float>>, !cir.vector<4 x !cir.float>
   // CIR:           cir.return %[[LOAD_2]] : !cir.vector<4 x !cir.float>
-  // CIR:         } 
+  // CIR:         }
 
   // LLVM-LABEL: define dso_local <4 x float> @test_cmpnleps(
   // LLVM-SAME: <4 x float> [[TMP0:%.*]], <4 x float> [[TMP1:%.*]]) #[[ATTR0:[0-9]+]] {
@@ -60,8 +60,8 @@ __m128 test_cmpnleps(__m128 A, __m128 B) {
 }
 
 __m128d test_cmpnlepd(__m128d A, __m128d B) {
-  // CIR-LABEL:   cir.func no_inline dso_local @test_cmpnlepd(
-  // CIR:           %[[ARG0:.*]]: !cir.vector<2 x !cir.double> {{.*}}, %[[ARG1:.*]]: !cir.vector<2 x !cir.double> {{.*}}) -> !cir.vector<2 x !cir.double> {
+  // CIR-LABEL:   cir.func no_inline optnone dso_local @test_cmpnlepd(
+  // CIR:           %[[ARG0:.*]]: !cir.vector<2 x !cir.double> {{.*}}, %[[ARG1:.*]]: !cir.vector<2 x !cir.double> {{.*}}) -> !cir.vector<2 x !cir.double> extra(#fn_attr) {
   // CIR:           %[[ALLOCA_0:.*]] = cir.alloca !cir.vector<2 x !cir.double>, !cir.ptr<!cir.vector<2 x !cir.double>>, ["A", init] {alignment = 16 : i64} 
   // CIR:           %[[ALLOCA_1:.*]] = cir.alloca !cir.vector<2 x !cir.double>, !cir.ptr<!cir.vector<2 x !cir.double>>, ["B", init] {alignment = 16 : i64} 
   // CIR:           %[[ALLOCA_2:.*]] = cir.alloca !cir.vector<2 x !cir.double>, !cir.ptr<!cir.vector<2 x !cir.double>>, ["__retval"] {alignment = 16 : i64} 
@@ -111,8 +111,8 @@ __m128d test_cmpnlepd(__m128d A, __m128d B) {
 }
 
 __m128 test_cmpnltps(__m128 A, __m128 B) {
-  // CIR-LABEL:   cir.func no_inline dso_local @test_cmpnltps(
-  // CIR:           %[[ARG0:.*]]: !cir.vector<4 x !cir.float> {{.*}}, %[[ARG1:.*]]: !cir.vector<4 x !cir.float> {{.*}}) -> !cir.vector<4 x !cir.float> {
+  // CIR-LABEL:   cir.func no_inline optnone dso_local @test_cmpnltps(
+  // CIR:           %[[ARG0:.*]]: !cir.vector<4 x !cir.float> {{.*}}, %[[ARG1:.*]]: !cir.vector<4 x !cir.float> {{.*}}) -> !cir.vector<4 x !cir.float> extra(#fn_attr) {
   // CIR:           %[[ALLOCA_0:.*]] = cir.alloca !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>, ["A", init] {alignment = 16 : i64} 
   // CIR:           %[[ALLOCA_1:.*]] = cir.alloca !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>, ["B", init] {alignment = 16 : i64} 
   // CIR:           %[[ALLOCA_2:.*]] = cir.alloca !cir.vector<4 x !cir.float>, !cir.ptr<!cir.vector<4 x !cir.float>>, ["__retval"] {alignment = 16 : i64} 
@@ -162,8 +162,8 @@ __m128 test_cmpnltps(__m128 A, __m128 B) {
 }
 
 __m128d test_cmpnltpd(__m128d A, __m128d B) {
-  // CIR-LABEL:   cir.func no_inline dso_local @test_cmpnltpd(
-  // CIR:           %[[ARG0:.*]]: !cir.vector<2 x !cir.double> {{.*}}, %[[ARG1:.*]]: !cir.vector<2 x !cir.double> {{.*}}) -> !cir.vector<2 x !cir.double> {
+  // CIR-LABEL:   cir.func no_inline optnone dso_local @test_cmpnltpd(
+  // CIR:           %[[ARG0:.*]]: !cir.vector<2 x !cir.double> {{.*}}, %[[ARG1:.*]]: !cir.vector<2 x !cir.double> {{.*}}) -> !cir.vector<2 x !cir.double> extra(#fn_attr) {
   // CIR:           %[[ALLOCA_0:.*]] = cir.alloca !cir.vector<2 x !cir.double>, !cir.ptr<!cir.vector<2 x !cir.double>>, ["A", init] {alignment = 16 : i64} 
   // CIR:           %[[ALLOCA_1:.*]] = cir.alloca !cir.vector<2 x !cir.double>, !cir.ptr<!cir.vector<2 x !cir.double>>, ["B", init] {alignment = 16 : i64} 
   // CIR:           %[[ALLOCA_2:.*]] = cir.alloca !cir.vector<2 x !cir.double>, !cir.ptr<!cir.vector<2 x !cir.double>>, ["__retval"] {alignment = 16 : i64} 

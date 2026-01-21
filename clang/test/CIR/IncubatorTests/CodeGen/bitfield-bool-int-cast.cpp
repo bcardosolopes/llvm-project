@@ -1,8 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
-// XFAIL: *
 //
-// Bitfield bool to int conversion - type cast assertion failure
-// Location: Casting.h:560
+// Bitfield bool to int conversion - previously crashed with type cast assertion
+// failure at Casting.h:560
 
 struct a {
   bool b : 1;

@@ -17,6 +17,6 @@ void test_mm_pause(void) {
   // CIR-LABEL: test_mm_pause
   // LLVM-LABEL: test_mm_pause
   _mm_pause();
-  // CIR: {{%.*}} = cir.llvm.intrinsic "x86.sse2.pause" : () -> !void
+  // CIR: {{%.*}} = cir.call_llvm_intrinsic "x86.sse2.pause" : () -> !void
   // LLVM: call void @llvm.x86.sse2.pause()
 }

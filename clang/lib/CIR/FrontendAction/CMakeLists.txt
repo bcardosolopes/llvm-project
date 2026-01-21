@@ -1,5 +1,7 @@
 set(LLVM_LINK_COMPONENTS
+  BitReader
   Core
+  Linker
   Support
   )
 
@@ -20,6 +22,7 @@ add_clang_library(clangCIRFrontendAction
   clangCIR
   clangCIRLoweringCommon
   clangCIRLoweringDirectToLLVM
+  clangCIRLoweringThroughMLIR
   clangCodeGen
   MLIRCIR
   MLIRIR

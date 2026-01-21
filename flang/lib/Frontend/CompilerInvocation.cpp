@@ -615,6 +615,7 @@ static bool parseFrontendArgs(FrontendOptions &opts, llvm::opt::ArgList &args,
       opts.programAction = ParseSyntaxOnly;
       break;
     case clang::options::OPT_emit_fir:
+    case clang::options::OPT_emit_mlir:
       opts.programAction = EmitFIR;
       break;
     case clang::options::OPT_emit_hlfir:

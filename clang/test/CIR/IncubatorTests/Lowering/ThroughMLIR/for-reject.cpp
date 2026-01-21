@@ -11,14 +11,14 @@ void reject_test1() {
   // CHECK: %[[HUNDRED:.+]] = arith.constant 100
   // CHECK: scf.while : () -> () {
   // CHECK:   %[[TMP:.+]] = memref.load %[[ALLOCA]]
-  // CHECK:   %[[TMP1:.+]] = arith.cmpi slt, %0, %[[HUNDRED]]
+  // CHECK:   %[[TMP1:.+]] = arith.cmpi slt, %[[TMP]], %[[HUNDRED]]
   // CHECK:   scf.condition(%[[TMP1]])
   // CHECK: } do {
   // CHECK:   %[[TMP2:.+]] = memref.load %[[ALLOCA]]
   // CHECK:   %[[ONE:.+]] = arith.constant 1
   // CHECK:   %[[TMP3:.+]] = arith.addi %[[TMP2]], %[[ONE]]
   // CHECK:   memref.store %[[TMP3]], %[[ALLOCA]]
-  // CHECK:   func.call @_Z1fv()
+  // CHECK:   func.call @_Z1fv() : () -> ()
   // CHECK:   scf.yield
   // CHECK: }
 }

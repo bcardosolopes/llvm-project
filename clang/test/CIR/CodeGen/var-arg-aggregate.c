@@ -24,6 +24,7 @@ struct Bar varargs_aggregate(int count, ...) {
 // CIR:   %[[RET_ADDR:.+]] = cir.alloca !rec_Bar, !cir.ptr<!rec_Bar>, ["__retval", init]
 // CIR:   %[[VAAREA:.+]] = cir.alloca !cir.array<!rec___va_list_tag x 1>, !cir.ptr<!cir.array<!rec___va_list_tag x 1>>, ["args"]
 // CIR:   %[[TMP_ADDR:.+]] = cir.alloca !rec_Bar, !cir.ptr<!rec_Bar>, ["vaarg.tmp"]
+// CIR:   %[[COERCE_TMP:.+]] = cir.alloca !rec_anon_struct, !cir.ptr<!rec_anon_struct>, ["tmp"]
 // CIR:   cir.store %arg0, %[[COUNT_ADDR]] : !s32i, !cir.ptr<!s32i>
 // CIR:   %[[VA_PTR0:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
 // CIR:   %[[COUNT_VAL:.+]] = cir.load{{.*}} %[[COUNT_ADDR]] : !cir.ptr<!s32i>, !s32i
@@ -34,18 +35,18 @@ struct Bar varargs_aggregate(int count, ...) {
 // CIR:   cir.copy %[[TMP_ADDR]] to %[[RET_ADDR]] : !cir.ptr<!rec_Bar>
 // CIR:   %[[VA_PTR2:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
 // CIR:   cir.va_end %[[VA_PTR2]] : !cir.ptr<!rec___va_list_tag>
-// CIR:   %[[RETVAL:.+]] = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!rec_Bar>, !rec_Bar
-// CIR:   cir.return %[[RETVAL]] : !rec_Bar
+// CIR:   cir.memcpy_inline 12 bytes from {{%.*}} to {{%.*}}
+// CIR:   %[[RETVAL:.+]] = cir.load %[[COERCE_TMP]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
+// CIR:   cir.return %[[RETVAL]] : !rec_anon_struct
 
-// LLVM-LABEL: define dso_local %struct.Bar @varargs_aggregate(
+// LLVM-LABEL: define dso_local { <2 x float>, i32 } @varargs_aggregate(
 // LLVM:   call void @llvm.va_start.p0(ptr %{{.*}})
 // LLVM:   %[[VA_PTR1:.+]] = getelementptr %struct.__va_list_tag, ptr %{{.*}}, i32 0
 // LLVM:   %[[VA_ARG:.+]] = va_arg ptr %[[VA_PTR1]], %struct.Bar
 // LLVM:   store %struct.Bar %[[VA_ARG]], ptr %{{.*}}
-// LLVM:   call void @llvm.memcpy.p0.p0.i32(ptr %{{.*}}, ptr %{{.*}}, i32 12, i1 false)
+// LLVM:   call void @llvm.memcpy.p0.p0.i64(ptr %{{.*}}, ptr %{{.*}}, i64 12, i1 false)
 
 // OGCG-LABEL: define dso_local { <2 x float>, i32 } @varargs_aggregate
 // OGCG:   call void @llvm.va_start.p0(ptr %{{.*}})
 // OGCG:   %[[VAARG_ADDR:.+]] = phi ptr [ %{{.*}}, %vaarg.in_reg ], [ %{{.*}}, %vaarg.in_mem ]
 // OGCG:   call void @llvm.memcpy.p0.p0.i64(ptr align 4 %{{.*}}, ptr align 4 %[[VAARG_ADDR]], i64 12, i1 false)
-

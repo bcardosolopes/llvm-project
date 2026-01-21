@@ -563,7 +563,7 @@ mlir::LogicalResult CIRGenFunction::emitAsmStmt(const AsmStmt &s) {
     int i = 0;
     for (auto typ : argElemTypes) {
       if (typ) {
-        auto op = args[i++];
+        auto op = args[i];
         assert(mlir::isa<cir::PointerType>(op.getType()) &&
                "pointer type expected");
         assert(cast<cir::PointerType>(op.getType()).getPointee() == typ &&
@@ -576,6 +576,7 @@ mlir::LogicalResult CIRGenFunction::emitAsmStmt(const AsmStmt &s) {
         // CallInsn argument by index, i.e. we can't skip null type here
         operandAttrs.push_back(mlir::Attribute());
       }
+      i++;
     }
     assert(args.size() == operandAttrs.size() &&
            "The number of attributes is not even with the number of operands");

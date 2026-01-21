@@ -127,7 +127,7 @@ public:
     return elementType;
   }
 
-  cir::TargetAddressSpaceAttr getAddressSpace() const {
+  mlir::ptr::MemorySpaceAttrInterface getAddressSpace() const {
     auto ptrTy = mlir::dyn_cast<cir::PointerType>(getType());
     return ptrTy.getAddrSpace();
   }

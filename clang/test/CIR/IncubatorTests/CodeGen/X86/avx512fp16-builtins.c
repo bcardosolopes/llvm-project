@@ -8,9 +8,9 @@
 
 __m128h test_mm_undefined_ph(void) {
   // CIR-LABEL: _mm_undefined_ph
-  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<!cir.double x 2>
-  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<!cir.double x 2> -> !cir.vector<!cir.f16 x 8>
-  // CIR: cir.return %{{.*}} : !cir.vector<!cir.f16 x 8>
+  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<2 x !cir.double>
+  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<2 x !cir.double> -> !cir.vector<8 x !cir.f16>
+  // CIR: cir.return %{{.*}} : !cir.vector<8 x !cir.f16>
 
   // LLVM-LABEL: @test_mm_undefined_ph
   // LLVM: store <8 x half> zeroinitializer, ptr %[[A:.*]], align 16
@@ -21,9 +21,9 @@ __m128h test_mm_undefined_ph(void) {
 
 __m256h test_mm256_undefined_ph(void) {
   // CIR-LABEL: _mm256_undefined_ph
-  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<!cir.double x 4>
-  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<!cir.double x 4> -> !cir.vector<!cir.f16 x 16>
-  // CIR: cir.return %{{.*}} : !cir.vector<!cir.f16 x 16>
+  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<4 x !cir.double>
+  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<4 x !cir.double> -> !cir.vector<16 x !cir.f16>
+  // CIR: cir.return %{{.*}} : !cir.vector<16 x !cir.f16>
 
   // LLVM-LABEL: @test_mm256_undefined_ph
   // LLVM: store <16 x half> zeroinitializer, ptr %[[A:.*]], align 32
@@ -34,9 +34,9 @@ __m256h test_mm256_undefined_ph(void) {
 
 __m512h test_mm512_undefined_ph(void) {
   // CIR-LABEL: _mm512_undefined_ph
-  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<!cir.double x 8>
-  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<!cir.double x 8> -> !cir.vector<!cir.f16 x 32>
-  // CIR: cir.return %{{.*}} : !cir.vector<!cir.f16 x 32>
+  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<8 x !cir.double>
+  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<8 x !cir.double> -> !cir.vector<32 x !cir.f16>
+  // CIR: cir.return %{{.*}} : !cir.vector<32 x !cir.f16>
 
   // LLVM-LABEL: @test_mm512_undefined_ph
   // LLVM: store <32 x half> zeroinitializer, ptr %[[A:.*]], align 64
@@ -47,7 +47,7 @@ __m512h test_mm512_undefined_ph(void) {
 
 void test_mm_mask_store_sh(void *__P, __mmask8 __U, __m128h __A) {
   // CIR-LABEL: _mm_mask_store_sh
-  // CIR: cir.llvm.intrinsic "masked.store" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<!cir.f16 x 8>, !cir.ptr<!cir.vector<!cir.f16 x 8>>, !u32i, !cir.vector<!cir.int<s, 1> x 8>) -> !void
+  // CIR: cir.call_llvm_intrinsic "masked.store" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<8 x !cir.f16>, !cir.ptr<!cir.vector<8 x !cir.f16>>, !u32i, !cir.vector<8 x !cir.int<s, 1>>) -> !void
 
   // LLVM-LABEL: @test_mm_mask_store_sh
   // LLVM: call void @llvm.masked.store.v8f16.p0(<8 x half> %{{.*}}, ptr elementtype(<8 x half>) align 1 %{{.*}}, <8 x i1> %{{.*}})
@@ -56,7 +56,7 @@ void test_mm_mask_store_sh(void *__P, __mmask8 __U, __m128h __A) {
 
 __m128h test_mm_mask_load_sh(__m128h __A, __mmask8 __U, const void *__W) {
   // CIR-LABEL: _mm_mask_load_sh
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<!cir.f16 x 8>>, !u32i, !cir.vector<!cir.int<s, 1> x 8>, !cir.vector<!cir.f16 x 8>) -> !cir.vector<!cir.f16 x 8>
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<8 x !cir.f16>>, !u32i, !cir.vector<8 x !cir.int<s, 1>>, !cir.vector<8 x !cir.f16>) -> !cir.vector<8 x !cir.f16>
 
   // LLVM-LABEL: @test_mm_mask_load_sh
   // LLVM: %{{.*}} = call <8 x half> @llvm.masked.load.v8f16.p0(ptr elementtype(<8 x half>) align 1 %{{.*}}, <8 x i1> %{{.*}}, <8 x half> %{{.*}})
@@ -65,7 +65,7 @@ __m128h test_mm_mask_load_sh(__m128h __A, __mmask8 __U, const void *__W) {
 
 __m128h test_mm_maskz_load_sh(__mmask8 __U, const void *__W) {
   // CIR-LABEL: _mm_maskz_load_sh
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<!cir.f16 x 8>>, !u32i, !cir.vector<!cir.int<s, 1> x 8>, !cir.vector<!cir.f16 x 8>) -> !cir.vector<!cir.f16 x 8>
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<8 x !cir.f16>>, !u32i, !cir.vector<8 x !cir.int<s, 1>>, !cir.vector<8 x !cir.f16>) -> !cir.vector<8 x !cir.f16>
 
   // LLVM-LABEL: @test_mm_maskz_load_sh
   // LLVM: %{{.*}} = call <8 x half> @llvm.masked.load.v8f16.p0(ptr elementtype(<8 x half>) align 1 %{{.*}}, <8 x i1> %{{.*}}, <8 x half> %{{.*}})

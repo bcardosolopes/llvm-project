@@ -6,6 +6,7 @@ set(LLVM_LINK_COMPONENTS
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
 add_clang_library(clangCIRLoweringDirectToLLVM
+  LowerTBAAToLLVM.cpp
   LowerToLLVM.cpp
   LowerToLLVMIR.cpp
 
@@ -21,6 +22,7 @@ add_clang_library(clangCIRLoweringDirectToLLVM
   MLIRCIRTargetLowering
   MLIRBuiltinToLLVMIRTranslation
   MLIRLLVMToLLVMIRTranslation
+  MLIRLLVMIRTransforms
   MLIRIR
   )
 

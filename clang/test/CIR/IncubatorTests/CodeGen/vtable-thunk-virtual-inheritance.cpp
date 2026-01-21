@@ -40,34 +40,36 @@ void test() {
 }
 
 // ============================================================================
-// CIR Output - Thunk Generation
+// CIR - vtable with thunk references and VTT
 // ============================================================================
 
-// Diamond's rightMethod needs a thunk because Right is at offset 16
-// leftMethod doesn't need a thunk because Left is at offset 0
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn16_N7Diamond11rightMethodEv
-// CIR: cir.ptr_stride
-// CIR: cir.call @_ZN7Diamond11rightMethodEv
+// CIR: cir.global  linkonce_odr comdat @_ZTV7Diamond = #cir.vtable
+// CIR-SAME: #cir.global_view<@_ZThn16_N7Diamond11rightMethodEv>
+// CIR: cir.global {{.*}} @_ZTT7Diamond
+
+// CIR: cir.func {{.*}} @_ZN7DiamondC1Ev
+// CIR:   cir.vtable.address_point(@_ZTV7Diamond, address_point = <index = 0, offset = 3>) : !cir.vptr
+// CIR:   cir.vtable.address_point(@_ZTV7Diamond, address_point = <index = 2, offset = 3>) : !cir.vptr
+// CIR:   cir.vtable.address_point(@_ZTV7Diamond, address_point = <index = 1, offset = 3>) : !cir.vptr
+
+// CIR: cir.func {{.*}} @_ZThn16_N7Diamond11rightMethodEv
+// CIR:   cir.ptr_stride %{{.*}}, %{{.*}} : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
+// CIR:   cir.call @_ZN7Diamond11rightMethodEv
 
 // ============================================================================
-// VTable Structure - Both CIR and OGCG
+// LLVM and OGCG Output
 // ============================================================================
 
-// Check that vtable contains the thunk reference at the correct position
-//      LLVM: @_ZTV7Diamond = linkonce_odr constant
+// LLVM: @_ZTV7Diamond = linkonce_odr global { [5 x ptr], [4 x ptr], [4 x ptr] }
 // LLVM-SAME: @_ZThn16_N7Diamond11rightMethodEv
+// LLVM: @_ZTT7Diamond = linkonce_odr global [7 x ptr]
+
+// LLVM: define linkonce_odr void @_ZThn16_N7Diamond11rightMethodEv
+// LLVM:   getelementptr i8, ptr %{{.*}}, i64 -16
+// LLVM:   call void @_ZN7Diamond11rightMethodEv
 
 //      OGCG: @_ZTV7Diamond = linkonce_odr {{.*}} constant
 // OGCG-SAME: @_ZThn16_N7Diamond11rightMethodEv
-
-// ============================================================================
-// Thunk Implementation - LLVM Lowering vs OGCG
-// ============================================================================
-
-// CIR lowering should produce the same this-pointer adjustment as OGCG
-// LLVM-LABEL: define linkonce_odr void @_ZThn16_N7Diamond11rightMethodEv
-//      LLVM: %[[VAR1:[0-9]+]] = getelementptr i8, ptr %{{[0-9]+}}, i64 -16
-//      LLVM: call void @_ZN7Diamond11rightMethodEv(ptr %[[VAR1]])
 
 // OGCG-LABEL: define linkonce_odr void @_ZThn16_N7Diamond11rightMethodEv
 //      OGCG: %[[VAR2:[0-9]+]] = getelementptr inbounds i8, ptr %{{.*}}, i64 -16

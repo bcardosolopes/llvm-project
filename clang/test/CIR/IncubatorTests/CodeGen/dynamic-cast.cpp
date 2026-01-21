@@ -52,8 +52,8 @@ Derived &ref_cast(Base &b) {
 // AFTER-NEXT:   %[[#DEST_RTTI:]] = cir.const #cir.global_view<@_ZTI7Derived> : !cir.ptr<!u8i>
 // AFTER-NEXT:   %[[#OFFSET_HINT:]] = cir.const #cir.int<0> : !s64i
 // AFTER-NEXT:   %[[#CASTED_PTR:]] = cir.call @__dynamic_cast(%[[#SRC_VOID_PTR]], %[[#SRC_RTTI]], %[[#DEST_RTTI]], %[[#OFFSET_HINT]]) : (!cir.ptr<!void>, !cir.ptr<!u8i>, !cir.ptr<!u8i>, !s64i) -> !cir.ptr<!void>
-// AFTER-NEXT:   %[[#CASTED_PTR_IS_NOT_NULL:]] = cir.cast ptr_to_bool %[[#CASTED_PTR]] : !cir.ptr<!void> -> !cir.bool
-// AFTER-NEXT:   %[[#CASTED_PTR_IS_NULL:]] = cir.unary(not, %[[#CASTED_PTR_IS_NOT_NULL]]) : !cir.bool, !cir.bool
+// AFTER-NEXT:   %[[#NULL_PTR:]] = cir.const #cir.ptr<null> : !cir.ptr<!void>
+// AFTER-NEXT:   %[[#CASTED_PTR_IS_NULL:]] = cir.cmp(eq, %[[#CASTED_PTR]], %[[#NULL_PTR]]) : !cir.ptr<!void>, !cir.bool
 // AFTER-NEXT:   cir.if %[[#CASTED_PTR_IS_NULL]] {
 // AFTER-NEXT:     cir.call @__cxa_bad_cast() : () -> ()
 // AFTER-NEXT:     cir.unreachable

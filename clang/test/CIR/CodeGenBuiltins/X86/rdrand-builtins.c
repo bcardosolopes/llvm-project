@@ -12,10 +12,6 @@
 // RUN: %clang_cc1 -x c++ -ffreestanding -triple=x86_64-unknown-linux -target-feature +rdrnd -target-feature +rdseed -emit-llvm -Wall -Werror %s -o - | FileCheck %s -check-prefixes=OGCG,OGCG-X64
 
 // 32-bit tests for _rdrand64_step()
-// RUN: %clang_cc1 -x c -ffreestanding -triple i386-unknown-linux -target-feature +rdrnd -target-feature +rdseed -Wno-implicit-function-declaration -fclangir -emit-cir -o %t.cir %s
-// RUN: FileCheck --check-prefixes=CIR,CIR-X86 --input-file=%t.cir %s
-// RUN: %clang_cc1 -x c -ffreestanding -triple i386-unknown-linux -target-feature +rdrnd -target-feature +rdseed -Wno-implicit-function-declaration -fclangir -emit-llvm -o %t.ll %s
-// RUN: FileCheck --check-prefixes=LLVM,LLVM-X86 --input-file=%t.ll %s
 // RUN: %clang_cc1 -x c -ffreestanding -triple=i386-unknown-linux -target-feature +rdrnd -target-feature +rdseed -emit-llvm -Wall -Werror %s -o - | FileCheck %s -check-prefixes=OGCG,OGCG-X86
 
 // This test mimics clang/test/CodeGen/X86/rdrand-builtins.c

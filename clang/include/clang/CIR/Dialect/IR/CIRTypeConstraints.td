@@ -339,16 +339,18 @@ def CIR_AnyDataMemberType : CIR_TypeBase<"::cir::DataMemberType",
     "data member type">;
 
 //===----------------------------------------------------------------------===//
+// C null-terminated string types.
+//===----------------------------------------------------------------------===//
+def CIR_StringType : CIR_PtrToType<CIR_SInt8>;
+
+//===----------------------------------------------------------------------===//
 // VPtr type predicates
 //===----------------------------------------------------------------------===//
 
 def CIR_AnyVPtrType : CIR_TypeBase<"::cir::VPtrType", "vptr type">,
       BuildableType<"$_builder.getType<" # cppType # ">()">;
 
-def CIR_PtrToVPtr : CIR_PtrToType<CIR_AnyVPtrType>,
-      BuildableType<"$_builder.getType<" # cppType # ">("
-        "$_builder.getType<::cir::VPtrType>())">;
-
+def CIR_PtrToVPtr : CIR_PtrToType<CIR_AnyVPtrType>;
 //===----------------------------------------------------------------------===//
 // Scalar Type predicates
 //===----------------------------------------------------------------------===//

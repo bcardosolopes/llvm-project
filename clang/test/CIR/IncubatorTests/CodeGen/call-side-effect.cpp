@@ -13,8 +13,8 @@ int test(int x) {
 }
 
 // CIR-LABEL: @_Z4testi
-// CIR:   %{{.+}} = cir.call @_Z9pure_funci(%{{.+}}) : (!s32i) -> !s32i side_effect(pure)
-// CIR:   %{{.+}} = cir.call @_Z10const_funci(%{{.+}}) : (!s32i) -> !s32i side_effect(const)
+// CIR:   %{{.+}} = cir.call @_Z9pure_funci(%{{.+}}) side_effect(pure) : (!s32i) -> !s32i
+// CIR:   %{{.+}} = cir.call @_Z10const_funci(%{{.+}}) side_effect(const) : (!s32i) -> !s32i
 // CIR: }
 
 // LLVM-LABEL: @_Z4testi(i32 %0)

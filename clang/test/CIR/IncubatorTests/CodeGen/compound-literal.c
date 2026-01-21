@@ -58,8 +58,11 @@ struct G g(int x, int y, int z) {
 // CIR:    cir.store{{.*}} {{.*}}, %[[Y]] : !s16i
 // CIR:    %[[Z:.*]] = cir.get_member %[[RETVAL]][2] {name = "z"}
 // CIR:    cir.store{{.*}} {{.*}}, %[[Z]] : !s16i
-// CIR:    %[[RES:.*]] = cir.load{{.*}} %[[RETVAL]]
-// CIR:    cir.return %[[RES]]
+// CIR:    %[[LOADED:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!rec_G>, !rec_G
+// CIR:    %[[COERCE:.*]] = cir.alloca !cir.int<u, 48>, !cir.ptr<!cir.int<u, 48>>
+// CIR:    cir.memcpy_inline 6 bytes
+// CIR:    %[[RES:.*]] = cir.load %[[COERCE]] : !cir.ptr<!cir.int<u, 48>>, !cir.int<u, 48>
+// CIR:    cir.return %[[RES]] : !cir.int<u, 48>
 
 // Nothing meaningful to test for LLVM codegen here.
 // FIXME: ABI note, LLVM lowering differs from traditional LLVM codegen here,
@@ -72,21 +75,21 @@ void split_large_page(unsigned long addr, pgprot_t prot)
 }
 
 // CIR-LABEL: @split_large_page
+// CIR:   %[[PROT_ALLOCA:.*]] = cir.alloca !rec_pgprot_t, !cir.ptr<!rec_pgprot_t>, [""]
+// CIR:   %[[PROT_BC:.*]] = cir.cast bitcast %[[PROT_ALLOCA]] : !cir.ptr<!rec_pgprot_t> -> !cir.ptr<!u64i>
+// CIR:   cir.store %arg1, %[[PROT_BC]] : !u64i, !cir.ptr<!u64i>
 // CIR:   %[[VAL_2:.*]] = cir.alloca !u64i, !cir.ptr<!u64i>, ["addr", init] {alignment = 8 : i64}
-// CIR:   %[[VAL_3:.*]] = cir.alloca !rec_pgprot_t, !cir.ptr<!rec_pgprot_t>, ["prot", init] {alignment = 8 : i64}
 // CIR:   cir.store{{.*}} {{.*}}, %[[VAL_2]] : !u64i, !cir.ptr<!u64i>
-// CIR:   cir.store{{.*}} {{.*}}, %[[VAL_3]] : !rec_pgprot_t, !cir.ptr<!rec_pgprot_t>
 // CIR:   {{.*}} = cir.scope {
-// CIR:     %[[VAL_4:.*]] = cir.alloca !rec_pgprot_t, !cir.ptr<!rec_pgprot_t>, ["ref.tmp0"] {alignment = 8 : i64} loc(#loc64)
+// CIR:     %[[VAL_4:.*]] = cir.alloca !rec_pgprot_t, !cir.ptr<!rec_pgprot_t>, ["ref.tmp0"] {alignment = 8 : i64}
 // CIR:     %[[VAL_5:.*]] = cir.load{{.*}} %[[VAL_2]] : !cir.ptr<!u64i>, !u64i
 // CIR:     %[[VAL_6:.*]] = cir.cast int_to_bool %[[VAL_5]] : !u64i -> !cir.bool
 // CIR:     cir.if %[[VAL_6]] {
-// CIR:       cir.copy %[[VAL_3]] to %[[VAL_4]] : !cir.ptr<!rec_pgprot_t>
+// CIR:       cir.copy %[[PROT_ALLOCA]] to %[[VAL_4]] : !cir.ptr<!rec_pgprot_t>
 // CIR:     } else {
 // CIR:       %[[VAL_7:.*]] = cir.get_member %[[VAL_4]][0] {name = "pgprot"} : !cir.ptr<!rec_pgprot_t> -> !cir.ptr<!u64i>
-// CIR:       %[[VAL_8:.*]] = cir.const #cir.int<1> : !s32i
-// CIR:       %[[VAL_9:.*]] = cir.cast integral %[[VAL_8]] : !s32i -> !u64i
-// CIR:       cir.store{{.*}} %[[VAL_9]], %[[VAL_7]] : !u64i, !cir.ptr<!u64i>
+// CIR:       %[[VAL_8:.*]] = cir.const #cir.int<1> : !u64i
+// CIR:       cir.store{{.*}} %[[VAL_8]], %[[VAL_7]] : !u64i, !cir.ptr<!u64i>
 // CIR:     }
 // CIR:     %[[VAL_10:.*]] = cir.get_member %[[VAL_4]][0] {name = "pgprot"} : !cir.ptr<!rec_pgprot_t> -> !cir.ptr<!u64i>
 // CIR:     %[[VAL_11:.*]] = cir.load{{.*}} %[[VAL_10]] : !cir.ptr<!u64i>, !u64i
@@ -100,7 +103,7 @@ void split_large_page(unsigned long addr, pgprot_t prot)
 // CHECK:    store i64 1, ptr %[[GEP]], align 8
 // CHECK:    br label %[[EXIT:[a-z0-9]+]]
 // CHECK:  [[TRUE]]:
-// CHECK:    call void @llvm.memcpy.p0.p0.i32(ptr %[[ADDR]], ptr {{.*}}, i32 8, i1 false)
+// CHECK:    call void @llvm.memcpy.p0.p0.i64(ptr %[[ADDR]], ptr {{.*}}, i64 8, i1 false)
 // CHECK:    br label %[[EXIT]]
 // CHECK:  [[EXIT]]:
 // CHECK:    ret void

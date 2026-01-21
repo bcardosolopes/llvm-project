@@ -4,8 +4,8 @@
 !s64i = !cir.int<s, 64>
 cir.func @foo()  {
     %a = cir.alloca !s32i, !cir.ptr<!s32i>, ["a"] {alignment = 4 : i64}
-    %i = cir.llvm.intrinsic "llvm.aarch64.ldxr" %a : (!cir.ptr<!s32i>) -> !s64i
+    %i = cir.call_llvm_intrinsic "llvm.aarch64.ldxr" %a : (!cir.ptr<!s32i>) -> !s64i
     cir.return
 }
 
-// CHECK: %1 = cir.llvm.intrinsic "llvm.aarch64.ldxr" %0 : (!cir.ptr<!s32i>) -> !s64i
+// CHECK: %1 = cir.call_llvm_intrinsic "llvm.aarch64.ldxr" %0 : (!cir.ptr<!s32i>) -> !s64i

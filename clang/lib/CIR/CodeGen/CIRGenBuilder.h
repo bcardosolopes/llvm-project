@@ -11,6 +11,7 @@
 
 #include "Address.h"
 #include "CIRGenRecordLayout.h"
+#include "CIRGenStatistics.h"
 #include "CIRGenTypeCache.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -64,6 +65,7 @@ public:
 
   cir::ConstArrayAttr getConstArray(mlir::Attribute attrs,
                                     cir::ArrayType arrayTy) const {
+    CIRGenStatistics::Stats.recordArrayInit(attrs, arrayTy);
     return cir::ConstArrayAttr::get(arrayTy, attrs);
   }
 
@@ -240,6 +242,12 @@ public:
           mlir::cast<mlir::ArrayAttr>(arrayVal.getElts()),
           [&](const mlir::Attribute &elt) { return isNullValue(elt); });
     }
+
+    if (const auto vecVal = mlir::dyn_cast<cir::ConstVectorAttr>(attr))
+      return llvm::all_of(vecVal.getElts(), [&](const mlir::Attribute &elt) {
+        return isNullValue(elt);
+      });
+
     return false;
   }
 
@@ -321,6 +329,46 @@ public:
   // Fetch the type representing a pointer to unsigned int8 values.
   cir::PointerType getUInt8PtrTy() { return typeCache.uInt8PtrTy; }
 
+  // Get an integer type with double the width (extended)
+  cir::IntType getExtendedIntTy(cir::IntType ty, bool isSigned) {
+    switch (ty.getWidth()) {
+    case 8:
+      return isSigned ? typeCache.sInt16Ty : typeCache.uInt16Ty;
+    case 16:
+      return isSigned ? typeCache.sInt32Ty : typeCache.uInt32Ty;
+    case 32:
+      return isSigned ? typeCache.sInt64Ty : typeCache.uInt64Ty;
+    default:
+      llvm_unreachable("NYI");
+    }
+  }
+
+  // Get an integer type with half the width (truncated)
+  cir::IntType getTruncatedIntTy(cir::IntType ty, bool isSigned) {
+    switch (ty.getWidth()) {
+    case 16:
+      return isSigned ? typeCache.sInt8Ty : typeCache.uInt8Ty;
+    case 32:
+      return isSigned ? typeCache.sInt16Ty : typeCache.uInt16Ty;
+    case 64:
+      return isSigned ? typeCache.sInt32Ty : typeCache.uInt32Ty;
+    default:
+      llvm_unreachable("NYI");
+    }
+  }
+
+  // Get a vector type with extended or truncated element type
+  cir::VectorType
+  getExtendedOrTruncatedElementVectorType(cir::VectorType vt, bool isExtended,
+                                          bool isSigned = false) {
+    auto elementTy = mlir::dyn_cast_or_null<cir::IntType>(vt.getElementType());
+    assert(elementTy && "expected int vector");
+    return cir::VectorType::get(isExtended
+                                    ? getExtendedIntTy(elementTy, isSigned)
+                                    : getTruncatedIntTy(elementTy, isSigned),
+                                vt.getSize());
+  }
+
   /// Get a CIR anonymous record type.
   cir::RecordType getAnonRecordTy(llvm::ArrayRef<mlir::Type> members,
                                   bool packed = false, bool padded = false) {
@@ -370,6 +418,19 @@ public:
     return cir::ConstantOp::create(*this, loc, getNullDataMemberAttr(ty));
   }
 
+  /// Create constant nullptr for pointer-to-member-function type ty.
+  cir::ConstantOp getNullMethodPtr(cir::MethodType ty, mlir::Location loc) {
+    return cir::ConstantOp::create(*this, loc, getNullMethodAttr(ty));
+  }
+
+  cir::ConstantOp getZero(mlir::Location loc, mlir::Type ty) {
+    // TODO: dispatch creation for primitive types.
+    assert((mlir::isa<cir::RecordType>(ty) || mlir::isa<cir::ArrayType>(ty) ||
+            mlir::isa<cir::VectorType>(ty)) &&
+           "NYI for other types");
+    return cir::ConstantOp::create(*this, loc, cir::ZeroAttr::get(ty));
+  }
+
   // TODO: split this to createFPExt/createFPTrunc when we have dedicated cast
   // operations.
   mlir::Value createFloatingCast(mlir::Value v, mlir::Type destType) {
@@ -409,6 +470,45 @@ public:
     return cir::BinOp::create(*this, loc, cir::BinOpKind::Div, lhs, rhs);
   }
 
+  /// Create a logical shift right (lshr) operation.
+  /// For vector integer types, this ensures logical (not arithmetic)
+  /// shift by using unsigned types internally if needed.
+  mlir::Value createLShr(mlir::Location loc, mlir::Value value,
+                         mlir::Value shiftAmt) {
+    mlir::Type valueTy = value.getType();
+
+    // Check if we have a vector type
+    if (auto vecTy = mlir::dyn_cast<cir::VectorType>(valueTy)) {
+      auto elemTy = mlir::cast<cir::IntType>(vecTy.getElementType());
+
+      // If already unsigned, just shift
+      if (!elemTy.isSigned()) {
+        return cir::ShiftOp::create(*this, loc, valueTy, value, shiftAmt,
+                                    false);
+      }
+
+      // Convert to unsigned for logical shift
+      auto unsignedElemTy = getUIntNTy(elemTy.getWidth());
+      auto unsignedVecTy =
+          cir::VectorType::get(unsignedElemTy, vecTy.getSize());
+
+      value = createBitcast(value, unsignedVecTy);
+      auto result = cir::ShiftOp::create(*this, loc, unsignedVecTy, value,
+                                         shiftAmt, false);
+
+      // Convert back to original signedness
+      return createBitcast(result, valueTy);
+    }
+
+    // Scalar case
+    if (auto intTy = mlir::dyn_cast<cir::IntType>(valueTy)) {
+      // For scalar integers, use ShiftOp directly with isShiftLeft=false
+      return cir::ShiftOp::create(*this, loc, valueTy, value, shiftAmt, false);
+    }
+
+    llvm_unreachable("createLShr expects integer or vector of integer type");
+  }
+
   mlir::Value createDynCast(mlir::Location loc, mlir::Value src,
                             cir::PointerType destType, bool isRefCast,
                             cir::DynamicCastInfoAttr info) {
@@ -420,9 +520,8 @@ public:
 
   mlir::Value createDynCastToVoid(mlir::Location loc, mlir::Value src,
                                   bool vtableUseRelativeLayout) {
-    // TODO(cir): consider address space here.
-    assert(!cir::MissingFeatures::addressSpace());
-    cir::PointerType destTy = getVoidPtrTy();
+    auto srcPtrTy = mlir::cast<cir::PointerType>(src.getType());
+    cir::PointerType destTy = getVoidPtrTy(srcPtrTy.getAddrSpace());
     return cir::DynamicCastOp::create(
         *this, loc, destTy, cir::DynamicCastKind::Ptr, src,
         cir::DynamicCastInfoAttr{}, vtableUseRelativeLayout);
@@ -466,6 +565,13 @@ public:
                                        offset);
   }
 
+  using cir::CIRBaseBuilderTy::createAddrSpaceCast;
+  Address createAddrSpaceCast(Address addr, mlir::Type newPtrTy,
+                              mlir::Type elemTy) {
+    return Address(createAddrSpaceCast(addr.emitRawPointer(), newPtrTy), elemTy,
+                   addr.getAlignment(), addr.isKnownNonNull());
+  }
+
   /// Cast the element type of the given address to a different type,
   /// preserving information like the alignment.
   Address createElementBitCast(mlir::Location loc, Address addr,
@@ -473,18 +579,21 @@ public:
     if (destType == addr.getElementType())
       return addr;
 
-    auto ptrTy = getPointerTo(destType);
-    return Address(createBitcast(loc, addr.getPointer(), ptrTy), destType,
+    auto ptrTy = mlir::cast<cir::PointerType>(addr.getPointer().getType());
+    auto dstPtrTy = getPointerTo(destType, ptrTy.getAddrSpace());
+    return Address(createBitcast(loc, addr.getPointer(), dstPtrTy), destType,
                    addr.getAlignment());
   }
 
   cir::LoadOp createLoad(mlir::Location loc, Address addr,
-                         bool isVolatile = false) {
+                         bool isVolatile = false, bool isNontemporal = false) {
     mlir::IntegerAttr align = getAlignmentAttr(addr.getAlignment());
     return cir::LoadOp::create(*this, loc, addr.getPointer(), /*isDeref=*/false,
-                               isVolatile, /*alignment=*/align,
+                               isVolatile, /*is_nontemporal=*/isNontemporal,
+                               /*alignment=*/align,
                                /*sync_scope=*/cir::SyncScopeKindAttr{},
-                               /*mem_order=*/cir::MemOrderAttr{});
+                               /*mem_order=*/cir::MemOrderAttr{},
+                               /*tbaa=*/{});
   }
 
   cir::LoadOp createAlignedLoad(mlir::Location loc, mlir::Type ty,
@@ -494,9 +603,11 @@ public:
     uint64_t alignment = align ? align->value() : 0;
     mlir::IntegerAttr alignAttr = getAlignmentAttr(alignment);
     return cir::LoadOp::create(*this, loc, ptr, /*isDeref=*/false,
-                               /*isVolatile=*/false, alignAttr,
+                               /*isVolatile=*/false,
+                               /*is_nontemporal=*/false, alignAttr,
                                /*sync_scope=*/cir::SyncScopeKindAttr{},
-                               /*mem_order=*/cir::MemOrderAttr{});
+                               /*mem_order=*/cir::MemOrderAttr{},
+                               /*tbaa=*/{});
   }
 
   cir::LoadOp
@@ -506,14 +617,23 @@ public:
   }
 
   cir::StoreOp createStore(mlir::Location loc, mlir::Value val, Address dst,
-                           bool isVolatile = false,
+                           bool isVolatile = false, bool isNontemporal = false,
                            mlir::IntegerAttr align = {},
                            cir::SyncScopeKindAttr scope = {},
                            cir::MemOrderAttr order = {}) {
     if (!align)
       align = getAlignmentAttr(dst.getAlignment());
-    return CIRBaseBuilderTy::createStore(loc, val, dst.getPointer(), isVolatile,
-                                         align, scope, order);
+    return cir::StoreOp::create(*this, loc, val, dst.getPointer(), isVolatile,
+                                isNontemporal, align, scope, order,
+                                /*tbaa=*/{});
+  }
+
+  cir::StoreOp
+  createAlignedStore(mlir::Location loc, mlir::Value val, mlir::Value dst,
+                     clang::CharUnits align = clang::CharUnits::One(),
+                     bool isVolatile = false) {
+    mlir::IntegerAttr alignAttr = getAlignmentAttr(align);
+    return CIRBaseBuilderTy::createStore(loc, val, dst, isVolatile, alignAttr);
   }
 
   /// Create a cir.complex.real_ptr operation that derives a pointer to the real
@@ -578,6 +698,12 @@ public:
   void computeGlobalViewIndicesFromFlatOffset(
       int64_t offset, mlir::Type ty, cir::CIRDataLayout layout,
       llvm::SmallVectorImpl<int64_t> &indices);
+
+  /// Compute the flat byte offset from a set of GEP-like indices into a type.
+  /// This is the inverse of computeGlobalViewIndicesFromFlatOffset.
+  uint64_t computeOffsetFromGlobalViewIndices(const cir::CIRDataLayout &layout,
+                                              mlir::Type ty,
+                                              llvm::ArrayRef<int64_t> indices);
 
   /// Creates a versioned global variable. If the symbol is already taken, an ID
   /// will be appended to the symbol. The returned global must always be queried
@@ -667,6 +793,41 @@ public:
     cir::ConstantOp poison =
         getConstant(loc, cir::PoisonAttr::get(vec1.getType()));
     return createVecShuffle(loc, vec1, poison, mask);
+  }
+
+  mlir::Value createMaskedLoad(mlir::Location loc, mlir::Type ty,
+                               mlir::Value ptr, llvm::Align alignment,
+                               mlir::Value mask, mlir::Value passThru) {
+    assert(mlir::isa<cir::VectorType>(ty) && "Type should be vector");
+    assert(mask && "Mask should not be all-ones (null)");
+
+    if (!passThru)
+      passThru = getConstant(loc, cir::PoisonAttr::get(ty));
+
+    mlir::Value ops[] = {ptr, getUInt32(int32_t(alignment.value()), loc), mask,
+                         passThru};
+
+    return cir::LLVMIntrinsicCallOp::create(
+               *this, loc, getStringAttr("masked.load"), ty, ops)
+        .getResult();
+  }
+
+  mlir::Value createMaskedStore(mlir::Location loc, mlir::Value val,
+                                mlir::Value ptr, llvm::Align alignment,
+                                mlir::Value mask) {
+    mlir::Type dataTy = val.getType();
+
+    assert(mlir::isa<cir::VectorType>(dataTy) && "val should be a vector");
+    assert(mask && "mask should not be all-ones (null)");
+
+    auto alignmentValue = cir::ConstantOp::create(
+        *this, loc, cir::IntAttr::get(getUInt32Ty(), alignment.value()));
+
+    mlir::Value ops[] = {val, ptr, alignmentValue, mask};
+
+    return cir::LLVMIntrinsicCallOp::create(
+               *this, loc, getStringAttr("masked.store"), getVoidTy(), ops)
+        .getResult();
   }
 };
 

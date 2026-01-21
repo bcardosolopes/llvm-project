@@ -63,8 +63,10 @@ void test_array_destructor() {
 
 // CIR: cir.func {{.*}} @_Z21test_array_destructorv()
 // CIR:   %[[ARR:.*]] = cir.alloca !cir.array<!rec_array_element x 5>, !cir.ptr<!cir.array<!rec_array_element x 5>>, ["arr", init]
+// CIR:   %[[END_OF_INIT:.*]] = cir.alloca !cir.ptr<!rec_array_element>, !cir.ptr<!cir.ptr<!rec_array_element>>, ["arrayinit.endOfInit"]
 // CIR:   %[[ARR_PTR:.*]] = cir.alloca !cir.ptr<!rec_array_element>, !cir.ptr<!cir.ptr<!rec_array_element>>, ["arrayinit.temp", init]
 // CIR:   %[[BEGIN:.*]] = cir.cast array_to_ptrdecay %[[ARR]] : !cir.ptr<!cir.array<!rec_array_element x 5>>
+// CIR:   cir.store{{.*}} %[[BEGIN]], %[[END_OF_INIT]]
 // CIR:   cir.store{{.*}} %[[BEGIN]], %[[ARR_PTR]]
 // CIR:   %[[FIVE:.*]] = cir.const #cir.int<5> : !s64i
 // CIR:   %[[ARR_END:.*]] = cir.ptr_stride %[[BEGIN]], %[[FIVE]] : (!cir.ptr<!rec_array_element>, !s64i)
@@ -72,6 +74,7 @@ void test_array_destructor() {
 // CIR:     %[[ARR_CUR:.*]] = cir.load{{.*}} %[[ARR_PTR]]
 // CIR:     %[[ONE:.*]] = cir.const #cir.int<1> : !s64i
 // CIR:     %[[ARR_NEXT:.*]] = cir.ptr_stride %[[ARR_CUR]], %[[ONE]] : (!cir.ptr<!rec_array_element>, !s64i)
+// CIR:     cir.store{{.*}} %[[ARR_NEXT]], %[[END_OF_INIT]] : !cir.ptr<!rec_array_element>, !cir.ptr<!cir.ptr<!rec_array_element>>
 // CIR:     cir.store{{.*}} %[[ARR_NEXT]], %[[ARR_PTR]] : !cir.ptr<!rec_array_element>, !cir.ptr<!cir.ptr<!rec_array_element>>
 // CIR:     cir.yield
 // CIR:   } while {
@@ -99,8 +102,10 @@ void test_array_destructor() {
 
 // LLVM: define{{.*}} void @_Z21test_array_destructorv()
 // LLVM:   %[[ARR:.*]] = alloca [5 x %struct.array_element]
+// LLVM:   %[[ENDOFINIT:.*]] = alloca ptr
 // LLVM:   %[[TMP:.*]] = alloca ptr
 // LLVM:   %[[ARR_PTR:.*]] = getelementptr %struct.array_element, ptr %[[ARR]], i32 0
+// LLVM:   store ptr %[[ARR_PTR]], ptr %[[ENDOFINIT]]
 // LLVM:   store ptr %[[ARR_PTR]], ptr %[[TMP]]
 // LLVM:   %[[END_PTR:.*]] = getelementptr %struct.array_element, ptr %[[ARR_PTR]], i64 5
 // LLVM:   br label %[[INIT_LOOP_BODY:.*]]
@@ -111,6 +116,7 @@ void test_array_destructor() {
 // LLVM: [[INIT_LOOP_BODY]]:
 // LLVM:   %[[CUR:.*]] = load ptr, ptr %[[TMP]]
 // LLVM:   %[[NEXT:.*]] = getelementptr %struct.array_element, ptr %[[CUR]], i64 1
+// LLVM:   store ptr %[[NEXT]], ptr %[[ENDOFINIT]]
 // LLVM:   store ptr %[[NEXT]], ptr %[[TMP]]
 // LLVM:   br label %[[INIT_LOOP_NEXT:.*]]
 // LLVM: [[INIT_LOOP_END]]:

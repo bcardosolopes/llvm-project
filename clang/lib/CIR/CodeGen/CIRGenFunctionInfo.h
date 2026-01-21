@@ -100,7 +100,7 @@ public:
   static void Profile(llvm::FoldingSetNodeID &id, RequiredArgs required,
                       CanQualType resultType,
                       llvm::ArrayRef<CanQualType> argTypes) {
-    id.AddBoolean(required.getOpaqueData());
+    id.AddInteger(required.getOpaqueData());
     resultType.Profile(id);
     for (const CanQualType &arg : argTypes)
       arg.Profile(id);

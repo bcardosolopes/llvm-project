@@ -22,26 +22,33 @@ __device__ int ptr_diff() {
 }
 
 
+// CIR-DEVICE: %[[#CStrAlloca:]] = cir.alloca !cir.array<!s8i x 9>, !cir.ptr<!cir.array<!s8i x 9>, lang_address_space(offload_private)>, ["c_str", init, const]
 // CIR-DEVICE: %[[#LenLocalAlloca:]] = cir.alloca !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>, lang_address_space(offload_private)>, ["len", init]
+// CIR-DEVICE: %[[#CStrAddrCast:]] = cir.cast address_space %[[#CStrAlloca]] : !cir.ptr<!cir.array<!s8i x 9>, lang_address_space(offload_private)> -> !cir.ptr<!cir.array<!s8i x 9>>
+// CIR-DEVICE: %[[#GlobalCStr:]] = cir.get_global @__const._Z8ptr_diffv.c_str : !cir.ptr<!cir.array<!s8i x 9>, target_address_space(4)>
+// CIR-DEVICE: %[[#GlobalCStrCast:]] = cir.cast address_space %[[#GlobalCStr]] : !cir.ptr<!cir.array<!s8i x 9>, target_address_space(4)> -> !cir.ptr<!cir.array<!s8i x 9>>
+// CIR-DEVICE: cir.copy %[[#GlobalCStrCast]] to %[[#CStrAddrCast]] : !cir.ptr<!cir.array<!s8i x 9>>
 // CIR-DEVICE: %[[#LenLocalAddr:]] = cir.cast address_space %[[#LenLocalAlloca]] : !cir.ptr<!cir.ptr<!s8i>, lang_address_space(offload_private)> -> !cir.ptr<!cir.ptr<!s8i>>
-// CIR-DEVICE: %[[#GlobalPtr:]] = cir.get_global @_ZZ8ptr_diffvE5c_str : !cir.ptr<!cir.array<!s8i x 9>, lang_address_space(offload_constant)>
-// CIR-DEVICE: %[[#CastDecay:]] = cir.cast array_to_ptrdecay %[[#GlobalPtr]] : !cir.ptr<!cir.array<!s8i x 9>, lang_address_space(offload_constant)>
-// CIR-DEVICE: %[[#LenLocalAddrCast:]] = cir.cast bitcast %[[#LenLocalAddr]] : !cir.ptr<!cir.ptr<!s8i>> -> !cir.ptr<!cir.ptr<!s8i, lang_address_space(offload_constant)>>
-// CIR-DEVICE: cir.store align(8) %[[#CastDecay]], %[[#LenLocalAddrCast]] : !cir.ptr<!s8i, lang_address_space(offload_constant)>, !cir.ptr<!cir.ptr<!s8i, lang_address_space(offload_constant)>>
-// CIR-DEVICE: %[[#CStr:]] = cir.cast array_to_ptrdecay %[[#GlobalPtr]] : !cir.ptr<!cir.array<!s8i x 9>, lang_address_space(offload_constant)> -> !cir.ptr<!s8i, lang_address_space(offload_constant)>
-// CIR-DEVICE: %[[#LoadedLenAddr:]] = cir.load align(8) %[[#LenLocalAddr]] : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!s8i>
-// CIR-DEVICE: %[[#AddrCast:]] = cir.cast address_space %[[#LoadedLenAddr]] : !cir.ptr<!s8i> -> !cir.ptr<!s8i, lang_address_space(offload_constant)>
-// CIR-DEVICE: %[[#DIFF:]] = cir.ptr_diff %[[#CStr]], %[[#AddrCast]] : !cir.ptr<!s8i, lang_address_space(offload_constant)>
+// CIR-DEVICE: %[[#Decayed1:]] = cir.cast array_to_ptrdecay %[[#CStrAddrCast]] : !cir.ptr<!cir.array<!s8i x 9>> -> !cir.ptr<!s8i>
+// CIR-DEVICE: cir.store align(8) %[[#Decayed1]], %[[#LenLocalAddr]] : !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>
+// CIR-DEVICE: %[[#Decayed2:]] = cir.cast array_to_ptrdecay %[[#CStrAddrCast]] : !cir.ptr<!cir.array<!s8i x 9>> -> !cir.ptr<!s8i>
+// CIR-DEVICE: %[[#LoadedLen:]] = cir.load align(8) %[[#LenLocalAddr]] : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!s8i>
+// CIR-DEVICE: cir.ptr_diff %[[#Decayed2]], %[[#LoadedLen]] : !cir.ptr<!s8i>
 
 // LLVM-DEVICE: define dso_local i32 @_Z8ptr_diffv()
-// LLVM-DEVICE: %[[#RetvalAddr:]] = alloca i32, i64 1, align 4, addrspace(5)
+// LLVM-DEVICE: alloca i32, i64 1, align 4, addrspace(5)
+// LLVM-DEVICE: %[[#CStrAlloca:]] = alloca [9 x i8], i64 1, align 1, addrspace(5)
 // LLVM-DEVICE: %[[#LenLocalAddr:]] = alloca ptr, i64 1, align 8, addrspace(5)
+// LLVM-DEVICE: %[[#CStrCast:]] = addrspacecast ptr addrspace(5) %[[#CStrAlloca]] to ptr
+// LLVM-DEVICE: call void @llvm.memcpy.p0.p0.i64(ptr %[[#CStrCast]], ptr addrspacecast (ptr addrspace(4) @__const._Z8ptr_diffv.c_str to ptr), i64 9, i1 false)
 // LLVM-DEVICE: %[[#LenLocalAddrCast:]] = addrspacecast ptr addrspace(5) %[[#LenLocalAddr]] to ptr
-// LLVM-DEVICE: store ptr addrspace(4) @_ZZ8ptr_diffvE5c_str, ptr %[[#LenLocalAddrCast]], align 8
-// LLVM-DEVICE: %[[#LoadedAddr:]] = load ptr, ptr %[[#LenLocalAddrCast]], align 8
-// LLVM-DEVICE: %[[#CastedVal:]] = addrspacecast ptr %[[#LoadedAddr]] to ptr addrspace(4)
-// LLVM-DEVICE: %[[#IntVal:]] = ptrtoint ptr addrspace(4) %[[#CastedVal]] to i64
-// LLVM-DEVICE: %[[#SubVal:]] = sub i64 ptrtoint (ptr addrspace(4) @_ZZ8ptr_diffvE5c_str to i64), %[[#IntVal]]
+// LLVM-DEVICE: %[[#GEP1:]] = getelementptr i8, ptr %[[#CStrCast]], i32 0
+// LLVM-DEVICE: store ptr %[[#GEP1]], ptr %[[#LenLocalAddrCast]], align 8
+// LLVM-DEVICE: %[[#GEP2:]] = getelementptr i8, ptr %[[#CStrCast]], i32 0
+// LLVM-DEVICE: %[[#LoadedLen:]] = load ptr, ptr %[[#LenLocalAddrCast]], align 8
+// LLVM-DEVICE: %[[#LHS:]] = ptrtoint ptr %[[#GEP2]] to i64
+// LLVM-DEVICE: %[[#RHS:]] = ptrtoint ptr %[[#LoadedLen]] to i64
+// LLVM-DEVICE: sub i64 %[[#LHS]], %[[#RHS]]
 
 // OGCG-DEVICE: define dso_local noundef i32 @_Z8ptr_diffv() #0
 // OGCG-DEVICE: %[[RETVAL:.*]] = alloca i32, align 4, addrspace(5)

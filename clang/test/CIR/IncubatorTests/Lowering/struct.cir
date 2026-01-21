@@ -5,17 +5,17 @@
 !u8i = !cir.int<u, 8>
 !u32i = !cir.int<u, 32>
 !rec_S = !cir.record<struct "S" {!u8i, !s32i}>
-!rec_S2A = !cir.record<struct "S2A" {!s32i} #cir.record.decl.ast>
-!rec_S1_ = !cir.record<struct "S1" {!s32i, !cir.float, !cir.ptr<!s32i>} #cir.record.decl.ast>
-!rec_S2_ = !cir.record<struct "S2" {!rec_S2A} #cir.record.decl.ast>
-!rec_S3_ = !cir.record<struct "S3" {!s32i} #cir.record.decl.ast>
+!rec_S2A = !cir.record<struct "S2A" {!s32i}>
+!rec_S1_ = !cir.record<struct "S1" {!s32i, !cir.float, !cir.ptr<!s32i>}>
+!rec_S2_ = !cir.record<struct "S2" {!rec_S2A}>
+!rec_S3_ = !cir.record<struct "S3" {!s32i}>
 
 !struct_with_bool = !cir.record<struct "struct_with_bool" {!u32i, !cir.bool}>
 
 module {
   cir.func @test() {
     %1 = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["x"] {alignment = 4 : i64}
-    // CHECK: %[[#ARRSIZE:]] = llvm.mlir.constant(1 : index) : i64
+    // CHECK: %[[#ARRSIZE:]] = llvm.mlir.constant(1 : i64) : i64
     // CHECK: %[[#STRUCT:]] = llvm.alloca %[[#ARRSIZE]] x !llvm.struct<"struct.S", (i8, i32)>
     %3 = cir.get_member %1[0] {name = "c"} : !cir.ptr<!rec_S> -> !cir.ptr<!u8i>
     // CHECK: = llvm.getelementptr %[[#STRUCT]][0, 0] : (!llvm.ptr) -> !llvm.ptr, !llvm.struct<"struct.S", (i8, i32)>
@@ -36,6 +36,10 @@ module {
     // CHECK-NEXT: %{{.+}} = llvm.extractvalue %[[#v4]][0] : !llvm.struct<"struct.S", (i8, i32)>
     %2 = cir.extract_member %0[1] : !rec_S -> !s32i
     // CHECK-NEXT: %{{.+}} = llvm.extractvalue %[[#v4]][1] : !llvm.struct<"struct.S", (i8, i32)>
+    %3 = cir.const #cir.int<42> : !s32i
+    // CHECK-NEXT: %[[#v5:]] = llvm.mlir.constant(42 : i32) : i32
+    %4 = cir.insert_member %0[1], %3 : !rec_S, !s32i
+    // CHECK-NEXT: %{{.+}} = llvm.insertvalue %[[#v5]], %[[#v4]][1] : !llvm.struct<"struct.S", (i8, i32)>
     cir.return
   }
 
@@ -46,7 +50,7 @@ module {
     cir.return
   }
   // CHECK: llvm.func @shouldConstInitLocalStructsWithConstStructAttr()
-  // CHECK:   %0 = llvm.mlir.constant(1 : index) : i64
+  // CHECK:   %0 = llvm.mlir.constant(1 : i64) : i64
   // CHECK:   %1 = llvm.alloca %0 x !llvm.struct<"struct.S2A", (i32)> {alignment = 4 : i64} : (i64) -> !llvm.ptr
   // CHECK:   %2 = llvm.mlir.undef : !llvm.struct<"struct.S2A", (i32)>
   // CHECK:   %3 = llvm.mlir.constant(1 : i32) : i32
@@ -100,14 +104,14 @@ module {
   cir.func @shouldLowerStructCopies() {
   // CHECK: llvm.func @shouldLowerStructCopies()
     %1 = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["a"] {alignment = 4 : i64}
-    // CHECK: %[[#ONE:]] = llvm.mlir.constant(1 : index) : i64
+    // CHECK: %[[#ONE:]] = llvm.mlir.constant(1 : i64) : i64
     // CHECK: %[[#SA:]] = llvm.alloca %[[#ONE]] x !llvm.struct<"struct.S", (i8, i32)> {alignment = 4 : i64} : (i64) -> !llvm.ptr
     %2 = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["b", init] {alignment = 4 : i64}
-    // CHECK: %[[#ONE:]] = llvm.mlir.constant(1 : index) : i64
+    // CHECK: %[[#ONE:]] = llvm.mlir.constant(1 : i64) : i64
     // CHECK: %[[#SB:]] = llvm.alloca %[[#ONE]] x !llvm.struct<"struct.S", (i8, i32)> {alignment = 4 : i64} : (i64) -> !llvm.ptr
     cir.copy %1 to %2 : !cir.ptr<!rec_S>
-    // CHECK: %[[#SIZE:]] = llvm.mlir.constant(8 : i32) : i32
-    // CHECK: "llvm.intr.memcpy"(%[[#SB]], %[[#SA]], %[[#SIZE]]) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i32) -> ()
+    // CHECK: %[[#SIZE:]] = llvm.mlir.constant(8 : i64) : i64
+    // CHECK: "llvm.intr.memcpy"(%[[#SB]], %[[#SA]], %[[#SIZE]]) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> ()
     cir.return
   }
 

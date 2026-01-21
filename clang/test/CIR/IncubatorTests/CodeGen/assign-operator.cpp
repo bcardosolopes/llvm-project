@@ -40,7 +40,7 @@ struct String {
   // StringView::operator=(StringView&&)
   //
   // CHECK: cir.func {{.*}} @_ZN10StringViewaSEOS_
-  // CHECK-SAME:                  special_member<#cir.cxx_assign<!rec_StringView, move>>
+  // CHECK-SAME:                  special_member<#cir.cxx_assign<!rec_StringView, move, trivial true>>
   // CHECK:   %0 = cir.alloca !cir.ptr<!rec_StringView>, !cir.ptr<!cir.ptr<!rec_StringView>>, ["this", init] {alignment = 8 : i64}
   // CHECK:   %1 = cir.alloca !cir.ptr<!rec_StringView>, !cir.ptr<!cir.ptr<!rec_StringView>>, ["", init, const] {alignment = 8 : i64}
   // CHECK:   %2 = cir.alloca !cir.ptr<!rec_StringView>, !cir.ptr<!cir.ptr<!rec_StringView>>, ["__retval"] {alignment = 8 : i64}
@@ -76,20 +76,20 @@ int main() {
 // CHECK: cir.func {{.*}} @main() -> !s32i
 // CHECK:     %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
 // CHECK:     %1 = cir.alloca !rec_StringView, !cir.ptr<!rec_StringView>, ["sv", init] {alignment = 8 : i64}
+// CHECK:     %2 = cir.const #cir.int<0> : !s32i
+// CHECK:     cir.store %2, %0 : !s32i, !cir.ptr<!s32i>
 // CHECK:     cir.call @_ZN10StringViewC2Ev(%1) : (!cir.ptr<!rec_StringView>) -> ()
 // CHECK:     cir.scope {
-// CHECK:       %3 = cir.alloca !rec_String, !cir.ptr<!rec_String>, ["s", init] {alignment = 8 : i64}
-// CHECK:       %4 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 3>>
-// CHECK:       %5 = cir.cast array_to_ptrdecay %4 : !cir.ptr<!cir.array<!s8i x 3>> -> !cir.ptr<!s8i>
-// CHECK:       cir.call @_ZN6StringC2EPKc(%3, %5) : (!cir.ptr<!rec_String>, !cir.ptr<!s8i>) -> ()
-// CHECK:       cir.scope {
-// CHECK:         %6 = cir.alloca !rec_StringView, !cir.ptr<!rec_StringView>, ["ref.tmp0"] {alignment = 8 : i64}
-// CHECK:         cir.call @_ZN10StringViewC2ERK6String(%6, %3) : (!cir.ptr<!rec_StringView>, !cir.ptr<!rec_String>) -> ()
-// CHECK:         %7 = cir.call @_ZN10StringViewaSEOS_(%1, %6) : (!cir.ptr<!rec_StringView>, !cir.ptr<!rec_StringView>) -> !cir.ptr<!rec_StringView>
-// CHECK:       }
+// CHECK:       cir.alloca !rec_String, !cir.ptr<!rec_String>, ["s", init] {alignment = 8 : i64}
+// CHECK:       cir.alloca !rec_StringView, !cir.ptr<!rec_StringView>, ["ref.tmp0"] {alignment = 8 : i64}
+// CHECK:       cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 3>>
+// CHECK:       cir.cast array_to_ptrdecay %{{.*}} : !cir.ptr<!cir.array<!s8i x 3>> -> !cir.ptr<!s8i>
+// CHECK:       cir.call @_ZN6StringC2EPKc({{.*}}) : (!cir.ptr<!rec_String>, !cir.ptr<!s8i>) -> ()
+// CHECK:       cir.call @_ZN10StringViewC2ERK6String({{.*}}) : (!cir.ptr<!rec_StringView>, !cir.ptr<!rec_String>) -> ()
+// CHECK:       cir.call @_ZN10StringViewaSEOS_(%1, {{.*}}) nothrow : (!cir.ptr<!rec_StringView>, !cir.ptr<!rec_StringView>) -> !cir.ptr<!rec_StringView>
 // CHECK:     }
-// CHECK:     %2 = cir.load{{.*}} %0 : !cir.ptr<!s32i>, !s32i
-// CHECK:     cir.return %2 : !s32i
+// CHECK:     %3 = cir.load{{.*}} %0 : !cir.ptr<!s32i>, !s32i
+// CHECK:     cir.return %3 : !s32i
 // CHECK: }
 
 struct HasNonTrivialAssignOp {
@@ -120,29 +120,27 @@ struct ContainsNonTrivial {
 // CHECK-NEXT:    %[[#OTHER_LOAD:]] = cir.load{{.*}} %[[#OTHER]]
 // CHECK-NEXT:    %[[#OTHER_START:]] = cir.get_member %[[#OTHER_LOAD]][0] {name = "start"}
 // CHECK-NEXT:    cir.call @_ZN21HasNonTrivialAssignOpaSERKS_(%[[#THIS_START]], %[[#OTHER_START]])
+// CHECK:         %[[#OTHER_I:]] = cir.get_member %{{.*}}[2] {name = "i"}
+// CHECK-NEXT:    %{{.*}} = cir.load{{.*}} %[[#OTHER_I]]
 // CHECK-NEXT:    %[[#THIS_I:]] = cir.get_member %[[#THIS_LOAD]][2] {name = "i"}
-// CHECK-NEXT:    %[[#OTHER_LOAD:]] = cir.load{{.*}} %[[#OTHER]]
-// CHECK-NEXT:    %[[#OTHER_I:]] = cir.get_member %[[#OTHER_LOAD]][2] {name = "i"}
-// CHECK-NEXT:    %[[#MEMCPY_SIZE:]] = cir.const #cir.int<12> : !u64i
-// CHECK-NEXT:    %[[#THIS_I_CAST:]] = cir.cast bitcast %[[#THIS_I]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CHECK-NEXT:    %[[#OTHER_I_CAST:]] = cir.cast bitcast %[[#OTHER_I]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CHECK-NEXT:    cir.libc.memcpy %[[#MEMCPY_SIZE]] bytes from %[[#OTHER_I_CAST]] to %[[#THIS_I_CAST]]
-// CHECK-NEXT:    %[[#THIS_MIDDLE:]] = cir.get_member %[[#THIS_LOAD]][4] {name = "middle"}
-// CHECK-NEXT:    %[[#OTHER_LOAD:]] = cir.load{{.*}} %[[#OTHER]]
-// CHECK-NEXT:    %[[#OTHER_MIDDLE:]] = cir.get_member %[[#OTHER_LOAD]][4] {name = "middle"}
+// CHECK-NEXT:    cir.store{{.*}} %{{.*}}, %[[#THIS_I]]
+// CHECK:         %[[#OTHER_J:]] = cir.get_member %{{.*}}[3] {name = "j"}
+// CHECK-NEXT:    %{{.*}} = cir.load{{.*}} %[[#OTHER_J]]
+// CHECK-NEXT:    %[[#THIS_J:]] = cir.get_member %[[#THIS_LOAD]][3] {name = "j"}
+// CHECK-NEXT:    cir.store{{.*}} %{{.*}}, %[[#THIS_J]]
+// CHECK:         %[[#THIS_MIDDLE:]] = cir.get_member %[[#THIS_LOAD]][4] {name = "middle"}
+// CHECK:         %[[#OTHER_MIDDLE:]] = cir.get_member %{{.*}}[4] {name = "middle"}
 // CHECK-NEXT:    cir.call @_ZN21HasNonTrivialAssignOpaSERKS_(%[[#THIS_MIDDLE]], %[[#OTHER_MIDDLE]])
-// CHECK-NEXT:    %[[#THIS_K:]] = cir.get_member %[[#THIS_LOAD]][5] {name = "k"}
-// CHECK-NEXT:    %[[#OTHER_LOAD:]] = cir.load{{.*}} %[[#OTHER]]
-// CHECK-NEXT:    %[[#OTHER_K:]] = cir.get_member %[[#OTHER_LOAD]][5] {name = "k"}
-// CHECK-NEXT:    %[[#MEMCPY_SIZE:]] = cir.const #cir.int<2> : !u64i
-// CHECK-NEXT:    %[[#THIS_K_CAST:]] = cir.cast bitcast %[[#THIS_K]] : !cir.ptr<!u16i> -> !cir.ptr<!void>
-// CHECK-NEXT:    %[[#OTHER_K_CAST:]] = cir.cast bitcast %[[#OTHER_K]] : !cir.ptr<!u16i> -> !cir.ptr<!void>
-// CHECK-NEXT:    cir.libc.memcpy %[[#MEMCPY_SIZE]] bytes from %[[#OTHER_K_CAST]] to %[[#THIS_K_CAST]]
-// CHECK-NEXT:    %[[#THIS_END:]] = cir.get_member %[[#THIS_LOAD]][6] {name = "end"}
-// CHECK-NEXT:    %[[#OTHER_LOAD:]] = cir.load{{.*}} %[[#OTHER]]
-// CHECK-NEXT:    %[[#OTHER_END:]] = cir.get_member %[[#OTHER_LOAD]][6] {name = "end"}
+// CHECK:         cir.get_bitfield
+// CHECK:         cir.set_bitfield
+// CHECK:         cir.get_bitfield
+// CHECK:         cir.set_bitfield
+// CHECK:         cir.get_bitfield
+// CHECK:         cir.set_bitfield
+// CHECK:         %[[#THIS_END:]] = cir.get_member %[[#THIS_LOAD]][6] {name = "end"}
+// CHECK:         %[[#OTHER_END:]] = cir.get_member %{{.*}}[6] {name = "end"}
 // CHECK-NEXT:    cir.call @_ZN21HasNonTrivialAssignOpaSERKS_(%[[#THIS_END]], %[[#OTHER_END]])
-// CHECK-NEXT:    cir.store{{.*}} %[[#THIS_LOAD]], %[[#RETVAL]]
+// CHECK:         cir.store{{.*}} %[[#THIS_LOAD]], %[[#RETVAL]]
 // CHECK-NEXT:    %[[#RETVAL_LOAD:]] = cir.load{{.*}} %[[#RETVAL]]
 // CHECK-NEXT:    cir.return %[[#RETVAL_LOAD]]
 // CHECK-NEXT:  }
@@ -157,21 +155,29 @@ struct Trivial {
 };
 
 // CHECK-LABEL: cir.func {{.*}} @_ZN7TrivialaSERKS_(
+// CHECK-SAME:    special_member<#cir.cxx_assign<!rec_Trivial, copy, trivial true>>
 // CHECK-NEXT:    %[[#THIS:]] = cir.alloca !cir.ptr<!rec_Trivial>
 // CHECK-NEXT:    %[[#OTHER:]] = cir.alloca !cir.ptr<!rec_Trivial>
 // CHECK-NEXT:    %[[#RETVAL:]] = cir.alloca !cir.ptr<!rec_Trivial>
 // CHECK-NEXT:    cir.store{{.*}} %arg0, %[[#THIS]]
 // CHECK-NEXT:    cir.store{{.*}} %arg1, %[[#OTHER]]
 // CHECK-NEXT:    %[[#THIS_LOAD:]] = cir.load{{.*}} deref %[[#THIS]]
-// CHECK-NEXT:    %[[#THIS_I:]] = cir.get_member %[[#THIS_LOAD]][0] {name = "i"}
 // CHECK-NEXT:    %[[#OTHER_LOAD:]] = cir.load{{.*}} %[[#OTHER]]
 // CHECK-NEXT:    %[[#OTHER_I:]] = cir.get_member %[[#OTHER_LOAD]][0] {name = "i"}
-// Note that tail padding bytes are not included.
-// CHECK-NEXT:    %[[#MEMCPY_SIZE:]] = cir.const #cir.int<36> : !u64i
-// CHECK-NEXT:    %[[#THIS_I_CAST:]] = cir.cast bitcast %[[#THIS_I]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CHECK-NEXT:    %[[#OTHER_I_CAST:]] = cir.cast bitcast %[[#OTHER_I]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CHECK-NEXT:    cir.libc.memcpy %[[#MEMCPY_SIZE]] bytes from %[[#OTHER_I_CAST]] to %[[#THIS_I_CAST]]
-// CHECK-NEXT:    cir.store{{.*}} %[[#THIS_LOAD]], %[[#RETVAL]]
+// CHECK-NEXT:    %[[#OTHER_I_VAL:]] = cir.load{{.*}} %[[#OTHER_I]]
+// CHECK-NEXT:    %[[#THIS_I:]] = cir.get_member %[[#THIS_LOAD]][0] {name = "i"}
+// CHECK-NEXT:    cir.store{{.*}} %[[#OTHER_I_VAL]], %[[#THIS_I]]
+// CHECK:         %{{.*}} = cir.get_member %{{.*}}[1] {name = "j"}
+// CHECK:         %{{.*}} = cir.get_member %[[#THIS_LOAD]][1] {name = "j"}
+// CHECK:         %{{.*}} = cir.get_member %{{.*}}[2] {name = "k"}
+// CHECK:         %{{.*}} = cir.get_member %[[#THIS_LOAD]][2] {name = "k"}
+// CHECK:         %{{.*}} = cir.get_member %[[#THIS_LOAD]][3] {name = "l"}
+// CHECK:         %{{.*}} = cir.cast bitcast %{{.*}} : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!void>
+// CHECK:         %{{.*}} = cir.get_member %{{.*}}[3] {name = "l"}
+// CHECK:         %{{.*}} = cir.cast bitcast %{{.*}} : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!void>
+// CHECK:         %{{.*}} = cir.const #cir.int<12> : !u64i
+// CHECK:         cir.libc.memcpy %{{.*}} bytes from %{{.*}} to %{{.*}}
+// CHECK:         cir.store{{.*}} %[[#THIS_LOAD]], %[[#RETVAL]]
 // CHECK-NEXT:    %[[#RETVAL_LOAD:]] = cir.load{{.*}} %[[#RETVAL]]
 // CHECK-NEXT:    cir.return %[[#RETVAL_LOAD]]
 // CHECK-NEXT:  }
@@ -192,8 +198,8 @@ struct ContainsTrivial {
 // We should explicitly call operator= even for trivial types.
 // CHECK-LABEL: cir.func {{.*}} @_ZN15ContainsTrivialaSERKS_(
 // CHECK-SAME:    special_member<#cir.cxx_assign<!rec_ContainsTrivial, copy>>
-// CHECK:         cir.call @_ZN7TrivialaSERKS_(
-// CHECK:         cir.call @_ZN7TrivialaSERKS_(
+// CHECK:         cir.call @_ZN7TrivialaSERKS_({{.*}}) nothrow
+// CHECK:         cir.call @_ZN7TrivialaSERKS_({{.*}}) nothrow
 ContainsTrivial &ContainsTrivial::operator=(const ContainsTrivial &) = default;
 
 struct ContainsTrivialArray {

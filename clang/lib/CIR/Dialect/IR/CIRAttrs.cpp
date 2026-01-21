@@ -10,9 +10,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/IR/DialectImplementation.h"
+#include "clang/AST/DeclCXX.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 //===-----------------------------------------------------------------===//
@@ -65,8 +68,153 @@ using namespace mlir;
 using namespace cir;
 
 //===----------------------------------------------------------------------===//
+// MemorySpaceAttrInterface implementations for Lang and Target address space
+// attributes
+//===----------------------------------------------------------------------===//
+namespace cir {
+
+bool LangAddressSpaceAttr::isValidLoad(
+    mlir::Type type, mlir::ptr::AtomicOrdering ordering,
+    std::optional<int64_t> alignment, const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool LangAddressSpaceAttr::isValidStore(
+    mlir::Type type, mlir::ptr::AtomicOrdering ordering,
+    std::optional<int64_t> alignment, const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool LangAddressSpaceAttr::isValidAtomicOp(
+    mlir::ptr::AtomicBinOp op, mlir::Type type,
+    mlir::ptr::AtomicOrdering ordering, std::optional<int64_t> alignment,
+    const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool LangAddressSpaceAttr::isValidAtomicXchg(
+    mlir::Type type, mlir::ptr::AtomicOrdering successOrdering,
+    mlir::ptr::AtomicOrdering failureOrdering, std::optional<int64_t> alignment,
+    const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool LangAddressSpaceAttr::isValidAddrSpaceCast(
+    mlir::Type tgt, mlir::Type src,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool LangAddressSpaceAttr::isValidPtrIntCast(
+    mlir::Type intLikeTy, mlir::Type ptrLikeTy,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool TargetAddressSpaceAttr::isValidLoad(
+    mlir::Type type, mlir::ptr::AtomicOrdering ordering,
+    std::optional<int64_t> alignment, const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool TargetAddressSpaceAttr::isValidStore(
+    mlir::Type type, mlir::ptr::AtomicOrdering ordering,
+    std::optional<int64_t> alignment, const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool TargetAddressSpaceAttr::isValidAtomicOp(
+    mlir::ptr::AtomicBinOp op, mlir::Type type,
+    mlir::ptr::AtomicOrdering ordering, std::optional<int64_t> alignment,
+    const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool TargetAddressSpaceAttr::isValidAtomicXchg(
+    mlir::Type type, mlir::ptr::AtomicOrdering successOrdering,
+    mlir::ptr::AtomicOrdering failureOrdering, std::optional<int64_t> alignment,
+    const mlir::DataLayout *dataLayout,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool TargetAddressSpaceAttr::isValidAddrSpaceCast(
+    mlir::Type tgt, mlir::Type src,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+bool TargetAddressSpaceAttr::isValidPtrIntCast(
+    mlir::Type intLikeTy, mlir::Type ptrLikeTy,
+    llvm::function_ref<mlir::InFlightDiagnostic()> emitError) const {
+  assert(false && "NYI");
+  return false;
+}
+
+} // namespace cir
+
+//===----------------------------------------------------------------------===//
 // General CIR parsing / printing
 //===----------------------------------------------------------------------===//
+
+Attribute CIRDialect::parseAttribute(DialectAsmParser &parser,
+                                     Type type) const {
+  llvm::SMLoc typeLoc = parser.getCurrentLocation();
+  llvm::StringRef mnemonic;
+  Attribute genAttr;
+
+  // First, try to parse the #cir<mnemonic ...> format where the mnemonic
+  // is inside angle brackets.
+  if (succeeded(parser.parseOptionalLess())) {
+    // We're in the #cir<...> format. Parse the mnemonic keyword.
+    if (failed(parser.parseKeyword(&mnemonic)))
+      return Attribute();
+
+    // Use the mnemonic to dispatch to the appropriate attribute parser.
+    OptionalParseResult parseResult =
+        generatedAttributeParser(parser, &mnemonic, type, genAttr);
+    if (parseResult.has_value()) {
+      // Parse the closing '>'
+      if (failed(parser.parseGreater()))
+        return Attribute();
+      return genAttr;
+    }
+    parser.emitError(typeLoc, "unknown attribute `")
+        << mnemonic << "` in dialect `cir`";
+    return Attribute();
+  }
+
+  // Standard #cir.mnemonic<...> format
+  OptionalParseResult parseResult =
+      generatedAttributeParser(parser, &mnemonic, type, genAttr);
+  if (parseResult.has_value())
+    return genAttr;
+  parser.emitError(typeLoc, "unknown attribute in CIR dialect");
+  return Attribute();
+}
+
+void CIRDialect::printAttribute(Attribute attr, DialectAsmPrinter &os) const {
+  if (failed(generatedAttributePrinter(attr, os)))
+    llvm_unreachable("unexpected CIR attribute kind");
+}
 
 static void printRecordMembers(mlir::AsmPrinter &printer,
                                mlir::ArrayAttr members) {
@@ -270,6 +418,66 @@ ConstComplexAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 }
 
 //===----------------------------------------------------------------------===//
+// CUDAVarRegistrationInfoAttr definitions
+//===----------------------------------------------------------------------===//
+
+void CUDAVarRegistrationInfoAttr::print(AsmPrinter &p) const {
+  p << "<" << stringifyEnum(getKind());
+  if (getIsExtern())
+    p << ", extern";
+  if (getIsConstant())
+    p << ", constant";
+  if (getIsManaged())
+    p << ", managed";
+  p << ">";
+}
+
+Attribute CUDAVarRegistrationInfoAttr::parse(AsmParser &parser, Type odsType) {
+  if (parser.parseLess())
+    return {};
+
+  // Parse the device variable kind (Variable, Surface, Texture)
+  StringRef kindStr;
+  if (parser.parseKeyword(&kindStr))
+    return {};
+
+  auto kind = symbolizeCUDADeviceVarKind(kindStr);
+  if (!kind) {
+    parser.emitError(parser.getCurrentLocation(),
+                     "unknown device variable kind: ")
+        << kindStr;
+    return {};
+  }
+
+  // Parse optional flags: extern, constant, managed
+  bool isExtern = false;
+  bool isConstant = false;
+  bool isManaged = false;
+
+  while (parser.parseOptionalGreater().failed()) {
+    if (parser.parseComma())
+      return {};
+
+    StringRef flag;
+    if (parser.parseKeyword(&flag))
+      return {};
+
+    if (flag == "extern")
+      isExtern = true;
+    else if (flag == "constant")
+      isConstant = true;
+    else if (flag == "managed")
+      isManaged = true;
+    else {
+      parser.emitError(parser.getCurrentLocation(), "unknown flag: ") << flag;
+      return {};
+    }
+  }
+
+  return get(parser.getContext(), *kind, isExtern, isConstant, isManaged);
+}
+
+//===----------------------------------------------------------------------===//
 // DataMemberAttr definitions
 //===----------------------------------------------------------------------===//
 
@@ -305,6 +513,18 @@ DataMemberAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 // MethodAttr definitions
 //===----------------------------------------------------------------------===//
 
+LogicalResult MethodAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                                 cir::MethodType type,
+                                 std::optional<FlatSymbolRefAttr> symbol,
+                                 std::optional<uint64_t> vtable_offset) {
+  if (symbol.has_value() && vtable_offset.has_value())
+    return emitError()
+           << "at most one of symbol and vtable_offset can be present "
+              "in #cir.method";
+
+  return success();
+}
+
 Attribute MethodAttr::parse(AsmParser &parser, Type odsType) {
   auto ty = mlir::cast<cir::MethodType>(odsType);
 
@@ -331,15 +551,30 @@ Attribute MethodAttr::parse(AsmParser &parser, Type odsType) {
     return get(ty, symbol);
   }
 
-  return {};
+  // Parse a uint64 that represents the vtable offset.
+  std::uint64_t vtableOffset = 0;
+  if (parser.parseKeyword("vtable_offset"))
+    return {};
+  if (parser.parseEqual())
+    return {};
+  if (parser.parseInteger(vtableOffset))
+    return {};
+
+  if (parser.parseGreater().failed())
+    return {};
+
+  return get(ty, vtableOffset);
 }
 
 void MethodAttr::print(AsmPrinter &printer) const {
   auto symbol = getSymbol();
+  auto vtableOffset = getVtableOffset();
 
   printer << '<';
   if (symbol.has_value()) {
     printer << *symbol;
+  } else if (vtableOffset.has_value()) {
+    printer << "vtable_offset = " << *vtableOffset;
   } else {
     printer << "null";
   }
@@ -532,6 +767,55 @@ LogicalResult cir::VTableAttr::verify(
 }
 
 //===----------------------------------------------------------------------===//
+// CmpThreeWayInfoAttr definitions
+//===----------------------------------------------------------------------===//
+
+std::string CmpThreeWayInfoAttr::getAlias() const {
+  std::string alias = "cmp3way_info";
+
+  if (getOrdering() == CmpOrdering::Strong)
+    alias.append("_strong_");
+  else
+    alias.append("_partial_");
+
+  auto appendInt = [&](int64_t value) {
+    if (value < 0) {
+      alias.push_back('n');
+      value = -value;
+    }
+    alias.append(std::to_string(value));
+  };
+
+  alias.append("lt");
+  appendInt(getLt());
+  alias.append("eq");
+  appendInt(getEq());
+  alias.append("gt");
+  appendInt(getGt());
+
+  if (auto unordered = getUnordered()) {
+    alias.append("un");
+    appendInt(unordered.value());
+  }
+
+  return alias;
+}
+
+LogicalResult
+CmpThreeWayInfoAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                            CmpOrdering ordering, int64_t lt, int64_t eq,
+                            int64_t gt, std::optional<int64_t> unordered) {
+  // The presense of unordered must match the value of ordering.
+  if (ordering == CmpOrdering::Strong && unordered)
+    return emitError() << "strong ordering does not include unordered ordering";
+
+  if (ordering == CmpOrdering::Partial && !unordered)
+    return emitError() << "partial ordering lacks unordered ordering";
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // DynamicCastInfoAtttr definitions
 //===----------------------------------------------------------------------===//
 
@@ -575,6 +859,144 @@ LogicalResult DynamicCastInfoAttr::verify(
 }
 
 //===----------------------------------------------------------------------===//
+// GlobalAnnotationValuesAttr
+//===----------------------------------------------------------------------===//
+
+LogicalResult
+GlobalAnnotationValuesAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                                   mlir::ArrayAttr annotations) {
+  if (annotations.empty())
+    return emitError() << "GlobalAnnotationValuesAttr should at least have "
+                          "one annotation";
+
+  for (auto &entry : annotations) {
+    auto annoEntry = mlir::dyn_cast<mlir::ArrayAttr>(entry);
+    if (!annoEntry)
+      return emitError()
+             << "Element of GlobalAnnotationValuesAttr annotations array"
+                " must be an array";
+
+    if (annoEntry.size() != 2)
+      return emitError()
+             << "Element of GlobalAnnotationValuesAttr annotations array"
+             << " must be a 2-element array and you have " << annoEntry.size();
+
+    if (!mlir::isa<mlir::StringAttr>(annoEntry[0]))
+      return emitError()
+             << "Element of GlobalAnnotationValuesAttr annotations"
+                "array must start with a string, which is the name of "
+                "global op or func it annotates";
+
+    if (!mlir::isa<cir::AnnotationAttr>(annoEntry[1]))
+      return emitError() << "The second element of GlobalAnnotationValuesAttr"
+                            "annotations array element must be of "
+                            "type AnnotationAttr";
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// OpenCLKernelMetadataAttr
+//===----------------------------------------------------------------------===//
+
+LogicalResult OpenCLKernelMetadataAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError, ArrayAttr workGroupSizeHint,
+    ArrayAttr reqdWorkGroupSize, TypeAttr vecTypeHint,
+    std::optional<bool> vecTypeHintSignedness,
+    IntegerAttr intelReqdSubGroupSize) {
+  // If no field is present, the attribute is considered invalid.
+  if (!workGroupSizeHint && !reqdWorkGroupSize && !vecTypeHint &&
+      !vecTypeHintSignedness && !intelReqdSubGroupSize) {
+    return emitError()
+           << "metadata attribute without any field present is invalid";
+  }
+
+  // Check for 3-dim integer tuples
+  auto is3dimIntTuple = [](ArrayAttr arr) {
+    auto isInt = [](Attribute dim) { return mlir::isa<IntegerAttr>(dim); };
+    return arr.size() == 3 && llvm::all_of(arr, isInt);
+  };
+  if (workGroupSizeHint && !is3dimIntTuple(workGroupSizeHint)) {
+    return emitError()
+           << "work_group_size_hint must have exactly 3 integer elements";
+  }
+  if (reqdWorkGroupSize && !is3dimIntTuple(reqdWorkGroupSize)) {
+    return emitError()
+           << "reqd_work_group_size must have exactly 3 integer elements";
+  }
+
+  // Check that vec_type_hint is from the CIR or LLVM dialect.
+  if (vecTypeHint) {
+    mlir::Type vecTypeHintValue = vecTypeHint.getValue();
+    if (mlir::isa<cir::CIRDialect>(vecTypeHintValue.getDialect())) {
+      // Check for signedness alignment in CIR
+      if (isSignedHint(vecTypeHintValue) != vecTypeHintSignedness) {
+        return emitError() << "vec_type_hint_signedness must match the "
+                              "signedness of the vec_type_hint type";
+      }
+    } else if (!mlir::LLVM::isCompatibleType(vecTypeHintValue)) {
+      return emitError()
+             << "vec_type_hint must be a type from the CIR or LLVM dialect";
+    }
+  }
+
+  // Check for co-presence of vecTypeHintSignedness
+  if (!!vecTypeHint != vecTypeHintSignedness.has_value()) {
+    return emitError() << "vec_type_hint_signedness should be present if and "
+                          "only if vec_type_hint is set";
+  }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// OpenCLKernelArgMetadataAttr
+//===----------------------------------------------------------------------===//
+
+LogicalResult OpenCLKernelArgMetadataAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError, ArrayAttr addrSpaces,
+    ArrayAttr accessQuals, ArrayAttr types, ArrayAttr baseTypes,
+    ArrayAttr typeQuals, ArrayAttr argNames) {
+  auto isIntArray = [](ArrayAttr elt) {
+    return llvm::all_of(
+        elt, [](Attribute elt) { return mlir::isa<IntegerAttr>(elt); });
+  };
+  auto isStrArray = [](ArrayAttr elt) {
+    return llvm::all_of(
+        elt, [](Attribute elt) { return mlir::isa<StringAttr>(elt); });
+  };
+
+  if (!isIntArray(addrSpaces))
+    return emitError() << "addr_space must be integer arrays";
+  if (!llvm::all_of<ArrayRef<ArrayAttr>>(
+          {accessQuals, types, baseTypes, typeQuals}, isStrArray))
+    return emitError()
+           << "access_qual, type, base_type, type_qual must be string arrays";
+  if (argNames && !isStrArray(argNames)) {
+    return emitError() << "name must be a string array";
+  }
+
+  if (!llvm::all_of<ArrayRef<ArrayAttr>>(
+          {addrSpaces, accessQuals, types, baseTypes, typeQuals, argNames},
+          [&](ArrayAttr arr) {
+            return !arr || arr.size() == addrSpaces.size();
+          })) {
+    return emitError() << "all arrays must have the same number of elements";
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// TBAAAttr
+//===----------------------------------------------------------------------===//
+
+bool cir::TBAAAttr::classof(mlir::Attribute attr) {
+  return llvm::isa<cir::TBAAOmnipotentCharAttr, cir::TBAAVTablePointerAttr,
+                   cir::TBAAScalarAttr, cir::TBAAStructAttr, cir::TBAATagAttr>(
+      attr);
+}
+
+//===----------------------------------------------------------------------===//
 // CIR Dialect
 //===----------------------------------------------------------------------===//
 
@@ -584,3 +1006,36 @@ void CIRDialect::registerAttributes() {
 #include "clang/CIR/Dialect/IR/CIROpsAttributes.cpp.inc"
       >();
 }
+
+//===----------------------------------------------------------------------===//
+// makeFuncDeclAttr
+//===----------------------------------------------------------------------===//
+
+namespace cir {
+mlir::Attribute makeFuncDeclAttr(const clang::Decl *decl,
+                                 mlir::MLIRContext *ctx) {
+  return llvm::TypeSwitch<const clang::Decl *, mlir::Attribute>(decl)
+      .Case([ctx](const clang::CXXConstructorDecl *ast) {
+        return ASTCXXConstructorDeclAttr::get(ctx, ast);
+      })
+      .Case([ctx](const clang::CXXConversionDecl *ast) {
+        return ASTCXXConversionDeclAttr::get(ctx, ast);
+      })
+      .Case([ctx](const clang::CXXDestructorDecl *ast) {
+        return ASTCXXDestructorDeclAttr::get(ctx, ast);
+      })
+      .Case([ctx](const clang::CXXMethodDecl *ast) {
+        return ASTCXXMethodDeclAttr::get(ctx, ast);
+      })
+      .Case([ctx](const clang::FunctionDecl *ast) {
+        return ASTFunctionDeclAttr::get(ctx, ast);
+      })
+      .Case([ctx](const clang::RecordDecl *ast) {
+        return ASTRecordDeclAttr::get(ctx, ast);
+      })
+      .Default([](auto) {
+        llvm_unreachable("unexpected Decl kind");
+        return mlir::Attribute();
+      });
+}
+} // namespace cir

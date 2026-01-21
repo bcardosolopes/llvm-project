@@ -6,15 +6,16 @@ struct HasOps {
 };
 
 void use(int x, unsigned int y, float f, HasOps ops) {
-  // CHECK: cir.func{{.*}}(%[[X_ARG:.*]]: !s32i{{.*}}, %[[Y_ARG:.*]]: !u32i{{.*}}, %[[F_ARG:.*]]: !cir.float{{.*}}){{.*}}, %[[OPS_ARG:.*]]: !rec_HasOps{{.*}}) {
+  // CHECK: cir.func{{.*}}(%[[X_ARG:.*]]: !s32i{{.*}}, %[[Y_ARG:.*]]: !u32i{{.*}}, %[[F_ARG:.*]]: !cir.float{{.*}}, %[[OPS_ARG:.*]]: !u8i{{.*}}) extra(#fn_attr) {
+  // CHECK-NEXT: %[[OPS_ALLOCA:.*]] = cir.alloca !rec_HasOps, !cir.ptr<!rec_HasOps>, [""]
+  // CHECK-NEXT: %[[OPS_CAST:.*]] = cir.cast bitcast %[[OPS_ALLOCA]] : !cir.ptr<!rec_HasOps> -> !cir.ptr<!u8i>
+  // CHECK-NEXT: cir.store %[[OPS_ARG]], %[[OPS_CAST]] : !u8i, !cir.ptr<!u8i>
   // CHECK-NEXT: %[[X_ALLOCA:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init]
   // CHECK-NEXT: %[[Y_ALLOCA:.*]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["y", init]
   // CHECK-NEXT: %[[F_ALLOCA:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["f", init]
-  // CHECK-NEXT: %[[OPS_ALLOCA:.*]] = cir.alloca !rec_HasOps, !cir.ptr<!rec_HasOps>, ["ops", init]
   // CHECK-NEXT: cir.store %[[X_ARG]], %[[X_ALLOCA]] : !s32i, !cir.ptr<!s32i>
   // CHECK-NEXT: cir.store %[[Y_ARG]], %[[Y_ALLOCA]] : !u32i, !cir.ptr<!u32i>
   // CHECK-NEXT: cir.store %[[F_ARG]], %[[F_ALLOCA]] : !cir.float, !cir.ptr<!cir.float>
-  // CHECK-NEXT: cir.store %[[OPS_ARG]], %[[OPS_ALLOCA]] : !rec_HasOps, !cir.ptr<!rec_HasOps>
 
   // CHECK-NEXT: acc.atomic.update %[[X_ALLOCA]] : !cir.ptr<!s32i> {
   // CHECK-NEXT: ^bb0(%[[RECIPE_ARG:.*]]: !s32i{{.*}}):

@@ -28,19 +28,23 @@ void test() {
   b2->bar();
 }
 
-// Check CIR thunk in vtable
-// CIR: cir.global {{.*}}linkonce_odr @_ZTV7Derived = #cir.vtable<{{.*}}@_ZThn{{[0-9]+}}_N7Derived3barEv
+// CIR vtable contains thunk references
+// CIR: cir.global  linkonce_odr comdat @_ZTV7Derived = #cir.vtable
+// CIR-SAME: #cir.global_view<@_ZThn8_N7Derived3barEv>
 
-// Check CIR thunk function
-// CIR: cir.func {{.*}} @_ZThn{{[0-9]+}}_N7Derived3barEv
-// CIR:   cir.ptr_stride
+// CIR: cir.func {{.*}} @_ZN7DerivedC2Ev
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 1, offset = 2>) : !cir.vptr
+
+// CIR thunk function
+// CIR: cir.func {{.*}} @_ZThn8_N7Derived3barEv
+// CIR:   cir.ptr_stride %{{.*}}, %{{.*}} : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
 // CIR:   cir.call @_ZN7Derived3barEv
 
-// Check LLVM thunk in vtable (from CIR)
-// LLVM-DAG: @_ZTV7Derived = linkonce_odr constant {{.*}} @_ZThn{{[0-9]+}}_N7Derived3barEv
-
-// Check LLVM thunk function (from CIR)
-// LLVM-DAG: define linkonce_odr void @_ZThn{{[0-9]+}}_N7Derived3barEv
+// CIR lowered LLVM output
+// LLVM: @_ZTV7Derived = linkonce_odr {{.*}} { [4 x ptr], [3 x ptr] }
+// LLVM-SAME: @_ZThn8_N7Derived3barEv
+// LLVM: define linkonce_odr void @_ZThn8_N7Derived3barEv
 
 // Check original CodeGen LLVM output matches
 // OGCG-DAG: @_ZTV7Derived = linkonce_odr unnamed_addr constant {{.*}} @_ZThn{{[0-9]+}}_N7Derived3barEv

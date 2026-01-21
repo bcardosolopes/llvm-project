@@ -34,10 +34,10 @@ void test() {
 
 // Check vtable contains thunk with correct offset (16 bytes on x86_64)
 // Both CIR and OGCG should produce identical vtable structure
-// LLVM: @_ZTV7Derived = linkonce_odr constant { [4 x ptr], [3 x ptr] }
+// LLVM: @_ZTV7Derived = linkonce_odr global { [4 x ptr], [3 x ptr] }
 // LLVM-SAME: @_ZThn16_N7Derived3barEv
 
-// OGCG: @_ZTV7Derived = linkonce_odr {{.*}} constant { [4 x ptr], [3 x ptr] }
+// OGCG: @_ZTV7Derived = linkonce_odr unnamed_addr constant { [4 x ptr], [3 x ptr] }
 // OGCG-SAME: @_ZThn16_N7Derived3barEv
 
 // ============================================================================

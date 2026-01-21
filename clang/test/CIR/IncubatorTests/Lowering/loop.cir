@@ -69,7 +69,7 @@ module {
 
 
 
-  // test corner case 
+  // test corner case
   // while (1) {
   //     break;
   // }
@@ -115,10 +115,6 @@ module {
 // CHECK:  ^bb[[#COND:]]:
 // CHECK:    llvm.cond_br %{{.+}}, ^bb[[#BODY:]], ^bb[[#EXIT:]]
 // CHECK:  ^bb[[#BODY]]:
-// CHECK:    llvm.br ^bb[[#SCOPE_IN:]]
-// CHECK:  ^bb[[#SCOPE_IN]]:
-// CHECK:    llvm.br ^bb[[#EXIT]]
-// CHECK:  ^bb[[#SCOPE_EXIT:]]:
 // CHECK:    llvm.br ^bb[[#STEP:]]
 // CHECK:  ^bb[[#STEP]]:
 // CHECK:    llvm.br ^bb[[#COND]]

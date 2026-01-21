@@ -4,6 +4,7 @@
 // RUN: FileCheck %s -input-file %t.spirv64.ll -check-prefix=SPIRV64
 // RUN: cir-translate --cir-to-llvmir --disable-cc-lowering %s -o %t.default.ll
 // RUN: FileCheck %s -input-file %t.default.ll -check-prefix=DEFAULT
+// REQUIRES: system-linux
 
 module {
   cir.func @foo() {

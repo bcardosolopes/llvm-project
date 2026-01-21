@@ -45,7 +45,7 @@ void foo(void) {}
 // LLVM-NEXT:   ret void
 // LLVM-NEXT: }
 
-//      CIR_STD_LLVM: define void @foo()
+//      CIR_STD_LLVM: define dso_local void @foo()
 // CIR_STD_LLVM-NEXT:   ret void
 // CIR_STD_LLVM-NEXT: }
 

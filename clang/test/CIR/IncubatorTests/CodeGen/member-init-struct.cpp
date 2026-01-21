@@ -34,7 +34,7 @@ C a, b(x), c(0, 2);
 // CHECK:   %[[VAL_8:.*]] = cir.get_member %[[VAL_2]][2] {name = "d"} : !cir.ptr<!rec_C> -> !cir.ptr<!cir.array<!s32i x 10>>
 // CHECK:   %[[VAL_9:.*]] = cir.const {{.*}} : !cir.array<!s32i x 10>
 // CHECK:   cir.store{{.*}} %[[VAL_9]], %[[VAL_8]] : !cir.array<!s32i x 10>, !cir.ptr<!cir.array<!s32i x 10>>
-// CHECK:   %[[VAL_10:.*]] = cir.get_member %[[VAL_2]][4] {name = "e"} : !cir.ptr<!rec_C> -> !cir.ptr<!cir.method<!cir.func<()> in !rec_C>>
-// CHECK:   %[[VAL_11:.*]] = cir.const #cir.method<null> : !cir.method<!cir.func<()> in !rec_C>
-// CHECK:   cir.store{{.*}} %[[VAL_11]], %[[VAL_10]] : !cir.method<!cir.func<()> in !rec_C>, !cir.ptr<!cir.method<!cir.func<()> in !rec_C>>
+// CHECK:   %[[VAL_10:.*]] = cir.get_member %[[VAL_2]][4] {name = "e"} : !cir.ptr<!rec_C> -> !cir.ptr<!rec_anon_struct>
+// CHECK:   %[[VAL_11:.*]] = cir.const #cir.const_record<{#cir.int<0> : !s64i, #cir.int<0> : !s64i}> : !rec_anon_struct
+// CHECK:   cir.store{{.*}} %[[VAL_11]], %[[VAL_10]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
 // CHECK:   cir.return

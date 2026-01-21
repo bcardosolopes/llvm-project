@@ -36,16 +36,14 @@ void m(APIType api) {
 // CHECK:    cir.store %arg0, %0 : !u32i, !cir.ptr<!u32i>
 // CHECK:    %1 = cir.load{{.*}} %0 : !cir.ptr<!u32i>, !u32i
 // CHECK:    %2 = cir.cast integral %1 : !u32i -> !s32i
-// CHECK:    %3 = cir.const #cir.int<0> : !u32i
-// CHECK:    %4 = cir.cast integral %3 : !u32i -> !s32i
-// CHECK:    %5 = cir.cmp(eq, %2, %4) : !s32i, !cir.bool
-// CHECK:    cir.ternary(%5, true {
-// CHECK:      %6 = cir.const #cir.int<0> : !s32i
+// CHECK:    %3 = cir.const #cir.int<0> : !s32i
+// CHECK:    %4 = cir.cmp(eq, %2, %3) : !s32i, !cir.bool
+// CHECK:    cir.ternary(%4, true {
 // CHECK:      cir.yield
 // CHECK:    }, false {
-// CHECK:      %6 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 7>>
-// CHECK:      %7 = cir.cast array_to_ptrdecay %6 : !cir.ptr<!cir.array<!s8i x 7>> -> !cir.ptr<!s8i>
-// CHECK:      cir.call @_Z3obaPKc(%7) : (!cir.ptr<!s8i>) -> ()
+// CHECK:      %5 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 7>>
+// CHECK:      %6 = cir.cast array_to_ptrdecay %5 : !cir.ptr<!cir.array<!s8i x 7>> -> !cir.ptr<!s8i>
+// CHECK:      cir.call @_Z3obaPKc(%6) : (!cir.ptr<!s8i>) -> ()
 // CHECK:      cir.yield
 // CHECK:    }) : (!cir.bool) -> ()
 // CHECK:    cir.return

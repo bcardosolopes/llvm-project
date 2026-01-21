@@ -139,15 +139,13 @@ void foo(void) {
 
   h1 = h0 * (__bf16) -2.0f;
   //      NONATIVE: %[[#A:]] = cir.cast floating %{{.+}} : !cir.bf16 -> !cir.float
-  // NONATIVE-NEXT: %[[#B:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NONATIVE-NEXT: %[[#C:]] = cir.unary(minus, %[[#B]]) : !cir.float, !cir.float
-  // NONATIVE-NEXT: %[[#D:]] = cir.cast floating %[[#C]] : !cir.float -> !cir.bf16
-  // NONATIVE-NEXT: %[[#E:]] = cir.cast floating %[[#D]] : !cir.bf16 -> !cir.float
-  // NONATIVE-NEXT: %[[#F:]] = cir.binop(mul, %[[#A]], %[[#E]]) : !cir.float
-  // NONATIVE-NEXT: %{{.+}} = cir.cast floating %[[#F]] : !cir.float -> !cir.bf16
+  // NONATIVE-NEXT: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
+  // NONATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
+  // NONATIVE-NEXT: %[[#D:]] = cir.cast floating %[[#C]] : !cir.bf16 -> !cir.float
+  // NONATIVE-NEXT: %[[#E:]] = cir.binop(mul, %[[#A]], %[[#D]]) : !cir.float
+  // NONATIVE-NEXT: %{{.+}} = cir.cast floating %[[#E]] : !cir.float -> !cir.bf16
 
-  //      NATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.float, !cir.float
+  //      NATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
   // NATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
   // NATIVE-NEXT: %{{.+}} = cir.binop(mul, %{{.+}}, %[[#C]]) : !cir.bf16
 
@@ -227,15 +225,13 @@ void foo(void) {
 
   h1 = (h0 / (__bf16) -2.0f);
   //      NONATIVE: %[[#A:]] = cir.cast floating %{{.+}} : !cir.bf16 -> !cir.float
-  // NONATIVE-NEXT: %[[#B:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NONATIVE-NEXT: %[[#C:]] = cir.unary(minus, %[[#B]]) : !cir.float, !cir.float
-  // NONATIVE-NEXT: %[[#D:]] = cir.cast floating %[[#C]] : !cir.float -> !cir.bf16
-  // NONATIVE-NEXT: %[[#E:]] = cir.cast floating %[[#D]] : !cir.bf16 -> !cir.float
-  // NONATIVE-NEXT: %[[#F:]] = cir.binop(div, %[[#A]], %[[#E]]) : !cir.float
-  // NONATIVE-NEXT: %{{.+}} = cir.cast floating %[[#F]] : !cir.float -> !cir.bf16
+  // NONATIVE-NEXT: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
+  // NONATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
+  // NONATIVE-NEXT: %[[#D:]] = cir.cast floating %[[#C]] : !cir.bf16 -> !cir.float
+  // NONATIVE-NEXT: %[[#E:]] = cir.binop(div, %[[#A]], %[[#D]]) : !cir.float
+  // NONATIVE-NEXT: %{{.+}} = cir.cast floating %[[#E]] : !cir.float -> !cir.bf16
 
-  //      NATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.float, !cir.float
+  //      NATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
   // NATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
   // NATIVE-NEXT: %{{.+}} = cir.binop(div, %{{.+}}, %[[#C]]) : !cir.bf16
 
@@ -314,16 +310,14 @@ void foo(void) {
   // NATIVE-LLVM: %{{.+}} = fadd bfloat %{{.+}}, %{{.+}}
 
   h1 = ((__bf16)-2.0 + h0);
-  //      NONATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.double
-  // NONATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.double, !cir.double
+  //      NONATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.double
   // NONATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.double -> !cir.bf16
   // NONATIVE-NEXT: %[[#D:]] = cir.cast floating %[[#C]] : !cir.bf16 -> !cir.float
   //      NONATIVE: %[[#E:]] = cir.cast floating %{{.+}} : !cir.bf16 -> !cir.float
   // NONATIVE-NEXT: %[[#F:]] = cir.binop(add, %[[#D]], %[[#E]]) : !cir.float
   // NONATIVE-NEXT: %{{.+}} = cir.cast floating %[[#F]] : !cir.float -> !cir.bf16
 
-  //      NATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.double
-  // NATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.double, !cir.double
+  //      NATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.double
   // NATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.double -> !cir.bf16
   //      NATIVE: %{{.+}} = cir.binop(add, %[[#C]], %{{.+}}) : !cir.bf16
 
@@ -404,16 +398,14 @@ void foo(void) {
   // NATIVE-LLVM: %{{.+}} = fsub bfloat %{{.+}}, %{{.+}}
 
   h1 = ((__bf16)-2.0f - h0);
-  //      NONATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NONATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.float, !cir.float
+  //      NONATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
   // NONATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
   // NONATIVE-NEXT: %[[#D:]] = cir.cast floating %[[#C]] : !cir.bf16 -> !cir.float
   //      NONATIVE: %[[#E:]] = cir.cast floating %{{.+}} : !cir.bf16 -> !cir.float
   // NONATIVE-NEXT: %[[#F:]] = cir.binop(sub, %[[#D]], %[[#E]]) : !cir.float
   // NONATIVE-NEXT: %{{.+}} = cir.cast floating %[[#F]] : !cir.float -> !cir.bf16
 
-  //      NATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.float, !cir.float
+  //      NATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
   // NATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
   //      NATIVE: %{{.+}} = cir.binop(sub, %[[#C]], %{{.+}}) : !cir.bf16
 
@@ -750,14 +742,12 @@ void foo(void) {
   // NATIVE-LLVM: %{{.+}} = fcmp oge bfloat %{{.+}}, %{{.+}}
 
   test = (h0 >= (__bf16)-2.0);
-  //      NONATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.double
-  // NONATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.double, !cir.double
+  //      NONATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.double
   // NONATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.double -> !cir.bf16
   // NONATIVE-NEXT: %[[#D:]] = cir.cmp(ge, %{{.+}}, %[[#C]]) : !cir.bf16, !cir.bool
   // NONATIVE-NEXT: %{{.+}} = cir.cast bool_to_int %[[#D]] : !cir.bool -> !s32i
 
-  //      NATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.double
-  // NATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.double, !cir.double
+  //      NATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.double
   // NATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.double -> !cir.bf16
   // NATIVE-NEXT: %[[#D:]] = cir.cmp(ge, %{{.+}}, %[[#C]]) : !cir.bf16, !cir.bool
   // NATIVE-NEXT: %{{.+}} = cir.cast bool_to_int %[[#D]] : !cir.bool -> !s32i
@@ -1055,14 +1045,12 @@ void foo(void) {
   // NATIVE-LLVM-NEXT: store volatile bfloat %[[#A]], ptr @h0, align 2
 
   h0 = (__bf16)-2.0f;
-  //      NONATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NONATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.float, !cir.float
+  //      NONATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
   // NONATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
   // NONATIVE-NEXT: %[[#D:]] = cir.get_global @h0 : !cir.ptr<!cir.bf16>
   // NONATIVE-NEXT: cir.store volatile{{.*}} %[[#C]], %[[#D]] : !cir.bf16, !cir.ptr<!cir.bf16>
 
-  //      NATIVE: %[[#A:]] = cir.const #cir.fp<2.000000e+00> : !cir.float
-  // NATIVE-NEXT: %[[#B:]] = cir.unary(minus, %[[#A]]) : !cir.float, !cir.float
+  //      NATIVE: %[[#B:]] = cir.const #cir.fp<-2.000000e+00> : !cir.float
   // NATIVE-NEXT: %[[#C:]] = cir.cast floating %[[#B]] : !cir.float -> !cir.bf16
   // NATIVE-NEXT: %[[#D:]] = cir.get_global @h0 : !cir.ptr<!cir.bf16>
   // NATIVE-NEXT: cir.store volatile{{.*}} %[[#C]], %[[#D]] : !cir.bf16, !cir.ptr<!cir.bf16>

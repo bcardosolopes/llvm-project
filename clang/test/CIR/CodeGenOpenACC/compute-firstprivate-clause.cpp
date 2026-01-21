@@ -54,7 +54,7 @@ struct HasDtor {
 // CHECK-NEXT: acc.yield
 // CHECK-NEXT: } copy {
 // CHECK-NEXT: ^bb0(%[[ARG_FROM:.*]]: !cir.ptr<!rec_CopyConstruct> {{.*}}, %[[ARG_TO:.*]]: !cir.ptr<!rec_CopyConstruct> {{.*}}):
-// CHECK-NEXT: cir.call @_ZN13CopyConstructC1ERKS_(%[[ARG_TO]], %[[ARG_FROM]]) : (!cir.ptr<!rec_CopyConstruct>, !cir.ptr<!rec_CopyConstruct>) -> ()
+// CHECK-NEXT: cir.copy %[[ARG_FROM]] to %[[ARG_TO]] : !cir.ptr<!rec_CopyConstruct>
 // CHECK-NEXT: acc.yield
 // CHECK-NEXT: }
 //
@@ -212,7 +212,7 @@ struct HasDtor {
 // CHECK-NEXT: %[[STRIDE_FROM:.*]] = cir.ptr_stride %[[DECAY_FROM]], %[[ITR_LOAD]] : (!cir.ptr<!rec_CopyConstruct>, !u64i) -> !cir.ptr<!rec_CopyConstruct>
 // CHECK-NEXT: %[[DECAY_TO:.*]] = cir.cast array_to_ptrdecay %[[ARG_TO]] : !cir.ptr<!cir.array<!rec_CopyConstruct x 5>> -> !cir.ptr<!rec_CopyConstruct>
 // CHECK-NEXT: %[[STRIDE_TO:.*]] = cir.ptr_stride %[[DECAY_TO]], %[[ITR_LOAD]] : (!cir.ptr<!rec_CopyConstruct>, !u64i) -> !cir.ptr<!rec_CopyConstruct>
-// CHECK-NEXT: cir.call @_ZN13CopyConstructC1ERKS_(%[[STRIDE_TO]], %[[STRIDE_FROM]]) : (!cir.ptr<!rec_CopyConstruct>, !cir.ptr<!rec_CopyConstruct>) -> ()
+// CHECK-NEXT: cir.copy %[[STRIDE_FROM]] to %[[STRIDE_TO]] : !cir.ptr<!rec_CopyConstruct>
 // CHECK-NEXT: cir.yield
 // CHECK-NEXT: } step {
 // CHECK-NEXT: %[[ITR_LOAD]] = cir.load %[[ITR]] : !cir.ptr<!u64i>, !u64i

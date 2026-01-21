@@ -2,6 +2,7 @@
 
 !s32i = !cir.int<s, 32>
 !s64i = !cir.int<s, 64>
+!u8i = !cir.int<u, 8>
 !u32i = !cir.int<u, 32>
 !u64i = !cir.int<u, 64>
 
@@ -202,3 +203,9 @@ cir.func @has_attrs() attributes {foo, baz = 5, floof = "flop"} {
 // CHECK: cir.func @has_attrs() attributes {baz = 5 : i64{{.*}}, floof = "flop", foo} {
 // CHECK:   cir.return
 // CHECK: }
+
+// Should print/parse argument and result attributes.
+// CHECK: cir.func @parse_arg_res_attrs(%arg0: !u8i {cir.zeroext}) -> (!u8i {cir.zeroext}) {
+cir.func @parse_arg_res_attrs(%0: !u8i {cir.zeroext}) -> (!u8i {cir.zeroext}) {
+  cir.return %0 : !u8i
+}

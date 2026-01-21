@@ -16,7 +16,7 @@
 int test_mm_extract_pi16(__m64 a) {
 
   // CIR-CHECK-LABEL: test_mm_extract_pi16
-  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : !u64i : !cir.vector<!s16i x 4>
+  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : !u64i : !cir.vector<4 x !s16i>
 
   // LLVM-CHECK-LABEL: test_mm_extract_pi16
   // LLVM-CHECK: extractelement <4 x i16> %{{.*}}, i64 2
@@ -26,7 +26,7 @@ int test_mm_extract_pi16(__m64 a) {
 __m64 test_mm_insert_pi16(__m64 a, int d) {
 
   // CIR-CHECK-LABEL: test_mm_insert_pi16
-  // CIR-CHECK-LABEL: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : !u64i] : !cir.vector<!s16i x 4>
+  // CIR-CHECK-LABEL: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : !u64i] : !cir.vector<4 x !s16i>
 
   // LLVM-CHECK-LABEL: test_mm_insert_pi16
   // LLVM-CHECK: insertelement <4 x i16>

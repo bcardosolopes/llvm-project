@@ -1,0 +1,38 @@
+// RUN: cir-opt %s --verify-roundtrip | FileCheck %s
+
+!u8i = !cir.int<u, 8>
+!u16i = !cir.int<u, 16>
+!u32i = !cir.int<u, 32>
+!s32i = !cir.int<s, 32>
+
+!rec_Sc = !cir.record<struct "Sc" {!u8i, !u16i, !u32i}>
+
+module {
+
+cir.func @insert_member_test() {
+    %0 = cir.const #cir.const_record<{#cir.int<1> : !u8i, #cir.int<2> : !u16i, #cir.int<3> : !u32i}> : !rec_Sc
+    %1 = cir.const #cir.int<42> : !u32i
+    %2 = cir.insert_member %0[2], %1 : !rec_Sc, !u32i
+    cir.return
+}
+
+// CHECK: cir.func{{.*}} @insert_member_test() {
+// CHECK:   %[[RECORD:.*]] = cir.const #cir.const_record<{#cir.int<1> : !u8i, #cir.int<2> : !u16i, #cir.int<3> : !u32i}> : !rec_Sc
+// CHECK:   %[[VAL:.*]] = cir.const #cir.int<42> : !u32i
+// CHECK:   %[[RESULT:.*]] = cir.insert_member %[[RECORD]][2], %[[VAL]] : !rec_Sc, !u32i
+// CHECK:   cir.return
+// CHECK: }
+
+cir.func @insert_member_first(%arg0 : !rec_Sc) -> !rec_Sc {
+    %0 = cir.const #cir.int<10> : !u8i
+    %1 = cir.insert_member %arg0[0], %0 : !rec_Sc, !u8i
+    cir.return %1 : !rec_Sc
+}
+
+// CHECK: cir.func{{.*}} @insert_member_first(%[[ARG:.*]]: !rec_Sc) -> !rec_Sc {
+// CHECK:   %[[VAL:.*]] = cir.const #cir.int<10> : !u8i
+// CHECK:   %[[RESULT:.*]] = cir.insert_member %[[ARG]][0], %[[VAL]] : !rec_Sc, !u8i
+// CHECK:   cir.return %[[RESULT]] : !rec_Sc
+// CHECK: }
+
+}

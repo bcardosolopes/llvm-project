@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CIRGenCXXABI.h"
+#include "CIRGenCleanup.h"
 #include "CIRGenFunction.h"
 
 #include "clang/CIR/MissingFeatures.h"
@@ -565,14 +566,15 @@ void CIRGenFunction::populateCatchHandlers(cir::TryOp tryOp) {
   if (!handlerTypesAttr || handlerTypesAttr.empty()) {
     // Accumulate all the handlers in scope.
     bool hasCatchAll = false;
+    bool hasCleanup = false;
     llvm::SmallPtrSet<mlir::Attribute, 4> catchTypes;
     llvm::SmallVector<mlir::Attribute> handlerAttrs;
     for (EHScopeStack::iterator i = ehStack.begin(), e = ehStack.end(); i != e;
          ++i) {
       switch (i->getKind()) {
       case EHScope::Cleanup:
-        cgm.errorNYI("emitLandingPad: Cleanup");
-        return;
+        hasCleanup = (hasCleanup || cast<EHCleanupScope>(*i).isEHCleanup());
+        continue;
 
       case EHScope::Filter:
         cgm.errorNYI("emitLandingPad: Filter");
@@ -609,10 +611,13 @@ void CIRGenFunction::populateCatchHandlers(cir::TryOp tryOp) {
         break;
     }
 
+    if (hasCleanup)
+      tryOp.setCleanup(true);
+
     if (hasCatchAll)
       handlerAttrs.push_back(cir::CatchAllAttr::get(&getMLIRContext()));
 
-    assert(!cir::MissingFeatures::ehScopeFilter());
+    assert((!handlerAttrs.empty() || hasCleanup) && "no catch clauses!");
 
     // If there's no catch_all, attach the unwind region. This needs to be the
     // last region in the TryOp catch list.
@@ -652,51 +657,79 @@ void CIRGenFunction::populateEHCatchRegions(EHScopeStack::stable_iterator scope,
   EHScope &ehScope = *ehStack.find(scope);
   bool mayThrow = ehScope.mayThrow();
 
-  mlir::Block *originalBlock = nullptr;
-  if (mayThrow && tryOp) {
-    // If the dispatch is cached but comes from a different tryOp, make sure:
-    // - Populate current `tryOp` with a new dispatch block regardless.
-    // - Update the map to enqueue new dispatchBlock to also get a cleanup. See
-    // code at the end of the function.
-    cgm.errorNYI("getEHDispatchBlock: mayThrow & tryOp");
-    return;
-  }
+  // Unlike the incubator which caches dispatch blocks per-scope, we populate
+  // cleanup regions per-call using callWithExceptionCtx. For each call within
+  // a try block, we populate its cleanup region independently.
+  // The incubator's "mayThrow && tryOp" check was about a cached dispatch
+  // block from a different TryOp - since we don't cache, we skip that check.
 
-  if (!mayThrow) {
-    switch (ehScope.getKind()) {
-    case EHScope::Catch: {
-      mayThrow = true;
+  switch (ehScope.getKind()) {
+  case EHScope::Catch: {
+    mayThrow = true;
 
-      // LLVM does some optimization with branches here, CIR just keep track of
-      // the corresponding calls.
-      EHCatchScope &catchScope = cast<EHCatchScope>(ehScope);
-      if (catchScope.getNumHandlers() == 1 &&
-          catchScope.getHandler(0).isCatchAll()) {
-        break;
-      }
-
-      // TODO(cir): In the incubator we create a new basic block with YieldOp
-      // inside the attached cleanup region, but this part will be redesigned
+    // LLVM does some optimization with branches here, CIR just keep track of
+    // the corresponding calls.
+    EHCatchScope &catchScope = cast<EHCatchScope>(ehScope);
+    if (catchScope.getNumHandlers() == 1 &&
+        catchScope.getHandler(0).isCatchAll()) {
       break;
     }
-    case EHScope::Cleanup: {
-      cgm.errorNYI("getEHDispatchBlock: mayThrow & cleanup");
-      return;
-    }
-    case EHScope::Filter: {
-      cgm.errorNYI("getEHDispatchBlock: mayThrow & Filter");
-      return;
-    }
-    case EHScope::Terminate: {
-      cgm.errorNYI("getEHDispatchBlock: mayThrow & Terminate");
-      return;
-    }
-    }
-  }
 
-  if (originalBlock) {
-    cgm.errorNYI("getEHDispatchBlock: originalBlock");
+    // Populate cleanup region for this call with a YieldOp.
+    if (callWithExceptionCtx) {
+      mlir::OpBuilder::InsertionGuard guard(builder);
+      assert(callWithExceptionCtx.getCleanup().empty() &&
+             "one per call: expected empty region at this point");
+      builder.createBlock(&callWithExceptionCtx.getCleanup());
+      cir::YieldOp::create(builder, callWithExceptionCtx.getLoc());
+    }
+    break;
+  }
+  case EHScope::Cleanup: {
+    mayThrow = true;
+    // Populate cleanup region for this call with the actual cleanup body.
+    if (callWithExceptionCtx) {
+      EHCleanupScope &cleanupScope = cast<EHCleanupScope>(ehScope);
+      mlir::OpBuilder::InsertionGuard guard(builder);
+      assert(callWithExceptionCtx.getCleanup().empty() &&
+             "one per call: expected empty region at this point");
+      builder.createBlock(&callWithExceptionCtx.getCleanup());
+      // Emit the actual cleanup body (e.g., operator delete call).
+      if (cleanupScope.isEHCleanup()) {
+        EHScopeStack::Cleanup *cleanup = cleanupScope.getCleanup();
+        EHScopeStack::Cleanup::Flags flags;
+        flags.setIsForEHCleanup();
+        flags.setIsEHCleanupKind();
+        cleanup->emit(*this, flags);
+      }
+      // Only add a yield if the cleanup didn't already emit one (e.g.,
+      // CallEndCatch emits its own yield).
+      if (!builder.getInsertionBlock()->mightHaveTerminator())
+        cir::YieldOp::create(builder, callWithExceptionCtx.getLoc());
+    }
+    // Propagate mayThrow to all enclosing scopes up to and including
+    // the first catch scope. Without this, cleanup scopes between
+    // the call and the catch scope would prevent the catch scope
+    // from being marked as mayThrow, causing exitCXXTryStmt to
+    // incorrectly clear the handler types.
+    for (EHScopeStack::stable_iterator si = ehScope.getEnclosingEHScope();
+         si != ehStack.stable_end();
+         si = ehStack.find(si)->getEnclosingEHScope()) {
+      EHScope &enclosing = *ehStack.find(si);
+      enclosing.setMayThrow(true);
+      if (enclosing.getKind() == EHScope::Catch)
+        break;
+    }
+    break;
+  }
+  case EHScope::Filter: {
+    cgm.errorNYI("populateEHCatchRegions: Filter scope");
     return;
+  }
+  case EHScope::Terminate: {
+    cgm.errorNYI("populateEHCatchRegions: Terminate scope");
+    return;
+  }
   }
 
   ehScope.setMayThrow(mayThrow);
@@ -735,10 +768,13 @@ void CIRGenFunction::populateCatchHandlersIfRequired(cir::TryOp tryOp) {
 
   const EHPersonality &personality = EHPersonality::get(*this);
 
-  // Set personality function if not already set
-  auto funcOp = mlir::cast<cir::FuncOp>(curFn);
-  if (!funcOp.getPersonality())
-    funcOp.setPersonality(getPersonalityFn(cgm, personality));
+  // Set personality function if not already set. Skip if we're in a global
+  // initializer context (GlobalOp) since the personality will be set later
+  // when the init function is lowered.
+  if (auto funcOp = mlir::dyn_cast<cir::FuncOp>(curFn)) {
+    if (!funcOp.getPersonality())
+      funcOp.setPersonality(getPersonalityFn(cgm, personality));
+  }
 
   // CIR does not cache landing pads.
   if (personality.usesFuncletPads()) {

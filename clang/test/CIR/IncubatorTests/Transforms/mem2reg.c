@@ -49,9 +49,9 @@ void alloca_in_loop(int* ar, int n) {
 // BEFORE:          %5 = cir.const #cir.int<4> : !s32i
 // BEFORE:          cir.store{{.*}} %5, %4 : !s32i, !cir.ptr<!s32i>
 // BEFORE:          %6 = cir.load{{.*}} %4 : !cir.ptr<!s32i>, !s32i
-// BEFORE:          %7 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// BEFORE:          %8 = cir.load{{.*}} %2 : !cir.ptr<!s32i>, !s32i
-// BEFORE:          %9 = cir.ptr_stride %7, %8 : (!cir.ptr<!s32i>, !s32i) -> !cir.ptr<!s32i>
+// BEFORE:          %7 = cir.load{{.*}} %2 : !cir.ptr<!s32i>, !s32i
+// BEFORE:          %8 = cir.load{{.*}} %0 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// BEFORE:          %9 = cir.ptr_stride %8, %7 : (!cir.ptr<!s32i>, !s32i) -> !cir.ptr<!s32i>
 // BEFORE:          cir.store{{.*}} %6, %9 : !s32i, !cir.ptr<!s32i>
 // BEFORE:        }
 // BEFORE:        cir.yield
@@ -88,7 +88,6 @@ void alloca_in_loop(int* ar, int n) {
 // MEM2REG:    cir.br ^bb8
 // MEM2REG:  ^bb8:  // pred: ^bb7
 // MEM2REG:    cir.return
-
 
 int alloca_in_ifelse(int x) {
   int y = 0;
@@ -165,9 +164,6 @@ int alloca_in_ifelse(int x) {
 // MEM2REG:    cir.return %9 : !s32i
 // MEM2REG:  }
 
-
-
-
 typedef __SIZE_TYPE__ size_t;
 void *alloca(size_t size);
 
@@ -189,3 +185,4 @@ void test_bitcast(size_t n) {
 // MEM2REG:  cir.func {{.*@test_bitcast}}
 // MEM2REG:    cir.return
 // MEM2REG:  }
+

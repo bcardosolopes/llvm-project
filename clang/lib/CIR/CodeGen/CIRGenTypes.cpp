@@ -1,7 +1,9 @@
 #include "CIRGenTypes.h"
 
+#include "CIRGenCXXABI.h"
 #include "CIRGenFunctionInfo.h"
 #include "CIRGenModule.h"
+#include "TargetInfo.h"
 #include "mlir/IR/BuiltinTypes.h"
 
 #include "clang/AST/ASTContext.h"
@@ -23,6 +25,20 @@ CIRGenTypes::CIRGenTypes(CIRGenModule &genModule)
 CIRGenTypes::~CIRGenTypes() {
   for (auto i = functionInfos.begin(), e = functionInfos.end(); i != e;)
     delete &*i++;
+}
+
+cir::CallingConv
+CIRGenTypes::ClangCallConvToCIRCallConv(clang::CallingConv cc) {
+  switch (cc) {
+  case CC_C:
+    return cir::CallingConv::C;
+  case CC_DeviceKernel:
+    return cgm.getTargetCIRGenInfo().getOpenCLKernelCallingConv();
+  case CC_SpirFunction:
+    return cir::CallingConv::SpirFunction;
+  default:
+    llvm_unreachable("No other calling conventions implemented.");
+  }
 }
 
 mlir::MLIRContext &CIRGenTypes::getMLIRContext() const {
@@ -312,14 +328,27 @@ mlir::Type CIRGenTypes::convertType(QualType type) {
       break;
 
     // Signed integral types.
+    case BuiltinType::Accum:
     case BuiltinType::Char_S:
+    case BuiltinType::Fract:
     case BuiltinType::Int:
     case BuiltinType::Int128:
     case BuiltinType::Long:
+    case BuiltinType::LongAccum:
+    case BuiltinType::LongFract:
     case BuiltinType::LongLong:
     case BuiltinType::SChar:
     case BuiltinType::Short:
+    case BuiltinType::ShortAccum:
+    case BuiltinType::ShortFract:
     case BuiltinType::WChar_S:
+    // Saturated signed types.
+    case BuiltinType::SatAccum:
+    case BuiltinType::SatFract:
+    case BuiltinType::SatLongAccum:
+    case BuiltinType::SatLongFract:
+    case BuiltinType::SatShortAccum:
+    case BuiltinType::SatShortFract:
       resultType =
           cir::IntType::get(&getMLIRContext(), astContext.getTypeSize(ty),
                             /*isSigned=*/true);
@@ -380,13 +409,26 @@ mlir::Type CIRGenTypes::convertType(QualType type) {
     case BuiltinType::Char16:
     case BuiltinType::Char32:
     case BuiltinType::Char_U:
+    case BuiltinType::UAccum:
     case BuiltinType::UChar:
+    case BuiltinType::UFract:
     case BuiltinType::UInt:
     case BuiltinType::UInt128:
     case BuiltinType::ULong:
+    case BuiltinType::ULongAccum:
+    case BuiltinType::ULongFract:
     case BuiltinType::ULongLong:
     case BuiltinType::UShort:
+    case BuiltinType::UShortAccum:
+    case BuiltinType::UShortFract:
     case BuiltinType::WChar_U:
+    // Saturated unsigned types.
+    case BuiltinType::SatUAccum:
+    case BuiltinType::SatUFract:
+    case BuiltinType::SatULongAccum:
+    case BuiltinType::SatULongFract:
+    case BuiltinType::SatUShortAccum:
+    case BuiltinType::SatUShortFract:
       resultType =
           cir::IntType::get(&getMLIRContext(), astContext.getTypeSize(ty),
                             /*isSigned=*/false);
@@ -438,6 +480,13 @@ mlir::Type CIRGenTypes::convertType(QualType type) {
       // `sizeof(std::nullptr_t)` is equal to `sizeof(void *)`, model
       // std::nullptr_t as !cir.ptr<!void>
       resultType = builder.getVoidPtrTy();
+      break;
+
+    case BuiltinType::OCLEvent:
+      resultType = cir::OpaqueType::get(
+          builder.getContext(),
+          mlir::StringAttr::get(builder.getContext(),
+                                cir::OpaqueType::getOpenCLEventTag()));
       break;
 
     default:
@@ -649,11 +698,9 @@ bool CIRGenTypes::isZeroInitializable(clang::QualType t) {
   if (const auto *rd = t->getAsRecordDecl())
     return isZeroInitializable(rd);
 
-  if (t->getAs<MemberPointerType>()) {
-    cgm.errorNYI(SourceLocation(), "isZeroInitializable for MemberPointerType",
-                 t);
-    return false;
-  }
+  // We have to ask the ABI about member pointers.
+  if (const MemberPointerType *mpt = t->getAs<MemberPointerType>())
+    return theCXXABI.isZeroInitializable(mpt);
 
   return true;
 }

@@ -10,29 +10,80 @@
 //
 //===----------------------------------------------------------------------===//
 
-// #include "clang/AST/ASTContext.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "llvm/Support/TimeProfiler.h"
 
 namespace cir {
-mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
-                                      mlir::MLIRContext &mlirContext,
-                                      clang::ASTContext &astContext,
-                                      bool enableVerifier,
-                                      bool enableCIRSimplify) {
+mlir::LogicalResult
+runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
+                  clang::ASTContext &astContext, bool enableVerifier,
+                  bool enableLifetime, llvm::StringRef lifetimeOpts,
+                  bool enableCIRSimplify, bool enableCIRMoveOpt,
+                  bool enableCallConvLowering, bool enableIdiomRecognizer,
+                  llvm::StringRef idiomRecognizerOpts, bool enableLibOpt,
+                  llvm::StringRef libOptOpts,
+                  std::string &passOptParsingFailure, bool enableMem2Reg) {
 
   llvm::TimeTraceScope scope("CIR To CIR Passes");
 
   mlir::PassManager pm(&mlirContext);
   pm.addPass(mlir::createCIRCanonicalizePass());
 
+  auto errorHandler = [](const llvm::Twine &) -> mlir::LogicalResult {
+    return mlir::LogicalResult::failure();
+  };
+
+  if (enableLifetime) {
+    auto lifetimePass = mlir::createLifetimeCheckPass(&astContext);
+    if (lifetimePass->initializeOptions(lifetimeOpts, errorHandler).failed()) {
+      passOptParsingFailure = lifetimeOpts;
+      return mlir::failure();
+    }
+    pm.addPass(std::move(lifetimePass));
+  }
+
+  if (enableIdiomRecognizer) {
+    auto idiomPass = mlir::createIdiomRecognizerPass(&astContext);
+    if (idiomPass->initializeOptions(idiomRecognizerOpts, errorHandler)
+            .failed()) {
+      passOptParsingFailure = idiomRecognizerOpts;
+      return mlir::failure();
+    }
+    pm.addPass(std::move(idiomPass));
+  }
+
+  if (enableLibOpt) {
+    auto libOpPass = mlir::createLibOptPass(&astContext);
+    if (libOpPass->initializeOptions(libOptOpts, errorHandler).failed()) {
+      passOptParsingFailure = libOptOpts;
+      return mlir::failure();
+    }
+    pm.addPass(std::move(libOpPass));
+  }
+
+  if (enableCIRMoveOpt)
+    pm.addPass(mlir::createMoveOptPass(&astContext));
+
   if (enableCIRSimplify)
     pm.addPass(mlir::createCIRSimplifyPass());
 
   pm.addPass(mlir::createCXXABILoweringPass());
   pm.addPass(mlir::createLoweringPreparePass(&astContext));
+
+  if (enableCallConvLowering)
+    pm.addPass(mlir::createCallConvLoweringPass());
+
+  // Mem2reg requires a flat CIR, so run the pre-lowering passes first.
+  if (enableMem2Reg) {
+    pm.addPass(mlir::createHoistAllocasPass());
+    pm.addPass(mlir::createCIRFlattenCFGPass());
+    pm.addPass(mlir::createGotoSolverPass());
+    pm.addPass(mlir::createMem2Reg());
+  }
 
   pm.enableVerifier(enableVerifier);
   (void)mlir::applyPassManagerCLOptions(pm);
@@ -44,6 +95,7 @@ mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
 namespace mlir {
 
 void populateCIRPreLoweringPasses(OpPassManager &pm) {
+  pm.addPass(createCXXABILoweringPass());
   pm.addPass(createHoistAllocasPass());
   pm.addPass(createCIRFlattenCFGPass());
   pm.addPass(createGotoSolverPass());

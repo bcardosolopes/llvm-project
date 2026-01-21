@@ -9,7 +9,7 @@ void rethrow() {
   throw;
 }
 
-// CIR: cir.throw
+// CIR: cir.call exception @__cxa_rethrow() : () -> ()
 // CIR: cir.unreachable
 
 // LLVM: call void @__cxa_rethrow()
@@ -34,7 +34,7 @@ int rethrow_from_block(int a, int b) {
 // CIR:    %[[CONST_0:.*]] = cir.const #cir.int<0> : !s32i
 // CIR:    %[[IS_B_ZERO:.*]] = cir.cmp(eq, %[[TMP_B]], %[[CONST_0]]) : !s32i, !cir.bool
 // CIR:    cir.if %[[IS_B_ZERO]] {
-// CIR:      cir.throw
+// CIR:      cir.call exception @__cxa_rethrow() : () -> ()
 // CIR:      cir.unreachable
 // CIR:    }
 // CIR:  }

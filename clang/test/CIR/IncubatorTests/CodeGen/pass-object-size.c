@@ -13,12 +13,12 @@ void c() {
 }
 
 // CIR: cir.func {{.*}} @c()
-// CIR: [[TMP0:%.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, %{{[0-9]+}} : !u64i, ["vla"] {alignment = 16 : i64}
+// CIR: [[TMP0:%.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, %{{[0-9]+}} : !u64i, ["d"] {alignment = 16 : i64}
 // CIR: [[TMP1:%.*]] = cir.cast bitcast [[TMP0]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CIR-NEXT: [[TMP2:%.*]] = cir.objsize max [[TMP1]] : !cir.ptr<!void> -> !u64i
+// CIR-NEXT: [[TMP2:%.*]] = cir.objsize max nullunknown [[TMP1]] : !cir.ptr<!void> -> !u64i
 // CIR-NEXT: cir.call @b([[TMP1]], [[TMP2]]) : (!cir.ptr<!void>, !u64i) -> ()
 // CIR: [[TMP3:%.*]] = cir.cast bitcast [[TMP0]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
-// CIR: [[TMP4:%.*]] = cir.objsize min [[TMP3]] : !cir.ptr<!void> -> !u64i
+// CIR: [[TMP4:%.*]] = cir.objsize min nullunknown [[TMP3]] : !cir.ptr<!void> -> !u64i
 // CIR-NEXT: cir.call @e([[TMP3]], [[TMP4]]) : (!cir.ptr<!void>, !u64i) -> ()
 
 // LLVM: define dso_local void @c()

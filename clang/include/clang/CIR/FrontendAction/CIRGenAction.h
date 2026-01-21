@@ -27,6 +27,8 @@ public:
   enum class OutputType {
     EmitAssembly,
     EmitCIR,
+    EmitCIRFlat,
+    EmitMLIR,
     EmitLLVM,
     EmitBC,
     EmitObj,
@@ -46,6 +48,10 @@ protected:
   CreateASTConsumer(clang::CompilerInstance &CI,
                     llvm::StringRef InFile) override;
 
+  void ExecuteAction() override;
+
+  bool hasIRSupport() const override { return true; }
+
 public:
   ~CIRGenAction() override;
 
@@ -57,6 +63,20 @@ class EmitCIRAction : public CIRGenAction {
 
 public:
   EmitCIRAction(mlir::MLIRContext *MLIRCtx = nullptr);
+};
+
+class EmitCIRFlatAction : public CIRGenAction {
+  virtual void anchor();
+
+public:
+  EmitCIRFlatAction(mlir::MLIRContext *MLIRCtx = nullptr);
+};
+
+class EmitMLIRAction : public CIRGenAction {
+  virtual void anchor();
+
+public:
+  EmitMLIRAction(mlir::MLIRContext *MLIRCtx = nullptr);
 };
 
 class EmitLLVMAction : public CIRGenAction {

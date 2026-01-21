@@ -33,14 +33,14 @@ e *g = new e(0);
 // CIR_EH:     cir.yield
 // CIR_EH:   }
 // CIR_EH:   cir.yield
-// CIR_EH: } catch [#cir.unwind {
+// CIR_EH: } unwind {
 // CIR_EH:   cir.resume
-// CIR_EH: }]
+// CIR_EH: }
 
 // CIR_FLAT_EH: cir.func internal private @__cxx_global_var_init()
 // CIR_FLAT_EH: ^bb3:
-// CIR_FLAT_EH:   %exception_ptr, %type_id = cir.eh.inflight_exception
-// CIR_FLAT_EH:   cir.call @_ZdlPvm({{.*}}) : (!cir.ptr<!void>, !u64i) -> ()
+// CIR_FLAT_EH:   %exception_ptr, %type_id = cir.eh.inflight_exception cleanup
+// CIR_FLAT_EH:   cir.call @_ZdlPvm({{.*}}) nothrow : (!cir.ptr<!void>, !u64i) -> ()
 // CIR_FLAT_EH:   cir.br ^bb4(%exception_ptr, %type_id : !cir.ptr<!void>, !u32i)
 
 // LLVM_EH: define internal void @__cxx_global_var_init() personality ptr @__gxx_personality_v0
@@ -68,7 +68,7 @@ e *g = new e(0);
 // LLVM_EH:   ret void
 // LLVM_EH: }
 
-// LLVM-DAG: @llvm.global_ctors = appending constant [2 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 65535, ptr @__cxx_global_var_init, ptr null }, { i32, ptr, ptr } { i32 65535, ptr @__cxx_global_var_init.1, ptr null }]
+// LLVM-DAG: @llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 65535, ptr @_GLOBAL__sub_I_global_new.cpp, ptr null }]
 // LLVM: define internal void @__cxx_global_var_init()
 // LLVM: call ptr @_Znwm(i64 1)
 

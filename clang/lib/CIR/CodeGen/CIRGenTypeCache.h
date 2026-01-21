@@ -80,7 +80,7 @@ struct CIRGenTypeCache {
     unsigned char SizeAlignInBytes;
   };
 
-  cir::TargetAddressSpaceAttr cirAllocaAddressSpace;
+  mlir::ptr::MemorySpaceAttrInterface cirAllocaAddressSpace;
 
   clang::CharUnits getSizeSize() const {
     return clang::CharUnits::fromQuantity(SizeSizeInBytes);
@@ -93,7 +93,7 @@ struct CIRGenTypeCache {
     return clang::CharUnits::fromQuantity(PointerAlignInBytes);
   }
 
-  cir::TargetAddressSpaceAttr getCIRAllocaAddressSpace() const {
+  mlir::ptr::MemorySpaceAttrInterface getCIRAllocaAddressSpace() const {
     return cirAllocaAddressSpace;
   }
 };

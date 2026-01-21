@@ -30,14 +30,15 @@ static U1 g = {5};
 
 void foo() { U arr[2] = {{.b = {1, 2}}, {.a = {1}}}; }
 
-// CIR: cir.const #cir.const_record<{#cir.const_record<{#cir.const_record<{#cir.int<1> : !s64i, #cir.int<2> : !s64i}> : {{.*}}}> : {{.*}}, #cir.const_record<{#cir.const_record<{#cir.int<1> : !s8i}> : {{.*}}, #cir.const_array<[#cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i]> : !cir.array<!u8i x 15>}>
-// LLVM: store { { %struct.S_2 }, { %struct.S_1, [15 x i8] } } { { %struct.S_2 } { %struct.S_2 { i64 1, i64 2 } }, { %struct.S_1, [15 x i8] } { %struct.S_1 { i8 1 }, [15 x i8] zeroinitializer } }
+// CIR-DAG: cir.global "private" {{.*}}constant{{.*}} @__const.bar.x = #cir.const_array<[#cir.global_view<@g> : !cir.ptr<!s32i>, #cir.global_view<@g> : !cir.ptr<!s32i>]> : !cir.array<!cir.ptr<!s32i> x 2>
+// CIR-DAG: cir.global "private" internal dso_local @g = #cir.const_record<{#cir.int<5> : !s32i}> : !rec_anon_struct
+// CIR-DAG: cir.global external @g2 = #cir.global_view<@g1, [1 : i32, 1 : i32, 4 : i32]> : !cir.ptr<!s32i>
+// CIR-DAG: cir.global "private" {{.*}}constant{{.*}} @__const.foo.arr = #cir.const_record<{#cir.const_record<{#cir.const_record<{#cir.int<1> : !s64i, #cir.int<2> : !s64i}> : {{.*}}}> : {{.*}}, #cir.const_record<{#cir.const_record<{#cir.int<1> : !s8i}> : {{.*}}, #cir.const_array<[#cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i, #cir.zero : !u8i]> : !cir.array<!u8i x 15>}>
+// LLVM: @__const.foo.arr = private constant <{ { %struct.S_2 }, { %struct.S_1, [15 x i8] } }> <{ { %struct.S_2 } { %struct.S_2 { i64 1, i64 2 } }, { %struct.S_1, [15 x i8] } { %struct.S_1 { i8 1 }, [15 x i8] zeroinitializer } }>
 
 void bar(void) {
   int *x[2] = { &g.f0, &g.f0 };
 }
-// CIR: cir.global "private" internal dso_local @g = #cir.const_record<{#cir.int<5> : !s32i}> : !rec_anon_struct
-// CIR: cir.const #cir.const_array<[#cir.global_view<@g> : !cir.ptr<!s32i>, #cir.global_view<@g> : !cir.ptr<!s32i>]> : !cir.array<!cir.ptr<!s32i> x 2>
 
 typedef struct {
     long s0;
@@ -52,7 +53,6 @@ typedef union {
 
 static U2 g1[3] = {{0x42},{0x42},{0x42}};
 int* g2 = &g1[1].f1.s1;
-// CIR: cir.global external @g2 = #cir.global_view<@g1, [1, 1, 4]> : !cir.ptr<!s32i>
 
 void baz(void) {
   (*g2) = 4;

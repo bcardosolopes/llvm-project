@@ -30,9 +30,9 @@ void make1() {
 // CIR:     %[[AGG_TMP:.*]] = cir.alloca ![[S1]], !cir.ptr<![[S1]]>, ["agg.tmp.ensured"]
 // CIR:     %[[FIELD:.*]] = cir.get_member %[[AGG_TMP]][0] {name = "v"} : !cir.ptr<![[S1]]> -> !cir.ptr<![[VecType]]>
 // CIR:     cir.call @_ZN3VecC1EOS_(%[[FIELD]], %[[VEC]]) : (!cir.ptr<![[VecType]]>, !cir.ptr<![[VecType]]>) -> ()
-// CIR:     cir.call @_ZN2S1D1Ev(%[[AGG_TMP]]) : (!cir.ptr<![[S1]]>) -> ()
+// CIR:     cir.call @_ZN2S1D1Ev(%[[AGG_TMP]]) {{.*}}: (!cir.ptr<![[S1]]>) -> ()
 // CIR:   }
-// CIR:   cir.call @_ZN3VecD1Ev(%[[VEC]]) : (!cir.ptr<![[VecType]]>) -> ()
+// CIR:   cir.call @_ZN3VecD1Ev(%[[VEC]]) {{.*}}: (!cir.ptr<![[VecType]]>) -> ()
 // CIR:   cir.return
 
 // CIR_EH: cir.func {{.*}} @_Z5make1ILi0EEvv()
@@ -43,24 +43,19 @@ void make1() {
 // CIR_EH:  cir.scope {
 // CIR_EH:    %1 = cir.alloca ![[S1]], !cir.ptr<![[S1]]>, ["agg.tmp.ensured"]
 // CIR_EH:    %2 = cir.get_member %1[0] {name = "v"} : !cir.ptr<![[S1]]> -> !cir.ptr<![[VecType]]>
+
+// Call v move ctor (synthetic try because v's dtor cleanup is active)
 // CIR_EH:    cir.try synthetic cleanup {
-
-// Call v move ctor
-// CIR_EH:      cir.call exception @_ZN3VecC1EOS_{{.*}} cleanup {
-
-// Destroy v after v move ctor throws
-// CIR_EH:        cir.call @_ZN3VecD1Ev(%[[VEC]])
-// CIR_EH:        cir.yield
-// CIR_EH:      }
+// CIR_EH:      cir.call exception @_ZN3VecC1EOS_{{.*}}
 // CIR_EH:      cir.yield
-// CIR_EH:    } catch [#cir.unwind {
+// CIR_EH:    } unwind {
 // CIR_EH:      cir.resume
-// CIR_EH:    }]
-// CIR_EH:    cir.call @_ZN2S1D1Ev(%1) : (!cir.ptr<![[S1]]>) -> ()
+// CIR_EH:    }
+// CIR_EH:    cir.call @_ZN2S1D1Ev(%1) {{.*}}: (!cir.ptr<![[S1]]>) -> ()
 // CIR_EH:  }
 
-// Destroy v after successful cir.try
-// CIR_EH:  cir.call @_ZN3VecD1Ev(%[[VEC]]) : (!cir.ptr<![[VecType]]>) -> ()
+// Destroy v after successful scope
+// CIR_EH:  cir.call @_ZN3VecD1Ev(%[[VEC]]) {{.*}}: (!cir.ptr<![[VecType]]>) -> ()
 // CIR_EH:  cir.return
 }
 

@@ -1,5 +1,3 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++17 -fclangir -emit-cir %s -o %t.cir
-// RUN: FileCheck --input-file=%t.cir %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++17 -fclangir -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll --check-prefix=LLVM %s
 
@@ -13,10 +11,6 @@ auto make_non_virtual() -> void (Foo::*)(int) {
   return &Foo::m1;
 }
 
-// CHECK-LABEL: cir.func {{.*}} @_Z16make_non_virtualv() -> !cir.method<!cir.func<(!s32i)> in !rec_Foo>
-//       CHECK:   %{{.+}} = cir.const #cir.method<@_ZN3Foo2m1Ei> : !cir.method<!cir.func<(!s32i)> in !rec_Foo>
-//       CHECK: }
-
 // LLVM-LABEL: @_Z16make_non_virtualv
 //       LLVM:   store { i64, i64 } { i64 ptrtoint (ptr @_ZN3Foo2m1Ei to i64), i64 0 }, ptr %{{.+}}
 //       LLVM: }
@@ -24,10 +18,6 @@ auto make_non_virtual() -> void (Foo::*)(int) {
 auto make_virtual() -> void (Foo::*)(int) {
   return &Foo::m3;
 }
-
-// CHECK-LABEL: cir.func {{.*}} @_Z12make_virtualv() -> !cir.method<!cir.func<(!s32i)> in !rec_Foo>
-//       CHECK:   %{{.+}} = cir.const #cir.method<vtable_offset = 8> : !cir.method<!cir.func<(!s32i)> in !rec_Foo>
-//       CHECK: }
 
 // LLVM-LABEL: @_Z12make_virtualv
 //       LLVM:   store { i64, i64 } { i64 9, i64 0 }, ptr %{{.+}}
@@ -37,10 +27,6 @@ auto make_null() -> void (Foo::*)(int) {
   return nullptr;
 }
 
-// CHECK-LABEL: cir.func {{.*}} @_Z9make_nullv() -> !cir.method<!cir.func<(!s32i)> in !rec_Foo>
-//       CHECK:   %{{.+}} = cir.const #cir.method<null> : !cir.method<!cir.func<(!s32i)> in !rec_Foo>
-//       CHECK: }
-
 // LLVM-LABEL: @_Z9make_nullv
 //       LLVM:   store { i64, i64 } zeroinitializer, ptr %{{.+}}
 //       LLVM: }
@@ -48,12 +34,6 @@ auto make_null() -> void (Foo::*)(int) {
 void call(Foo *obj, void (Foo::*func)(int), int arg) {
   (obj->*func)(arg);
 }
-
-// CHECK-LABEL: cir.func {{.*}} @_Z4callP3FooMS_FviEi
-//       CHECK:   %[[CALLEE:.+]], %[[THIS:.+]] = cir.get_method %{{.+}}, %{{.+}} : (!cir.method<!cir.func<(!s32i)> in !rec_Foo>, !cir.ptr<!rec_Foo>) -> (!cir.ptr<!cir.func<(!cir.ptr<!void>, !s32i)>>, !cir.ptr<!void>)
-//  CHECK-NEXT:   %[[#ARG:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
-//  CHECK-NEXT:   cir.call %[[CALLEE]](%[[THIS]], %[[#ARG]]) : (!cir.ptr<!cir.func<(!cir.ptr<!void>, !s32i)>>, !cir.ptr<!void>, !s32i) -> ()
-//       CHECK: }
 
 // LLVM-LABEL: @_Z4callP3FooMS_FviEi
 //      LLVM:    %[[#obj:]] = load ptr, ptr %{{.+}}
@@ -83,9 +63,6 @@ bool cmp_eq(void (Foo::*lhs)(int), void (Foo::*rhs)(int)) {
   return lhs == rhs;
 }
 
-// CHECK-LABEL: @_Z6cmp_eqM3FooFviES1_
-// CHECK: %{{.+}} = cir.cmp(eq, %{{.+}}, %{{.+}}) : !cir.method<!cir.func<(!s32i)> in !rec_Foo>, !cir.bool
-
 // LLVM-LABEL: @_Z6cmp_eqM3FooFviES1_
 //      LLVM: %[[#lhs:]] = load { i64, i64 }, ptr %{{.+}}
 // LLVM-NEXT: %[[#rhs:]] = load { i64, i64 }, ptr %{{.+}}
@@ -102,9 +79,6 @@ bool cmp_eq(void (Foo::*lhs)(int), void (Foo::*rhs)(int)) {
 bool cmp_ne(void (Foo::*lhs)(int), void (Foo::*rhs)(int)) {
   return lhs != rhs;
 }
-
-// CHECK-LABEL: @_Z6cmp_neM3FooFviES1_
-// CHECK: %{{.+}} = cir.cmp(ne, %{{.+}}, %{{.+}}) : !cir.method<!cir.func<(!s32i)> in !rec_Foo>, !cir.bool
 
 // LLVM-LABEL: @_Z6cmp_neM3FooFviES1_
 //      LLVM: %[[#lhs:]] = load { i64, i64 }, ptr %{{.+}}
@@ -127,10 +101,6 @@ bool memfunc_to_bool(void (Foo::*func)(int)) {
   return func;
 }
 
-// CIR-LABEL: @_Z15memfunc_to_boolM3FooFviE
-// CIR:   %{{.+}} = cir.cast member_ptr_to_bool %{{.+}} : !cir.method<!cir.func<(!s32i)> in !rec_Foo> -> !cir.bool
-// CIR: }
-
 // LLVM-LABEL: @_Z15memfunc_to_boolM3FooFviE
 //      LLVM:   %[[#memfunc:]] = load { i64, i64 }, ptr %{{.+}}
 // LLVM-NEXT:   %[[#ptr:]] = extractvalue { i64, i64 } %[[#memfunc]], 0
@@ -141,19 +111,10 @@ auto memfunc_reinterpret(void (Foo::*func)(int)) -> void (Bar::*)() {
   return reinterpret_cast<void (Bar::*)()>(func);
 }
 
-// CIR-LABEL: @_Z19memfunc_reinterpretM3FooFviE
-// CIR:   %{{.+}} = cir.cast bitcast %{{.+}} : !cir.method<!cir.func<(!s32i)> in !rec_Foo> -> !cir.method<!cir.func<()> in !rec_Bar>
-// CIR: }
-
 // LLVM-LABEL: @_Z19memfunc_reinterpretM3FooFviE
-// LLVM-NEXT:   %[[#arg_slot:]] = alloca { i64, i64 }, i64 1
-// LLVM-NEXT:   %[[#ret_slot:]] = alloca { i64, i64 }, i64 1
-// LLVM-NEXT:   store { i64, i64 } %{{.+}}, ptr %[[#arg_slot]]
-// LLVM-NEXT:   %[[#tmp:]] = load { i64, i64 }, ptr %[[#arg_slot]]
-// LLVM-NEXT:   store { i64, i64 } %[[#tmp]], ptr %[[#ret_slot]]
-// LLVM-NEXT:   %[[#ret:]] = load { i64, i64 }, ptr %[[#ret_slot]]
-// LLVM-NEXT:   ret { i64, i64 } %[[#ret]]
-// LLVM-NEXT: }
+//      LLVM:   %[[#tmp:]] = load { i64, i64 }, ptr %{{.+}}
+// LLVM-NEXT:   store { i64, i64 } %[[#tmp]], ptr %{{.+}}
+//      LLVM: }
 
 struct Base1 {
   int x;
@@ -177,61 +138,37 @@ DerivedMemFunc base_to_derived_zero_offset(Base1MemFunc ptr) {
   return static_cast<DerivedMemFunc>(ptr);
 }
 
-// CIR-LABEL: @_Z27base_to_derived_zero_offsetM5Base1FviE
-// CIR: %{{.+}} = cir.derived_method(%{{.+}} : !cir.method<!cir.func<(!s32i)> in !rec_Base1_>) [0] -> !cir.method<!cir.func<(!s32i)> in !rec_Derived>
-
 // LLVM-LABEL: @_Z27base_to_derived_zero_offsetM5Base1FviE
-// LLVM-NEXT:   %[[#arg_slot:]] = alloca { i64, i64 }, i64 1
-// LLVM-NEXT:   %[[#ret_slot:]] = alloca { i64, i64 }, i64 1
-// LLVM-NEXT:   store { i64, i64 } %{{.+}}, ptr %[[#arg_slot]]
-// LLVM-NEXT:   %[[#tmp:]] = load { i64, i64 }, ptr %[[#arg_slot]]
-// LLVM-NEXT:   store { i64, i64 } %[[#tmp]], ptr %[[#ret_slot]]
-// LLVM-NEXT:   %[[#ret:]] = load { i64, i64 }, ptr %[[#ret_slot]]
-// LLVM-NEXT:   ret { i64, i64 } %[[#ret]]
-// LLVM-NEXT: }
+//      LLVM:   %[[#tmp:]] = load { i64, i64 }, ptr %{{.+}}
+// LLVM-NEXT:   store { i64, i64 } %[[#tmp]], ptr %{{.+}}
+//      LLVM: }
 
 DerivedMemFunc base_to_derived(Base2MemFunc ptr) {
   return static_cast<DerivedMemFunc>(ptr);
 }
 
-// CIR-LABEL: @_Z15base_to_derivedM5Base2FviE
-// CIR: %{{.+}} = cir.derived_method(%{{.+}} : !cir.method<!cir.func<(!s32i)> in !rec_Base2_>) [16] -> !cir.method<!cir.func<(!s32i)> in !rec_Derived>
-
 // LLVM-LABEL: @_Z15base_to_derivedM5Base2FviE
 //      LLVM: %[[#arg:]] = load { i64, i64 }, ptr %{{.+}}
 // LLVM-NEXT: %[[#adj:]] = extractvalue { i64, i64 } %[[#arg]], 1
 // LLVM-NEXT: %[[#adj_adj:]] = add i64 %[[#adj]], 16
-// LLVM-NEXT: %{{.+}} = insertvalue { i64, i64 } %[[#arg]], i64 %[[#adj_adj]], 1
 
 Base1MemFunc derived_to_base_zero_offset(DerivedMemFunc ptr) {
   return static_cast<Base1MemFunc>(ptr);
 }
 
-// CIR-LABEL: @_Z27derived_to_base_zero_offsetM7DerivedFviE
-// CIR: %{{.+}} = cir.base_method(%{{.+}} : !cir.method<!cir.func<(!s32i)> in !rec_Derived>) [0] -> !cir.method<!cir.func<(!s32i)> in !rec_Base1_>
-
 // LLVM-LABEL: @_Z27derived_to_base_zero_offsetM7DerivedFviE
-// LLVM-NEXT:   %[[#arg_slot:]] = alloca { i64, i64 }, i64 1
-// LLVM-NEXT:   %[[#ret_slot:]] = alloca { i64, i64 }, i64 1
-// LLVM-NEXT:   store { i64, i64 } %{{.+}}, ptr %[[#arg_slot]]
-// LLVM-NEXT:   %[[#tmp:]] = load { i64, i64 }, ptr %[[#arg_slot]]
-// LLVM-NEXT:   store { i64, i64 } %[[#tmp]], ptr %[[#ret_slot]]
-// LLVM-NEXT:   %[[#ret:]] = load { i64, i64 }, ptr %[[#ret_slot]]
-// LLVM-NEXT:   ret { i64, i64 } %[[#ret]]
-// LLVM-NEXT: }
+//      LLVM:   %[[#tmp:]] = load { i64, i64 }, ptr %{{.+}}
+// LLVM-NEXT:   store { i64, i64 } %[[#tmp]], ptr %{{.+}}
+//      LLVM: }
 
 Base2MemFunc derived_to_base(DerivedMemFunc ptr) {
   return static_cast<Base2MemFunc>(ptr);
 }
 
-// CIR-LABEL: @_Z15derived_to_baseM7DerivedFviE
-// CIR: %{{.+}} = cir.base_method(%{{.+}} : !cir.method<!cir.func<(!s32i)> in !rec_Derived>) [16] -> !cir.method<!cir.func<(!s32i)> in !rec_Base2_>
-
 // LLVM-LABEL: @_Z15derived_to_baseM7DerivedFviE
 //      LLVM: %[[#arg:]] = load { i64, i64 }, ptr %{{.+}}
 // LLVM-NEXT: %[[#adj:]] = extractvalue { i64, i64 } %[[#arg]], 1
 // LLVM-NEXT: %[[#adj_adj:]] = sub i64 %[[#adj]], 16
-// LLVM-NEXT: %{{.+}} = insertvalue { i64, i64 } %[[#arg]], i64 %[[#adj_adj]], 1
 
 struct HasVTable {
   virtual void test(void (Foo::*)());

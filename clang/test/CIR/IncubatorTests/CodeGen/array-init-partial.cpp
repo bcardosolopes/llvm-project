@@ -34,6 +34,7 @@ struct HasDtor {
 // LLVM: call void @_ZN7HasDtorC1Ei(ptr %{{.*}}, i32 2)
 // LLVM: store ptr %{{.*}}, ptr %[[ENDOFINIT]]
 // LLVM: call void @_ZN7HasDtorC1Ei(ptr %{{.*}}, i32 3)
+// LLVM: store ptr %{{.*}}, ptr %[[ENDOFINIT]]
 // LLVM: call void @_ZN7HasDtorC1Ev(ptr %{{.*}})
 // LLVM: call void @_ZN7HasDtorD1Ev(ptr %{{.*}})
 

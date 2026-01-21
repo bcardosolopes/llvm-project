@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fclangir -emit-cir -triple spirv64-unknown-unknown %s -o %t.cir
+// RUN: %clang_cc1 -fclangir -emit-cir -fno-clangir-call-conv-lowering -triple spirv64-unknown-unknown %s -o %t.cir
 // RUN: FileCheck %s --input-file=%t.cir --check-prefix=CIR
 // RUN: %clang_cc1 -fclangir -emit-llvm -fno-clangir-call-conv-lowering -triple spirv64-unknown-unknown %s -o %t.ll
 // RUN: FileCheck %s --input-file=%t.ll --check-prefix=LLVM
@@ -18,7 +18,7 @@ kernel  __attribute__((vec_type_hint(int))) __attribute__((reqd_work_group_size(
 
 kernel __attribute__((vec_type_hint(uint4))) __attribute__((work_group_size_hint(8,16,32))) void kernel2(int a) {}
 
-// CIR-DAG: #fn_attr[[KERNEL2:[0-9]*]] = {{.+}}cl.kernel_metadata = #cir.cl.kernel_metadata<work_group_size_hint = [8 : i32, 16 : i32, 32 : i32], vec_type_hint = !cir.vector<!u32i x 4>, vec_type_hint_signedness = 0>{{.+}}
+// CIR-DAG: #fn_attr[[KERNEL2:[0-9]*]] = {{.+}}cl.kernel_metadata = #cir.cl.kernel_metadata<work_group_size_hint = [8 : i32, 16 : i32, 32 : i32], vec_type_hint = !cir.vector<4 x !u32i>, vec_type_hint_signedness = 0>{{.+}}
 // CIR-DAG: cir.func{{.*}} @kernel2{{.+}} extra(#fn_attr[[KERNEL2]])
 
 // LLVM-DAG: define {{(dso_local )?}}spir_kernel void @kernel2(i32 {{[^%]*}}%0) {{[^{]+}} !vec_type_hint ![[MD2_VEC_TYPE:[0-9]+]] !work_group_size_hint ![[MD2_WG_SIZE:[0-9]+]]

@@ -265,9 +265,7 @@ extern "C" void default_follow_label(int v) {
 
 // CIR: cir.func {{.*}} @default_follow_label
 // CIR: cir.switch
-// CIR: cir.case(equal, [#cir.int<1> : !s32i]) {
-// CIR:   cir.yield
-// CIR: cir.case(equal, [#cir.int<2> : !s32i]) {
+// CIR: cir.case(anyof, [#cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
 // CIR:   cir.call @action1()
 // CIR:   cir.break
 // CIR:   cir.label "label"
@@ -276,11 +274,7 @@ extern "C" void default_follow_label(int v) {
 // CIR:   cir.goto "label"
 
 // LLVM: define dso_local void @default_follow_label
-// LLVM: [[CASE1:.*]]:
-// LLVM:   br label %[[BB8:.*]]
-// LLVM: [[BB8]]:
-// LLVM:   br label %[[CASE2:.*]]
-// LLVM: [[CASE2]]:
+// LLVM: [[CASE12:.*]]:
 // LLVM:   call void @action1()
 // LLVM:   br label %[[BREAK:.*]]
 // LLVM: [[LABEL:.*]]:

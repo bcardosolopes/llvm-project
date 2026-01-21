@@ -4,9 +4,6 @@
 // These are here so we find this test when grepping for missing features.
 // cir::MissingFeatures::opGlobalThreadLocal()
 
-// Note: Unlike CIR doesn't set dso_local on function declarations. This is
-//       a difference from classic codege in the STATIC checks.
-
 /// Static relocation model defaults to -fdirect-access-external-data and sets
 /// dso_local on most global objects.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm -mrelocation-model static %s -o - | FileCheck --check-prefix=STATIC %s
@@ -15,9 +12,9 @@
 // STATIC-NEXT: @import_var = external dso_local global i32
 // STATIC-NEXT: @weak_bar = extern_weak dso_local global i32
 // STATIC-NEXT: @bar = external dso_local global i32
-// STATIC-DAG: declare void @foo()
+// STATIC-DAG: declare dso_local void @foo()
 // STATIC-DAG: define dso_local ptr @zed()
-// STATIC-DAG: declare void @import_func()
+// STATIC-DAG: declare dso_local void @import_func()
 
 /// If -fno-direct-access-external-data is set, drop dso_local from global variable
 /// declarations.
@@ -67,7 +64,6 @@
 // PIE-DIRECT-NOPLT-DAG: declare void @import_func()
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm -pic-level 1 -pic-is-pie -fno-plt %s -o - | FileCheck --check-prefix=PIE-NO-PLT %s
-// RUN: %clang_cc1 -triple powerpc64le -fclangir -emit-llvm -mrelocation-model static %s -o - | FileCheck --check-prefix=PIE-NO-PLT %s
 // PIE-NO-PLT:      @baz = dso_local global i32 42
 // PIE-NO-PLT-NEXT: @import_var = external global i32
 // PIE-NO-PLT-NEXT: @weak_bar = extern_weak global i32

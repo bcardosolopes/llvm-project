@@ -36,6 +36,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/FrontendAction/CIRGenAction.h"
+#include "clang/CIR/StdLibStatistics.h"
 #endif
 
 using namespace clang;
@@ -51,10 +52,11 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
 
   unsigned UseCIR = CI.getFrontendOpts().UseClangIRPipeline;
   frontend::ActionKind Act = CI.getFrontendOpts().ProgramAction;
-  bool EmitsCIR = Act == EmitCIR;
+  bool EmitsCIR = Act == EmitCIR || Act == EmitCIRFlat || Act == EmitMLIR;
 
   if (!UseCIR && EmitsCIR)
-    llvm::report_fatal_error("-emit-cir and only valid when using -fclangir");
+    llvm::report_fatal_error(
+        "-emit-cir/-emit-mlir only valid when using -fclangir");
 
   switch (CI.getFrontendOpts().ProgramAction) {
   case ASTDeclList:            return std::make_unique<ASTDeclListAction>();
@@ -80,6 +82,20 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
   case EmitCIR:
 #if CLANG_ENABLE_CIR
     return std::make_unique<cir::EmitCIRAction>();
+#else
+    CI.getDiagnostics().Report(diag::err_fe_cir_not_built);
+    return nullptr;
+#endif
+  case EmitCIRFlat:
+#if CLANG_ENABLE_CIR
+    return std::make_unique<cir::EmitCIRFlatAction>();
+#else
+    CI.getDiagnostics().Report(diag::err_fe_cir_not_built);
+    return nullptr;
+#endif
+  case EmitMLIR:
+#if CLANG_ENABLE_CIR
+    return std::make_unique<cir::EmitMLIRAction>();
 #else
     CI.getDiagnostics().Report(diag::err_fe_cir_not_built);
     return nullptr;
@@ -184,6 +200,9 @@ CreateFrontendAction(CompilerInstance &CI) {
 
   if (CI.getLangOpts().HLSL)
     Act = std::make_unique<HLSLFrontendAction>(std::move(Act));
+
+  if (FEOpts.StdLibStats)
+    Act = std::make_unique<WrappingStdLibStatsAction>(std::move(Act));
 
   if (FEOpts.FixAndRecompile) {
     Act = std::make_unique<FixItRecompile>(std::move(Act));

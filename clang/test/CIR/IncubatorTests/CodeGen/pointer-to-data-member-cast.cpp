@@ -19,7 +19,11 @@ struct Derived : Base1, Base2 {
 // LLVM-LABEL: @_Z15base_to_derivedM5Base2i
 auto base_to_derived(int Base2::*ptr) -> int Derived::* {
   return ptr;
-  // CIR: %{{.+}} = cir.derived_data_member %{{.+}} : !cir.data_member<!s32i in !rec_Base2> [4] -> !cir.data_member<!s32i in !rec_Derived>
+  // In upstream, data member pointers are !s64i. Cast uses null check + add + select.
+  //      CIR: %[[#src:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s64i>, !s64i
+  //      CIR: %{{.+}} = cir.cmp(eq, %[[#src]], %{{.+}}) : !s64i, !cir.bool
+  //      CIR: %{{.+}} = cir.binop(add, %[[#src]], %{{.+}}) : !s64i
+  //      CIR: %{{.+}} = cir.select
 
   //      LLVM: %[[#src:]] = load i64, ptr %{{.+}}
   // LLVM-NEXT: %[[#is_null:]] = icmp eq i64 %[[#src]], -1
@@ -31,7 +35,11 @@ auto base_to_derived(int Base2::*ptr) -> int Derived::* {
 // LLVM-LABEL: @_Z15derived_to_baseM7Derivedi
 auto derived_to_base(int Derived::*ptr) -> int Base2::* {
   return static_cast<int Base2::*>(ptr);
-  // CIR: %{{.+}} = cir.base_data_member %{{.+}} : !cir.data_member<!s32i in !rec_Derived> [4] -> !cir.data_member<!s32i in !rec_Base2>
+  // In upstream, cast uses null check + sub + select.
+  //      CIR: %[[#src:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s64i>, !s64i
+  //      CIR: %{{.+}} = cir.cmp(eq, %[[#src]], %{{.+}}) : !s64i, !cir.bool
+  //      CIR: %{{.+}} = cir.binop(sub, %[[#src]], %{{.+}}) : !s64i
+  //      CIR: %{{.+}} = cir.select
 
   //      LLVM: %[[#src:]] = load i64, ptr %{{.+}}
   // LLVM-NEXT: %[[#is_null:]] = icmp eq i64 %[[#src]], -1
@@ -43,7 +51,7 @@ auto derived_to_base(int Derived::*ptr) -> int Base2::* {
 // LLVM-LABEL: @_Z27base_to_derived_zero_offsetM5Base1i
 auto base_to_derived_zero_offset(int Base1::*ptr) -> int Derived::* {
   return ptr;
-  // CIR: %{{.+}} = cir.derived_data_member %{{.+}} : !cir.data_member<!s32i in !rec_Base1> [0] -> !cir.data_member<!s32i in !rec_Derived>
+  // Zero-offset cast is a no-op in upstream (just load/store !s64i)
 
   // No LLVM instructions emitted for performing a zero-offset cast.
   // LLVM-NEXT: %[[#src_slot:]] = alloca i64, i64 1
@@ -59,7 +67,7 @@ auto base_to_derived_zero_offset(int Base1::*ptr) -> int Derived::* {
 // LLVM-LABEL: @_Z27derived_to_base_zero_offsetM7Derivedi
 auto derived_to_base_zero_offset(int Derived::*ptr) -> int Base1::* {
   return static_cast<int Base1::*>(ptr);
-  // CIR: %{{.+}} = cir.base_data_member %{{.+}} : !cir.data_member<!s32i in !rec_Derived> [0] -> !cir.data_member<!s32i in !rec_Base1>
+  // Zero-offset cast is a no-op in upstream (just load/store !s64i)
 
   // No LLVM instructions emitted for performing a zero-offset cast.
   // LLVM-NEXT: %[[#src_slot:]] = alloca i64, i64 1
@@ -83,16 +91,17 @@ bool to_bool(int Foo::*x) {
   return x;
 }
 
+// In upstream, member_ptr_to_bool is lowered to cmp(ne, ..., -1)
 // CIR-LABEL: @_Z7to_boolM3Fooi
-//      CIR:   %[[#x:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.data_member<!s32i in !rec_Foo>>, !cir.data_member<!s32i in !rec_Foo>
-// CIR-NEXT:   %{{.+}} = cir.cast member_ptr_to_bool %[[#x]] : !cir.data_member<!s32i in !rec_Foo> -> !cir.bool
+//      CIR:   %[[#x:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s64i>, !s64i
+//      CIR:   %{{.+}} = cir.cmp(ne, %[[#x]], %{{.+}}) : !s64i, !cir.bool
 //      CIR: }
 
 auto bitcast(int Foo::*x) {
   return reinterpret_cast<int Bar::*>(x);
 }
 
+// In upstream, bitcast between data member pointers is a no-op (both are !s64i)
 // CIR-LABEL: @_Z7bitcastM3Fooi
-//      CIR:   %[[#x:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.data_member<!s32i in !rec_Foo>>, !cir.data_member<!s32i in !rec_Foo>
-// CIR-NEXT:   %{{.+}} = cir.cast bitcast %[[#x]] : !cir.data_member<!s32i in !rec_Foo> -> !cir.data_member<!s32i in !rec_Bar>
+//      CIR:   %[[#x:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s64i>, !s64i
 //      CIR: }

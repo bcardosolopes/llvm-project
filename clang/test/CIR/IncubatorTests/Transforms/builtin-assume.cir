@@ -19,20 +19,20 @@ module {
   // CHECK-NEXT: }
 
   cir.func @assume_aligned(%arg0: !cir.ptr<!s32i>) -> !cir.ptr<!s32i> {
-    %0 = cir.assume.aligned %arg0 : !cir.ptr<!s32i>[alignment 8]
+    %0 = cir.assume_aligned %arg0 alignment 8 : !cir.ptr<!s32i>
     cir.return %0 : !cir.ptr<!s32i>
   }
   //      CHECK: cir.func @assume_aligned(%arg0: !cir.ptr<!s32i>) -> !cir.ptr<!s32i> {
-  // CHECK-NEXT:   %0 = cir.assume.aligned %arg0 : !cir.ptr<!s32i>[alignment 8]
+  // CHECK-NEXT:   %0 = cir.assume_aligned %arg0 alignment 8 : !cir.ptr<!s32i>
   // CHECK-NEXT:   cir.return %0 : !cir.ptr<!s32i>
   // CHECK-NEXT: }
 
   cir.func @assume_separate_storage(%arg0: !cir.ptr<!cir.void>, %arg1: !cir.ptr<!cir.void>) {
-    cir.assume.separate_storage %arg0, %arg1 : !cir.ptr<!cir.void>
+    cir.assume_separate_storage %arg0, %arg1 : !cir.ptr<!cir.void>
     cir.return
   }
   //      CHECK: cir.func @assume_separate_storage(%arg0: !cir.ptr<!void>, %arg1: !cir.ptr<!void>) {
-  // CHECK-NEXT:   cir.assume.separate_storage %arg0, %arg1 : !cir.ptr<!void>
+  // CHECK-NEXT:   cir.assume_separate_storage %arg0, %arg1 : !cir.ptr<!void>
   // CHECK-NEXT:   cir.return
   // CHECK-NEXT: }
 }

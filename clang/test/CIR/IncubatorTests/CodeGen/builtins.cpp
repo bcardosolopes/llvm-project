@@ -31,14 +31,16 @@ int *test_std_addressof() {
   
   // CIR-LABEL: test_std_addressof
   // CIR: [[ADDR:%.*]] = cir.get_global @s : !cir.ptr<!s32i>
-  // CIR: cir.store [[ADDR]], [[SAVE:%.*]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+  // CIR: [[RES2:%.*]] = cir.call @_ZSt9addressofIiEPT_RS0_([[ADDR]]) {{.*}}
+  // CIR: cir.store [[RES2]], [[SAVE:%.*]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
   // CIR: [[RES:%.*]] = cir.load [[SAVE]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
   // CIR: cir.return [[RES]] : !cir.ptr<!s32i>
 
   // LLVM-LABEL: test_std_addressof
-  // LLVM: store ptr @s, ptr [[ADDR:%.*]], align 8
-  // LLVM: [[RES:%.*]] = load ptr, ptr [[ADDR]], align 8
-  // LLVM: ret ptr [[RES]]
+  // LLVM: [[RES:%.*]] = call ptr @_ZSt9addressofIiEPT_RS0_(ptr @s)
+  // LLVM: store ptr [[RES]], ptr [[ADDR:%.*]], align 8
+  // LLVM: [[RET:%.*]] = load ptr, ptr [[ADDR]], align 8
+  // LLVM: ret ptr [[RET]]
 }
 
 namespace std { template<typename T> T *__addressof(T &); }
@@ -47,24 +49,25 @@ int *test_std_addressof2() {
   
   // CIR-LABEL: test_std_addressof2
   // CIR: [[ADDR:%.*]] = cir.get_global @s : !cir.ptr<!s32i>
-  // CIR: cir.store [[ADDR]], [[SAVE:%.*]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+  // CIR: [[RES2:%.*]] = cir.call @_ZSt11__addressofIiEPT_RS0_([[ADDR]]) {{.*}}
+  // CIR: cir.store [[RES2]], [[SAVE:%.*]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
   // CIR: [[RES:%.*]] = cir.load [[SAVE]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
   // CIR: cir.return [[RES]] : !cir.ptr<!s32i>
 
   /// LLVM-LABEL: test_std_addressof2
-  // LLVM: store ptr @s, ptr [[ADDR:%.*]], align 8
-  // LLVM: [[RES:%.*]] = load ptr, ptr [[ADDR]], align 8
-  // LLVM: ret ptr [[RES]]
+  // LLVM: [[RES:%.*]] = call ptr @_ZSt11__addressofIiEPT_RS0_(ptr @s)
+  // LLVM: store ptr [[RES]], ptr [[ADDR:%.*]], align 8
+  // LLVM: [[RET:%.*]] = load ptr, ptr [[ADDR]], align 8
+  // LLVM: ret ptr [[RET]]
 }
 
 extern "C" char* test_memchr(const char arg[32]) {
   return __builtin_char_memchr(arg, 123, 32);
 
   // CIR-LABEL: test_memchr
-  // CIR: [[PATTERN:%.*]] = cir.const #cir.int<123> : !s32i 
-  // CIR: [[LEN:%.*]] = cir.const #cir.int<32> : !s32i 
-  // CIR: [[LEN_U64:%.*]] = cir.cast integral [[LEN]] : !s32i -> !u64i 
-  // CIR: {{%.*}} = cir.libc.memchr({{%.*}}, [[PATTERN]], [[LEN_U64]])
+  // CIR: [[PATTERN:%.*]] = cir.const #cir.int<123> : !s32i
+  // CIR: [[LEN:%.*]] = cir.const #cir.int<32> : !u64i
+  // CIR: {{%.*}} = cir.call @memchr({{%.*}}, [[PATTERN]], [[LEN]]){{.*}} : (!cir.ptr<!s8i>, !s32i, !u64i) -> !cir.ptr<!s8i>
 
   // LLVM: {{.*}}@test_memchr(ptr{{.*}}[[ARG:%.*]]) 
   // LLVM: [[TMP0:%.*]] = alloca ptr, i64 1, align 8
@@ -80,10 +83,9 @@ extern "C"  wchar_t* test_wmemchr(const wchar_t *wc) {
   return __builtin_wmemchr(wc, 257u, 32);
 
   // CIR-LABEL: test_wmemchr
-  // CIR: [[PATTERN:%.*]] = cir.const #cir.int<257> : !u32i 
-  // CIR: [[LEN:%.*]] = cir.const #cir.int<32> : !s32i 
-  // CIR: [[LEN_U64:%.*]] = cir.cast integral [[LEN]] : !s32i -> !u64i 
-  // CIR: cir.call @wmemchr({{%.*}}, [[PATTERN]], [[LEN_U64]]) : (!cir.ptr<!u32i>, !u32i, !u64i) -> !cir.ptr<!u32i>
+  // CIR: [[PATTERN:%.*]] = cir.const #cir.int<257> : !u32i
+  // CIR: [[LEN:%.*]] = cir.const #cir.int<32> : !u64i
+  // CIR: cir.call @wmemchr({{%.*}}, [[PATTERN]], [[LEN]]){{.*}} : (!cir.ptr<!u32i>, !u32i, !u64i) -> !cir.ptr<!u32i>
 
   // LLVM: {{.*}}@test_wmemchr(ptr{{.*}}[[ARG:%.*]])
   // LLVM: [[TMP0:%.*]] = alloca ptr, i64 1, align 8

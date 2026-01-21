@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "PassDetail.h"
+#include "clang/CIR/Dialect/IR/CIRAttrs.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "llvm/ADT/SmallSet.h"
@@ -42,6 +43,43 @@ static void process(cir::FuncOp func) {
       blockAddrLabel.insert(blockAddr.getBlockAddrInfo().getLabel());
     }
   });
+
+  // Also check for block address references in global initializers that
+  // reference labels in this function (e.g., &&label or &&label1 - &&label2).
+  if (auto moduleOp = func->getParentOfType<mlir::ModuleOp>()) {
+    llvm::StringRef funcName = func.getSymName();
+    auto checkBlockAddrInfo = [&](cir::BlockAddrInfoAttr info) {
+      if (info.getFunc().getValue() == funcName)
+        blockAddrLabel.insert(info.getLabel());
+    };
+    // Walk global ops to find BlockAddrAttr and BlockAddrDiffAttr in
+    // initializers, which may reference labels in this function.
+    moduleOp.walk([&](cir::GlobalOp globalOp) {
+      if (auto init = globalOp.getInitialValue()) {
+        // Check the initializer attribute recursively for block address refs.
+        llvm::SmallVector<mlir::Attribute, 8> worklist;
+        worklist.push_back(*init);
+        while (!worklist.empty()) {
+          mlir::Attribute attr = worklist.pop_back_val();
+          if (auto ba = dyn_cast<cir::BlockAddrAttr>(attr)) {
+            checkBlockAddrInfo(ba.getInfo());
+          } else if (auto bad = dyn_cast<cir::BlockAddrDiffAttr>(attr)) {
+            checkBlockAddrInfo(bad.getLhs());
+            checkBlockAddrInfo(bad.getRhs());
+          } else if (auto ca = dyn_cast<cir::ConstArrayAttr>(attr)) {
+            if (auto elts =
+                    dyn_cast_if_present<mlir::ArrayAttr>(ca.getElts())) {
+              for (mlir::Attribute elt : elts)
+                worklist.push_back(elt);
+            }
+          } else if (auto cr = dyn_cast<cir::ConstRecordAttr>(attr)) {
+            for (mlir::Attribute member : cr.getMembers())
+              worklist.push_back(member);
+          }
+        }
+      }
+    });
+  }
 
   for (auto &lab : labels) {
     StringRef labelName = lab.getKey();

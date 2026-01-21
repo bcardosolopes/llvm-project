@@ -1,18 +1,18 @@
-// RUN: %clang_cc1 -cl-std=CL3.0 -O0 -fclangir -emit-cir -triple spirv64-unknown-unknown %s -o %t.cir
+// RUN: %clang_cc1 -cl-std=CL3.0 -O0 -fclangir -emit-cir -fno-clangir-call-conv-lowering -triple spirv64-unknown-unknown %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s --check-prefix=CIR
 // RUN: %clang_cc1 -cl-std=CL3.0 -O0 -fclangir -emit-llvm -fno-clangir-call-conv-lowering -triple spirv64-unknown-unknown %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s --check-prefix=LLVM
 
 global int a = 13;
-// CIR-DAG: cir.global external lang_address_space(offload_global) @a = #cir.int<13> : !s32i
+// CIR-DAG: cir.global {{.*}}external lang_address_space(offload_global) @a = #cir.int<13> : !s32i
 // LLVM-DAG: @a = addrspace(1) global i32 13
 
 global int b = 15;
-// CIR-DAG: cir.global external lang_address_space(offload_global) @b = #cir.int<15> : !s32i
+// CIR-DAG: cir.global {{.*}}external lang_address_space(offload_global) @b = #cir.int<15> : !s32i
 // LLVM-DAG: @b = addrspace(1) global i32 15
 
 constant int c[2] = {18, 21};
-// CIR-DAG: cir.global constant {{.*}}lang_address_space(offload_constant) {{.*}}@c
+// CIR-DAG: cir.global  constant external lang_address_space(offload_constant) {{.*}}@c
 // LLVM-DAG: @c = addrspace(2) constant
 
 kernel void test_get_global() {

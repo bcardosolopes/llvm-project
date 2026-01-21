@@ -45,16 +45,24 @@ CIRGenFunction::emitOMPParallelDirective(const OMPParallelDirective &s) {
     mlir::OpBuilder::InsertionGuard guardCase(builder);
     builder.setInsertionPointToEnd(&block);
 
-    LexicalScope ls{*this, begin, builder.getInsertionBlock()};
+    // Create a scope for the OpenMP region.
+    cir::ScopeOp::create(
+        builder, begin, /*scopeBuilder=*/
+        [&](mlir::OpBuilder &b, mlir::Location loc) {
+          LexicalScope ls{*this, begin, builder.getInsertionBlock()};
 
-    if (s.hasCancel())
-      getCIRGenModule().errorNYI(s.getBeginLoc(),
-                                 "OpenMP Parallel with Cancel");
-    if (s.getTaskReductionRefExpr())
-      getCIRGenModule().errorNYI(s.getBeginLoc(),
-                                 "OpenMP Parallel with Task Reduction");
+          if (s.hasCancel())
+            getCIRGenModule().errorNYI(s.getBeginLoc(),
+                                       "OpenMP Parallel with Cancel");
+          if (s.getTaskReductionRefExpr())
+            getCIRGenModule().errorNYI(s.getBeginLoc(),
+                                       "OpenMP Parallel with Task Reduction");
 
-    res = emitStmt(s.getAssociatedStmt(), /*useCurrentScope=*/true);
+          res = emitStmt(
+              s.getCapturedStmt(OpenMPDirectiveKind::OMPD_parallel)
+                  ->getCapturedStmt(),
+              /*useCurrentScope=*/true);
+        });
 
     mlir::omp::TerminatorOp::create(builder, end);
   }
@@ -68,9 +76,8 @@ CIRGenFunction::emitOMPTaskwaitDirective(const OMPTaskwaitDirective &s) {
 }
 mlir::LogicalResult
 CIRGenFunction::emitOMPTaskyieldDirective(const OMPTaskyieldDirective &s) {
-  getCIRGenModule().errorNYI(s.getSourceRange(),
-                             "OpenMP OMPTaskyieldDirective");
-  return mlir::failure();
+  mlir::omp::TaskyieldOp::create(builder, getLoc(s.getSourceRange()));
+  return mlir::success();
 }
 mlir::LogicalResult
 CIRGenFunction::emitOMPBarrierDirective(const OMPBarrierDirective &s) {

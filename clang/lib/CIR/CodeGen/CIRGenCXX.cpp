@@ -15,11 +15,165 @@
 #include "CIRGenModule.h"
 
 #include "clang/AST/GlobalDecl.h"
+#include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/MissingFeatures.h"
 #include "llvm/Support/SaveAndRestore.h"
 
 using namespace clang;
 using namespace clang::CIRGen;
+
+/// Try to emit a base destructor as an alias to its primary
+/// base-class destructor.
+bool CIRGenModule::tryEmitBaseDestructorAsAlias(const CXXDestructorDecl *d) {
+  if (!getCodeGenOpts().CXXCtorDtorAliases)
+    return true;
+
+  // Producing an alias to a base class ctor/dtor can degrade debug quality
+  // as the debugger cannot tell them apart.
+  if (getCodeGenOpts().OptimizationLevel == 0)
+    return true;
+
+  // If sanitizing memory to check for use-after-dtor, do not emit as
+  //  an alias, unless this class owns no members.
+  if (getCodeGenOpts().SanitizeMemoryUseAfterDtor &&
+      !d->getParent()->field_empty())
+    assert(!cir::MissingFeatures::sanitizers());
+
+  // If the destructor doesn't have a trivial body, we have to emit it
+  // separately.
+  if (!d->hasTrivialBody())
+    return true;
+
+  const CXXRecordDecl *klass = d->getParent();
+
+  // We are going to instrument this destructor, so give up even if it is
+  // currently empty.
+  if (klass->mayInsertExtraPadding())
+    return true;
+
+  // If we need to manipulate a VTT parameter, give up.
+  if (klass->getNumVBases()) {
+    // Extra Credit:  passing extra parameters is perfectly safe
+    // in many calling conventions, so only bail out if the ctor's
+    // calling convention is nonstandard.
+    return true;
+  }
+
+  // If any field has a non-trivial destructor, we have to emit the
+  // destructor separately.
+  for (const auto *i : klass->fields())
+    if (i->getType().isDestructedType())
+      return true;
+
+  // Try to find a unique base class with a non-trivial destructor.
+  const CXXRecordDecl *uniqueBase = nullptr;
+  for (const auto &i : klass->bases()) {
+
+    // We're in the base destructor, so skip virtual bases.
+    if (i.isVirtual())
+      continue;
+
+    // Skip base classes with trivial destructors.
+    const auto *base = i.getType()->getAsCXXRecordDecl();
+    if (base->hasTrivialDestructor())
+      continue;
+
+    // If we've already found a base class with a non-trivial
+    // destructor, give up.
+    if (uniqueBase)
+      return true;
+    uniqueBase = base;
+  }
+
+  // If we didn't find any bases with a non-trivial destructor, then
+  // the base destructor is actually effectively trivial, which can
+  // happen if it was needlessly user-defined or if there are virtual
+  // bases with non-trivial destructors.
+  if (!uniqueBase)
+    return true;
+
+  // If the base is at a non-zero offset, give up.
+  const ASTRecordLayout &classLayout = astContext.getASTRecordLayout(klass);
+  if (!classLayout.getBaseClassOffset(uniqueBase).isZero())
+    return true;
+
+  // Give up if the calling conventions don't match. We could update the call,
+  // but it is probably not worth it.
+  const CXXDestructorDecl *baseD = uniqueBase->getDestructor();
+  if (baseD->getType()->castAs<FunctionType>()->getCallConv() !=
+      d->getType()->castAs<FunctionType>()->getCallConv())
+    return true;
+
+  GlobalDecl aliasDecl(d, Dtor_Base);
+  GlobalDecl targetDecl(baseD, Dtor_Base);
+
+  // The alias will use the linkage of the referent.  If we can't
+  // support aliases with that linkage, fail.
+  auto linkage = getFunctionLinkage(aliasDecl);
+
+  // We can't use an alias if the linkage is not valid for one.
+  if (!cir::isValidLinkage(linkage))
+    return true;
+
+  auto targetLinkage = getFunctionLinkage(targetDecl);
+
+  // Check if we have it already.
+  StringRef mangledName = getMangledName(aliasDecl);
+  auto entry = getGlobalValue(mangledName);
+  auto globalValue = dyn_cast_or_null<cir::CIRGlobalValueInterface>(entry);
+  if (entry && globalValue && !globalValue.isDeclaration())
+    return false;
+  if (replacements.count(mangledName))
+    return false;
+
+  // Find the referent.
+  auto aliasee = cast<cir::FuncOp>(getAddrOfGlobal(targetDecl));
+  auto aliaseeGV = dyn_cast_or_null<cir::CIRGlobalValueInterface>(
+      getAddrOfGlobal(targetDecl));
+
+  // Instead of creating as alias to a linkonce_odr, replace all of the uses
+  // of the aliasee.
+  if (cir::isDiscardableIfUnused(linkage) &&
+      !(targetLinkage == cir::GlobalLinkageKind::AvailableExternallyLinkage &&
+        targetDecl.getDecl()->hasAttr<AlwaysInlineAttr>())) {
+    // FIXME: An extern template instantiation will create functions with
+    // linkage "AvailableExternally". In libc++, some classes also define
+    // members with attribute "AlwaysInline" and expect no reference to
+    // be generated. It is desirable to reenable this optimisation after
+    // corresponding LLVM changes.
+    addReplacement(mangledName, aliasee);
+    return false;
+  }
+
+  // If we have a weak, non-discardable alias (weak, weak_odr), like an
+  // extern template instantiation or a dllexported class, avoid forming it on
+  // COFF. A COFF weak external alias cannot satisfy a normal undefined
+  // symbol reference from another TU. The other TU must also mark the
+  // referenced symbol as weak, which we cannot rely on.
+  if (cir::isWeakForLinker(linkage) && getTriple().isOSBinFormatCOFF()) {
+    llvm_unreachable("please sent a PR with a test and remove this.\n");
+    return true;
+  }
+
+  // If we don't have a definition for the destructor yet or the definition
+  // is available_externally, don't emit an alias.  We can't emit aliases to
+  // declarations; that's just not how aliases work.
+  if (aliaseeGV && aliaseeGV.isDeclarationForLinker())
+    return true;
+
+  // Don't create an alias to a linker weak symbol. This avoids producing
+  // different COMDATs in different TUs. Another option would be to
+  // output the alias both for weak_odr and linkonce_odr, but that
+  // requires explicit comdat support in the IL.
+  if (cir::isWeakForLinker(targetLinkage)) {
+    llvm_unreachable("please sent a PR with a test and remove this.\n");
+    return true;
+  }
+
+  // Create the alias with no name.
+  emitAliasForGlobal(mangledName, entry, aliasDecl, aliasee, linkage);
+  return false;
+}
 
 /// Emit code to cause the variable at the given address to be considered as
 /// constant from this point onwards.
@@ -245,7 +399,7 @@ void CIRGenModule::emitCXXGlobalVarDeclInit(const VarDecl *varDecl,
   // For example, in the above CUDA code, the static local variable s has a
   // "shared" address space qualifier, but the constructor of StructWithCtor
   // expects "this" in the "generic" address space.
-  assert(!cir::MissingFeatures::addressSpace());
+  // Address space casting is handled in emitDeclInit.
 
   // Create a CIRGenFunction to emit the initializer. While this isn't a true
   // function, the handling works the same way.
@@ -257,6 +411,10 @@ void CIRGenModule::emitCXXGlobalVarDeclInit(const VarDecl *varDecl,
                                             getLoc(varDecl->getLocation())};
 
   assert(!cir::MissingFeatures::astVarDeclInterface());
+
+  // Set init_priority if the variable has the attribute.
+  if (const auto *ipa = varDecl->getAttr<InitPriorityAttr>())
+    addr.setInitPriorityAttr(builder.getI32IntegerAttr(ipa->getPriority()));
 
   if (!ty->isReferenceType()) {
     assert(!cir::MissingFeatures::openMP());
@@ -293,5 +451,37 @@ void CIRGenModule::emitCXXGlobalVarDeclInit(const VarDecl *varDecl,
     return;
   }
 
-  errorNYI(varDecl->getSourceRange(), "global with reference type");
+  // Reference type global variable initialization.
+  {
+    mlir::OpBuilder::InsertionGuard guard(builder);
+    mlir::Block *block = builder.createBlock(&addr.getCtorRegion());
+    CIRGenFunction::LexicalScope lexScope{cgf, addr.getLoc(),
+                                          builder.getInsertionBlock()};
+    lexScope.setAsGlobalInit();
+    builder.setInsertionPointToStart(block);
+    auto getGlobal = builder.createGetGlobal(addr);
+
+    Address declAddr(getGlobal, getASTContext().getDeclAlign(varDecl));
+    assert(performInit && "cannot have constant initializer which needs "
+                          "destruction for reference");
+    const Expr *init = varDecl->getInit();
+    RValue rv = cgf.emitReferenceBindingToExpr(init);
+    {
+      mlir::OpBuilder::InsertionGuard innerGuard(builder);
+      mlir::Operation *rvalueDefOp = rv.getValue().getDefiningOp();
+      if (rvalueDefOp && rvalueDefOp->getBlock()) {
+        mlir::Block *rvalSrcBlock = rvalueDefOp->getBlock();
+        if (!rvalSrcBlock->empty() && isa<cir::YieldOp>(rvalSrcBlock->back())) {
+          auto &front = rvalSrcBlock->front();
+          getGlobal.getDefiningOp()->moveBefore(&front);
+          auto yield = cast<cir::YieldOp>(rvalSrcBlock->back());
+          builder.setInsertionPoint(yield);
+        }
+      }
+      LValue lv = cgf.makeAddrLValue(declAddr, ty);
+      cgf.emitStoreOfScalar(rv.getValue(), lv, /*isInit=*/true);
+    }
+    builder.setInsertionPointToEnd(block);
+    cir::YieldOp::create(builder, addr->getLoc());
+  }
 }

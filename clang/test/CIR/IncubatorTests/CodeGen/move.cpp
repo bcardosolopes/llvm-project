@@ -30,9 +30,11 @@ void t() {
 
 // CHECK: cir.func {{.*}} @_Z1tv()
 // CHECK:   %[[#Addr:]] = cir.alloca ![[StdString]], {{.*}} ["ref.tmp0"]
-// CHECK:   %[[#RValStr:]] = cir.call @_Z6getstrv() : () -> ![[StdString]]
-// CHECK:   cir.store{{.*}} %[[#RValStr]], %[[#Addr]]
-// CHECK:   cir.call @_Z7emplaceOSt6string(%[[#Addr]])
+// CHECK:   %[[#RValStr:]] = cir.call @_Z6getstrv() : () -> !u8i
+// CHECK:   %[[#Cast:]] = cir.cast bitcast %[[#Addr]] : !cir.ptr<![[StdString]]> -> !cir.ptr<!u8i>
+// CHECK:   cir.store %[[#RValStr]], %[[#Cast]]
+// CHECK:   %[[#Move:]] = cir.call @_ZSt4moveISt6stringEONSt16remove_referenceIT_E4typeEOS2_(%[[#Addr]]) nothrow side_effect(const)
+// CHECK:   cir.call @_Z7emplaceOSt6string(%[[#Move]])
 // CHECK:   cir.return
 // CHECK: }
 
@@ -44,13 +46,14 @@ struct S {
 };
 
 // CHECK-LABEL:   cir.func {{.*}} @_ZN1SC1EOS_
-// CHECK-SAME:      special_member<#cir.cxx_ctor<!rec_S, move>>
+// CHECK-SAME:      special_member<#cir.cxx_ctor<!rec_S, move, trivial true>>
 
 void test_ctor() {
 // CHECK-LABEL:   cir.func {{.*}} @_Z9test_ctorv()
 // CHECK:           %[[VAR_A:.*]] = cir.alloca !rec_S, !cir.ptr<!rec_S>
 // CHECK:           %[[VAR_B:.*]] = cir.alloca !rec_S, !cir.ptr<!rec_S>
-// CHECK:           cir.call @_ZN1SC1EOS_(%[[VAR_B]], %[[VAR_A]]) : (!cir.ptr<!rec_S>, !cir.ptr<!rec_S>) -> ()
+// CHECK:           %[[MOVE:.*]] = cir.call @_ZSt4moveIR1SEONSt16remove_referenceIT_E4typeEOS3_(%[[VAR_A]]) nothrow side_effect(const) : (!cir.ptr<!rec_S>) -> !cir.ptr<!rec_S>
+// CHECK:           cir.call @_ZN1SC1EOS_(%[[VAR_B]], %[[MOVE]]) nothrow : (!cir.ptr<!rec_S>, !cir.ptr<!rec_S>) -> ()
 // CHECK:           cir.return
 // CHECK:         }
 

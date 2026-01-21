@@ -14,6 +14,7 @@
 #define CLANG_CIR_CIRTOCIRPASSES_H
 
 #include "mlir/Pass/Pass.h"
+#include "llvm/ADT/StringRef.h"
 
 #include <memory>
 
@@ -29,11 +30,14 @@ class ModuleOp;
 namespace cir {
 
 // Run set of cleanup/prepare/etc passes CIR <-> CIR.
-mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
-                                      mlir::MLIRContext &mlirCtx,
-                                      clang::ASTContext &astCtx,
-                                      bool enableVerifier,
-                                      bool enableCIRSimplify);
+mlir::LogicalResult runCIRToCIRPasses(
+    mlir::ModuleOp theModule, mlir::MLIRContext &mlirCtx,
+    clang::ASTContext &astCtx, bool enableVerifier, bool enableLifetime,
+    llvm::StringRef lifetimeOpts, bool enableCIRSimplify, bool enableCIRMoveOpt,
+    bool enableCallConvLowering, bool enableIdiomRecognizer,
+    llvm::StringRef idiomRecognizerOpts, bool enableLibOpt,
+    llvm::StringRef libOptOpts, std::string &passOptParsingFailure,
+    bool enableMem2Reg = false);
 
 } // namespace cir
 

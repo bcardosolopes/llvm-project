@@ -20,6 +20,7 @@
 #include "CIRGenModule.h"
 
 #include "clang/AST/Mangle.h"
+#include "clang/Basic/Thunk.h"
 
 namespace clang::CIRGen {
 
@@ -206,6 +207,11 @@ public:
   isVirtualOffsetNeededForVTableField(CIRGenFunction &cgf,
                                       CIRGenFunction::VPtr vptr) = 0;
 
+  /// Determine whether it's possible to emit a vtable for \p RD, even
+  /// though we do not know that the vtable has been marked as used by semantic
+  /// analysis.
+  virtual bool canSpeculativelyEmitVTable(const CXXRecordDecl *rd) const = 0;
+
   /// Emits the VTable definitions required for the given record type.
   virtual void emitVTableDefinitions(CIRGenVTables &cgvt,
                                      const CXXRecordDecl *rd) = 0;
@@ -222,6 +228,32 @@ public:
   /// Emit any tables needed to implement virtual inheritance.  For Itanium,
   /// this emits virtual table tables.
   virtual void emitVirtualInheritanceTables(const CXXRecordDecl *rd) = 0;
+
+  virtual bool exportThunk() = 0;
+  virtual void setThunkLinkage(cir::FuncOp thunkFn, bool forVTable,
+                               GlobalDecl gd, bool returnAdjustment) = 0;
+
+  /// Perform adjustment on the this pointer for a thunk.
+  /// Returns the adjusted this pointer value.
+  virtual mlir::Value
+  performThisAdjustment(CIRGenFunction &cgf, Address thisAddr,
+                        const CXXRecordDecl *unadjustedClass,
+                        const ThunkInfo &ti) = 0;
+
+  /// Perform adjustment on a return pointer for a thunk (covariant returns).
+  /// Returns the adjusted return pointer value.
+  virtual mlir::Value
+  performReturnAdjustment(CIRGenFunction &cgf, Address ret,
+                          const CXXRecordDecl *unadjustedClass,
+                          const ReturnAdjustment &ra) = 0;
+
+  virtual void adjustCallArgsForDestructorThunk(CIRGenFunction &cgf,
+                                                GlobalDecl gd,
+                                                CallArgList &callArgs) {}
+
+  /// Emit a return from a thunk.
+  virtual void emitReturnFromThunk(CIRGenFunction &cgf, RValue rv,
+                                   QualType resultType);
 
   /// Returns true if the given destructor type should be emitted as a linkonce
   /// delegating thunk, regardless of whether the dtor is defined in this TU or
@@ -292,6 +324,15 @@ public:
   /// allowed; in other words, does the target do strict checking of signatures
   /// for all calls.
   virtual bool canCallMismatchedFunctionType() const { return true; }
+
+  /// Create a MethodAttr for the given member function.
+  /// Handles both virtual and non-virtual member functions.
+  virtual cir::MethodAttr emitMemberFunctionPointer(const CXXMethodDecl *md,
+                                                    cir::MethodType ty) = 0;
+
+  /// Return true if the given member pointer can be zero-initialized
+  /// (in the C++ sense) with an LLVM zeroinitializer.
+  virtual bool isZeroInitializable(const MemberPointerType *mpt);
 
   /// Gets the mangle context.
   clang::MangleContext &getMangleContext() { return *mangleContext; }

@@ -30,11 +30,11 @@ void yo() {
 // CIR:   %[[VADDR:.*]] = cir.alloca ![[VecTy]], !cir.ptr<![[VecTy]]>, ["v", init]
 // CIR:   cir.try {
 // CIR:     cir.call exception @_ZN3VecC1Ev(%[[VADDR]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call @_ZN3VecD1Ev(%[[VADDR]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[VADDR]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR:     cir.yield
-// CIR:   } catch [type #cir.all {
-// CIR:     cir.catch_param -> !cir.ptr<!void>
-// CIR:   }]
+// CIR:   } catch all {
+// CIR:     cir.catch_param : !cir.ptr<!void>
+// CIR:   }
 // CIR: }
 // CIR: cir.return
 
@@ -84,17 +84,15 @@ void yo2() {
 // CIR:       cir.call exception @_ZN3VecC1Ev
 // CIR:       cir.scope {
 // CIR:         cir.alloca ![[S1:.*]], !cir.ptr<![[S1:.*]]>, ["agg.tmp.ensured"]
-// CIR:         cir.call exception @_ZN3VecC1EOS_{{.*}} cleanup {
-// CIR:           cir.call @_ZN3VecD1Ev
-// CIR:           cir.yield
+// CIR:         cir.call exception @_ZN3VecC1EOS_
 // CIR:         cir.call @_ZN2S1D2Ev
 // CIR:       }
-// CIR:       cir.call @_ZN3VecD1Ev
+// CIR:       cir.call @_ZN3VecD1Ev{{.*}} nothrow
 // CIR:       cir.yield
-// CIR:     } catch [type #cir.all {
-// CIR:       cir.catch_param -> !cir.ptr<!void>
+// CIR:     } catch all {
+// CIR:       cir.catch_param : !cir.ptr<!void>
 // CIR:       cir.yield
-// CIR:     }]
+// CIR:     }
 // CIR:   }
 // CIR:   cir.return
 // CIR: }
@@ -116,7 +114,6 @@ void yo2() {
 // CIR_FLAT:    cir.br ^[[CATCH_BEGIN:.*]](%exception_ptr : !cir.ptr<!void>)
 // CIR_FLAT:  ^[[PAD_DTOR]]:
 // CIR_FLAT:    %exception_ptr_0, %type_id_1 = cir.eh.inflight_exception
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[vec]]) : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR_FLAT:    cir.br ^[[CATCH_BEGIN]](%exception_ptr_0 : !cir.ptr<!void>)
 // CIR_FLAT:  ^[[CATCH_BEGIN]](
 // CIR_FLAT:    cir.catch_param begin
@@ -142,28 +139,16 @@ void yo3(bool x) {
 // CIR:   %[[V4:.*]] = cir.alloca ![[VecTy]], !cir.ptr<![[VecTy]]>, ["v4"
 // CIR:   cir.try {
 // CIR:     cir.call exception @_ZN3VecC1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> () cleanup {
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.yield
-// CIR:     }
-// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> () cleanup {
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.yield
-// CIR:     }
-// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> () cleanup {
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.yield
-// CIR:     }
-// CIR:     cir.call @_ZN3VecD1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call @_ZN3VecD1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[V4]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[V3]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[V2]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[V1]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR:     cir.yield
-// CIR:   } catch [type #cir.all {
-// CIR:   }]
+// CIR:   } catch all {
+// CIR:   }
 // CIR: }
 // CIR: cir.return
 
@@ -182,28 +167,22 @@ void yo3(bool x) {
 // CIR_FLAT:  ^[[CALL3]]:
 // CIR_FLAT:    cir.try_call @_ZN3VecC1Ev(%[[V4]]) ^[[NOTROW_CLEANUP:.*]], ^[[CLEANUP_V4:.*]] : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR_FLAT:  ^[[NOTROW_CLEANUP]]:
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V4]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V3]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V2]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V1]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR_FLAT:    cir.br ^[[AFTER_TRY:.*]] loc
 // CIR_FLAT:  ^[[CLEANUP_V1]]:
 // CIR_FLAT:    %exception_ptr, %type_id = cir.eh.inflight_exception
 // CIR_FLAT:    cir.br ^[[CATCH_BEGIN:.*]](%exception_ptr : !cir.ptr<!void>)
 // CIR_FLAT:  ^[[CLEANUP_V2]]:
 // CIR_FLAT:    %exception_ptr_0, %type_id_1 = cir.eh.inflight_exception
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR_FLAT:    cir.br ^[[CATCH_BEGIN]](%exception_ptr_0 : !cir.ptr<!void>)
 // CIR_FLAT:  ^[[CLEANUP_V3]]:
 // CIR_FLAT:    %exception_ptr_2, %type_id_3 = cir.eh.inflight_exception
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR_FLAT:    cir.br ^[[CATCH_BEGIN]](%exception_ptr_2 : !cir.ptr<!void>)
 // CIR_FLAT:  ^[[CLEANUP_V4]]:
 // CIR_FLAT:    %exception_ptr_4, %type_id_5 = cir.eh.inflight_exception
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR_FLAT:    cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR_FLAT:    cir.br ^[[CATCH_BEGIN]](%exception_ptr_4 : !cir.ptr<!void>)
 // CIR_FLAT:  ^[[CATCH_BEGIN]]({{.*}}
 // CIR_FLAT:    cir.catch_param begin
@@ -242,20 +221,14 @@ void yo3(bool x) {
 // LLVM: [[LPAD1]]:
 // LLVM:   landingpad { ptr, i32 }
 // LLVM:           catch ptr null
-// LLVM:   call void @_ZN3VecD1Ev(ptr %[[V1]])
 // LLVM:   br label %[[CATCH]]
 // LLVM: [[LPAD2]]:
 // LLVM:   landingpad { ptr, i32 }
 // LLVM:           catch ptr null
-// LLVM:   call void @_ZN3VecD1Ev(ptr %[[V2]])
-// LLVM:   call void @_ZN3VecD1Ev(ptr %[[V1]])
 // LLVM:   br label %[[CATCH]]
 // LLVM: [[LPAD3]]:
 // LLVM:   landingpad { ptr, i32 }
 // LLVM:           catch ptr null
-// LLVM:   call void @_ZN3VecD1Ev(ptr %[[V3]])
-// LLVM:   call void @_ZN3VecD1Ev(ptr %[[V2]])
-// LLVM:   call void @_ZN3VecD1Ev(ptr %[[V1]])
 // LLVM:   br label %[[CATCH]]
 // LLVM: [[CATCH]]:
 // LLVM:   call ptr @__cxa_begin_catch
@@ -282,32 +255,26 @@ void yo2(bool x) {
 // CIR:   %[[V2:.*]] = cir.alloca ![[VecTy]], !cir.ptr<![[VecTy]]>, ["v2"
 // CIR:   cir.try {
 // CIR:     cir.call exception @_ZN3VecC1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> () cleanup {
-// CIR:       cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:       cir.yield
-// CIR:     }
+// CIR:     cir.call exception @_ZN3VecC1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR:     cir.scope {
 // CIR:       %[[V3:.*]] = cir.alloca ![[VecTy]], !cir.ptr<![[VecTy]]>, ["v3"
 // CIR:       %[[V4:.*]] = cir.alloca ![[VecTy]], !cir.ptr<![[VecTy]]>, ["v4"
 // CIR:       cir.try {
 // CIR:         cir.call exception @_ZN3VecC1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:         cir.call exception @_ZN3VecC1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> () cleanup {
-// CIR:           cir.call @_ZN3VecD1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:           cir.yield
-// CIR:         }
-// CIR:         cir.call @_ZN3VecD1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:         cir.call @_ZN3VecD1Ev(%[[V3]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:         cir.call exception @_ZN3VecC1Ev(%[[V4]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:         cir.call @_ZN3VecD1Ev(%[[V4]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:         cir.call @_ZN3VecD1Ev(%[[V3]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR:         cir.yield
-// CIR:       } catch [type #cir.all {
-// CIR:         cir.catch_param -> !cir.ptr<!void>
-// CIR:       }]
+// CIR:       } catch all {
+// CIR:         cir.catch_param : !cir.ptr<!void>
+// CIR:       }
 // CIR:     }
-// CIR:     cir.call @_ZN3VecD1Ev(%[[V2]]) : (!cir.ptr<![[VecTy]]>) -> ()
-// CIR:     cir.call @_ZN3VecD1Ev(%[[V1]]) : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[V2]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
+// CIR:     cir.call @_ZN3VecD1Ev(%[[V1]]) nothrow : (!cir.ptr<![[VecTy]]>) -> ()
 // CIR:     cir.yield
-// CIR:   } catch [type #cir.all {
-// CIR:     cir.catch_param -> !cir.ptr<!void>
-// CIR:   }]
+// CIR:   } catch all {
+// CIR:     cir.catch_param : !cir.ptr<!void>
+// CIR:   }
 
 
 int foo() { return 42; }
@@ -324,18 +291,29 @@ void bar() {
 // CIR-LABEL: @_Z3barv
 // CIR:  %[[V0:.*]] = cir.alloca !rec_A, !cir.ptr<!rec_A>, ["a"] {alignment = 1 : i64}
 // CIR:  %[[V1:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", init] {alignment = 4 : i64}
-// CIR:  %[[V2:.*]] = cir.call @_Z3foov() : () -> !s32i
-// CIR:  cir.store align(4) %[[V2]], %[[V1]] : !s32i, !cir.ptr<!s32i>
-// CIR:  cir.call @_ZN1AD2Ev(%[[V0]]) : (!cir.ptr<!rec_A>) -> ()
+// CIR:  cir.try synthetic cleanup {
+// CIR:    %{{.*}} = cir.call exception @_Z3foov() : () -> !s32i
+// CIR:    cir.yield
+// CIR:  } unwind {
+// CIR:    cir.resume
+// CIR:  }
+// CIR:  cir.call @_ZN1AD2Ev(%[[V0]]) nothrow : (!cir.ptr<!rec_A>) -> ()
 // CIR:  cir.return
 
-// LLVM: ; Function Attrs: noinline nounwind optnone
-// LLVM-NEXT: _Z3foo
-// LLVM: @_Z3barv()
+// LLVM: define {{.*}} @_Z3foov
+// LLVM: @_Z3barv() {{.*}} personality ptr @__gxx_personality_v0
 // LLVM:   %[[V1:.*]] = alloca %struct.A, i64 1, align 1
 // LLVM:   %[[V2:.*]] = alloca i32, i64 1, align 4
-// LLVM:   %[[V3:.*]] = call i32 @_Z3foov()
-// LLVM:   store i32 %[[V3]], ptr %[[V2]], align 4
+// LLVM:   %[[V5:.*]] = invoke i32 @_Z3foov()
+// LLVM:           to label %[[CONT:.*]] unwind label %[[LPAD:.*]]
+// LLVM: [[CONT]]:
+// LLVM:   store i32 %[[V5]], ptr %{{.*}}, align 4
+// LLVM:   br label %[[NORMAL:.*]]
+// LLVM: [[LPAD]]:
+// LLVM:   landingpad { ptr, i32 }
+// LLVM:           cleanup
+// LLVM:   resume { ptr, i32 }
+// LLVM: [[NORMAL]]:
 // LLVM:   call void @_ZN1AD2Ev(ptr %[[V1]])
 // LLVM:   ret void
 
@@ -355,21 +333,16 @@ void d() {
 // CIR-NEXT: cir.scope {
 // CIR-NEXT:   %[[V2:.*]] = cir.alloca !rec_C, !cir.ptr<!rec_C>, ["agg.tmp0"] {alignment = 1 : i64}
 // CIR-NEXT:   cir.copy %[[V1]] to %[[V2]] : !cir.ptr<!rec_C>
-// CIR-NEXT:   %[[V3:.*]] = cir.load{{.*}} %[[V2]] : !cir.ptr<!rec_C>, !rec_C
-// CIR-NEXT:   cir.try synthetic cleanup {
-// CIR-NEXT:     cir.call exception @_ZN1CaSES_(%[[V0]], %[[V3]]) : (!cir.ptr<!rec_C>, !rec_C) -> () cleanup {
-// CIR-NEXT:       cir.call @_ZN1CD1Ev(%[[V2]]) : (!cir.ptr<!rec_C>) -> ()
-// CIR-NEXT:       cir.call @_ZN1CD1Ev(%[[V1]]) : (!cir.ptr<!rec_C>) -> ()
-// CIR-NEXT:       cir.yield
-// CIR-NEXT:     }
-// CIR-NEXT:     cir.yield
-// CIR-NEXT:   } catch [#cir.unwind {
-// CIR-NEXT:     cir.resume
-// CIR-NEXT:   }]
-// CIR-NEXT:   cir.call @_ZN1CD1Ev(%[[V2]]) : (!cir.ptr<!rec_C>) -> ()
+// CIR:        cir.try synthetic cleanup {
+// CIR:          cir.call exception @_ZN1CaSES_(%[[V0]], {{.*}}) : (!cir.ptr<!rec_C>, !u8i) -> ()
+// CIR:          cir.yield
+// CIR:        } unwind {
+// CIR:          cir.resume
+// CIR:        }
+// CIR:        cir.call @_ZN1CD1Ev(%[[V2]]) nothrow : (!cir.ptr<!rec_C>) -> ()
 // CIR-NEXT: }
-// CIR-NEXT: cir.call @_ZN1CD1Ev(%[[V1]]) : (!cir.ptr<!rec_C>) -> ()
-// CIR-NEXT: cir.call @_ZN1CD1Ev(%[[V0]]) : (!cir.ptr<!rec_C>) -> ()
+// CIR-NEXT: cir.call @_ZN1CD1Ev(%[[V1]]) nothrow : (!cir.ptr<!rec_C>) -> ()
+// CIR-NEXT: cir.call @_ZN1CD1Ev(%[[V0]]) nothrow : (!cir.ptr<!rec_C>) -> ()
 // CIR-NEXT: cir.return
 
 template <typename> class a;
@@ -431,24 +404,20 @@ void fn3() { s(); }
 // CIR:   cir.scope
 // CIR:     %[[V5:.*]] = cir.alloca !rec_a3Cint3E, !cir.ptr<!rec_a3Cint3E>
 // CIR:     %[[V6:.*]] = cir.alloca !rec_a3Cvoid3E, !cir.ptr<!rec_a3Cvoid3E>
-// CIR:     cir.try {
+// CIR:     cir.try cleanup {
 // CIR:       cir.copy {{.*}} to %[[V6]] : !cir.ptr<!rec_a3Cvoid3E>
 // CIR:       %[[V7:.*]] = cir.load align(1) %[[V6]] : !cir.ptr<!rec_a3Cvoid3E>, !rec_a3Cvoid3E
-// CIR:       cir.call @_ZN1aIiEC1IS_IvEEET_(%[[V5]], %[[V7]]) : (!cir.ptr<!rec_a3Cint3E>, !rec_a3Cvoid3E) -> ()
+// CIR:       cir.call @_ZN1aIiEC1IS_IvEEET_(%[[V5]], {{.*}}) nothrow : (!cir.ptr<!rec_a3Cint3E>, !u8i) -> ()
 // CIR:       cir.scope {
 // CIR:         %[[V8:.*]] = cir.alloca !rec_a3Cint3E, !cir.ptr<!rec_a3Cint3E>
 // CIR:         cir.copy %[[V5]] to %[[V8]] : !cir.ptr<!rec_a3Cint3E>
 // CIR:         %[[V9:.*]] = cir.load align(1) %[[V8]] : !cir.ptr<!rec_a3Cint3E>, !rec_a3Cint3E
-// CIR-NEXT:         cir.call exception @_Z1iI1aIiEEvT_(%[[V9]]) : (!rec_a3Cint3E) -> () cleanup {
-// CIR-NEXT:           cir.call @_ZN1aIiED1Ev(%[[V8]]) : (!cir.ptr<!rec_a3Cint3E>) -> ()
-// CIR-NEXT:           cir.call @_ZN1aIiED1Ev(%[[V5]]) : (!cir.ptr<!rec_a3Cint3E>) -> ()
-// CIR-NEXT:           cir.yield
-// CIR-NEXT:         }
-// CIR-NEXT:         cir.call @_ZN1aIiED1Ev(%[[V8]]) : (!cir.ptr<!rec_a3Cint3E>) -> ()
-// CIR-NEXT:       }
-// CIR-NEXT:       cir.call @_ZN1aIiED1Ev(%[[V5]]) : (!cir.ptr<!rec_a3Cint3E>) -> ()
-// CIR-NEXT:       cir.yield
-// CIR:     } catch [type #cir.all {
-// CIR:       %[[V7:.*]] = cir.catch_param -> !cir.ptr<!void>
+// CIR:         cir.call exception @_Z1iI1aIiEEvT_({{.*}}) : (!u8i) -> ()
+// CIR:         cir.call @_ZN1aIiED1Ev(%[[V8]]) nothrow : (!cir.ptr<!rec_a3Cint3E>) -> ()
+// CIR:       }
+// CIR:       cir.call @_ZN1aIiED1Ev(%[[V5]]) nothrow : (!cir.ptr<!rec_a3Cint3E>) -> ()
 // CIR:       cir.yield
-// CIR:     }]
+// CIR:     } catch all {
+// CIR:       %[[V7:.*]] = cir.catch_param : !cir.ptr<!void>
+// CIR:       cir.yield
+// CIR:     }

@@ -31,14 +31,14 @@ auto base_to_derived(int Base2::*ptr) -> int Derived::* {
 // CIR-AFTER:   %[[NULL_VALUE:.*]] = cir.const #cir.int<-1> : !s64i
 // CIR-AFTER:   %[[IS_NULL:.*]] = cir.cmp(eq, %[[PTR]], %[[NULL_VALUE]])
 // CIR-AFTER:   %[[OFFSET_VALUE:.*]] = cir.const #cir.int<4> : !s64i
-// CIR-AFTER:   %[[BINOP_KIND:.*]] = cir.binop(add, %[[PTR]], %[[OFFSET_VALUE]]) nsw : !s64i
-// CIR-AFTER:   %[[SELECT:.*]] = cir.select if %[[IS_NULL]] then %[[PTR]] else %[[BINOP_KIND]]
+// CIR-AFTER:   %[[BINOP_KIND:.*]] = cir.binop(add, %[[PTR]], %[[OFFSET_VALUE]]) : !s64i
+// CIR-AFTER:   %[[SELECT:.*]] = cir.select if %[[IS_NULL]] then %[[NULL_VALUE]] else %[[BINOP_KIND]]
 
 // LLVM: define {{.*}} i64 @_Z15base_to_derivedM5Base2i
 // LLVM:   %[[PTR:.*]] = load i64, ptr %{{.*}}
 // LLVM:   %[[IS_NULL:.*]] = icmp eq i64 %[[PTR]], -1
-// LLVM:   %[[DERIVED:.*]] = add nsw i64 %[[PTR]], 4
-// LLVM:   %[[RET:.*]] = select i1 %[[IS_NULL]], i64 %[[PTR]], i64 %[[DERIVED]]
+// LLVM:   %[[DERIVED:.*]] = add i64 %[[PTR]], 4
+// LLVM:   %[[RET:.*]] = select i1 %[[IS_NULL]], i64 -1, i64 %[[DERIVED]]
 
 // OGCG: define {{.*}} i64 @_Z15base_to_derivedM5Base2i
 // OGCG:   %[[PTR:.*]] = load i64, ptr %{{.*}}
@@ -59,14 +59,14 @@ auto derived_to_base(int Derived::*ptr) -> int Base2::* {
 // CIR-AFTER:   %[[NULL_VALUE:.*]] = cir.const #cir.int<-1> : !s64i
 // CIR-AFTER:   %[[IS_NULL:.*]] = cir.cmp(eq, %[[PTR]], %[[NULL_VALUE]])
 // CIR-AFTER:   %[[OFFSET_VALUE:.*]] = cir.const #cir.int<4> : !s64i
-// CIR-AFTER:   %[[BINOP_KIND:.*]] = cir.binop(sub, %[[PTR]], %[[OFFSET_VALUE]]) nsw : !s64i
-// CIR-AFTER:   %[[SELECT:.*]] = cir.select if %[[IS_NULL]] then %[[PTR]] else %[[BINOP_KIND]]
+// CIR-AFTER:   %[[BINOP_KIND:.*]] = cir.binop(sub, %[[PTR]], %[[OFFSET_VALUE]]) : !s64i
+// CIR-AFTER:   %[[SELECT:.*]] = cir.select if %[[IS_NULL]] then %[[NULL_VALUE]] else %[[BINOP_KIND]]
 
 // LLVM: define {{.*}} i64 @_Z15derived_to_baseM7Derivedi
 // LLVM:   %[[PTR:.*]] = load i64, ptr %{{.*}}
 // LLVM:   %[[IS_NULL:.*]] = icmp eq i64 %[[PTR]], -1
-// LLVM:   %[[BASE:.*]] = sub nsw i64 %[[PTR]], 4
-// LLVM:   %[[RET:.*]] = select i1 %[[IS_NULL]], i64 %[[PTR]], i64 %[[BASE]]
+// LLVM:   %[[BASE:.*]] = sub i64 %[[PTR]], 4
+// LLVM:   %[[RET:.*]] = select i1 %[[IS_NULL]], i64 -1, i64 %[[BASE]]
 
 // OGCG: define {{.*}} i64 @_Z15derived_to_baseM7Derivedi
 // OGCG:   %[[PTR:.*]] = load i64, ptr %{{.*}}

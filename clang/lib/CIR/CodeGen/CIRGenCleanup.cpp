@@ -64,7 +64,33 @@ cir::BrOp CIRGenFunction::emitBranchThroughCleanup(mlir::Location loc,
     return brOp;
   }
 
-  cgm.errorNYI(loc, "emitBranchThroughCleanup: valid destination scope depth");
+  // Otherwise, thread through all the normal cleanups in scope.
+  auto index = builder.getUInt32(dest.getDestIndex(), loc);
+  assert(!cir::MissingFeatures::cleanupIndexAndBIAdjustment());
+
+  // Add this destination to all the scopes involved.
+  EHScopeStack::stable_iterator i = topCleanup;
+  EHScopeStack::stable_iterator e = dest.getScopeDepth();
+  if (e.strictlyEncloses(i)) {
+    while (true) {
+      EHCleanupScope &scope = cast<EHCleanupScope>(*ehStack.find(i));
+      assert(scope.isNormalCleanup());
+      i = scope.getEnclosingNormalCleanup();
+
+      // If this is the last cleanup we're propagating through, tell it
+      // that there's a resolved jump moving through it.
+      if (!e.strictlyEncloses(i)) {
+        scope.addBranchAfter(index, dest.getBlock());
+        break;
+      }
+
+      // Otherwise, tell the scope that there's a jump propagating
+      // through it.  If this isn't new information, all the rest of
+      // the work has been done before.
+      if (!scope.addBranchThrough(dest.getBlock()))
+        break;
+    }
+  }
   return brOp;
 }
 
@@ -136,7 +162,15 @@ void EHScopeStack::deallocate(size_t size) {
 void EHScopeStack::popNullFixups() {
   // We expect this to only be called when there's still an innermost
   // normal cleanup;  otherwise there really shouldn't be any fixups.
-  cgf->cgm.errorNYI("popNullFixups");
+  assert(hasNormalCleanups());
+
+  EHScopeStack::iterator it = find(innermostNormalCleanup);
+  unsigned minSize = cast<EHCleanupScope>(*it).getFixupDepth();
+  assert(branchFixups.size() >= minSize && "fixup stack out of order");
+
+  while (branchFixups.size() > minSize &&
+         branchFixups.back().destination == nullptr)
+    branchFixups.pop_back();
 }
 
 void *EHScopeStack::pushCleanup(CleanupKind kind, size_t size) {
@@ -145,13 +179,15 @@ void *EHScopeStack::pushCleanup(CleanupKind kind, size_t size) {
   bool isEHCleanup = kind & EHCleanup;
   bool isLifetimeMarker = kind & LifetimeMarker;
 
-  assert(!cir::MissingFeatures::innermostEHScope());
-
-  EHCleanupScope *scope = new (buffer) EHCleanupScope(
-      size, branchFixups.size(), innermostNormalCleanup, innermostEHScope);
+  EHCleanupScope *scope = new (buffer)
+      EHCleanupScope(isNormalCleanup, isEHCleanup, size, branchFixups.size(),
+                     innermostNormalCleanup, innermostEHScope);
 
   if (isNormalCleanup)
     innermostNormalCleanup = stable_begin();
+
+  if (isEHCleanup)
+    innermostEHScope = stable_begin();
 
   if (isLifetimeMarker)
     cgf->cgm.errorNYI("push lifetime marker cleanup");
@@ -170,6 +206,7 @@ void EHScopeStack::popCleanup() {
   assert(isa<EHCleanupScope>(*begin()));
   EHCleanupScope &cleanup = cast<EHCleanupScope>(*begin());
   innermostNormalCleanup = cleanup.getEnclosingNormalCleanup();
+  innermostEHScope = cleanup.getEnclosingEHScope();
   deallocate(cleanup.getAllocatedSize());
 
   // Destroy the cleanup.
@@ -247,12 +284,17 @@ void CIRGenFunction::popCleanupBlock() {
   unsigned fixupDepth = scope.getFixupDepth();
   bool hasFixups = ehStack.getNumBranchFixups() != fixupDepth;
 
+  // - whether there are branch-throughs or branch-afters
+  bool hasExistingBranches = scope.hasBranches();
+
   // - whether there's a fallthrough
   mlir::Block *fallthroughSource = builder.getInsertionBlock();
-  bool hasFallthrough = fallthroughSource != nullptr && isActive;
+  bool hasFallthrough =
+      fallthroughSource != nullptr && (isActive || hasExistingBranches);
 
   bool requiresNormalCleanup =
-      scope.isNormalCleanup() && (hasFixups || hasFallthrough);
+      scope.isNormalCleanup() &&
+      (hasFixups || hasExistingBranches || hasFallthrough);
 
   // If we don't need the cleanup at all, we're done.
   assert(!cir::MissingFeatures::ehCleanupScopeRequiresEHCleanup());
@@ -293,7 +335,7 @@ void CIRGenFunction::popCleanupBlock() {
 
   // If we have a fallthrough and no other need for the cleanup,
   // emit it directly.
-  if (hasFallthrough && !hasFixups) {
+  if (hasFallthrough && !hasFixups && !hasExistingBranches) {
     assert(!cir::MissingFeatures::ehCleanupScopeRequiresEHCleanup());
     ehStack.popCleanup();
     scope.markEmitted();
@@ -338,9 +380,11 @@ void CIRGenFunction::popCleanupBlock() {
     //   - if fall-through is a branch-through
     //   - if there are fixups that will be optimistically forwarded
     //     to the enclosing cleanup
-    assert(!cir::MissingFeatures::cleanupBranchThrough());
-    if (hasFixups && hasEnclosingCleanups)
-      cgm.errorNYI("cleanup branch-through dest");
+    mlir::Block *branchThroughDest = nullptr;
+    if (scope.hasBranchThroughs() || (hasFixups && hasEnclosingCleanups)) {
+      assert(!cir::MissingFeatures::cleanupBranchThrough());
+    }
+    (void)branchThroughDest;
 
     mlir::Block *fallthroughDest = nullptr;
 
@@ -351,7 +395,19 @@ void CIRGenFunction::popCleanupBlock() {
     // the end, all other exits in a _try (return/goto/continue/break)
     // are considered as abnormal terminations, using NormalCleanupDestSlot
     // to indicate abnormal termination)
-    assert(!cir::MissingFeatures::cleanupBranchThrough());
+    if (!scope.hasBranchThroughs() && !hasFixups && !hasFallthrough &&
+        scope.getNumBranchAfters() == 1) {
+      cgm.errorNYI("cleanup single branch-after routing");
+
+      // Build a switch-out if we need it:
+      //   - if there are branch-afters threaded through the scope
+      //   - if fall-through is a branch-after
+      //   - if there are fixups that have nowhere left to go and
+      //     so must be immediately resolved
+    } else if (scope.getNumBranchAfters() || (hasFallthrough) ||
+               (hasFixups && !hasEnclosingCleanups)) {
+      assert(!cir::MissingFeatures::cleanupBranchThrough());
+    }
     assert(!cir::MissingFeatures::ehCleanupScopeRequiresEHCleanup());
 
     // IV.  Pop the cleanup and emit it.
@@ -365,8 +421,13 @@ void CIRGenFunction::popCleanupBlock() {
     assert(!cir::MissingFeatures::cleanupAppendInsts());
 
     // Optimistically hope that any fixups will continue falling through.
-    if (fixupDepth != ehStack.getNumBranchFixups())
-      cgm.errorNYI("cleanup fixup depth mismatch");
+    for (unsigned i = fixupDepth, e = ehStack.getNumBranchFixups(); i < e;
+         ++i) {
+      BranchFixup &fixup = ehStack.getBranchFixup(i);
+      if (!fixup.destination)
+        continue;
+      fixup.optimisticBranchBlock = fixup.initialBranch->getBlock();
+    }
 
     // V.  Set up the fallthrough edge out.
 
@@ -416,4 +477,32 @@ void CIRGenFunction::popCleanupBlocks(
   while (ehStack.stable_begin() != oldCleanupStackDepth) {
     popCleanupBlock();
   }
+}
+
+void CIRGenFunction::deactivateCleanupBlock(EHScopeStack::stable_iterator c,
+                                            mlir::Operation *dominatingIP) {
+  assert(c != ehStack.stable_end() && "deactivating bottom of stack?");
+  EHCleanupScope &scope = cast<EHCleanupScope>(*ehStack.find(c));
+  assert(scope.isActive() && "double deactivation");
+
+  // If it's the top of the stack, just pop it, but do so only if it belongs
+  // to the current RunCleanupsScope.
+  if (c == ehStack.stable_begin() &&
+      currentCleanupStackDepth.strictlyEncloses(c)) {
+    // If it's a normal cleanup, we need to pretend that the
+    // fallthrough is unreachable.
+    if (!scope.isNormalCleanup() && getLangOpts().EHAsynch) {
+      cgm.errorNYI("deactivateCleanupBlock: EHAsynch");
+    } else {
+      mlir::OpBuilder::InsertionGuard guard(builder);
+      builder.clearInsertionPoint();
+      popCleanupBlock();
+    }
+    return;
+  }
+
+  // Otherwise, follow the general case.
+  // For now, just mark it inactive. Full activation flag support can be
+  // added later if needed.
+  scope.setActive(false);
 }

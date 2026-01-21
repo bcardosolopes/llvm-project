@@ -20,6 +20,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/ABI.h"
+#include "clang/CIR/Dialect/IR/CIROpsEnums.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 
 #include "llvm/ADT/SmallPtrSet.h"
@@ -120,6 +121,11 @@ public:
 
   const CIRGenRecordLayout &getCIRGenRecordLayout(const clang::RecordDecl *rd);
 
+  /// Determine if a C++ inheriting constructor should have parameters matching
+  /// those of its inherited constructor.
+  bool inheritingCtorHasParams(const clang::InheritedConstructor &inherited,
+                               clang::CXXCtorType type);
+
   /// Convert type T into an mlir::Type. This differs from convertType in that
   /// it is used to convert to the memory representation for a type. For
   /// example, the scalar representation for bool is i1, but the memory
@@ -200,6 +206,9 @@ public:
   arrangeCIRFunctionInfo(CanQualType returnType,
                          llvm::ArrayRef<CanQualType> argTypes,
                          RequiredArgs required);
+
+  /// Map a Clang calling convention to a CIR calling convention.
+  cir::CallingConv ClangCallConvToCIRCallConv(clang::CallingConv cc);
 
   const CIRGenFunctionInfo &
   arrangeFreeFunctionType(CanQual<FunctionProtoType> fpt);

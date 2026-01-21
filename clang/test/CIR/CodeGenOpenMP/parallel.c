@@ -23,7 +23,8 @@ void emit_simple_parallel() {
     during(i);
   }
   // CHECK-NEXT: omp.parallel {
-  // CHECK-NEXT: omp.terminator
+  // CHECK:      cir.call @during
+  // CHECK:      omp.terminator
   // CHECK-NEXT: }
 
   after(i);
@@ -45,7 +46,7 @@ void parallel_with_operations() {
    ++b;
   }
   // CHECK-NEXT: omp.parallel {
-  // CHECK-NEXT: omp.terminator
+  // CHECK:      omp.terminator
   // CHECK-NEXT: }
 }
 void proc_bind_parallel() {

@@ -691,8 +691,8 @@ CIRGenTypes::computeRecordLayout(const RecordDecl *rd, cir::RecordType *ty) {
   // Fill in the record *after* computing the base type.  Filling in the body
   // signifies that the type is no longer opaque and record layout is complete,
   // but we may need to recursively layout rd while laying D out as a base type.
-  assert(!cir::MissingFeatures::astRecordDeclAttr());
-  ty->complete(lowering.fieldTypes, lowering.packed, lowering.padded);
+  auto astAttr = cir::ASTRecordDeclAttr::get(ty->getContext(), rd);
+  ty->complete(lowering.fieldTypes, lowering.packed, lowering.padded, astAttr);
 
   auto rl = std::make_unique<CIRGenRecordLayout>(
       ty ? *ty : cir::RecordType{}, baseTy ? baseTy : cir::RecordType{},

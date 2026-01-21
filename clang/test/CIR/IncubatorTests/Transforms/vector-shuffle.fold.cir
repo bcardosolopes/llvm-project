@@ -4,18 +4,18 @@
 !s64i = !cir.int<s, 64>
 
 module  {
-  cir.func @fold_shuffle_vector_op_test() -> !cir.vector<!s32i x 4> {
-    %vec_1 = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<7> : !s32i]> : !cir.vector<!s32i x 4>
-    %vec_2 = cir.const #cir.const_vector<[#cir.int<2> : !s32i, #cir.int<4> : !s32i, #cir.int<6> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<!s32i x 4>
-    %new_vec = cir.vec.shuffle(%vec_1, %vec_2 : !cir.vector<!s32i x 4>) [#cir.int<0> : !s64i, #cir.int<4> : !s64i,
-      #cir.int<1> : !s64i, #cir.int<5> : !s64i] : !cir.vector<!s32i x 4>
-    cir.return %new_vec : !cir.vector<!s32i x 4>
+  cir.func @fold_shuffle_vector_op_test() -> !cir.vector<4 x !s32i> {
+    %vec_1 = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<7> : !s32i]> : !cir.vector<4 x !s32i>
+    %vec_2 = cir.const #cir.const_vector<[#cir.int<2> : !s32i, #cir.int<4> : !s32i, #cir.int<6> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<4 x !s32i>
+    %new_vec = cir.vec.shuffle(%vec_1, %vec_2 : !cir.vector<4 x !s32i>) [#cir.int<0> : !s64i, #cir.int<4> : !s64i,
+      #cir.int<1> : !s64i, #cir.int<5> : !s64i] : !cir.vector<4 x !s32i>
+    cir.return %new_vec : !cir.vector<4 x !s32i>
   }
 
-  // CHECK: cir.func @fold_shuffle_vector_op_test() -> !cir.vector<!s32i x 4> {
+  // CHECK: cir.func @fold_shuffle_vector_op_test() -> !cir.vector<4 x !s32i> {
   // CHECK-NEXT: %[[RES:.*]] = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i,
-  // CHECK-SAME: #cir.int<4> : !s32i]> : !cir.vector<!s32i x 4>
-  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<!s32i x 4>
+  // CHECK-SAME: #cir.int<4> : !s32i]> : !cir.vector<4 x !s32i>
+  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<4 x !s32i>
 }
 
 // -----
@@ -24,18 +24,18 @@ module  {
 !s64i = !cir.int<s, 64>
 
 module  {
-  cir.func @fold_shuffle_vector_op_test() -> !cir.vector<!s32i x 6> {
-    %vec_1 = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<7> : !s32i]> : !cir.vector<!s32i x 4>
-    %vec_2 = cir.const #cir.const_vector<[#cir.int<2> : !s32i, #cir.int<4> : !s32i, #cir.int<6> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<!s32i x 4>
-    %new_vec = cir.vec.shuffle(%vec_1, %vec_2 : !cir.vector<!s32i x 4>) [#cir.int<0> : !s64i, #cir.int<4> : !s64i,
-      #cir.int<1> : !s64i, #cir.int<5> : !s64i, #cir.int<2> : !s64i, #cir.int<6> : !s64i] : !cir.vector<!s32i x 6>
-    cir.return %new_vec : !cir.vector<!s32i x 6>
+  cir.func @fold_shuffle_vector_op_test() -> !cir.vector<6 x !s32i> {
+    %vec_1 = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<7> : !s32i]> : !cir.vector<4 x !s32i>
+    %vec_2 = cir.const #cir.const_vector<[#cir.int<2> : !s32i, #cir.int<4> : !s32i, #cir.int<6> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<4 x !s32i>
+    %new_vec = cir.vec.shuffle(%vec_1, %vec_2 : !cir.vector<4 x !s32i>) [#cir.int<0> : !s64i, #cir.int<4> : !s64i,
+      #cir.int<1> : !s64i, #cir.int<5> : !s64i, #cir.int<2> : !s64i, #cir.int<6> : !s64i] : !cir.vector<6 x !s32i>
+    cir.return %new_vec : !cir.vector<6 x !s32i>
   }
 
-  // CHECK: cir.func @fold_shuffle_vector_op_test() -> !cir.vector<!s32i x 6> {
+  // CHECK: cir.func @fold_shuffle_vector_op_test() -> !cir.vector<6 x !s32i> {
   // CHECK-NEXT: %[[RES:.*]] = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i,
-  // CHECK-SAME: #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<6> : !s32i]> : !cir.vector<!s32i x 6>
-  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<!s32i x 6>
+  // CHECK-SAME: #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<6> : !s32i]> : !cir.vector<6 x !s32i>
+  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<6 x !s32i>
 }
 
 // -----
@@ -44,16 +44,16 @@ module  {
 !s64i = !cir.int<s, 64>
 
 module  {
-  cir.func @fold_shuffle_vector_op_test() -> !cir.vector<!s32i x 4> {
-    %vec_1 = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<7> : !s32i]> : !cir.vector<!s32i x 4>
-    %vec_2 = cir.const #cir.const_vector<[#cir.int<2> : !s32i, #cir.int<4> : !s32i, #cir.int<6> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<!s32i x 4>
-    %new_vec = cir.vec.shuffle(%vec_1, %vec_2 : !cir.vector<!s32i x 4>) [#cir.int<-1> : !s64i, #cir.int<4> : !s64i,
-      #cir.int<1> : !s64i, #cir.int<5> : !s64i] : !cir.vector<!s32i x 4>
-    cir.return %new_vec : !cir.vector<!s32i x 4>
+  cir.func @fold_shuffle_vector_op_test() -> !cir.vector<4 x !s32i> {
+    %vec_1 = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<7> : !s32i]> : !cir.vector<4 x !s32i>
+    %vec_2 = cir.const #cir.const_vector<[#cir.int<2> : !s32i, #cir.int<4> : !s32i, #cir.int<6> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<4 x !s32i>
+    %new_vec = cir.vec.shuffle(%vec_1, %vec_2 : !cir.vector<4 x !s32i>) [#cir.int<-1> : !s64i, #cir.int<4> : !s64i,
+      #cir.int<1> : !s64i, #cir.int<5> : !s64i] : !cir.vector<4 x !s32i>
+    cir.return %new_vec : !cir.vector<4 x !s32i>
   }
 
-  // CHECK: cir.func @fold_shuffle_vector_op_test() -> !cir.vector<!s32i x 4> {
+  // CHECK: cir.func @fold_shuffle_vector_op_test() -> !cir.vector<4 x !s32i> {
   // CHECK: cir.const #cir.const_vector<[#cir.undef : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i,
-  // CHECK-SAME: #cir.int<4> : !s32i]> : !cir.vector<!s32i x 4>
-  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<!s32i x 4>
+  // CHECK-SAME: #cir.int<4> : !s32i]> : !cir.vector<4 x !s32i>
+  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<4 x !s32i>
 }

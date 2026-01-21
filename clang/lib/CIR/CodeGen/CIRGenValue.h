@@ -15,6 +15,7 @@
 #define CLANG_LIB_CIR_CIRGENVALUE_H
 
 #include "Address.h"
+#include "CIRGenTBAA.h"
 
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Type.h"
@@ -171,7 +172,12 @@ class LValue {
   mlir::Attribute vectorElts; // ExtVector element subset: V.xyx
   mlir::Type elementType;
   LValueBaseInfo baseInfo;
+  TBAAAccessInfo tbaaInfo;
   const CIRGenBitFieldInfo *bitFieldInfo{nullptr};
+
+  // This flag shows if a nontemporal load/stores should be used when accessing
+  // this lvalue.
+  bool nontemporal : 1;
 
   void initialize(clang::QualType type, clang::Qualifiers quals,
                   clang::CharUnits alignment, LValueBaseInfo baseInfo) {
@@ -186,6 +192,7 @@ class LValue {
     assert(this->alignment == alignment.getQuantity() &&
            "Alignment exceeds allowed max!");
     this->baseInfo = baseInfo;
+    this->nontemporal = false;
   }
 
 public:
@@ -228,6 +235,12 @@ public:
 
   LValueBaseInfo getBaseInfo() const { return baseInfo; }
   void setBaseInfo(LValueBaseInfo info) { baseInfo = info; }
+
+  TBAAAccessInfo getTBAAInfo() const { return tbaaInfo; }
+  void setTBAAInfo(TBAAAccessInfo info) { tbaaInfo = info; }
+
+  bool isNontemporal() const { return nontemporal; }
+  void setNontemporal(bool value) { nontemporal = value; }
 
   static LValue makeAddr(Address address, clang::QualType t,
                          LValueBaseInfo baseInfo) {

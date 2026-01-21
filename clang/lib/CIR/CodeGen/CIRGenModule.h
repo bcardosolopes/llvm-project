@@ -15,6 +15,7 @@
 
 #include "CIRGenBuilder.h"
 #include "CIRGenCall.h"
+#include "CIRGenTBAA.h"
 #include "CIRGenTypeCache.h"
 #include "CIRGenTypes.h"
 #include "CIRGenVTables.h"
@@ -41,6 +42,7 @@ class CodeGenOptions;
 class Decl;
 class GlobalDecl;
 class LangOptions;
+class MaterializeTemporaryExpr;
 class TargetInfo;
 class VarDecl;
 
@@ -48,6 +50,7 @@ namespace CIRGen {
 
 class CIRGenFunction;
 class CIRGenCXXABI;
+class CIRGenCUDARuntime;
 
 enum ForDefinition_t : bool { NotForDefinition = false, ForDefinition = true };
 
@@ -63,6 +66,8 @@ public:
                clang::DiagnosticsEngine &diags);
 
   ~CIRGenModule();
+
+  friend class CIRGenVTables;
 
 private:
   mutable std::unique_ptr<TargetCIRGenInfo> theTargetCIRGenInfo;
@@ -90,11 +95,26 @@ private:
   /// Holds information about C++ vtables.
   CIRGenVTables vtables;
 
+  /// Holds the CUDA runtime
+  std::unique_ptr<CIRGenCUDARuntime> cudaRuntime;
+
+  std::unique_ptr<CIRGenTBAA> tbaa;
+
   /// Per-function codegen information. Updated everytime emitCIR is called
   /// for FunctionDecls's.
   CIRGenFunction *curCGF = nullptr;
 
   llvm::SmallVector<mlir::Attribute> globalScopeAsm;
+
+  /// Used for uniquing of annotation arguments.
+  llvm::DenseMap<unsigned, mlir::ArrayAttr> annotationArgs;
+
+  /// Store deferred function annotations so they can be emitted at the end with
+  /// most up to date ValueDecl that will have all the inherited annotations.
+  llvm::DenseMap<llvm::StringRef, const ValueDecl *> deferredAnnotations;
+
+  /// thread_local variables defined or used in this TU.
+  std::vector<const clang::VarDecl *> cxxThreadLocals;
 
 public:
   mlir::ModuleOp getModule() const { return theModule; }
@@ -108,6 +128,17 @@ public:
 
   CIRGenCXXABI &getCXXABI() const { return *abi; }
   mlir::MLIRContext &getMLIRContext() { return *builder.getContext(); }
+
+  /// Return a reference to the configured CUDA runtime.
+  CIRGenCUDARuntime &getCUDARuntime() {
+    assert(cudaRuntime != nullptr);
+    return *cudaRuntime;
+  }
+
+  bool shouldEmitCUDAGlobalVar(const VarDecl *global) const;
+
+  void printPostfixForExternalizedDecl(llvm::raw_ostream &os,
+                                       const Decl *d) const;
 
   const cir::CIRDataLayout getDataLayout() const {
     // FIXME(cir): instead of creating a CIRDataLayout every time, set it as an
@@ -147,6 +178,7 @@ public:
   void handleCXXStaticMemberVarInstantiation(VarDecl *vd);
 
   llvm::DenseMap<const Decl *, cir::GlobalOp> staticLocalDeclMap;
+  llvm::DenseMap<const VarDecl *, cir::GlobalOp> initializerConstants;
 
   mlir::Operation *getGlobalValue(llvm::StringRef ref);
 
@@ -170,10 +202,17 @@ public:
   cir::GlobalOp getOrCreateCIRGlobal(const VarDecl *d, mlir::Type ty,
                                      ForDefinition_t isForDefinition);
 
-  static cir::GlobalOp createGlobalOp(CIRGenModule &cgm, mlir::Location loc,
-                                      llvm::StringRef name, mlir::Type t,
-                                      bool isConstant = false,
-                                      mlir::Operation *insertPoint = nullptr);
+  static cir::GlobalOp
+  createGlobalOp(CIRGenModule &cgm, mlir::Location loc, llvm::StringRef name,
+                 mlir::Type t, bool isConstant = false,
+                 mlir::ptr::MemorySpaceAttrInterface addrSpace = {},
+                 mlir::Operation *insertPoint = nullptr);
+
+  /// Create an unnamed global constant with the given constant initializer.
+  /// If the variable already has a cached constant global, use that.
+  /// Returns an Address pointing to the global.
+  Address createUnnamedGlobalFrom(const VarDecl &d, mlir::Attribute constant,
+                                  CharUnits align);
 
   /// Add a global constructor or destructor to the module.
   /// The priority is optional, if not specified, the default priority is used.
@@ -248,6 +287,12 @@ public:
   /// Return the mlir::GlobalViewAttr for the address of the given global.
   cir::GlobalViewAttr getAddrOfGlobalVarAttr(const VarDecl *d);
 
+  /// Returns a pointer to a global variable representing a temporary with
+  /// static or thread storage duration.
+  mlir::Operation *
+  getAddrOfGlobalTemporary(const clang::MaterializeTemporaryExpr *expr,
+                           const clang::Expr *init);
+
   CharUnits computeNonVirtualBaseClassOffset(
       const CXXRecordDecl *derivedClass,
       llvm::iterator_range<CastExpr::path_const_iterator> path);
@@ -284,6 +329,18 @@ public:
 
   void emitVTable(const CXXRecordDecl *rd);
 
+  void addDeferredVTable(const CXXRecordDecl *rd) {
+    deferredVTables.push_back(rd);
+  }
+
+  void emitDeferredVTables();
+
+  bool shouldOpportunisticallyEmitVTables();
+
+  /// Try to emit external vtables as available_externally if they have emitted
+  /// all inlined virtual functions.
+  void emitVTablesOpportunistically();
+
   /// Return the appropriate linkage for the vtable, VTT, and type information
   /// of the given class.
   cir::GlobalLinkageKind getVTableLinkage(const CXXRecordDecl *rd);
@@ -310,6 +367,18 @@ public:
     llvm_unreachable("unknown visibility!");
   }
 
+  static cir::VisibilityKind getCIRVisibilityKind(Visibility v) {
+    switch (v) {
+    case DefaultVisibility:
+      return cir::VisibilityKind::Default;
+    case HiddenVisibility:
+      return cir::VisibilityKind::Hidden;
+    case ProtectedVisibility:
+      return cir::VisibilityKind::Protected;
+    }
+    llvm_unreachable("unknown visibility!");
+  }
+
   llvm::DenseMap<mlir::Attribute, cir::GlobalOp> constantStringMap;
 
   /// Return a constant array for the given string.
@@ -326,11 +395,25 @@ public:
   getAddrOfConstantStringFromLiteral(const StringLiteral *s,
                                      llvm::StringRef name = ".str");
 
+  unsigned compoundLiteralCnt = 0;
+  /// Return the unique name for global compound literal.
+  std::string createGlobalCompoundLiteralName() {
+    return (llvm::Twine(".compoundLiteral.") +
+            llvm::Twine(compoundLiteralCnt++))
+        .str();
+  }
+
   /// Returns the address space for temporary allocations in the language. This
   /// ensures that the allocated variable's address space matches the
   /// expectations of the AST, rather than using the target's allocation address
   /// space, which may lead to type mismatches in other parts of the IR.
   LangAS getLangTempAllocaAddressSpace() const;
+
+  /// Return the address space for constant globals.
+  LangAS getGlobalConstantAddressSpace() const;
+
+  /// Determine the address space for a global variable.
+  LangAS getGlobalVarAddressSpace(const VarDecl *d);
 
   /// Set attributes which are common to any form of a global definition (alias,
   /// Objective-C method, function, global variable).
@@ -402,6 +485,17 @@ public:
     deferredDeclsToEmit.emplace_back(GD);
   }
 
+  /// A queue of (previously-emitted) vtables that we deferred checking for
+  /// completeness, and which we will either emit or discard at end of TU.
+  std::vector<const clang::CXXRecordDecl *> deferredVTables;
+
+  /// A queue of (optional) vtables that may be emitted opportunistically.
+  std::vector<const clang::CXXRecordDecl *> opportunisticVTables;
+
+  /// Map of materialized global temporaries to their GlobalOps.
+  llvm::DenseMap<const clang::Expr *, mlir::Operation *>
+      materializedGlobalTemporaryMap;
+
   void emitTopLevelDecl(clang::Decl *decl);
 
   /// Determine whether the definition must be emitted; if this returns \c
@@ -423,6 +517,13 @@ public:
   getAddrOfFunction(clang::GlobalDecl gd, mlir::Type funcType = nullptr,
                     bool forVTable = false, bool dontDefer = false,
                     ForDefinition_t isForDefinition = NotForDefinition);
+
+  /// Get a reference to the target of a weak reference.
+  cir::FuncOp getWeakRefReference(const clang::ValueDecl *vd);
+
+  /// Get the address of a thunk and emit it if necessary.
+  cir::FuncOp getAddrOfThunk(llvm::StringRef name, mlir::Type fnTy,
+                             clang::GlobalDecl gd);
 
   mlir::Operation *
   getAddrOfGlobal(clang::GlobalDecl gd,
@@ -547,6 +648,10 @@ public:
   // Make sure that this type is translated.
   void updateCompletedType(const clang::TagDecl *td);
 
+  /// Try to emit a base destructor as an alias to its primary
+  /// base-class destructor.
+  bool tryEmitBaseDestructorAsAlias(const CXXDestructorDecl *d);
+
   // Produce code for this constructor/destructor. This method doesn't try to
   // apply any ABI rules about which other constructors/destructors are needed
   // or if they are alias to each other.
@@ -587,6 +692,7 @@ public:
   static constexpr const char *builtinCoroId = "__builtin_coro_id";
   static constexpr const char *builtinCoroAlloc = "__builtin_coro_alloc";
   static constexpr const char *builtinCoroBegin = "__builtin_coro_begin";
+  static constexpr const char *builtinCoroEnd = "__builtin_coro_end";
 
   /// Given a builtin id for a function like "__builtin_fabsf", return a
   /// Function* for "fabsf".
@@ -597,7 +703,7 @@ public:
   }
 
   /// Emit any needed decls for which code generation was deferred.
-  void emitDeferred();
+  void emitDeferred(unsigned recursionLimit);
 
   /// Helper for `emitDeferred` to apply actual codegen.
   void emitGlobalDecl(const clang::GlobalDecl &d);
@@ -606,6 +712,18 @@ public:
 
   // Finalize CIR code generation.
   void release();
+
+  /// Emit all the global annotations.
+  void emitGlobalAnnotations();
+
+  /// Emit additional args of the annotation.
+  mlir::ArrayAttr emitAnnotationArgs(const clang::AnnotateAttr *attr);
+
+  /// Create an AnnotationAttr for the given annotate attribute.
+  cir::AnnotationAttr emitAnnotateAttr(const clang::AnnotateAttr *aa);
+
+  /// Add global annotations for a global value.
+  void addGlobalAnnotations(const ValueDecl *d, mlir::Operation *gv);
 
   /// -------
   /// Visibility and Linkage
@@ -676,14 +794,67 @@ public:
   /// Print out an error that codegen doesn't support the specified decl yet.
   void errorUnsupported(const Decl *d, llvm::StringRef type);
 
+  /// OpenCL v1.2 s5.6.4.6 allows the compiler to store kernel argument
+  /// information in the program executable. The argument information stored
+  /// includes the argument name, its type, the address and access qualifiers
+  /// used. This helper can be used to generate metadata for source code kernel
+  /// function as well as generated implicitly kernels. If a kernel is generated
+  /// implicitly null value has to be passed to the last two parameters,
+  /// otherwise all parameters must have valid non-null values.
+  /// \param fn is a pointer to IR function being generated.
+  /// \param fd is a pointer to function declaration if any.
+  /// \param cgf is a pointer to CIRGenFunction that generates this function.
+  void buildOpenCLMetadata();
+
+  void genKernelArgMetadata(cir::FuncOp fn, const FunctionDecl *fd = nullptr,
+                            CIRGenFunction *cgf = nullptr);
+
+  template <typename Op>
+  void decorateOperationWithTBAA(Op op, TBAAAccessInfo tbaaInfo) {
+    if (auto tag = getTBAAAccessTagInfo(tbaaInfo)) {
+      op.setTbaaAttr(tag);
+    }
+  }
+
+  cir::TBAAAttr getTBAATypeInfo(QualType qTy);
+
+  /// Get TBAA information that describes an access to an object of the given
+  /// type.
+  TBAAAccessInfo getTBAAAccessInfo(QualType accessType);
+
+  /// Get the TBAA information that describes an access to a virtual table
+  /// pointer.
+  TBAAAccessInfo getTBAAVTablePtrAccessInfo(mlir::Type vTablePtrType);
+
+  mlir::ArrayAttr getTBAAStructInfo(QualType qTy);
+
+  /// Get attribute that describes the given base access type. Return null if
+  /// type is not suitable for use in TBAA access tags.
+  cir::TBAAAttr getTBAABaseTypeInfo(QualType qTy);
+
+  cir::TBAAAttr getTBAAAccessTagInfo(TBAAAccessInfo tbaaInfo);
+
+  /// Get merged TBAA information for the purposes of type casts.
+  TBAAAccessInfo mergeTBAAInfoForCast(TBAAAccessInfo sourceInfo,
+                                      TBAAAccessInfo targetInfo);
+
+  /// Get merged TBAA information for the purposes of conditional operator.
+  TBAAAccessInfo mergeTBAAInfoForConditionalOperator(TBAAAccessInfo infoA,
+                                                     TBAAAccessInfo infoB);
+
+  TBAAAccessInfo getTBAAInfoForSubobject(LValue base, QualType accessType) {
+    if (base.getTBAAInfo().isMayAlias())
+      return TBAAAccessInfo::getMayAliasInfo();
+    return getTBAAAccessInfo(accessType);
+  }
+
 private:
   // An ordered map of canonical GlobalDecls to their mangled names.
   llvm::MapVector<clang::GlobalDecl, llvm::StringRef> mangledDeclNames;
   llvm::StringMap<clang::GlobalDecl, llvm::BumpPtrAllocator> manglings;
 
   // FIXME: should we use llvm::TrackingVH<mlir::Operation> here?
-  typedef llvm::StringMap<mlir::Operation *> ReplacementsTy;
-  ReplacementsTy replacements;
+  llvm::MapVector<StringRef, mlir::Operation *> replacements;
   /// Call replaceAllUsesWith on all pairs in replacements.
   void applyReplacements();
 

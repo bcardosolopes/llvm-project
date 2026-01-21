@@ -48,12 +48,14 @@ private:
   bool inConstantContext = false;
 
 public:
+  bool isInConstantContext() const { return inConstantContext; }
+  void setInConstantContext(bool var) { inConstantContext = var; }
   /// Initialize this emission in the context of the given function.
   /// Use this if the expression might contain contextual references like
   /// block addresses or PredefinedExprs.
   ConstantEmitter(CIRGenFunction &cgf) : cgm(cgf.cgm), cgf(&cgf) {}
 
-  ConstantEmitter(CIRGenModule &cgm, CIRGenFunction *cgf = nullptr)
+  ConstantEmitter(CIRGenModule &cgm, const CIRGenFunction *cgf = nullptr)
       : cgm(cgm), cgf(cgf) {}
 
   ConstantEmitter(const ConstantEmitter &other) = delete;
@@ -64,6 +66,14 @@ public:
   /// Try to emit the initializer of the given declaration as an abstract
   /// constant.  If this succeeds, the emission must be finalized.
   mlir::Attribute tryEmitForInitializer(const VarDecl &d);
+
+  /// Try to emit the initializer of the given expression as a constant.
+  mlir::Attribute tryEmitForInitializer(const Expr *e, LangAS destAddrSpace,
+                                        QualType destType);
+
+  /// Emit the given APValue as a constant for an initializer.
+  /// Initializes non-abstract emission and must be finalized.
+  mlir::Attribute emitForInitializer(const APValue &value, QualType destType);
 
   void finalize(cir::GlobalOp gv);
 
@@ -93,6 +103,10 @@ public:
   /// Try to emit the initializer of the given declaration as an abstract
   /// constant.
   mlir::Attribute tryEmitAbstractForInitializer(const VarDecl &d);
+
+  /// Try to emit the result of the given expression as an abstract constant.
+  /// Returns null on failure instead of asserting.
+  mlir::Attribute tryEmitAbstract(const Expr *e, QualType destType);
 
   /// Emit the result of the given expression as an abstract constant,
   /// asserting that it succeeded.  This is only safe to do when the

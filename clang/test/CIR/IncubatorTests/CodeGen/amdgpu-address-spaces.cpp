@@ -14,21 +14,21 @@
 // For AMDGPU in non-OpenCL/HIP mode, globals default to AS 1 (global).
 int globalVar = 123;
 
-// CIR-DAG: cir.global external lang_address_space(offload_global) @globalVar = #cir.int<123> : !s32i
+// CIR-DAG: cir.global external target_address_space(1) @globalVar = #cir.int<123> : !s32i
 // LLVM-DAG: @globalVar = addrspace(1) global i32 123, align 4
 // OGCG-DAG: @globalVar = addrspace(1) global i32 123, align 4
 
 // Test non-const global array goes to global AS.
 int globalArray[4] = {1, 2, 3, 4};
 
-// CIR-DAG: cir.global external lang_address_space(offload_global) @globalArray = #cir.const_array<[#cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<4> : !s32i]> : !cir.array<!s32i x 4>
+// CIR-DAG: cir.global external target_address_space(1) @globalArray = #cir.const_array<[#cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<4> : !s32i]> : !cir.array<!s32i x 4>
 // LLVM-DAG: @globalArray = addrspace(1) global [4 x i32] [i32 1, i32 2, i32 3, i32 4], align 4
 // OGCG-DAG: @globalArray = addrspace(1) global [4 x i32] [i32 1, i32 2, i32 3, i32 4], align 4
 
 // Test static global goes to global AS.
 static int staticGlobal = 555;
 
-// CIR-DAG: cir.global "private" internal{{.*}}lang_address_space(offload_global) @_ZL12staticGlobal = #cir.int<555> : !s32i
+// CIR-DAG: cir.global "private" internal{{.*}} target_address_space(1) @_ZL12staticGlobal = #cir.int<555> : !s32i
 // LLVM-DAG: @_ZL12staticGlobal = internal addrspace(1) global i32 555, align 4
 // OGCG-DAG: @_ZL12staticGlobal = internal addrspace(1) global i32 555, align 4
 

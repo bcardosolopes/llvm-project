@@ -8,16 +8,17 @@ struct ConvertsToScalar {
 };
 
 void use(int x, unsigned int y, float f, ConvertsToScalar cts) {
-  // CHECK: cir.func{{.*}}(%[[X_ARG:.*]]: !s32i{{.*}}, %[[Y_ARG:.*]]: !u32i{{.*}}, %[[F_ARG:.*]]: !cir.float{{.*}}){{.*}}, %[[CTS_ARG:.*]]: !rec_ConvertsToScalar{{.*}}) {
+  // CHECK: cir.func{{.*}}(%[[X_ARG:.*]]: !s32i{{.*}}, %[[Y_ARG:.*]]: !u32i{{.*}}, %[[F_ARG:.*]]: !cir.float{{.*}}, %[[CTS_ARG:.*]]: !u8i{{.*}}) extra(#fn_attr) {
+  // CHECK-NEXT: %[[CTS_ALLOC:.*]] = cir.alloca !rec_ConvertsToScalar, !cir.ptr<!rec_ConvertsToScalar>, [""]
+  // CHECK-NEXT: %[[CTS_CAST:.*]] = cir.cast bitcast %[[CTS_ALLOC]] : !cir.ptr<!rec_ConvertsToScalar> -> !cir.ptr<!u8i>
+  // CHECK-NEXT: cir.store %[[CTS_ARG]], %[[CTS_CAST]] : !u8i, !cir.ptr<!u8i>
   // CHECK-NEXT: %[[X_ALLOC:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init]
   // CHECK-NEXT: %[[Y_ALLOC:.*]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["y", init]
   // CHECK-NEXT: %[[F_ALLOC:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["f", init]
-  // CHECK-NEXT: %[[CTS_ALLOC:.*]] = cir.alloca !rec_ConvertsToScalar, !cir.ptr<!rec_ConvertsToScalar>, ["cts", init]
   //
   // CHECK-NEXT: cir.store %[[X_ARG]], %[[X_ALLOC]] : !s32i, !cir.ptr<!s32i>
   // CHECK-NEXT: cir.store %[[Y_ARG]], %[[Y_ALLOC]] : !u32i, !cir.ptr<!u32i>
   // CHECK-NEXT: cir.store %[[F_ARG]], %[[F_ALLOC]] : !cir.float, !cir.ptr<!cir.float>
-  // CHECK-NEXT: cir.store %[[CTS_ARG]], %[[CTS_ALLOC]] : !rec_ConvertsToScalar, !cir.ptr<!rec_ConvertsToScalar>
 
   // CHECK-NEXT: %[[Y_LOAD:.*]] = cir.load {{.*}}%[[Y_ALLOC]] : !cir.ptr<!u32i>, !u32i
   // CHECK-NEXT: %[[Y_TO_FLOAT:.*]] = cir.cast int_to_float %[[Y_LOAD]] : !u32i -> !cir.float

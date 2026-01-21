@@ -17,17 +17,17 @@ void test() {
 
 // CIR: [[INITLIST_TYPE:!.*]] = !cir.record<class "std::initializer_list<int>" {!cir.ptr<!s32i>, !u64i}>
 
-// CIR: cir.func {{.*}} @_ZSt1fIiEvSt16initializer_listIT_E(%arg0: [[INITLIST_TYPE]]
+// CIR: cir.func {{.*}} @_ZSt1fIiEvSt16initializer_listIT_E(%arg0: !cir.array<!u64i x 2>
 // CIR: [[REG0:%.*]] = cir.alloca [[INITLIST_TYPE]], !cir.ptr<[[INITLIST_TYPE]]>,
-// CIR: cir.store{{.*}} %arg0, [[REG0]] : [[INITLIST_TYPE]], !cir.ptr<[[INITLIST_TYPE]]>
+// CIR: [[REG1:%.*]] = cir.cast bitcast [[REG0]] : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.array<!u64i x 2>>
+// CIR: cir.store{{.*}} %arg0, [[REG1]] : !cir.array<!u64i x 2>, !cir.ptr<!cir.array<!u64i x 2>>
 // CIR: cir.return
 
 // CIR: cir.func {{.*}} @_ZSt4testv()
 // CIR: cir.scope {
 // CIR: [[LIST_PTR:%.*]] = cir.alloca [[INITLIST_TYPE]], !cir.ptr<[[INITLIST_TYPE]]>,
 // CIR: [[ARRAY:%.*]] = cir.alloca !cir.array<!s32i x 1>, !cir.ptr<!cir.array<!s32i x 1>>,
-// CIR: [[ZERO:%.*]] = cir.const #cir.int<0> : !s32i
-// CIR: [[FIRST_ELEM:%.*]] = cir.get_element [[ARRAY]][[[ZERO]]] : (!cir.ptr<!cir.array<!s32i x 1>>, !s32i) -> !cir.ptr<!s32i>
+// CIR: [[FIRST_ELEM:%.*]] = cir.cast array_to_ptrdecay [[ARRAY]] : !cir.ptr<!cir.array<!s32i x 1>> -> !cir.ptr<!s32i>
 // CIR: [[SEVEN:%.*]] = cir.const #cir.int<7> : !s32i
 // CIR: cir.store{{.*}} [[SEVEN]], [[FIRST_ELEM]] : !s32i, !cir.ptr<!s32i>
 // CIR: [[FLD_C:%.*]] = cir.get_member [[LIST_PTR]][0] {name = "c"} : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.ptr<!s32i>>
@@ -37,7 +37,9 @@ void test() {
 // CIR: [[FLD_LEN:%.*]] = cir.get_member [[LIST_PTR]][1] {name = "len"} : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!u64i>
 // CIR: cir.store{{.*}} [[LENGTH_ONE]], [[FLD_LEN]] : !u64i, !cir.ptr<!u64i>
 // CIR: [[ARG2PASS:%.*]] = cir.load{{.*}} [[LIST_PTR]] : !cir.ptr<[[INITLIST_TYPE]]>,  [[INITLIST_TYPE]]
-// CIR: cir.call @_ZSt1fIiEvSt16initializer_listIT_E([[ARG2PASS]]) : ([[INITLIST_TYPE]]) -> ()
+// CIR: [[BITCAST:%.*]] = cir.cast bitcast [[LIST_PTR]] : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.array<!u64i x 2>>
+// CIR: [[FLAT_ARG:%.*]] = cir.load [[BITCAST]] : !cir.ptr<!cir.array<!u64i x 2>>, !cir.array<!u64i x 2>
+// CIR: cir.call @_ZSt1fIiEvSt16initializer_listIT_E([[FLAT_ARG]]) : (!cir.array<!u64i x 2>) -> ()
 // CIR: }
 // CIR: cir.return
 // CIR: }
@@ -52,7 +54,7 @@ void test() {
 // LLVM:  [[ELEM_ARRAY:%.*]] = alloca [1 x i32], i64 1, align 4
 // LLVM: br label %[[SCOPE_START:.*]]
 // LLVM: [[SCOPE_START]]: ; preds = %0
-// LLVM:  [[PTR_FIRST_ELEM:%.*]] = getelementptr [1 x i32], ptr [[ELEM_ARRAY]], i32 0, i64 0
+// LLVM:  [[PTR_FIRST_ELEM:%.*]] = getelementptr i32, ptr [[ELEM_ARRAY]], i32 0
 // LLVM:  store i32 7, ptr [[PTR_FIRST_ELEM]], align 4
 // LLVM:  [[ELEM_ARRAY_PTR:%.*]] = getelementptr %"class.std::initializer_list<int>", ptr [[INIT_STRUCT]], i32 0, i32 0
 // LLVM:  store ptr [[ELEM_ARRAY]], ptr [[ELEM_ARRAY_PTR]], align 8

@@ -995,7 +995,8 @@ bool FrontendAction::BeginSourceFile(CompilerInstance &CI,
     CI.getSourceManager().setAllFilesAreTransient(true);
 
   // IR files bypass the rest of initialization.
-  if (Input.getKind().getLanguage() == Language::LLVM_IR) {
+  if (Input.getKind().getLanguage() == Language::LLVM_IR ||
+      Input.getKind().getLanguage() == Language::CIR) {
     if (!hasIRSupport()) {
       CI.getDiagnostics().Report(diag::err_ast_action_on_llvm_ir)
           << Input.getFile();

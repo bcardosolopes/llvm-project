@@ -25,10 +25,10 @@ cir.func @b0() {
 !u32i = !cir.int<u, 32>
 cir.func @if0() {
   %0 = cir.const #true
-  // expected-error@+1 {{'cir.if' op region control flow edge from Operation cir.yield to parent results: source has 1 operands, but target successor <to parent> needs 0}}
+  // expected-error@+1 {{'cir.if' op along control flow edge from Operation cir.yield to parent: region branch point has 1 operands, but region successor needs 0 inputs}}
   cir.if %0 {
     %6 = cir.const #cir.int<3> : !u32i
-    cir.yield %6 : !u32i
+    cir.yield %6 : !u32i // expected-note {{region branch point}}
   }
   cir.return
 }
@@ -53,7 +53,7 @@ cir.func @yield0() {
 cir.func @yieldbreak() {
   %0 = cir.const #true
   cir.if %0 {
-    cir.break // expected-error {{op must be within a breakable operation}}
+    cir.break // expected-error {{op must be within a loop}}
   }
   cir.return
 }
@@ -130,7 +130,7 @@ cir.func @cast2(%p: !cir.ptr<!u32i>) {
 
 !u32i = !cir.int<u, 32>
 cir.func @cast3(%p: !cir.ptr<!u32i>) {
-  %0 = cir.alloca !cir.array<!u32i x 10>, !cir.ptr<!cir.array<!u32i x 10>>, ["x", init]
+  %0 = cir.alloca !cir.array<!u32i x 10>, !cir.ptr<!cir.array<!u32i x 10>>, ["x", init] {alignment = 4 : i64}
   %2 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!u32i x 10>> -> !cir.ptr<!cir.float> // expected-error {{requires same type for array element and pointee result}}
   cir.return
 }
@@ -328,7 +328,7 @@ module {
 
 !u8i = !cir.int<u, 8>
 module {
-  // expected-error@+1 {{constant array size should match type size}}
+  // expected-error@+2 {{constant array size should match type size}}
   cir.global external @a = #cir.const_array<[#cir.int<0> : !u8i, #cir.int<23> : !u8i, #cir.int<33> : !u8i] : !cir.array<!u8i x 4>>
 }
 
@@ -336,7 +336,7 @@ module {
 
 !u32i = !cir.int<u, 32>
 module {
-  // expected-error@+1 {{constant array element for string literals expects !cir.int<u, 8> element type}}
+  // expected-error@+2 {{constant array element for string literals expects !cir.int<u, 8> element type}}
   cir.global external @b = #cir.const_array<"example\00" : !cir.array<!u32i x 8>>
 }
 
@@ -351,7 +351,7 @@ module {
 
 !u32i = !cir.int<u, 32>
 module {
-  // expected-error@+1 {{expected string or keyword containing one of the following enum values for attribute 'linkage' [external, available_externally, linkonce, linkonce_odr, weak, weak_odr, appending, internal, cir_private, extern_weak, common]}}
+  // expected-error@+1 {{expected string or keyword containing one of the following enum values for attribute 'linkage' [external, available_externally, linkonce, linkonce_odr, weak, weak_odr, internal, cir_private, extern_weak, common]}}
   cir.global @a = #cir.const_array<[0 : !u8i, -23 : !u8i, 33 : !u8i] : !cir.array<!u32i x 3>>
 }
 
@@ -373,7 +373,7 @@ module {
 
 !u32i = !cir.int<u, 32>
 module {
-  cir.global external @v = #cir.zero : !u32i // expected-error {{zero expects record or array type}}
+  cir.global external @v = #cir.zero : !u32i // expected-error {{zero expects struct, array, vector, complex, or opaque type}}
 }
 
 // -----
@@ -385,7 +385,8 @@ module {
 // -----
 
 module {
-  cir.global external @v = #cir.poison : !cir.void // expected-error {{poison expects non-void type}}
+  // expected-error@+1 {{poison expects non-void type}}
+  cir.global external @v = #cir.poison : !cir.void
 }
 
 // -----
@@ -393,7 +394,7 @@ module {
 !s32i = !cir.int<s, 32>
 cir.func @vec_op_size() {
   %0 = cir.const #cir.int<1> : !s32i
-  %1 = cir.vec.create(%0 : !s32i) : !cir.vector<!s32i x 2> // expected-error {{'cir.vec.create' op operand count of 1 doesn't match vector type '!cir.vector<!cir.int<s, 32> x 2>' element count of 2}}
+  %1 = cir.vec.create(%0 : !s32i) : !cir.vector<2 x !s32i> // expected-error {{'cir.vec.create' op operand count of 1 doesn't match vector type '!cir.vector<2 x !cir.int<s, 32>>' element count of 2}}
   cir.return
 }
 
@@ -404,7 +405,7 @@ cir.func @vec_op_size() {
 cir.func @vec_op_type() {
   %0 = cir.const #cir.int<1> : !s32i
   %1 = cir.const #cir.int<2> : !u32i
-  %2 = cir.vec.create(%0, %1 : !s32i, !u32i) : !cir.vector<!s32i x 2> // expected-error {{'cir.vec.create' op operand type '!cir.int<u, 32>' doesn't match vector element type '!cir.int<s, 32>'}}
+  %2 = cir.vec.create(%0, %1 : !s32i, !u32i) : !cir.vector<2 x !s32i> // expected-error {{'cir.vec.create' op operand type '!cir.int<u, 32>' doesn't match vector element type '!cir.int<s, 32>'}}
   cir.return
 }
 
@@ -414,8 +415,8 @@ cir.func @vec_op_type() {
 cir.func @vec_extract_non_int_idx() {
   %0 = cir.const 1.5e+00 : f64
   %1 = cir.const #cir.int<0> : !s32i
-  %2 = cir.vec.create(%1, %1 : !s32i, !s32i) : !cir.vector<!s32i x 2>
-  %3 = cir.vec.extract %2[%0 : f64] : !cir.vector<!s32i x 2> // expected-error {{expected '<'}}
+  %2 = cir.vec.create(%1, %1 : !s32i, !s32i) : !cir.vector<2 x !s32i>
+  %3 = cir.vec.extract %2[%0 : f64] : !cir.vector<2 x !s32i> // expected-error {{expected '<'}}
   cir.return
 }
 
@@ -426,8 +427,8 @@ cir.func @vec_extract_non_int_idx() {
 cir.func @vec_extract_bad_type() {
   %0 = cir.alloca !u32i, !cir.ptr<!u32i>, ["x", init] {alignment = 4 : i64}
   %1 = cir.const #cir.int<0> : !s32i
-  %2 = cir.vec.create(%1, %1 : !s32i, !s32i) : !cir.vector<!s32i x 2>
-  %3 = cir.vec.extract %2[%1 : !s32i] : !cir.vector<!s32i x 2> // expected-note {{prior use here}}
+  %2 = cir.vec.create(%1, %1 : !s32i, !s32i) : !cir.vector<2 x !s32i>
+  %3 = cir.vec.extract %2[%1 : !s32i] : !cir.vector<2 x !s32i> // expected-note {{prior use here}}
   cir.store %3, %0 : !u32i, !cir.ptr<!u32i> // expected-error {{use of value '%3' expects different type than prior uses: '!cir.int<u, 32>' vs '!cir.int<s, 32>'}}
   cir.return
 }
@@ -447,9 +448,9 @@ cir.func @vec_extract_non_vector() {
 !u32i = !cir.int<u, 32>
 cir.func @vec_insert_bad_type() {
   %0 = cir.const #cir.int<0> : !s32i
-  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<!s32i x 2>
+  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<2 x !s32i>
   %2 = cir.const #cir.int<0> : !u32i // expected-note {{prior use here}}
-  %3 = cir.vec.insert %2, %1[%0 : !s32i] : !cir.vector<!s32i x 2> // expected-error {{use of value '%2' expects different type than prior uses: '!cir.int<s, 32>' vs '!cir.int<u, 32>'}}
+  %3 = cir.vec.insert %2, %1[%0 : !s32i] : !cir.vector<2 x !s32i> // expected-error {{use of value '%2' expects different type than prior uses: '!cir.int<s, 32>' vs '!cir.int<u, 32>'}}
   cir.return
 }
 
@@ -467,8 +468,8 @@ cir.func @vec_insert_non_vector() {
 !s32i = !cir.int<s, 32>
 cir.func @vec_ternary_non_vector1() {
   %0 = cir.const #cir.int<0> : !s32i
-  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<!s32i x 2>
-  %2 = cir.vec.ternary(%0, %1, %1) : !s32i, !cir.vector<!s32i x 2> // expected-error {{'cir.vec.ternary' op operand #0 must be vector of integer type, but got '!cir.int<s, 32>'}}
+  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<2 x !s32i>
+  %2 = cir.vec.ternary(%0, %1, %1) : !s32i, !cir.vector<2 x !s32i> // expected-error {{'cir.vec.ternary' op operand #0 must be vector of integer type, but got '!cir.int<s, 32>'}}
   cir.return
 }
 
@@ -477,8 +478,8 @@ cir.func @vec_ternary_non_vector1() {
 !s32i = !cir.int<s, 32>
 cir.func @vec_ternary_non_vector2() {
   %0 = cir.const #cir.int<0> : !s32i
-  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<!s32i x 2>
-  %2 = cir.vec.ternary(%1, %0, %0) : !cir.vector<!s32i x 2>, !s32i // expected-error {{'cir.vec.ternary' op operand #1 must be CIR vector type, but got '!cir.int<s, 32>'}}
+  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<2 x !s32i>
+  %2 = cir.vec.ternary(%1, %0, %0) : !cir.vector<2 x !s32i>, !s32i // expected-error {{'cir.vec.ternary' op operand #1 must be CIR vector type, but got '!cir.int<s, 32>'}}
   cir.return
 }
 
@@ -487,17 +488,17 @@ cir.func @vec_ternary_non_vector2() {
 !s32i = !cir.int<s, 32>
 cir.func @vec_ternary_different_size() {
   %0 = cir.const #cir.int<0> : !s32i
-  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<!s32i x 2>
-  %2 = cir.vec.create(%0, %0, %0, %0 : !s32i, !s32i, !s32i, !s32i) : !cir.vector<!s32i x 4>
-  %3 = cir.vec.ternary(%1, %2, %2) : !cir.vector<!s32i x 2>, !cir.vector<!s32i x 4> // expected-error {{'cir.vec.ternary' op : the number of elements in '!cir.vector<!cir.int<s, 32> x 2>' and '!cir.vector<!cir.int<s, 32> x 4>' don't match}}
+  %1 = cir.vec.create(%0, %0 : !s32i, !s32i) : !cir.vector<2 x !s32i>
+  %2 = cir.vec.create(%0, %0, %0, %0 : !s32i, !s32i, !s32i, !s32i) : !cir.vector<4 x !s32i>
+  %3 = cir.vec.ternary(%1, %2, %2) : !cir.vector<2 x !s32i>, !cir.vector<4 x !s32i> // expected-error {{'cir.vec.ternary' op : the number of elements in '!cir.vector<2 x !cir.int<s, 32>>' and '!cir.vector<4 x !cir.int<s, 32>>' don't match}}
   cir.return
 }
 
 // -----
 
 cir.func @vec_ternary_not_int(%p : !cir.float) {
-  %0 = cir.vec.create(%p, %p : !cir.float, !cir.float) : !cir.vector<!cir.float x 2>
-  %1 = cir.vec.ternary(%0, %0, %0) : !cir.vector<!cir.float x 2>, !cir.vector<!cir.float x 2> // expected-error {{'cir.vec.ternary' op operand #0 must be vector of integer type, but got '!cir.vector<!cir.float x 2>'}}
+  %0 = cir.vec.create(%p, %p : !cir.float, !cir.float) : !cir.vector<2 x !cir.float>
+  %1 = cir.vec.ternary(%0, %0, %0) : !cir.vector<2 x !cir.float>, !cir.vector<2 x !cir.float> // expected-error {{'cir.vec.ternary' op operand #0 must be vector of integer type, but got '!cir.vector<2 x !cir.float>'}}
   cir.return
 }
 
@@ -505,17 +506,17 @@ cir.func @vec_ternary_not_int(%p : !cir.float) {
 
 !s32i = !cir.int<s, 32>
 cir.func @vec_shuffle_mismatch_args(%f : !cir.float, %n : !s32i) {
-  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<!cir.float x 2>
-  %1 = cir.vec.create(%n, %n : !s32i, !s32i) : !cir.vector<!s32i x 2> // expected-note {{prior use here}}
-  %2 = cir.vec.shuffle(%0, %1 : !cir.vector<!cir.float x 2>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<!cir.float x 2> // expected-error {{use of value '%1' expects different type than prior uses: '!cir.vector<!cir.float x 2>' vs '!cir.vector<!cir.int<s, 32> x 2>}}
+  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<2 x !cir.float>
+  %1 = cir.vec.create(%n, %n : !s32i, !s32i) : !cir.vector<2 x !s32i> // expected-note {{prior use here}}
+  %2 = cir.vec.shuffle(%0, %1 : !cir.vector<2 x !cir.float>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<2 x !cir.float> // expected-error {{use of value '%1' expects different type than prior uses: '!cir.vector<2 x !cir.float>' vs '!cir.vector<2 x !cir.int<s, 32>>}}
   cir.return
 }
 
 // -----
 
 cir.func @vec_shuffle_non_ints(%f : !cir.float) {
-  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<!cir.float x 2>
-  %1 = cir.vec.shuffle(%0, %0 : !cir.vector<!cir.float x 2>) [#cir.fp<1.000000e+00> : !cir.float, #cir.fp<1.000000e+00> : !cir.float] : !cir.vector<!cir.float x 2> // expected-error {{'cir.vec.shuffle' op all index values must be integers}}
+  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<2 x !cir.float>
+  %1 = cir.vec.shuffle(%0, %0 : !cir.vector<2 x !cir.float>) [#cir.fp<1.000000e+00> : !cir.float, #cir.fp<1.000000e+00> : !cir.float] : !cir.vector<2 x !cir.float> // expected-error {{attribute 'indices' failed to satisfy constraint: integer array attribute}}
   cir.return
 }
 
@@ -523,8 +524,8 @@ cir.func @vec_shuffle_non_ints(%f : !cir.float) {
 
 !s32i = !cir.int<s, 32>
 cir.func @vec_shuffle_result_size(%f : !cir.float) {
-  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<!cir.float x 2>
-  %1 = cir.vec.shuffle(%0, %0 : !cir.vector<!cir.float x 2>) [#cir.int<1> : !s32i, #cir.int<1> : !s32i] : !cir.vector<!cir.float x 4> // expected-error {{'cir.vec.shuffle' op : the number of elements in [#cir.int<1> : !cir.int<s, 32>, #cir.int<1> : !cir.int<s, 32>] and '!cir.vector<!cir.float x 4>' don't match}}
+  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<2 x !cir.float>
+  %1 = cir.vec.shuffle(%0, %0 : !cir.vector<2 x !cir.float>) [#cir.int<1> : !s32i, #cir.int<1> : !s32i] : !cir.vector<4 x !cir.float> // expected-error {{'cir.vec.shuffle' op : the number of elements in [#cir.int<1> : !cir.int<s, 32>, #cir.int<1> : !cir.int<s, 32>] and '!cir.vector<4 x !cir.float>' don't match}}
   cir.return
 }
 
@@ -532,8 +533,8 @@ cir.func @vec_shuffle_result_size(%f : !cir.float) {
 
 !s32i = !cir.int<s, 32>
 cir.func @vec_shuffle_result_element(%f : !cir.float) {
-  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<!cir.float x 2>
-  %1 = cir.vec.shuffle(%0, %0 : !cir.vector<!cir.float x 2>) [#cir.int<1> : !s32i, #cir.int<1> : !s32i] : !cir.vector<!s32i x 2> // expected-error {{'cir.vec.shuffle' op : element types of '!cir.vector<!cir.float x 2>' and '!cir.vector<!cir.int<s, 32> x 2>' don't match}}
+  %0 = cir.vec.create(%f, %f : !cir.float, !cir.float) : !cir.vector<2 x !cir.float>
+  %1 = cir.vec.shuffle(%0, %0 : !cir.vector<2 x !cir.float>) [#cir.int<1> : !s32i, #cir.int<1> : !s32i] : !cir.vector<2 x !s32i> // expected-error {{'cir.vec.shuffle' op : element types of '!cir.vector<2 x !cir.float>' and '!cir.vector<2 x !cir.int<s, 32>>' don't match}}
   cir.return
 }
 
@@ -567,7 +568,7 @@ module {
   // rid of this somehow in favor of clarity?
   cir.global "private" external @_ZTVN10__cxxabiv120__si_class_type_infoE : !cir.ptr<!u32i>
 
-  // expected-error@+1 {{element at index 0 has type '!cir.ptr<!cir.int<u, 8>>' but return type for this element is '!cir.ptr<!cir.int<u, 32>>'}}
+  // expected-error@+1 {{element at index 0 has type '!cir.ptr<!cir.int<u, 8>>' but the expected type for this element is '!cir.ptr<!cir.int<u, 32>>'}}
   cir.global external @type_info_B = #cir.typeinfo<{
     #cir.global_view<@_ZTVN10__cxxabiv120__si_class_type_infoE, [2]> : !cir.ptr<!u8i>}>
     : !cir.record<struct {!cir.ptr<!u32i>}>
@@ -627,7 +628,7 @@ module {
 // -----
 
 module {
-  // expected-error@+1 {{functions only supports zero or one results}}
+  // expected-error@+1 {{functions with multiple return types are not supported}}
   cir.func @variadic() -> (!cir.int<s, 32>, !cir.int<s, 32>)
 }
 
@@ -752,24 +753,22 @@ module {
 
 // -----
 !s8i = !cir.int<s, 8>
-!rec_Init = !cir.record<class "Init" {!s8i} #cir.record.decl.ast>
+!rec_Init = !cir.record<class "Init" {!s8i}>
 module {
   cir.global "private" internal @_ZL8__ioinit = ctor : !rec_Init {
   }
-  // expected-error@+1 {{custom op 'cir.global' ctor region must have exactly one block}}
 }
 
 // -----
 !s8i = !cir.int<s, 8>
 #true = #cir.bool<true> : !cir.bool
-!rec_Init = !cir.record<class "Init" {!s8i} #cir.record.decl.ast>
+!rec_Init = !cir.record<class "Init" {!s8i}>
 module {
   cir.func private @_ZN4InitC1Eb(!cir.ptr<!rec_Init>)
   cir.global "private" internal @_ZL8__ioinit = ctor : !rec_Init {
     %0 = cir.get_global @_ZL8__ioinit : !cir.ptr<!rec_Init>
     cir.call @_ZN4InitC1Eb(%0) : (!cir.ptr<!rec_Init>) -> ()
   } dtor {}
-  // expected-error@+1 {{custom op 'cir.global' dtor region must have exactly one block}}
 }
 
 // -----
@@ -840,7 +839,7 @@ module {
 module {
   cir.func @tmp(%arg0: !cir.float) {
     // expected-error@+1 {{operand #0 must be fundamental integer type}}
-    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, %arg0 : !cir.float, ["tmp"]
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, %arg0 : !cir.float, ["tmp"] {alignment = 4 : i64}
     cir.return
   }
 }
@@ -850,8 +849,8 @@ module {
 !u8i = !cir.int<u, 8>
 module {
   cir.func @stack_save_type_mismatch() {
-    // expected-error@+1 {{must be CIR pointer type}}
-    %1 = cir.stack_save : !u8i
+    // expected-error@+1 {{'cir.stacksave' op result #0 must be CIR pointer type, but got '!cir.int<u, 8>'}}
+    %1 = cir.stacksave : !u8i
     cir.return
   }
 }
@@ -860,8 +859,8 @@ module {
 !u8i = !cir.int<u, 8>
 module {
   cir.func @stack_restore_type_mismatch(%arg0 : !u8i) {
-    // expected-error@+1 {{must be CIR pointer type}}
-    cir.stack_restore %arg0 : !u8i
+    // expected-error@+1 {{'cir.stackrestore' op operand #0 must be CIR pointer type, but got '!cir.int<u, 8>'}}
+    cir.stackrestore %arg0 : !u8i
     cir.return
   }
 }
@@ -965,7 +964,7 @@ cir.func @clrsb_invalid_result_ty(%arg0 : !s32i) -> () {  // expected-note {{pri
 
 cir.func @clz_invalid_input_ty(%arg0 : !s32i) -> () {
   // expected-error@+1 {{'cir.clz' op operand #0 must be unsigned integer type of widths 16/32/64, but got '!cir.int<s, 32>'}}
-  %0 = cir.clz %arg0 zero_poison : !s32i
+  %0 = cir.clz %arg0 : !s32i
   cir.return
 }
 
@@ -986,7 +985,7 @@ cir.func @clz_invalid_result_ty(%arg0 : !u32i) -> () {  // expected-note {{prior
 
 cir.func @ctz_invalid_input_ty(%arg0 : !s32i) -> () {
   // expected-error@+1 {{'cir.ctz' op operand #0 must be unsigned integer type of widths 16/32/64, but got '!cir.int<s, 32>'}}
-  %0 = cir.ctz %arg0 zero_poison : !s32i
+  %0 = cir.ctz %arg0 : !s32i
   cir.return
 }
 
@@ -1068,8 +1067,8 @@ cir.func @popcount_invalid_result_ty(%arg0 : !u32i) -> () {  // expected-note {{
 // -----
 
 cir.func @bad_fetch(%x: !cir.ptr<!cir.float>, %y: !cir.float) -> () {
-  // expected-error@+1 {{only operates on integer values}}
-  %12 = cir.atomic.fetch(xor, %x : !cir.ptr<!cir.float>, %y : !cir.float, seq_cst) : !cir.float
+  // expected-error@+1 {{only atomic add, sub, max, and min operation could operate on floating-point values}}
+  %12 = cir.atomic.fetch xor seq_cst %x, %y : (!cir.ptr<!cir.float>, !cir.float) -> !cir.float
   cir.return
 }
 
@@ -1078,8 +1077,8 @@ cir.func @bad_fetch(%x: !cir.ptr<!cir.float>, %y: !cir.float) -> () {
 !u32i = !cir.int<u, 32>
 !u64i = !cir.int<u, 64>
 cir.func @bad_xchg(%x: !cir.ptr<!u32i>, %y: !u64i) -> () {
-  // expected-error@+1 {{ptr type and val type must match}}
-  %13 = cir.atomic.xchg(%x: !cir.ptr<!u32i>, %y: !u64i, seq_cst) : !u64i
+  // expected-error@+1 {{'cir.atomic.xchg' op failed to verify that type of 'val' must match the pointee type of 'ptr'}}
+  %13 = cir.atomic.xchg seq_cst %x, %y : (!cir.ptr<!u32i>, !u64i) -> !u64i
   cir.return
 }
 
@@ -1088,8 +1087,8 @@ cir.func @bad_xchg(%x: !cir.ptr<!u32i>, %y: !u64i) -> () {
 !u32i = !cir.int<u, 32>
 !u64i = !cir.int<u, 64>
 cir.func @bad_cmp_xchg(%x: !cir.ptr<!u32i>, %y: !u64i, %z: !u64i) -> () {
-  // expected-error@+1 {{ptr, expected and desired types must match}}
-  %14, %15 = cir.atomic.cmp_xchg(%x : !cir.ptr<!u32i>, %y : !u64i, %z : !u64i, success = seq_cst, failure = seq_cst) align(8) weak : (!u64i, !cir.bool)
+  // expected-error@+1 {{'cir.atomic.cmpxchg' op failed to verify that type of 'expected' must match the pointee type of 'ptr'}}
+  %14, %15 = cir.atomic.cmpxchg weak success(seq_cst) failure(seq_cst) %x, %y, %z : (!cir.ptr<!u32i>, !u64i, !u64i) -> (!u64i, !cir.bool)
   cir.return
 }
 
@@ -1278,19 +1277,9 @@ cir.func @address_space4(%p : !cir.ptr<!u64i, lang_address_space(foobar)>) {
 
 !s32i = !cir.int<s, 32>
 
-// expected-error@+1 {{vec_type_hint_signedness should be present if and only if vec_type_hint is set}}
-#fn_attr = #cir.cl.kernel_metadata<
-  vec_type_hint = !s32i
->
-
-// -----
-
-!s32i = !cir.int<s, 32>
-
 // expected-error@+1 {{vec_type_hint_signedness must match the signedness of the vec_type_hint type}}
 #fn_attr = #cir.cl.kernel_metadata<
-  vec_type_hint = !s32i,
-  vec_type_hint_signedness = 0
+  vec_type_hint = !s32i
 >
 
 // -----
@@ -1368,8 +1357,8 @@ module {
 
 module {
   cir.func @array_to_ptrdecay_addrspace() {
-    %0 = cir.alloca !cir.array<!s32i x 32>, !cir.ptr<!cir.array<!s32i x 32>, lang_address_space(offload_private)>, ["x", init]
-    // expected-error@+1 {{requires same address space for source and result}}
+    %0 = cir.alloca !cir.array<!s32i x 32>, !cir.ptr<!cir.array<!s32i x 32>, lang_address_space(offload_private)>, ["x", init] {alignment = 4 : i64}
+    // expected-error@+1 {{'cir.cast' op result type address space does not match the address space of the operand}}
     %1 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!s32i x 32>, lang_address_space(offload_private)> -> !cir.ptr<!s32i>
     cir.return
   }
@@ -1386,7 +1375,7 @@ module {
 
   cir.func @call_conv_match() {
     // expected-error@+1 {{'cir.call' op calling convention mismatch: expected spir_function, but provided spir_kernel}}
-    cir.call @subroutine(): () -> !cir.void cc(spir_kernel)
+    cir.call @subroutine() : () -> () cc(spir_kernel)
     cir.return
   }
 }
@@ -1405,46 +1394,17 @@ module {
 
 // -----
 
-!s16i = !cir.int<s, 16>
-!s64i = !cir.int<s, 64>
-
-module {
-  cir.func @test_bitcast_vec2scalar_diff_size() {
-    %0 = cir.const #cir.int<1> : !s16i
-    %1 = cir.vec.create(%0, %0 : !s16i, !s16i) : !cir.vector<!s16i x 2>
-    // expected-error@+1 {{'cir.cast' op requires !cir.ptr or !cir.vector type for source and result}}
-    %2 = cir.cast bitcast %1 : !cir.vector<!s16i x 2> -> !s64i
-    cir.return
-  }
-}
-
-// -----
-
-!s32i = !cir.int<s, 32>
-!s64i = !cir.int<s, 64>
-
-module {
-  cir.func @test_bitcast_scalar2vec_diff_size() {
-    %0 = cir.const #cir.int<1> : !s64i
-    // expected-error@+1 {{'cir.cast' op requires !cir.ptr or !cir.vector type for source and result}}
-    %1 = cir.cast bitcast %0 : !s64i -> !cir.vector<!s32i x 4>
-    cir.return
-  }
-}
-
-// -----
-
 !s32i = !cir.int<s, 32>
 !s16i = !cir.int<s, 16>
 module {
   cir.func @test_shift_vec() {
-    %0 = cir.alloca !cir.vector<!s32i x 2>, !cir.ptr<!cir.vector<!s32i x 2>>, ["a", init] {alignment = 8 : i64}
-    %1 = cir.load %0 : !cir.ptr<!cir.vector<!s32i x 2>>, !cir.vector<!s32i x 2>
+    %0 = cir.alloca !cir.vector<2 x !s32i>, !cir.ptr<!cir.vector<2 x !s32i>>, ["a", init] {alignment = 8 : i64}
+    %1 = cir.load %0 : !cir.ptr<!cir.vector<2 x !s32i>>, !cir.vector<2 x !s32i>
     %2 = cir.const #cir.int<12> : !s32i
-    %4 = cir.const #cir.const_vector<[#cir.int<12> : !s16i, #cir.int<12> : !s16i]> : !cir.vector<!s16i x 2>
+    %4 = cir.const #cir.const_vector<[#cir.int<12> : !s16i, #cir.int<12> : !s16i]> : !cir.vector<2 x !s16i>
     // expected-error@+1 {{'cir.shift' op input types cannot be one vector and one scalar}}
-    %3 = cir.shift(left, %1 : !cir.vector<!s32i x 2>, %2 : !s32i) -> !cir.vector<!s32i x 2>
-    %5 = cir.shift(left, %1 : !cir.vector<!s32i x 2>, %4 : !cir.vector<!s16i x 2>) -> !cir.vector<!s32i x 2>
+    %3 = cir.shift(left, %1 : !cir.vector<2 x !s32i>, %2 : !s32i) -> !cir.vector<2 x !s32i>
+    %5 = cir.shift(left, %1 : !cir.vector<2 x !s32i>, %4 : !cir.vector<2 x !s16i>) -> !cir.vector<2 x !s32i>
     cir.return
   }
 }
@@ -1455,11 +1415,11 @@ module {
 !s16i = !cir.int<s, 16>
 module {
    cir.func @test_shift_vec2() {
-    %0 = cir.alloca !cir.vector<!s32i x 2>, !cir.ptr<!cir.vector<!s32i x 2>>, ["a", init] {alignment = 8 : i64}
-    %1 = cir.load %0 : !cir.ptr<!cir.vector<!s32i x 2>>, !cir.vector<!s32i x 2>
-    %4 = cir.const #cir.const_vector<[#cir.int<12> : !s16i, #cir.int<12> : !s16i]> : !cir.vector<!s16i x 2>
+    %0 = cir.alloca !cir.vector<2 x !s32i>, !cir.ptr<!cir.vector<2 x !s32i>>, ["a", init] {alignment = 8 : i64}
+    %1 = cir.load %0 : !cir.ptr<!cir.vector<2 x !s32i>>, !cir.vector<2 x !s32i>
+    %4 = cir.const #cir.const_vector<[#cir.int<12> : !s16i, #cir.int<12> : !s16i]> : !cir.vector<2 x !s16i>
     // expected-error@+1 {{'cir.shift' op vector operands do not have the same elements sizes}}
-    %5 = cir.shift(left, %1 : !cir.vector<!s32i x 2>, %4 : !cir.vector<!s16i x 2>) -> !cir.vector<!s32i x 2>
+    %5 = cir.shift(left, %1 : !cir.vector<2 x !s32i>, %4 : !cir.vector<2 x !s16i>) -> !cir.vector<2 x !s32i>
     cir.return
   }
 }
@@ -1470,11 +1430,11 @@ module {
 !s16i = !cir.int<s, 16>
 module {
    cir.func @test_shift_vec2() {
-    %0 = cir.alloca !cir.vector<!s32i x 2>, !cir.ptr<!cir.vector<!s32i x 2>>, ["a", init] {alignment = 8 : i64}
-    %1 = cir.load %0 : !cir.ptr<!cir.vector<!s32i x 2>>, !cir.vector<!s32i x 2>
-    %4 = cir.const #cir.const_vector<[#cir.int<12> : !s16i, #cir.int<12> : !s16i]> : !cir.vector<!s16i x 2>
+    %0 = cir.alloca !cir.vector<2 x !s32i>, !cir.ptr<!cir.vector<2 x !s32i>>, ["a", init] {alignment = 8 : i64}
+    %1 = cir.load %0 : !cir.ptr<!cir.vector<2 x !s32i>>, !cir.vector<2 x !s32i>
+    %4 = cir.const #cir.const_vector<[#cir.int<12> : !s16i, #cir.int<12> : !s16i]> : !cir.vector<2 x !s16i>
     // expected-error@+1 {{'cir.shift' op vector operands do not have the same elements sizes}}
-    %5 = cir.shift(left, %4 : !cir.vector<!s16i x 2>, %1 : !cir.vector<!s32i x 2>) -> !cir.vector<!s32i x 2>
+    %5 = cir.shift(left, %4 : !cir.vector<2 x !s16i>, %1 : !cir.vector<2 x !s32i>) -> !cir.vector<2 x !s32i>
     cir.return
   }
 }
@@ -1633,32 +1593,4 @@ cir.func @invalidConditionTerminator (%arg0 : !cir.bool) -> !cir.void {
     cir.yield
   }
   cir.return
-}
-
-// -----
-
-!s16i = !cir.int<s, 16>
-!s32i = !cir.int<s, 32>
-#fn_attr = #cir<extra({nothrow = #cir.nothrow, uwtable = #cir.uwtable<async>})>
-!rec_S = !cir.record<struct "S" {!s16i} #cir.record.decl.ast>
-#tbaa_scalar = #cir.tbaa_scalar<id = "short", type = !s16i>
-// expected-error @below {{invalid kind of attribute specified}}
-// expected-error @below {{failed to parse CIR_TBAAStructAttr parameter 'members'}}
-#tbaa_struct = #cir.tbaa_struct<id = "S", members = {#cir.uwtable<async>}>
-#tbaa_tag = #cir.tbaa_tag<base = #tbaa_struct, access = #tbaa_scalar, offset = 0>
-cir.global external dso_local @glob = #cir.zero : !rec_S {alignment = 2 : i64}
-cir.func dso_local @main() -> !s32i extra(#fn_attr) {
-  %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
-  %1 = cir.const #cir.int<0> : !s32i
-  %2 = cir.cast integral %1 : !s32i -> !s16i
-  %3 = cir.get_global @glob : !cir.ptr<!rec_S>
-  %4 = cir.get_member %3[0] {name = "i"} : !cir.ptr<!rec_S> -> !cir.ptr<!s16i>
-  cir.store align(2) %2, %4 : !s16i, !cir.ptr<!s16i> tbaa(#tbaa_tag)
-  %5 = cir.get_global @glob : !cir.ptr<!rec_S>
-  %6 = cir.get_member %5[0] {name = "i"} : !cir.ptr<!rec_S> -> !cir.ptr<!s16i>
-  %7 = cir.load align(2) %6 : !cir.ptr<!s16i>, !s16i tbaa(#tbaa_tag)
-  %8 = cir.cast integral %7 : !s16i -> !s32i
-  cir.store %8, %0 : !s32i, !cir.ptr<!s32i>
-  %9 = cir.load %0 : !cir.ptr<!s32i>, !s32i
-  cir.return %9 : !s32i
 }

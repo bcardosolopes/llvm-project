@@ -20,7 +20,15 @@ using namespace clang::CIRGen;
 void CIRGenModule::emitCXXGlobalVarDeclInitFunc(const VarDecl *vd,
                                                 cir::GlobalOp addr,
                                                 bool performInit) {
-  assert(!cir::MissingFeatures::cudaSupport());
+  // According to E.2.3.1 in CUDA-7.5 Programming guide: __device__,
+  // __constant__ and __shared__ variables defined in namespace scope,
+  // that are of class type, cannot have a non-empty constructor. All
+  // the checks have been done in Sema by now. Whatever initializers
+  // are allowed are empty and we just need to ignore them here.
+  if (getLangOpts().CUDAIsDevice && !getLangOpts().GPUAllowDeviceInit &&
+      (vd->hasAttr<CUDADeviceAttr>() || vd->hasAttr<CUDAConstantAttr>() ||
+       vd->hasAttr<CUDASharedAttr>()))
+    return;
 
   assert(!cir::MissingFeatures::deferredCXXGlobalInit());
 

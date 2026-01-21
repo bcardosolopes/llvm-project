@@ -31,6 +31,10 @@ mlir::Value lowerCirAttrAsValue(mlir::Operation *parentOp, mlir::Attribute attr,
 
 mlir::LLVM::Linkage convertLinkage(cir::GlobalLinkageKind linkage);
 
+mlir::ArrayAttr lowerCIRTBAAAttr(mlir::Attribute tbaa,
+                                 mlir::ConversionPatternRewriter &rewriter,
+                                 cir::LowerModule *lowerMod);
+
 void convertSideEffectForCall(mlir::Operation *callOp, bool isNothrow,
                               cir::SideEffect sideEffect,
                               mlir::LLVM::MemoryEffectsAttr &memoryEffect,

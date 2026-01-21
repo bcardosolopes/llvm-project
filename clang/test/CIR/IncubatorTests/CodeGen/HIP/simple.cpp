@@ -81,9 +81,9 @@ __global__ void global_fn(int a) {}
 // LLVM-HOST: void @_Z24__device_stub__global_fni
 // LLVM-HOST: %[[#KernelArgs:]] = alloca [1 x ptr], i64 1, align 16
 // LLVM-HOST: %[[#GEP1:]] = getelementptr ptr, ptr %[[#KernelArgs]], i32 0
-// LLVM-HOST: %[[#GEP2:]] = getelementptr [1 x ptr], ptr %[[#KernelArgs]], i32 0, i64 0
+// LLVM-HOST: %[[#GEP2:]] = getelementptr ptr, ptr %[[#GEP1]], i64 0
 // LLVM-HOST: call i32 @__hipPopCallConfiguration
-// LLVM-HOST: call i32 @hipLaunchKernel(ptr @_Z9global_fni 
+// LLVM-HOST: call i32 @hipLaunchKernel(ptr @_Z9global_fni
 // LLVM-HOST-PTH: call i32 @hipLaunchKernel_spt(ptr @_Z9global_fni 
 //
 // OGCG-HOST: define dso_local void @_Z24__device_stub__global_fni

@@ -32,35 +32,35 @@ void test() {
 }
 
 // ============================================================================
-// CIR Output - Thunk with This-Adjustment Only
+// CIR Output - Vtable with thunk references
 // ============================================================================
 
-// Derived::bar() needs a thunk when called through Base2* because
-// Base2 is at offset 8 in Derived (after Base1's vtable pointer)
+// CIR: cir.global  linkonce_odr comdat @_ZTV7Derived = #cir.vtable
+// CIR-SAME: #cir.global_view<@_ZThn8_N7Derived3barEv>
 
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn8_N7Derived3barEv
-// CIR: cir.ptr_stride
-// CIR: cir.call @_ZN7Derived3barEv
+// CIR: cir.func {{.*}} @_ZN7DerivedC2Ev
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Derived> -> !cir.ptr<!cir.vptr>
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 1, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Base2> -> !cir.ptr<!cir.vptr>
+
+// CIR: cir.func {{.*}} @_ZThn8_N7Derived3barEv
+// CIR:   cir.ptr_stride %{{.*}}, %{{.*}} : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
+// CIR:   cir.call @_ZN7Derived3barEv
 
 // ============================================================================
-// VTable Structure - Both CIR and OGCG
+// LLVM and OGCG Output
 // ============================================================================
 
-// Check that vtable contains the thunk
-//      LLVM: @_ZTV7Derived = linkonce_odr constant
+// LLVM: @_ZTV7Derived = linkonce_odr global { [4 x ptr], [3 x ptr] }
 // LLVM-SAME: @_ZThn8_N7Derived3barEv
+
+// LLVM: define linkonce_odr void @_ZThn8_N7Derived3barEv
+// LLVM:   getelementptr i8, ptr %{{.*}}, i64 -8
+// LLVM:   call void @_ZN7Derived3barEv
 
 //      OGCG: @_ZTV7Derived = linkonce_odr {{.*}} constant
 // OGCG-SAME: @_ZThn8_N7Derived3barEv
-
-// ============================================================================
-// Thunk Implementation - LLVM Lowering vs OGCG
-// ============================================================================
-
-// CIR lowering should produce this-adjustment (no return adjustment for void)
-// LLVM-LABEL: define linkonce_odr void @_ZThn8_N7Derived3barEv
-//       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -8
-//       LLVM: call void @_ZN7Derived3barEv
 
 // OGCG-LABEL: define linkonce_odr void @_ZThn8_N7Derived3barEv
 //       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -8

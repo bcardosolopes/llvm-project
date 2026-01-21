@@ -13,7 +13,10 @@ add_clang_library(clangCIR
   CIRGenBuilder.cpp
   CIRGenBuiltin.cpp
   CIRGenBuiltinAArch64.cpp
+  CIRGenBuiltinNVPTX.cpp
   CIRGenBuiltinX86.cpp
+  CIRGenCUDANV.cpp
+  CIRGenCUDARuntime.cpp
   CIRGenCall.cpp
   CIRGenClass.cpp
   CIRGenCleanup.cpp
@@ -40,10 +43,12 @@ add_clang_library(clangCIR
   CIRGenOpenMPClause.cpp
   CIRGenPointerAuth.cpp
   CIRGenRecordLayoutBuilder.cpp
+  CIRGenStatistics.cpp
   CIRGenStmt.cpp
   CIRGenStmtOpenACC.cpp
   CIRGenStmtOpenACCLoop.cpp
   CIRGenStmtOpenMP.cpp
+  CIRGenTBAA.cpp
   CIRGenTypes.cpp
   CIRGenVTables.cpp
   TargetInfo.cpp

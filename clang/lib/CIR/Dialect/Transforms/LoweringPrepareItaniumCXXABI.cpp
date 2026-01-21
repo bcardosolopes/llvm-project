@@ -12,7 +12,7 @@
 //
 //===--------------------------------------------------------------------===//
 
-#include "LoweringPrepareCXXABI.h"
+#include "LoweringPrepareItaniumCXXABI.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -22,13 +22,6 @@
 #include "clang/CIR/Dialect/IR/CIRDataLayout.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/MissingFeatures.h"
-
-class LoweringPrepareItaniumCXXABI : public cir::LoweringPrepareCXXABI {
-public:
-  mlir::Value lowerDynamicCast(cir::CIRBaseBuilderTy &builder,
-                               clang::ASTContext &astCtx,
-                               cir::DynamicCastOp op) override;
-};
 
 cir::LoweringPrepareCXXABI *cir::LoweringPrepareCXXABI::createItaniumABI() {
   return new LoweringPrepareItaniumCXXABI();
@@ -96,8 +89,10 @@ buildDynamicCastToVoidAfterNullCheck(cir::CIRBaseBuilderTy &builder,
   mlir::Location loc = op.getLoc();
   bool vtableUsesRelativeLayout = op.getRelativeLayout();
 
-  // TODO(cir): consider address space in this function.
-  assert(!cir::MissingFeatures::addressSpace());
+  // Get the address space from the source pointer to preserve it through
+  // intermediate operations.
+  auto srcPtrTy = mlir::cast<cir::PointerType>(op.getSrc().getType());
+  auto srcAS = srcPtrTy.getAddrSpace();
 
   mlir::Type vtableElemTy;
   uint64_t vtableElemAlign;
@@ -119,7 +114,10 @@ buildDynamicCastToVoidAfterNullCheck(cir::CIRBaseBuilderTy &builder,
   // Access vtable to get the offset from the given object to its containing
   // complete object.
   // TODO: Add a specialized operation to get the object offset?
-  auto vptrPtr = cir::VTableGetVPtrOp::create(builder, loc, op.getSrc());
+  auto vptrPtrTy =
+      cir::PointerType::get(cir::VPtrType::get(builder.getContext()), srcAS);
+  auto vptrPtr =
+      cir::VTableGetVPtrOp::create(builder, loc, vptrPtrTy, op.getSrc());
   mlir::Value vptr = builder.createLoad(loc, vptrPtr);
   mlir::Value elementPtr =
       builder.createBitcast(vptr, builder.getPointerTo(vtableElemTy));
@@ -131,12 +129,13 @@ buildDynamicCastToVoidAfterNullCheck(cir::CIRBaseBuilderTy &builder,
 
   // Add the offset to the given pointer to get the cast result.
   // Cast the input pointer to a uint8_t* to allow pointer arithmetic.
-  cir::PointerType u8PtrTy = builder.getPointerTo(builder.getUIntNTy(8));
+  // Preserve the source address space through these casts.
+  cir::PointerType u8PtrTy = builder.getPointerTo(builder.getUIntNTy(8), srcAS);
   mlir::Value srcBytePtr = builder.createBitcast(op.getSrc(), u8PtrTy);
   auto dstBytePtr =
       cir::PtrStrideOp::create(builder, loc, u8PtrTy, srcBytePtr, offsetToTop);
   // Cast the result to a void*.
-  return builder.createBitcast(dstBytePtr, builder.getVoidPtrTy());
+  return builder.createBitcast(dstBytePtr, builder.getVoidPtrTy(srcAS));
 }
 
 mlir::Value

@@ -112,9 +112,10 @@ void shouldGenerateUnionAccess(union U2 u) {
   u.d;
 }
 
-// CIR:      cir.func{{.*}} @shouldGenerateUnionAccess(%[[ARG:.*]]: !rec_U2
-// CIR-NEXT:   %[[U:.*]] = cir.alloca !rec_U2, !cir.ptr<!rec_U2>, ["u", init] {alignment = 8 : i64}
-// CIR-NEXT:   cir.store{{.*}} %[[ARG]], %[[U]] : !rec_U2, !cir.ptr<!rec_U2>
+// CIR:      cir.func{{.*}} @shouldGenerateUnionAccess(%[[ARG:.*]]: !u64i
+// CIR-NEXT:   %[[U:.*]] = cir.alloca !rec_U2, !cir.ptr<!rec_U2>, [""] {alignment = 4 : i64}
+// CIR-NEXT:   %[[UCAST:.*]] = cir.cast bitcast %[[U]] : !cir.ptr<!rec_U2> -> !cir.ptr<!u64i>
+// CIR-NEXT:   cir.store{{.*}} %[[ARG]], %[[UCAST]] : !u64i, !cir.ptr<!u64i>
 // CIR-NEXT:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s8i
 // CIR-NEXT:   %[[B_PTR:.*]] = cir.get_member %[[U]][0] {name = "b"} : !cir.ptr<!rec_U2> -> !cir.ptr<!s8i>
 // CIR-NEXT:   cir.store{{.*}} %[[ZERO]], %[[B_PTR]] : !s8i, !cir.ptr<!s8i>
@@ -137,9 +138,9 @@ void shouldGenerateUnionAccess(union U2 u) {
 // CIR-NEXT:   %[[D_VAL:.*]] = cir.load{{.*}} %[[D_PTR2]] : !cir.ptr<!cir.double>, !cir.double
 // CIR-NEXT:   cir.return
 
-// LLVM:      define{{.*}} void @shouldGenerateUnionAccess(%union.U2 %[[ARG:.*]])
-// LLVM-NEXT:   %[[U:.*]] = alloca %union.U2, i64 1, align 8
-// LLVM-NEXT:   store %union.U2 %[[ARG]], ptr %[[U]], align 8
+// LLVM:      define{{.*}} void @shouldGenerateUnionAccess(i64 %[[ARG:.*]])
+// LLVM-NEXT:   %[[U:.*]] = alloca %union.U2, i64 1, align 4
+// LLVM-NEXT:   store i64 %[[ARG]], ptr %[[U]], align 8
 // LLVM-NEXT:   store i8 0, ptr %[[U]], align 8
 // LLVM-NEXT:   %[[B_VAL:.*]] = load i8, ptr %[[U]], align 8
 // LLVM-NEXT:   store i32 1, ptr %[[U]], align 8
@@ -169,9 +170,10 @@ void f3(union U3 u) {
   u.c[2] = 0;
 }
 
-// CIR:      cir.func{{.*}} @f3(%[[ARG:.*]]: !rec_U3
-// CIR-NEXT:   %[[U:.*]] = cir.alloca !rec_U3, !cir.ptr<!rec_U3>, ["u", init] {alignment = 1 : i64}
-// CIR-NEXT:   cir.store{{.*}} %[[ARG]], %[[U]] : !rec_U3, !cir.ptr<!rec_U3>
+// CIR:      cir.func{{.*}} @f3(%[[ARG:.*]]: !cir.int<u, 40>
+// CIR-NEXT:   %[[U:.*]] = cir.alloca !rec_U3, !cir.ptr<!rec_U3>, [""] {alignment = 4 : i64}
+// CIR-NEXT:   %[[UCAST:.*]] = cir.cast bitcast %[[U]] : !cir.ptr<!rec_U3> -> !cir.ptr<!cir.int<u, 40>>
+// CIR-NEXT:   cir.store{{.*}} %[[ARG]], %[[UCAST]] : !cir.int<u, 40>, !cir.ptr<!cir.int<u, 40>>
 // CIR-NEXT:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s8i
 // CIR-NEXT:   %[[IDX:.*]] = cir.const #cir.int<2> : !s32i
 // CIR-NEXT:   %[[C_PTR:.*]] = cir.get_member %[[U]][0] {name = "c"} : !cir.ptr<!rec_U3> -> !cir.ptr<!cir.array<!s8i x 5>>
@@ -179,9 +181,9 @@ void f3(union U3 u) {
 // CIR-NEXT:   cir.store{{.*}} %[[ZERO]], %[[ELEM_PTR]] : !s8i, !cir.ptr<!s8i>
 // CIR-NEXT:   cir.return
 
-// LLVM:      define{{.*}} void @f3(%union.U3 %[[ARG:.*]])
-// LLVM-NEXT:   %[[U:.*]] = alloca %union.U3, i64 1, align 1
-// LLVM-NEXT:   store %union.U3 %[[ARG]], ptr %[[U]], align 1
+// LLVM:      define{{.*}} void @f3(i40 %[[ARG:.*]])
+// LLVM-NEXT:   %[[U:.*]] = alloca %union.U3, i64 1, align 4
+// LLVM-NEXT:   store i40 %[[ARG]], ptr %[[U]], align 8
 // LLVM-NEXT:   %[[ELEM_PTR:.*]] = getelementptr [5 x i8], ptr %[[U]], i32 0, i64 2
 // LLVM-NEXT:   store i8 0, ptr %[[ELEM_PTR]], align 1
 // LLVM-NEXT:   ret void
@@ -198,9 +200,10 @@ void f5(union U4 u) {
   u.c[4] = 65;
 }
 
-// CIR:      cir.func{{.*}} @f5(%[[ARG:.*]]: !rec_U4
-// CIR-NEXT:   %[[U:.*]] = cir.alloca !rec_U4, !cir.ptr<!rec_U4>, ["u", init] {alignment = 4 : i64}
-// CIR-NEXT:   cir.store{{.*}} %[[ARG]], %[[U]] : !rec_U4, !cir.ptr<!rec_U4>
+// CIR:      cir.func{{.*}} @f5(%[[ARG:.*]]: !u64i
+// CIR-NEXT:   %[[U:.*]] = cir.alloca !rec_U4, !cir.ptr<!rec_U4>, [""] {alignment = 4 : i64}
+// CIR-NEXT:   %[[UCAST:.*]] = cir.cast bitcast %[[U]] : !cir.ptr<!rec_U4> -> !cir.ptr<!u64i>
+// CIR-NEXT:   cir.store{{.*}} %[[ARG]], %[[UCAST]] : !u64i, !cir.ptr<!u64i>
 // CIR-NEXT:   %[[CHAR_VAL:.*]] = cir.const #cir.int<65> : !s8i
 // CIR-NEXT:   %[[IDX:.*]] = cir.const #cir.int<4> : !s32i
 // CIR-NEXT:   %[[C_PTR:.*]] = cir.get_member %[[U]][0] {name = "c"} : !cir.ptr<!rec_U4> -> !cir.ptr<!cir.array<!s8i x 5>>
@@ -208,9 +211,9 @@ void f5(union U4 u) {
 // CIR-NEXT:   cir.store{{.*}} %[[CHAR_VAL]], %[[ELEM_PTR]] : !s8i, !cir.ptr<!s8i>
 // CIR-NEXT:   cir.return
 
-// LLVM:      define{{.*}} void @f5(%union.U4 %[[ARG:.*]])
+// LLVM:      define{{.*}} void @f5(i64 %[[ARG:.*]])
 // LLVM-NEXT:   %[[U:.*]] = alloca %union.U4, i64 1, align 4
-// LLVM-NEXT:   store %union.U4 %[[ARG]], ptr %[[U]], align 4
+// LLVM-NEXT:   store i64 %[[ARG]], ptr %[[U]], align 8
 // LLVM-NEXT:   %[[ELEM_PTR:.*]] = getelementptr [5 x i8], ptr %[[U]], i32 0, i64 4
 // LLVM-NEXT:   store i8 65, ptr %[[ELEM_PTR]], align 4
 // LLVM-NEXT:   ret void

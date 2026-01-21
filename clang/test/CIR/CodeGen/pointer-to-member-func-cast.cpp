@@ -29,7 +29,7 @@ bool memfunc_to_bool(void (Foo::*func)(int)) {
 // CIR-AFTER:   %[[FUNC_PTR:.*]] = cir.extract_member %[[FUNC]][0] : !rec_anon_struct -> !s64i
 // CIR-AFTER:   %[[BOOL_VAL:.*]] = cir.cmp(ne, %[[FUNC_PTR]], %[[NULL_VAL]]) : !s64i, !cir.bool
 
-// LLVM: define {{.*}} i1 @_Z15memfunc_to_boolM3FooFviE
+// LLVM: define {{.*}} i1 @_Z15memfunc_to_boolM3FooFviE(i64 %{{.*}}, i64 %{{.*}})
 // LLVM:   %[[FUNC:.*]] = load { i64, i64 }, ptr %{{.*}}
 // LLVM:   %[[FUNC_PTR:.*]] = extractvalue { i64, i64 } %[[FUNC]], 0
 // LLVM:   %{{.*}} = icmp ne i64 %[[FUNC_PTR]], 0
@@ -53,14 +53,17 @@ auto memfunc_reinterpret(void (Foo::*func)(int)) -> void (Bar::*)() {
 // CIR-BEFORE:   %{{.*}} = cir.cast bitcast %{{.*}} : !cir.method<!cir.func<(!s32i)> in !rec_Foo> -> !cir.method<!cir.func<()> in !rec_Bar>
 
 // CIR-AFTER: cir.func {{.*}} @_Z19memfunc_reinterpretM3FooFviE
-// CIR-AFTER:   %[[FUNC:.*]] = cir.load{{.*}} %{{.*}} : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
+// CIR-AFTER:   %[[FUNC:.*]] = cir.load{{.*}} !cir.ptr<!rec_anon_struct>, !rec_anon_struct
 // CIR-AFTER:   cir.store %[[FUNC]], %[[RET_ADDR:.*]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
-// CIR-AFTER:   %[[RET:.*]] = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.return %[[RET]] : !rec_anon_struct
+// CIR-AFTER:   %{{.*}} = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
+// CIR-AFTER:   %[[RET_CAST:.*]] = cir.cast bitcast %[[RET_ADDR]]
+// CIR-AFTER:   %[[RET:.*]] = cir.load{{.*}} %[[RET_CAST]]
+// CIR-AFTER:   cir.return %[[RET]]
 
-// LLVM: define {{.*}} { i64, i64 } @_Z19memfunc_reinterpretM3FooFviE
+// LLVM: define {{.*}} { i64, i64 } @_Z19memfunc_reinterpretM3FooFviE(i64 %{{.*}}, i64 %{{.*}})
 // LLVM:   %[[FUNC:.*]] = load { i64, i64 }, ptr %{{.*}}
 // LLVM:   store { i64, i64 } %[[FUNC]], ptr %[[RET_ADDR:.*]]
+// LLVM:   %{{.*}} = load { i64, i64 }, ptr %[[RET_ADDR]]
 // LLVM:   %[[RET:.*]] = load { i64, i64 }, ptr %[[RET_ADDR]]
 // LLVM:   ret { i64, i64 } %[[RET]]
 

@@ -35,6 +35,5 @@ void test_accum() {
 void test_negative() {
   // CHECK: cir.func{{.*}} @test_negative
   short _Fract sf = -0.5hr;
-  // CHECK: %{{.*}} = cir.const #cir.int<64> : !s8i
-  // CHECK: %{{.*}} = cir.unary(minus, %{{.*}}) : !s8i, !s8i
+  // CHECK: %{{.*}} = cir.const #cir.int<-64> : !s8i
 }

@@ -5,12 +5,17 @@
 
 // TODO: remove the -fno-clangir-call-conv-lowering flag when ABI lowering for
 //       int128 is supported.
+//
+// TODO(cir): Upstream represents __int128 function parameters/returns as
+// anonymous structs (!rec_anon_struct = {!s64i, !s64i}) while the incubator
+// uses !s128i/!u128i directly. The !s128i type exists in upstream and is used
+// for alloca/load/store/arithmetic, but function signatures decompose it.
 
 // CHECK-LABEL: @_Z5test1n
 // LLVM-LABEL: @_Z5test1n
 __int128 test1(__int128 x) {
   return x;
-  // CHECK: cir.return %{{.+}} : !s128i
+  // CHECK: cir.return %{{.+}} : !rec_anon_struct
   // LLVM: ret i128 %{{.+}}
 }
 
@@ -18,7 +23,7 @@ __int128 test1(__int128 x) {
 // LLVM-LABEL: @_Z5test2o
 unsigned __int128 test2(unsigned __int128 x) {
   return x;
-  // CHECK: cir.return %{{.+}} : !u128i
+  // CHECK: cir.return %{{.+}} : !rec_anon_struct1
   // LLVM: ret i128 %{{.+}}
 }
 

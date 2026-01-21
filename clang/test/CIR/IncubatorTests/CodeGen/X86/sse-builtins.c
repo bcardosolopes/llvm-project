@@ -21,7 +21,7 @@ void test_mm_prefetch(char const* p) {
   // CIR-LABEL: test_mm_prefetch
   // LLVM-LABEL: test_mm_prefetch
   _mm_prefetch(p, 0);
-  // CIR: cir.prefetch(%{{.*}} : !cir.ptr<!void>) locality(0) read
+  // CIR: cir.prefetch read locality(0) %{{.*}} : !cir.ptr<!void>
   // LLVM: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 0, i32 1)
 }
 
@@ -29,15 +29,15 @@ void test_mm_sfence(void) {
   // CIR-LABEL: test_mm_sfence
   // LLVM-LABEL: test_mm_sfence
   _mm_sfence();
-  // CIR: {{%.*}} = cir.llvm.intrinsic "x86.sse.sfence" : () -> !void
+  // CIR: {{%.*}} = cir.call_llvm_intrinsic "x86.sse.sfence" : () -> !void
   // LLVM: call void @llvm.x86.sse.sfence()
 }
 
 __m128 test_mm_undefined_ps(void) {
   // CIR-LABEL: _mm_undefined_ps
-  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<!cir.double x 2>
-  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<!cir.double x 2> -> !cir.vector<!cir.float x 4>
-  // CIR: cir.return %{{.*}} : !cir.vector<!cir.float x 4>
+  // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<2 x !cir.double>
+  // CIR: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<2 x !cir.double> -> !cir.vector<4 x !cir.float>
+  // CIR: cir.return %{{.*}} : !cir.vector<4 x !cir.float>
 
   // LLVM-LABEL: test_mm_undefined_ps
   // LLVM: store <4 x float> zeroinitializer, ptr %[[A:.*]], align 16
@@ -49,7 +49,7 @@ __m128 test_mm_undefined_ps(void) {
 void test_mm_setcsr(unsigned int A) {
   // CIR-LABEL: test_mm_setcsr
   // CIR: cir.store {{.*}}, {{.*}} : !u32i
-  // CIR: cir.llvm.intrinsic "x86.sse.ldmxcsr" {{.*}} : (!cir.ptr<!u32i>) -> !void
+  // CIR: cir.call_llvm_intrinsic "x86.sse.ldmxcsr" {{.*}} : (!cir.ptr<!u32i>) -> !void
 
   // LLVM-LABEL: test_mm_setcsr 
   // LLVM: store i32
@@ -59,7 +59,7 @@ void test_mm_setcsr(unsigned int A) {
 
 unsigned int test_mm_getcsr(void) {
   // CIR-LABEL: test_mm_getcsr
-  // CIR: cir.llvm.intrinsic "x86.sse.stmxcsr" %{{.*}} : (!cir.ptr<!u32i>) -> !void
+  // CIR: cir.call_llvm_intrinsic "x86.sse.stmxcsr" %{{.*}} : (!cir.ptr<!u32i>) -> !void
   // CIR: cir.load {{.*}} : !cir.ptr<!u32i>, !u32i
 
   // LLVM-LABEL: test_mm_getcsr
@@ -70,7 +70,7 @@ unsigned int test_mm_getcsr(void) {
 
 __m128 test_mm_shuffle_ps(__m128 A, __m128 B) {
   // CIR-LABEL: _mm_shuffle_ps
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 4>) [#cir.int<0> : !s32i, #cir.int<0> : !s32i, #cir.int<4> : !s32i, #cir.int<4> : !s32i] : !cir.vector<!cir.float x 4>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.float>) [#cir.int<0> : !s32i, #cir.int<0> : !s32i, #cir.int<4> : !s32i, #cir.int<4> : !s32i] : !cir.vector<4 x !cir.float>
 
   // CHECK-LABEL: test_mm_shuffle_ps
   // CHECK: shufflevector <4 x float> {{.*}}, <4 x float> {{.*}}, <4 x i32> <i32 0, i32 0, i32 4, i32 4>

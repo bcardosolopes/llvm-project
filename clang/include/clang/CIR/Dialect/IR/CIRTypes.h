@@ -46,7 +46,17 @@ bool isSized(mlir::Type ty);
 cir::TargetAddressSpaceAttr toCIRTargetAddressSpace(mlir::MLIRContext &context,
                                                     clang::LangAS langAS);
 
-bool isMatchingAddressSpace(cir::TargetAddressSpaceAttr cirAS,
+cir::LangAddressSpace toCIRLangAddressSpace(clang::LangAS langAS);
+
+/// Convert a LangAS to the appropriate address space attribute interface.
+/// Returns a MemorySpaceAttrInterface.
+mlir::ptr::MemorySpaceAttrInterface
+toCIRLangAddressSpaceAttr(mlir::MLIRContext *ctx, clang::LangAS langAS);
+
+bool isSupportedCIRMemorySpaceAttr(
+    mlir::ptr::MemorySpaceAttrInterface memorySpace);
+
+bool isMatchingAddressSpace(mlir::ptr::MemorySpaceAttrInterface cirAS,
                             clang::LangAS as);
 
 } // namespace cir

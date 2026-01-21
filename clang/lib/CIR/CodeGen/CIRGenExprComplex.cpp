@@ -468,13 +468,14 @@ mlir::Value ComplexExprEmitter::emitCast(CastKind ck, Expr *op,
   case CK_LValueToRValue:
     return Visit(op);
 
+  case CK_UserDefinedConversion:
+    return Visit(op);
+
+  // Atomic to non-atomic casts may be more than a no-op for some platforms
+  // and for some types.
   case CK_AtomicToNonAtomic:
   case CK_NonAtomicToAtomic:
-  case CK_UserDefinedConversion: {
-    cgf.cgm.errorNYI(
-        "ComplexExprEmitter::emitCast Atmoic & UserDefinedConversion");
-    return {};
-  }
+    llvm_unreachable("emitCast Atomic NYI");
 
   case CK_LValueBitCast: {
     LValue origLV = cgf.emitLValue(op);

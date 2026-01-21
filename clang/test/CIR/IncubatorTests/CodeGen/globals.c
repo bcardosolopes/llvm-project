@@ -82,8 +82,6 @@ int foo() {
     return optind;
 }
 // CHECK: cir.global "private" external @optind : !s32i
-// CHECK: cir.func {{.*@foo}}
-// CHECK:   {{.*}} = cir.get_global @optind : !cir.ptr<!s32i>
 
 struct Glob {
   double a[42];
@@ -113,3 +111,5 @@ float zeroInitFlt[2];
 // CHECK: cir.global external @tentativeC = #cir.fp<0.000000e+00> : !cir.float
 // CHECK: cir.global external @tentativeD = #cir.zero : !cir.array<!s32i x 1>
 // CHECK: cir.global external @zeroInitFlt = #cir.zero : !cir.array<!cir.float x 2>
+// CHECK: cir.func {{.*@foo}}
+// CHECK:   {{.*}} = cir.get_global @optind : !cir.ptr<!s32i>

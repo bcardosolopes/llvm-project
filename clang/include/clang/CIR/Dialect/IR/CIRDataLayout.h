@@ -15,6 +15,7 @@
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
+#include "llvm/IR/DataLayout.h"
 
 namespace cir {
 
@@ -24,6 +25,9 @@ class CIRDataLayout {
   // This is starting with the minimum functionality needed for code that is
   // being upstreamed. Additional methods and members will be added as needed.
   bool bigEndian = false;
+
+  /// Aggregate alignment data.
+  llvm::DataLayout::PrimitiveSpec RecordAlignment;
 
 public:
   mlir::DataLayout layout;
@@ -41,6 +45,10 @@ public:
 
   llvm::Align getABITypeAlign(mlir::Type ty) const {
     return getAlignment(ty, true);
+  }
+
+  llvm::Align getPrefTypeAlign(mlir::Type ty) const {
+    return getAlignment(ty, false);
   }
 
   /// Returns the maximum number of bytes that may be overwritten by

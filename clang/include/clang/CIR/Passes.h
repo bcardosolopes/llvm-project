@@ -17,7 +17,33 @@
 
 #include <memory>
 
+namespace llvm {
+class LLVMContext;
+class Module;
+} // namespace llvm
+
 namespace cir {
+/// Create a pass for lowering from MLIR builtin dialects such as `Affine` and
+/// `Std`, to the LLVM dialect for codegen.
+std::unique_ptr<mlir::Pass> createConvertMLIRToLLVMPass();
+
+/// Create a pass that fully lowers CIR to the MLIR in-tree dialects.
+std::unique_ptr<mlir::Pass> createConvertCIRToMLIRPass();
+
+/// Lower CIR to MLIR standard dialects.
+mlir::ModuleOp lowerFromCIRToMLIR(mlir::ModuleOp theModule,
+                                  mlir::MLIRContext *mlirCtx);
+
+/// Lower CIR through MLIR to LLVM dialect.
+mlir::ModuleOp lowerFromCIRToMLIRToLLVMDialect(mlir::ModuleOp theModule,
+                                               mlir::MLIRContext *mlirCtx);
+
+/// Lower CIR through MLIR to LLVM IR.
+std::unique_ptr<llvm::Module>
+lowerFromCIRToMLIRToLLVMIR(mlir::ModuleOp theModule,
+                           std::unique_ptr<mlir::MLIRContext> mlirCtx,
+                           llvm::LLVMContext &llvmCtx);
+
 namespace direct {
 /// Create a pass that fully lowers CIR to the LLVMIR dialect.
 std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass();

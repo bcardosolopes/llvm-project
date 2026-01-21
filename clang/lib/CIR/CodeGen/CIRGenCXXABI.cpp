@@ -96,3 +96,16 @@ bool CIRGenCXXABI::requiresArrayCookie(const CXXNewExpr *e) {
 
   return e->getAllocatedType().isDestructedType();
 }
+
+bool CIRGenCXXABI::isZeroInitializable(const MemberPointerType *mpt) {
+  // Fake answer.
+  return true;
+}
+
+void CIRGenCXXABI::emitReturnFromThunk(CIRGenFunction &cgf, RValue rv,
+                                       QualType resultType) {
+  assert(!cgf.hasAggregateEvaluationKind(resultType) &&
+         "cannot handle aggregates");
+  auto loc = cgf.getBuilder().getUnknownLoc();
+  cgf.emitReturnOfRValue(loc, rv, resultType);
+}

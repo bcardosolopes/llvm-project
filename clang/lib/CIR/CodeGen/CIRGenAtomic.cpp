@@ -327,7 +327,8 @@ static void emitAtomicCmpXchg(CIRGenFunction &cgf, AtomicExpr *e, bool isWeak,
       expected, desired,
       cir::MemOrderAttr::get(&cgf.getMLIRContext(), successOrder),
       cir::MemOrderAttr::get(&cgf.getMLIRContext(), failureOrder),
-      builder.getI64IntegerAttr(ptr.getAlignment().getAsAlign().value()));
+      builder.getI64IntegerAttr(ptr.getAlignment().getAsAlign().value()),
+      /*weak=*/nullptr, /*is_volatile=*/nullptr, /*sync_scope=*/nullptr);
 
   cmpxchg.setIsVolatile(e->isVolatile());
   cmpxchg.setWeak(isWeak);
@@ -391,9 +392,56 @@ static void emitAtomicCmpXchgFailureSet(CIRGenFunction &cgf, AtomicExpr *e,
     return;
   }
 
-  assert(!cir::MissingFeatures::atomicExpr());
-  cgf.cgm.errorNYI(e->getSourceRange(),
-                   "emitAtomicCmpXchgFailureSet: non-constant failure order");
+  // Handle non-constant failure order by emitting a switch on the failure
+  // order value and calling emitAtomicCmpXchg for each valid case.
+  CIRGenBuilderTy &builder = cgf.getBuilder();
+  mlir::Location loc = cgf.getLoc(e->getSourceRange());
+  mlir::Value failureOrderVal = cgf.emitScalarExpr(failureOrderExpr);
+
+  cir::SwitchOp::create(
+      builder, loc, failureOrderVal,
+      [&](mlir::OpBuilder &, mlir::Location switchLoc, mlir::OperationState &) {
+        mlir::Block *switchBlock = builder.getBlock();
+
+        auto emitCase = [&](cir::MemOrder failureOrder,
+                            llvm::ArrayRef<int64_t> caseValues,
+                            cir::CaseOpKind caseKind) {
+          llvm::SmallVector<mlir::Attribute, 4> caseAttrs;
+          auto intTy = mlir::cast<cir::IntType>(failureOrderVal.getType());
+          for (int64_t val : caseValues)
+            caseAttrs.push_back(cir::IntAttr::get(intTy, val));
+          mlir::ArrayAttr ordersAttr = builder.getArrayAttr(caseAttrs);
+          mlir::OpBuilder::InsertPoint insertPoint;
+          cir::CaseOp::create(builder, switchLoc, ordersAttr, caseKind,
+                              insertPoint);
+          builder.restoreInsertionPoint(insertPoint);
+          emitAtomicCmpXchg(cgf, e, isWeak, dest, ptr, val1, val2, size,
+                            successOrder, failureOrder);
+          builder.createBreak(switchLoc);
+          builder.setInsertionPointToEnd(switchBlock);
+        };
+
+        // Default case: fallback to Relaxed
+        emitCase(cir::MemOrder::Relaxed, {}, cir::CaseOpKind::Default);
+
+        // Relaxed, Release, AcquireRelease -> Relaxed
+        emitCase(cir::MemOrder::Relaxed,
+                 {static_cast<int64_t>(cir::MemOrder::Relaxed),
+                  static_cast<int64_t>(cir::MemOrder::Release),
+                  static_cast<int64_t>(cir::MemOrder::AcquireRelease)},
+                 cir::CaseOpKind::Anyof);
+        // Consume, Acquire -> Acquire
+        emitCase(cir::MemOrder::Acquire,
+                 {static_cast<int64_t>(cir::MemOrder::Consume),
+                  static_cast<int64_t>(cir::MemOrder::Acquire)},
+                 cir::CaseOpKind::Anyof);
+        // SequentiallyConsistent -> SequentiallyConsistent
+        emitCase(cir::MemOrder::SequentiallyConsistent,
+                 {static_cast<int64_t>(cir::MemOrder::SequentiallyConsistent)},
+                 cir::CaseOpKind::Equal);
+
+        builder.createYield(switchLoc);
+      });
 }
 
 static void emitAtomicOp(CIRGenFunction &cgf, AtomicExpr *expr, Address dest,
@@ -431,9 +479,22 @@ static void emitAtomicOp(CIRGenFunction &cgf, AtomicExpr *expr, Address dest,
       emitAtomicCmpXchgFailureSet(cgf, expr, isWeak, dest, ptr, val1, val2,
                                   failureOrderExpr, size, order);
     } else {
-      assert(!cir::MissingFeatures::atomicExpr());
-      cgf.cgm.errorNYI(expr->getSourceRange(),
-                       "emitAtomicOp: non-constant isWeak");
+      // Non-constant isWeak: emit an if-else to handle both cases
+      mlir::Value isWeakVal = cgf.emitScalarExpr(isWeakExpr);
+      cir::IfOp::create(
+          builder, loc, isWeakVal, /*withElseRegion=*/true,
+          [&](mlir::OpBuilder &, mlir::Location) {
+            emitAtomicCmpXchgFailureSet(cgf, expr, /*isWeak=*/true, dest, ptr,
+                                        val1, val2, failureOrderExpr, size,
+                                        order);
+            builder.createYield(loc);
+          },
+          [&](mlir::OpBuilder &, mlir::Location) {
+            emitAtomicCmpXchgFailureSet(cgf, expr, /*isWeak=*/false, dest, ptr,
+                                        val1, val2, failureOrderExpr, size,
+                                        order);
+            builder.createYield(loc);
+          });
     }
     return;
   }
@@ -463,6 +524,7 @@ static void emitAtomicOp(CIRGenFunction &cgf, AtomicExpr *expr, Address dest,
     assert(!cir::MissingFeatures::atomicSyncScopeID());
 
     builder.createStore(loc, loadVal1, ptr, expr->isVolatile(),
+                        /*isNontemporal=*/false,
                         /*align=*/mlir::IntegerAttr{}, scopeAttr, orderAttr);
     return;
   }
@@ -959,6 +1021,8 @@ RValue CIRGenFunction::emitAtomicExpr(AtomicExpr *e) {
     ptr = atomics.castToAtomicIntPointer(ptr);
     if (val1.isValid())
       val1 = atomics.convertToAtomicIntPointer(val1);
+    if (val2.isValid())
+      val2 = atomics.convertToAtomicIntPointer(val2);
   }
   if (dest.isValid()) {
     if (shouldCastToIntPtrTy)

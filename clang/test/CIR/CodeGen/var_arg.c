@@ -27,7 +27,37 @@ int varargs(int count, ...) {
 // CIR:   %[[COUNT_VAL:.+]] = cir.load{{.*}} %[[COUNT_ADDR]] : !cir.ptr<!s32i>, !s32i
 // CIR:   cir.va_start %[[VA_PTR0]] %[[COUNT_VAL]] : !cir.ptr<!rec___va_list_tag>, !s32i
 // CIR:   %[[VA_PTR1:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
-// CIR:   %[[VA_ARG:.+]] = cir.va_arg %[[VA_PTR1]] : (!cir.ptr<!rec___va_list_tag>) -> !s32i
+// CIR:   %[[VA_ARG:.+]] = cir.scope {
+// CIR:     %[[GP_OFFSET_PTR:.+]] = cir.get_member %[[VA_PTR1]][0] {name = "gp_offset"} : !cir.ptr<!rec___va_list_tag> -> !cir.ptr<!u32i>
+// CIR:     %[[GP_OFFSET:.+]] = cir.load %[[GP_OFFSET_PTR]] : !cir.ptr<!u32i>, !u32i
+// CIR:     %[[LIMIT:.+]] = cir.const #cir.int<40> : !u32i
+// CIR:     %[[CMP:.+]] = cir.cmp(le, %[[GP_OFFSET]], %[[LIMIT]]) : !u32i, !cir.bool
+// CIR:     cir.brcond %[[CMP]] ^[[IN_REG:.+]], ^[[IN_MEM:.+]] loc
+//
+// CIR:   ^[[IN_REG]]:
+// CIR:     %[[REG_SAVE_AREA_PTR:.+]] = cir.get_member %[[VA_PTR1]][3] {name = "reg_save_area"} : !cir.ptr<!rec___va_list_tag> -> !cir.ptr<!cir.ptr<!void>>
+// CIR:     %[[REG_SAVE_AREA:.+]] = cir.load %[[REG_SAVE_AREA_PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
+// CIR:     %[[CUR_ADDR:.+]] = cir.ptr_stride %[[REG_SAVE_AREA]], %[[GP_OFFSET]] : (!cir.ptr<!void>, !u32i) -> !cir.ptr<!void>
+// CIR:     %[[EIGHT:.+]] = cir.const #cir.int<8> : !u32i
+// CIR:     %[[NEW_OFFSET:.+]] = cir.binop(add, %[[GP_OFFSET]], %[[EIGHT]]) : !u32i
+// CIR:     cir.store %[[NEW_OFFSET]], %[[GP_OFFSET_PTR]] : !u32i, !cir.ptr<!u32i>
+// CIR:     cir.br ^[[CONT:.+]](%[[CUR_ADDR]] : !cir.ptr<!void>)
+//
+// CIR:   ^[[IN_MEM]]:
+// CIR:     %[[OVERFLOW_PTR:.+]] = cir.get_member %[[VA_PTR1]][2] {name = "overflow_arg_area"} : !cir.ptr<!rec___va_list_tag> -> !cir.ptr<!cir.ptr<!void>>
+// CIR:     %[[OVERFLOW:.+]] = cir.load %[[OVERFLOW_PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
+// CIR:     %[[STRIDE:.+]] = cir.const #cir.int<8> : !s32i
+// CIR:     %[[OVERFLOW_I8:.+]] = cir.cast bitcast %[[OVERFLOW]] : !cir.ptr<!void> -> !cir.ptr<!s8i>
+// CIR:     %[[NEW_OVERFLOW_I8:.+]] = cir.ptr_stride %[[OVERFLOW_I8]], %[[STRIDE]] : (!cir.ptr<!s8i>, !s32i) -> !cir.ptr<!s8i>
+// CIR:     %[[NEW_OVERFLOW:.+]] = cir.cast bitcast %[[NEW_OVERFLOW_I8]] : !cir.ptr<!s8i> -> !cir.ptr<!void>
+// CIR:     cir.store %[[NEW_OVERFLOW]], %[[OVERFLOW_PTR]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
+// CIR:     cir.br ^[[CONT]](%[[OVERFLOW]] : !cir.ptr<!void>)
+//
+// CIR:   ^[[CONT]](%[[ARG_ADDR:.+]]: !cir.ptr<!void>
+// CIR:     %[[CAST:.+]] = cir.cast bitcast %[[ARG_ADDR]] : !cir.ptr<!void> -> !cir.ptr<!s32i>
+// CIR:     %[[LOADED:.+]] = cir.load align(8) %[[CAST]] : !cir.ptr<!s32i>, !s32i
+// CIR:     cir.yield %[[LOADED]] : !s32i
+// CIR:   } : !s32i
 // CIR:   cir.store{{.*}} %[[VA_ARG]], %[[RES_ADDR]] : !s32i, !cir.ptr<!s32i>
 // CIR:   %[[VA_PTR2:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
 // CIR:   cir.va_end %[[VA_PTR2]] : !cir.ptr<!rec___va_list_tag>
@@ -44,14 +74,27 @@ int varargs(int count, ...) {
 // LLVM:   %[[VA_PTR0:.+]] = getelementptr %struct.__va_list_tag, ptr %[[VAAREA]], i32 0
 // LLVM:   call void @llvm.va_start.p0(ptr %[[VA_PTR0]])
 // LLVM:   %[[VA_PTR1:.+]] = getelementptr %struct.__va_list_tag, ptr %[[VAAREA]], i32 0
-// LLVM:   %[[VA_ARG:.+]] = va_arg ptr %[[VA_PTR1]], i32
-// LLVM:   store i32 %[[VA_ARG]], ptr %[[RES_ADDR]], {{.*}}
+// LLVM:   %[[GP_OFFSET_PTR:.+]] = getelementptr {{.*}} %[[VA_PTR1]], i32 0, i32 0
+// LLVM:   %[[GP_OFFSET:.+]] = load i32, ptr %[[GP_OFFSET_PTR]]
+// LLVM:   %[[CMP:.+]] = icmp ule i32 %[[GP_OFFSET]], 40
+// LLVM:   br i1 %[[CMP]], label %[[IN_REG:.+]], label %[[IN_MEM:.+]]
+//
+// LLVM: [[IN_REG]]:
+// LLVM:   %[[UPDATED:.+]] = add i32 %[[GP_OFFSET]], 8
+// LLVM:   store i32 %[[UPDATED]], ptr %[[GP_OFFSET_PTR]]
+// LLVM:   br label %[[CONT:.+]]
+//
+// LLVM: [[IN_MEM]]:
+// LLVM:   %[[OVERFLOW_PTR:.+]] = getelementptr {{.*}} %[[VA_PTR1]], i32 0, i32 2
+// LLVM:   %[[OVERFLOW:.+]] = load ptr, ptr %[[OVERFLOW_PTR]]
+// LLVM:   %[[NEW_OVERFLOW:.+]] = getelementptr {{.*}} %[[OVERFLOW]], i64 8
+// LLVM:   store ptr %[[NEW_OVERFLOW]], ptr %[[OVERFLOW_PTR]]
+// LLVM:   br label %[[CONT]]
+//
+// LLVM: [[CONT]]:
 // LLVM:   %[[VA_PTR2:.+]] = getelementptr %struct.__va_list_tag, ptr %[[VAAREA]], i32 0
 // LLVM:   call void @llvm.va_end.p0(ptr %[[VA_PTR2]])
-// LLVM:   %[[TMP_LOAD:.+]] = load i32, ptr %[[RES_ADDR]], {{.*}}
-// LLVM:   store i32 %[[TMP_LOAD]], ptr %[[RET_ADDR]], {{.*}}
-// LLVM:   %[[RETVAL:.+]] = load i32, ptr %[[RET_ADDR]], {{.*}}
-// LLVM:   ret i32 %[[RETVAL]]
+// LLVM:   ret i32
 
 // OGCG-LABEL: define dso_local i32 @varargs
 // OGCG:   %[[COUNT_ADDR:.+]] = alloca i32
@@ -103,7 +146,37 @@ int stdarg_start(int count, ...) {
 // CIR:   %[[C12345:.+]] = cir.const #cir.int<12345> : !s32i
 // CIR:   cir.va_start %[[VA_PTR0]] %[[C12345]] : !cir.ptr<!rec___va_list_tag>, !s32i
 // CIR:   %[[VA_PTR1:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
-// CIR:   %[[VA_ARG:.+]] = cir.va_arg %[[VA_PTR1]] : (!cir.ptr<!rec___va_list_tag>) -> !s32i
+// CIR:   %[[VA_ARG:.+]] = cir.scope {
+// CIR:     %[[GP_OFFSET_PTR:.+]] = cir.get_member %[[VA_PTR1]][0] {name = "gp_offset"} : !cir.ptr<!rec___va_list_tag> -> !cir.ptr<!u32i>
+// CIR:     %[[GP_OFFSET:.+]] = cir.load %[[GP_OFFSET_PTR]] : !cir.ptr<!u32i>, !u32i
+// CIR:     %[[LIMIT:.+]] = cir.const #cir.int<40> : !u32i
+// CIR:     %[[CMP:.+]] = cir.cmp(le, %[[GP_OFFSET]], %[[LIMIT]]) : !u32i, !cir.bool
+// CIR:     cir.brcond %[[CMP]] ^[[IN_REG:.+]], ^[[IN_MEM:.+]] loc
+//
+// CIR:   ^[[IN_REG]]:
+// CIR:     %[[REG_SAVE_AREA_PTR:.+]] = cir.get_member %[[VA_PTR1]][3] {name = "reg_save_area"} : !cir.ptr<!rec___va_list_tag> -> !cir.ptr<!cir.ptr<!void>>
+// CIR:     %[[REG_SAVE_AREA:.+]] = cir.load %[[REG_SAVE_AREA_PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
+// CIR:     %[[CUR_ADDR:.+]] = cir.ptr_stride %[[REG_SAVE_AREA]], %[[GP_OFFSET]] : (!cir.ptr<!void>, !u32i) -> !cir.ptr<!void>
+// CIR:     %[[EIGHT:.+]] = cir.const #cir.int<8> : !u32i
+// CIR:     %[[NEW_OFFSET:.+]] = cir.binop(add, %[[GP_OFFSET]], %[[EIGHT]]) : !u32i
+// CIR:     cir.store %[[NEW_OFFSET]], %[[GP_OFFSET_PTR]] : !u32i, !cir.ptr<!u32i>
+// CIR:     cir.br ^[[CONT:.+]](%[[CUR_ADDR]] : !cir.ptr<!void>)
+//
+// CIR:   ^[[IN_MEM]]:
+// CIR:     %[[OVERFLOW_PTR:.+]] = cir.get_member %[[VA_PTR1]][2] {name = "overflow_arg_area"} : !cir.ptr<!rec___va_list_tag> -> !cir.ptr<!cir.ptr<!void>>
+// CIR:     %[[OVERFLOW:.+]] = cir.load %[[OVERFLOW_PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
+// CIR:     %[[STRIDE:.+]] = cir.const #cir.int<8> : !s32i
+// CIR:     %[[OVERFLOW_I8:.+]] = cir.cast bitcast %[[OVERFLOW]] : !cir.ptr<!void> -> !cir.ptr<!s8i>
+// CIR:     %[[NEW_OVERFLOW_I8:.+]] = cir.ptr_stride %[[OVERFLOW_I8]], %[[STRIDE]] : (!cir.ptr<!s8i>, !s32i) -> !cir.ptr<!s8i>
+// CIR:     %[[NEW_OVERFLOW:.+]] = cir.cast bitcast %[[NEW_OVERFLOW_I8]] : !cir.ptr<!s8i> -> !cir.ptr<!void>
+// CIR:     cir.store %[[NEW_OVERFLOW]], %[[OVERFLOW_PTR]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
+// CIR:     cir.br ^[[CONT]](%[[OVERFLOW]] : !cir.ptr<!void>)
+//
+// CIR:   ^[[CONT]](%[[ARG_ADDR:.+]]: !cir.ptr<!void>
+// CIR:     %[[CAST:.+]] = cir.cast bitcast %[[ARG_ADDR]] : !cir.ptr<!void> -> !cir.ptr<!s32i>
+// CIR:     %[[LOADED:.+]] = cir.load align(8) %[[CAST]] : !cir.ptr<!s32i>, !s32i
+// CIR:     cir.yield %[[LOADED]] : !s32i
+// CIR:   } : !s32i
 // CIR:   cir.store{{.*}} %[[VA_ARG]], %[[RES_ADDR]] : !s32i, !cir.ptr<!s32i>
 // CIR:   %[[VA_PTR2:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
 // CIR:   cir.va_end %[[VA_PTR2]] : !cir.ptr<!rec___va_list_tag>
@@ -120,14 +193,27 @@ int stdarg_start(int count, ...) {
 // LLVM:   %[[VA_PTR0:.+]] = getelementptr %struct.__va_list_tag, ptr %[[VAAREA]], i32 0
 // LLVM:   call void @llvm.va_start.p0(ptr %[[VA_PTR0]])
 // LLVM:   %[[VA_PTR1:.+]] = getelementptr %struct.__va_list_tag, ptr %[[VAAREA]], i32 0
-// LLVM:   %[[VA_ARG:.+]] = va_arg ptr %[[VA_PTR1]], i32
-// LLVM:   store i32 %[[VA_ARG]], ptr %[[RES_ADDR]], {{.*}}
+// LLVM:   %[[GP_OFFSET_PTR:.+]] = getelementptr {{.*}} %[[VA_PTR1]], i32 0, i32 0
+// LLVM:   %[[GP_OFFSET:.+]] = load i32, ptr %[[GP_OFFSET_PTR]]
+// LLVM:   %[[CMP:.+]] = icmp ule i32 %[[GP_OFFSET]], 40
+// LLVM:   br i1 %[[CMP]], label %[[IN_REG:.+]], label %[[IN_MEM:.+]]
+//
+// LLVM: [[IN_REG]]:
+// LLVM:   %[[UPDATED:.+]] = add i32 %[[GP_OFFSET]], 8
+// LLVM:   store i32 %[[UPDATED]], ptr %[[GP_OFFSET_PTR]]
+// LLVM:   br label %[[CONT:.+]]
+//
+// LLVM: [[IN_MEM]]:
+// LLVM:   %[[OVERFLOW_PTR:.+]] = getelementptr {{.*}} %[[VA_PTR1]], i32 0, i32 2
+// LLVM:   %[[OVERFLOW:.+]] = load ptr, ptr %[[OVERFLOW_PTR]]
+// LLVM:   %[[NEW_OVERFLOW:.+]] = getelementptr {{.*}} %[[OVERFLOW]], i64 8
+// LLVM:   store ptr %[[NEW_OVERFLOW]], ptr %[[OVERFLOW_PTR]]
+// LLVM:   br label %[[CONT]]
+//
+// LLVM: [[CONT]]:
 // LLVM:   %[[VA_PTR2:.+]] = getelementptr %struct.__va_list_tag, ptr %[[VAAREA]], i32 0
 // LLVM:   call void @llvm.va_end.p0(ptr %[[VA_PTR2]])
-// LLVM:   %[[TMP_LOAD:.+]] = load i32, ptr %[[RES_ADDR]], {{.*}}
-// LLVM:   store i32 %[[TMP_LOAD]], ptr %[[RET_ADDR]], {{.*}}
-// LLVM:   %[[RETVAL:.+]] = load i32, ptr %[[RET_ADDR]], {{.*}}
-// LLVM:   ret i32 %[[RETVAL]]
+// LLVM:   ret i32
 
 // OGCG-LABEL: define dso_local i32 @stdarg_start
 // OGCG:   %[[COUNT_ADDR:.+]] = alloca i32

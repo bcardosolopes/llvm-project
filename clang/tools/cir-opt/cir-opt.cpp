@@ -12,11 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/Conversion/Passes.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassOptions.h"
@@ -33,9 +37,11 @@ struct CIRToLLVMPipelineOptions
 int main(int argc, char **argv) {
   // TODO: register needed MLIR passes for CIR?
   mlir::DialectRegistry registry;
-  registry.insert<mlir::BuiltinDialect, cir::CIRDialect,
-                  mlir::memref::MemRefDialect, mlir::LLVM::LLVMDialect,
-                  mlir::DLTIDialect>();
+  registry
+      .insert<mlir::BuiltinDialect, cir::CIRDialect, mlir::arith::ArithDialect,
+              mlir::cf::ControlFlowDialect, mlir::func::FuncDialect,
+              mlir::memref::MemRefDialect, mlir::scf::SCFDialect,
+              mlir::LLVM::LLVMDialect, mlir::DLTIDialect>();
 
   ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
     return mlir::createCIRCanonicalizePass();
@@ -50,6 +56,18 @@ int main(int argc, char **argv) {
         cir::direct::populateCIRToLLVMPasses(pm);
       });
 
+  struct CIRToMLIRPipelineOptions
+      : public mlir::PassPipelineOptions<CIRToMLIRPipelineOptions> {};
+  mlir::PassPipelineRegistration<CIRToMLIRPipelineOptions> mlirPipeline(
+      "cir-to-mlir", "",
+      [](mlir::OpPassManager &pm, const CIRToMLIRPipelineOptions &options) {
+        pm.addPass(cir::createConvertCIRToMLIRPass());
+      });
+
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return cir::createConvertMLIRToLLVMPass();
+  });
+
   ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
     return mlir::createCIRFlattenCFGPass();
   });
@@ -62,7 +80,35 @@ int main(int argc, char **argv) {
     return mlir::createGotoSolverPass();
   });
 
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createABILoweringPass();
+  });
+
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createPointsToDiagnosticPass();
+  });
+
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createLiveObjectDiagnosticPass();
+  });
+
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createCXXABILoweringPass();
+  });
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createCallConvLoweringPass();
+  });
+
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createSCFPreparePass();
+  });
+
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return mlir::createMoveOptPass();
+  });
+
   mlir::registerTransformsPasses();
+  mlir::registerConversionPasses();
 
   return mlir::asMainReturnCode(MlirOptMain(
       argc, argv, "Clang IR analysis and optimization tool\n", registry));

@@ -12,8 +12,8 @@ void vector_int_test(int x) {
 
   // Vector constant.
   vi4 a = { 1, 2, 3, 4 };
-  // CHECK: %[[#T42:]] = llvm.mlir.constant(dense<[1, 2, 3, 4]> : vector<4xi32>) : vector<4xi32>
-  // CHECK: llvm.store %[[#T42]], %[[#T3:]] {alignment = 16 : i64} : vector<4xi32>, !llvm.ptr
+  // CHECK: %[[#CONSTPTR:]] = llvm.mlir.addressof @__const._Z15vector_int_testi.a : !llvm.ptr
+  // CHECK: "llvm.intr.memcpy"(%[[#T3:]], %[[#CONSTPTR]], %{{.*}}) <{isVolatile = false}>
 
   // Non-const vector initialization.
   vi4 b = { x, 5, 6, x + 1 };
@@ -42,10 +42,9 @@ void vector_int_test(int x) {
 
   // Scalar to vector conversion, a.k.a. vector splat.
   b = a + 7;
-  // CHECK: %[[#poison:]] = llvm.mlir.poison : vector<4xi32>
-  // CHECK: %[[#zeroInt:]] = llvm.mlir.constant(0 : i64) : i64
-  // CHECK: %[[#inserted:]] = llvm.insertelement %[[#seven:]], %[[#poison]][%[[#zeroInt]] : i64] : vector<4xi32>
-  // CHECK: %[[#shuffled:]] = llvm.shufflevector %[[#inserted]], %[[#poison]] [0, 0, 0, 0] : vector<4xi32>
+  // CHECK: %[[#aval:]] = llvm.load %[[#T3]] {alignment = 16 : i64} : !llvm.ptr -> vector<4xi32>
+  // CHECK: %[[#splat:]] = llvm.mlir.constant(dense<7> : vector<4xi32>) : vector<4xi32>
+  // CHECK: %[[#result:]] = llvm.add %[[#aval]], %[[#splat]] : vector<4xi32>
 
   // Extract element.
   int c = a[x];
@@ -127,18 +126,9 @@ void vector_int_test(int x) {
   // CHECK: llvm.store %[[#T92]], %[[#T27:]] {alignment = 16 : i64} : vector<4xi32>, !llvm.ptr
   vi4 n = ~a;
   // CHECK: %[[#T93:]] = llvm.load %[[#T3]] {alignment = 16 : i64} : !llvm.ptr -> vector<4xi32>
-  // CHECK: %[[#T94:]] = llvm.mlir.constant(-1 : i32) : i32
-  // CHECK: %[[#T95:]] = llvm.mlir.undef : vector<4xi32>
-  // CHECK: %[[#T96:]] = llvm.mlir.constant(0 : i64) : i64
-  // CHECK: %[[#T97:]] = llvm.insertelement %[[#T94]], %[[#T95]][%[[#T96]] : i64] : vector<4xi32>
-  // CHECK: %[[#T98:]] = llvm.mlir.constant(1 : i64) : i64
-  // CHECK: %[[#T99:]] = llvm.insertelement %[[#T94]], %[[#T97]][%[[#T98]] : i64] : vector<4xi32>
-  // CHECK: %[[#T100:]] = llvm.mlir.constant(2 : i64) : i64
-  // CHECK: %[[#T101:]] = llvm.insertelement %[[#T94]], %[[#T99]][%[[#T100]] : i64] : vector<4xi32>
-  // CHECK: %[[#T102:]] = llvm.mlir.constant(3 : i64) : i64
-  // CHECK: %[[#T103:]] = llvm.insertelement %[[#T94]], %[[#T101]][%[[#T102]] : i64] : vector<4xi32>
-  // CHECK: %[[#T104:]] = llvm.xor %[[#T93]], %[[#T103]]  : vector<4xi32>
-  // CHECK: llvm.store %[[#T104]], %[[#T29:]] {alignment = 16 : i64} : vector<4xi32>, !llvm.ptr
+  // CHECK: %[[#T94:]] = llvm.mlir.constant(dense<-1> : vector<4xi32>) : vector<4xi32>
+  // CHECK: %[[#T95:]] = llvm.xor %[[#T93]], %[[#T94]]  : vector<4xi32>
+  // CHECK: llvm.store %[[#T95]], %[[#T29:]] {alignment = 16 : i64} : vector<4xi32>, !llvm.ptr
 
   // Ternary conditional operator
   vi4 tc = a ? b : d;
@@ -232,8 +222,8 @@ void vector_int_test(int x) {
 
   vus2 z = { (unsigned short)x, (unsigned short)x };  
   vus2 zamt = { 3, 4 };
-  // CHECK: %[[#T219:]] = llvm.mlir.constant(dense<[3, 4]> : vector<2xi16>) : vector<2xi16>
-  // CHECK: llvm.store %[[#T219]], %[[#AMT_SAVE:]] {alignment = 4 : i64} : vector<2xi16>
+  // CHECK: %[[#ZAMTPTR:]] = llvm.mlir.addressof @__const._Z15vector_int_testi.zamt : !llvm.ptr
+  // CHECK: "llvm.intr.memcpy"(%[[#AMT_SAVE:]], %[[#ZAMTPTR]], %{{.*}}) <{isVolatile = false}>
   // CHECK: %[[#T221:]] = llvm.load %[[#AMT_SAVE]] {alignment = 4 : i64} : !llvm.ptr -> vector<2xi16>
   vus2 zzz = z >> zamt;
   // CHECK: %{{[0-9]+}}  = llvm.lshr %{{[0-9]+}}, %[[#T221]] : vector<2xi16>
@@ -243,8 +233,8 @@ void vector_double_test(int x, double y) {
 
   // Vector constant.
   vd2 a = { 1.5, 2.5 };
-  // CHECK: %[[#T28:]] = llvm.mlir.constant(dense<[1.500000e+00, 2.500000e+00]> : vector<2xf64>) : vector<2xf64>
-  // CHECK: llvm.store %[[#T28]], %[[#T5:]] {alignment = 16 : i64} : vector<2xf64>, !llvm.ptr
+  // CHECK: %[[#DBLPTR:]] = llvm.mlir.addressof @__const._Z18vector_double_testid.a : !llvm.ptr
+  // CHECK: "llvm.intr.memcpy"(%[[#T5:]], %[[#DBLPTR]], %{{.*}}) <{isVolatile = false}>
 
   // Non-const vector initialization.
   vd2 b = { y, y + 1.0 };

@@ -78,10 +78,10 @@ int test_struct_pointer(A*** p3, int A::***m3) {
 void test_member_pointer(A& a, int A::***m3, int val) {
 
     // CIR-LABEL: _Z19test_member_pointerR1APPMS_ii
-    // CIR: %{{.*}} = cir.load{{.*}} %{{.*}} : !cir.ptr<!cir.data_member<!s32i in !rec_A>>, !cir.data_member<!s32i in !rec_A> tbaa(#tbaa[[CHAR]])
+    // CIR: %{{.*}} = cir.load{{.*}} %{{.*}} : !cir.ptr<!s64i>, !s64i tbaa(#tbaa[[CHAR]])
 
     // CIR-POINTER-TBAA-LABEL: _Z19test_member_pointerR1APPMS_ii
-    // CIR-POINTER-TBAA: %{{.*}} = cir.load{{.*}} %{{.*}} : !cir.ptr<!cir.data_member<!s32i in !rec_A>>, !cir.data_member<!s32i in !rec_A> tbaa(#tbaa[[CHAR]])
+    // CIR-POINTER-TBAA: %{{.*}} = cir.load{{.*}} %{{.*}} : !cir.ptr<!s64i>, !s64i tbaa(#tbaa[[CHAR]])
 
     // LLVM-LABEL: _Z19test_member_pointerR1APPMS_ii
     // LLVM: %[[m2:.*]] = load ptr, ptr %{{.*}}, align 8, !tbaa ![[TBAA_ANY_PTR:.*]]

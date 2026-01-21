@@ -24,7 +24,7 @@ def CIR_Dialect : Dialect {
 
   let cppNamespace = "::cir";
 
-  let useDefaultAttributePrinterParser = 1;
+  let useDefaultAttributePrinterParser = 0;
 
   // Enable constant materialization for the CIR dialect. This generates a
   // declaration for the cir::CIRDialect::materializeConstant function. This
@@ -37,12 +37,17 @@ def CIR_Dialect : Dialect {
     static llvm::StringRef getSourceLanguageAttrName() { return "cir.lang"; }
     static llvm::StringRef getTripleAttrName() { return "cir.triple"; }
     static llvm::StringRef getOptInfoAttrName() { return "cir.opt_info"; }
+    static llvm::StringRef getSOBAttrName() { return "cir.sob"; }
+    static llvm::StringRef getTypeSizeInfoAttrName() { return "cir.type_size_info"; }
     static llvm::StringRef getCalleeAttrName() { return "callee"; }
     static llvm::StringRef getNoThrowAttrName() { return "nothrow"; }
     static llvm::StringRef getSideEffectAttrName() { return "side_effect"; }
     static llvm::StringRef getModuleLevelAsmAttrName() { return "cir.module_asm"; }
     static llvm::StringRef getGlobalCtorsAttrName() { return "cir.global_ctors"; }
     static llvm::StringRef getGlobalDtorsAttrName() { return "cir.global_dtors"; }
+    static llvm::StringRef getGlobalAnnotationsAttrName() { return "cir.global_annotations"; }
+    static llvm::StringRef getCUDABinaryHandleAttrName() { return "cir.cu.binary_handle"; }
+    static llvm::StringRef getUWTableAttrName() { return "cir.uwtable"; }
     static llvm::StringRef getOperandSegmentSizesAttrName() { return "operandSegmentSizes"; }
 
     void registerAttributes();
@@ -51,6 +56,11 @@ def CIR_Dialect : Dialect {
     mlir::Type parseType(mlir::DialectAsmParser &parser) const override;
     void printType(mlir::Type type,
                    mlir::DialectAsmPrinter &printer) const override;
+
+    mlir::Attribute parseAttribute(mlir::DialectAsmParser &parser,
+                                   mlir::Type type) const override;
+    void printAttribute(mlir::Attribute attr,
+                        mlir::DialectAsmPrinter &os) const override;
   }];
 }
 

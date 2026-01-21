@@ -7,7 +7,7 @@ struct S {
 
 // LLVM: define dso_local void @zeroInit
 // LLVM: [[TMP0:%.*]] = alloca %struct.S, i64 1
-// LLVM: store %struct.S zeroinitializer, ptr [[TMP0]]
+// LLVM: call void @llvm.memcpy.p0.p0.i64(ptr [[TMP0]], ptr @__const.zeroInit.s, i64 4, i1 false)
 void zeroInit() {
   struct S s = {0};
 }

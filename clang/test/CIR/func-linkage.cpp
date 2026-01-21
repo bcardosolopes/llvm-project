@@ -8,7 +8,7 @@
 
 void a() {}
 
-// CIR: cir.func no_inline dso_local @_Z1av()
+// CIR: cir.func no_inline optnone dso_local @_Z1av()
 // LLVM: define dso_local void @_Z1av()
 // OGCG: define dso_local void @_Z1av()
 
@@ -18,7 +18,7 @@ extern void b();
 // OGCG: declare void @_Z1bv()
 
 static void c() {}
-// CIR: cir.func no_inline internal private dso_local @_ZL1cv()
+// CIR: cir.func no_inline optnone internal private dso_local @_ZL1cv()
 // LLVM: define internal void @_ZL1cv()
 // OGCG: define internal void @_ZL1cv()
 

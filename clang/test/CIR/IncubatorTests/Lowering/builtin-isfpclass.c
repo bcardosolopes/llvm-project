@@ -20,7 +20,7 @@ void test_is_finite(__fp16 *H, float F, double D, long double LD) {
     res = __builtin_isfinite(F);
     // CHECK: call i1 @llvm.is.fpclass.f32(float %{{.*}}, i32 504)
     res = finite(D);
-    // CHECK: call i1 @llvm.is.fpclass.f64(double %{{.*}}, i32 504)
+    // CHECK: call i1 @llvm.is.fpclass.f64(double {{.*}}, i32 504)
 
     res = __builtin_isnormal(*H);
     // CHECK: call i1 @llvm.is.fpclass.f16(half %{{.*}}, i32 264)

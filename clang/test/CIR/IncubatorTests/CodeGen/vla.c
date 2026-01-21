@@ -13,26 +13,26 @@
 // CHECK:    cir.store{{.*}} %arg0, [[TMP0]] : !s32i, !cir.ptr<!s32i>
 // CHECK:    [[TMP2:%.*]] = cir.load{{.*}} [[TMP0]] : !cir.ptr<!s32i>, !s32i
 // CHECK:    [[TMP3:%.*]] = cir.cast integral [[TMP2]] : !s32i -> !u64i
-// CHECK:    [[TMP4:%.*]] = cir.stack_save : !cir.ptr<!u8i>
+// CHECK:    [[TMP4:%.*]] = cir.stacksave : !cir.ptr<!u8i>
 // CHECK:    cir.store{{.*}} [[TMP4]], [[TMP1]] : !cir.ptr<!u8i>, !cir.ptr<!cir.ptr<!u8i>>
-// CHECK:    [[TMP5:%.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, [[TMP3]] : !u64i, ["vla"] {alignment = 16 : i64}
+// CHECK:    [[TMP5:%.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, [[TMP3]] : !u64i, ["a"] {alignment = 16 : i64}
 // CHECK:    [[TMP6:%.*]] = cir.load{{.*}} [[TMP1]] : !cir.ptr<!cir.ptr<!u8i>>, !cir.ptr<!u8i>
-// CHECK:    cir.stack_restore [[TMP6]] : !cir.ptr<!u8i>
+// CHECK:    cir.stackrestore [[TMP6]] : !cir.ptr<!u8i>
 void f0(int len) {
     int a[len];
 }
 
 //     CHECK: cir.func {{.*}} @f1
-// CHECK-NOT:   cir.stack_save
-// CHECK-NOT:   cir.stack_restore
+// CHECK-NOT:   cir.stacksave
+// CHECK-NOT:   cir.stackrestore
 //     CHECK:   cir.return
 int f1(int n) {
   return sizeof(int[n]);
 }
 
 // CHECK: cir.func {{.*}} @f2
-// CHECK:   cir.stack_save
-// DONT_CHECK:   cir.stack_restore
+// CHECK:   cir.stacksave
+// DONT_CHECK:   cir.stackrestore
 // CHECK:   cir.return
 int f2(int x) {
   int vla[x];
@@ -40,8 +40,8 @@ int f2(int x) {
 }
 
 // CHECK: cir.func {{.*}} @f3
-// CHECK:   cir.stack_save
-// CHECK:   cir.stack_restore
+// CHECK:   cir.stacksave
+// CHECK:   cir.stackrestore
 // CHECK:   cir.return
 void f3(int count) {
   int a[count];
@@ -52,8 +52,8 @@ void f3(int count) {
 
 
 //     CHECK: cir.func {{.*}} @f4
-// CHECK-NOT:   cir.stack_save
-// CHECK-NOT:   cir.stack_restore
+// CHECK-NOT:   cir.stacksave
+// CHECK-NOT:   cir.stackrestore
 //     CHECK:   cir.return
 void f4(int count) {
   // Make sure we emit sizes correctly in some obscure cases
@@ -117,7 +117,7 @@ long f10(int n) {
 // LLVM: %[[QI:[0-9]+]] = ptrtoint ptr %{{.*}} to i64
 // LLVM: %[[PI:[0-9]+]] = ptrtoint ptr %{{.*}} to i64
 // LLVM: %[[DIFF_BYTES:[0-9]+]] = sub i64 %[[QI]], %[[PI]]
-// LLVM: %[[PTRDIFF_INTS:[0-9]+]] = sdiv i64 %[[DIFF_BYTES]], 4
+// LLVM: %[[PTRDIFF_INTS:[0-9]+]] = sdiv exact i64 %[[DIFF_BYTES]], 4
 // LLVM: %[[RESULT:[0-9]+]] = sdiv i64 %[[PTRDIFF_INTS]], %{{.*}}
 
 // OGCG-LABEL: @f10(
@@ -161,7 +161,7 @@ long f11(int n, int m) {
 // CHECK: %[[PTRDIFF:[0-9]+]] = cir.ptr_diff %[[Q_VAL]], %[[P_VAL]] : !cir.ptr<!s32i> -> !s64i
 
 // # compute n*m
-// CHECK: %[[NM_U64:[0-9]+]] = cir.binop(mul, %[[N_U64]], %[[M_U64]]) : !u64i
+// CHECK: %[[NM_U64:[0-9]+]] = cir.binop(mul, %[[N_U64]], %[[M_U64]]) {{.*}} : !u64i
 // CHECK: %[[NM_S64:[0-9]+]] = cir.cast integral %[[NM_U64]] : !u64i -> !s64i
 
 // # divide ptrdiff_ints by (n*m)
@@ -178,8 +178,8 @@ long f11(int n, int m) {
 // LLVM: %[[QI:[0-9]+]] = ptrtoint ptr %{{.*}} to i64
 // LLVM: %[[PI:[0-9]+]] = ptrtoint ptr %{{.*}} to i64
 // LLVM: %[[DIFF_BYTES:[0-9]+]] = sub i64 %[[QI]], %[[PI]]
-// LLVM: %[[PTRDIFF_INTS:[0-9]+]] = sdiv i64 %[[DIFF_BYTES]], 4
-// LLVM: %[[NM:[0-9]+]] = mul i64 %{{.*}}, %{{.*}}
+// LLVM: %[[PTRDIFF_INTS:[0-9]+]] = sdiv exact i64 %[[DIFF_BYTES]], 4
+// LLVM: %[[NM:[0-9]+]] = mul nuw i64 %{{.*}}, %{{.*}}
 // LLVM: %[[RESULT:[0-9]+]] = sdiv i64 %[[PTRDIFF_INTS]], %[[NM]]
 
 // OGCG-LABEL: @f11(

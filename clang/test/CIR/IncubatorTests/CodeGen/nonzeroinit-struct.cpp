@@ -18,6 +18,6 @@ struct Trivial {
 // This case has a trivial default constructor, but can't be zero-initialized.
 Trivial t;
 
-// CHECK: !rec_Trivial = !cir.record<struct "Trivial" {!s32i, !cir.double, !cir.data_member<!s32i in !rec_Other>} #cir.record.decl.ast>
+// CHECK: !rec_Trivial = !cir.record<struct "Trivial" {!s32i, !cir.double, !s64i}>
 // CHECK: cir.global external @t = #cir.const_record<{#cir.int<0> : !s32i, #cir.fp<0.000000e+00> : !cir.double,
 // CHECK-SAME: #cir.data_member<null> : !cir.data_member<!s32i in !rec_Other>}> : !rec_Trivial

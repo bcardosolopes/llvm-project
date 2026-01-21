@@ -12,6 +12,7 @@
 
 #include "CIRGenFunction.h"
 
+#include "CIRGenCUDARuntime.h"
 #include "CIRGenCXXABI.h"
 #include "CIRGenCall.h"
 #include "CIRGenValue.h"
@@ -207,10 +208,10 @@ bool CIRGenFunction::constantFoldsToSimpleInteger(const Expr *cond,
 void CIRGenFunction::emitAndUpdateRetAlloca(QualType type, mlir::Location loc,
                                             CharUnits alignment) {
   if (!type->isVoidType()) {
-    mlir::Value addr = emitAlloca("__retval", convertType(type), loc, alignment,
-                                  /*insertIntoFnEntryBlock=*/false);
-    fnRetAlloca = addr;
-    returnValue = Address(addr, alignment);
+    Address retAddr =
+        createTempAlloca(convertType(type), alignment, loc, "__retval");
+    fnRetAlloca = retAddr.emitRawPointer();
+    returnValue = retAddr;
   }
 }
 
@@ -356,9 +357,11 @@ cir::ReturnOp CIRGenFunction::LexicalScope::emitReturn(mlir::Location loc) {
   CIRGenBuilderTy &builder = cgf.getBuilder();
 
   // If we are on a coroutine, add the coro_end builtin call.
-  assert(!cir::MissingFeatures::coroEndBuiltinCall());
-
   auto fn = dyn_cast<cir::FuncOp>(cgf.curFn);
+  assert(fn && "emitReturn from non-function");
+  if (fn.getCoroutine())
+    cgf.emitCoroEndBuiltinCall(loc,
+                               builder.getNullPtr(builder.getVoidPtrTy(), loc));
   assert(fn && "emitReturn from non-function");
   if (!fn.getFunctionType().hasVoidReturn()) {
     // Load the value from `__retval` and return it via the `cir.return` op.
@@ -453,22 +456,31 @@ void CIRGenFunction::emitFunctionProlog(const FunctionArgList &args,
   }
 
   // Declare all the function arguments in the symbol table.
-  for (const auto nameValue : llvm::zip(args, entryBB->getArguments())) {
-    const VarDecl *paramVar = std::get<0>(nameValue);
-    mlir::Value paramVal = std::get<1>(nameValue);
+  // Use explicit indexing rather than llvm::zip because the entry block may
+  // have additional arguments for implicit pass_object_size parameters that
+  // don't correspond to entries in the FunctionArgList.
+  unsigned blockArgIdx = 0;
+  for (const VarDecl *paramVar : args) {
+    assert(blockArgIdx < entryBB->getNumArguments() &&
+           "Ran out of block arguments");
+    mlir::Value paramVal = entryBB->getArgument(blockArgIdx);
+    ++blockArgIdx;
+
     CharUnits alignment = getContext().getDeclAlign(paramVar);
     mlir::Location paramLoc = getLoc(paramVar->getSourceRange());
     paramVal.setLoc(paramLoc);
 
-    mlir::Value addrVal =
-        emitAlloca(cast<NamedDecl>(paramVar)->getName(),
-                   convertType(paramVar->getType()), paramLoc, alignment,
-                   /*insertIntoFnEntryBlock=*/true);
+    Address allocaAddr = Address::invalid();
+    Address paramAddr =
+        createTempAlloca(convertType(paramVar->getType()), alignment, paramLoc,
+                         cast<NamedDecl>(paramVar)->getName(),
+                         /*arraySize=*/nullptr, &allocaAddr);
 
-    declare(addrVal, paramVar, paramVar->getType(), paramLoc, alignment,
+    declare(allocaAddr.getPointer(), paramVar, paramVar->getType(), paramLoc,
+            alignment,
             /*isParam=*/true);
 
-    setAddrOfLocalVar(paramVar, Address(addrVal, alignment));
+    setAddrOfLocalVar(paramVar, paramAddr);
 
     bool isPromoted = isa<ParmVarDecl>(paramVar) &&
                       cast<ParmVarDecl>(paramVar)->isKNRPromoted();
@@ -479,7 +491,14 @@ void CIRGenFunction::emitFunctionProlog(const FunctionArgList &args,
     // Location of the store to the param storage tracked as beginning of
     // the function body.
     mlir::Location fnBodyBegin = getLoc(bodyBeginLoc);
-    builder.CIRBaseBuilderTy::createStore(fnBodyBegin, paramVal, addrVal);
+    builder.CIRBaseBuilderTy::createStore(fnBodyBegin, paramVal,
+                                          paramAddr.emitRawPointer());
+
+    // If this parameter has the pass_object_size attribute, skip the next
+    // block argument which is the implicit size parameter.
+    if (const auto *pvd = dyn_cast<ParmVarDecl>(paramVar))
+      if (pvd->hasAttr<PassObjectSizeAttr>())
+        ++blockArgIdx;
   }
   assert(builder.getInsertionBlock() && "Should be valid");
 }
@@ -517,6 +536,24 @@ void CIRGenFunction::startFunction(GlobalDecl gd, QualType returnType,
 
   emitFunctionProlog(args, entryBB, fd, bodyBeginLoc);
 
+  // If any of the arguments have a variably modified type, make sure to
+  // emit the type size, but only if the function is not naked.
+  if (!fd || !fd->hasAttr<NakedAttr>()) {
+    for (const VarDecl *vd : args) {
+      // Dig out the type as written from ParmVarDecls; it's unclear whether
+      // the standard (C99 6.9.1p10) requires this, but we're following the
+      // precedent set by gcc.
+      QualType ty;
+      if (const auto *pvd = dyn_cast<ParmVarDecl>(vd))
+        ty = pvd->getOriginalType();
+      else
+        ty = vd->getType();
+
+      if (ty->isVariablyModifiedType())
+        emitVariablyModifiedType(ty);
+    }
+  }
+
   // When the current function is not void, create an address to store the
   // result value.
   if (!returnType->isVoidType()) {
@@ -531,6 +568,16 @@ void CIRGenFunction::startFunction(GlobalDecl gd, QualType returnType,
     }
     emitAndUpdateRetAlloca(returnType, getLoc(bodyEndLoc),
                            getContext().getTypeAlignInChars(returnType));
+
+    // If this is an implicit-return-zero function (e.g. main()), initialize
+    // the return value to 0. C99 5.1.2.2.3: reaching the } that terminates
+    // main() returns 0.
+    if (fd && fd->hasImplicitReturnZero()) {
+      mlir::Location retLoc = getLoc(bodyEndLoc);
+      mlir::Value zero = builder.getNullValue(convertType(returnType), retLoc);
+      builder.CIRBaseBuilderTy::createStore(retLoc, zero,
+                                            returnValue.emitRawPointer());
+    }
   }
 
   if (isa_and_nonnull<CXXMethodDecl>(d) &&
@@ -736,6 +783,13 @@ cir::FuncOp CIRGenFunction::generateCode(clang::GlobalDecl gd, cir::FuncOp fn,
     // Emit the standard function prologue.
     startFunction(gd, retTy, fn, funcType, args, loc, bodyRange.getBegin());
 
+    // Emit OpenCL kernel metadata.
+    if (funcDecl && (getLangOpts().OpenCL ||
+                     ((getLangOpts().HIP || getLangOpts().OffloadViaLLVM) &&
+                      getLangOpts().CUDAIsDevice))) {
+      emitKernelMetadata(funcDecl, fn);
+    }
+
     // Save parameters for coroutine function.
     if (body && isa_and_nonnull<CoroutineBodyStmt>(body))
       llvm::append_range(fnArgs, funcDecl->parameters());
@@ -746,7 +800,7 @@ cir::FuncOp CIRGenFunction::generateCode(clang::GlobalDecl gd, cir::FuncOp fn,
       emitConstructorBody(args);
     } else if (getLangOpts().CUDA && !getLangOpts().CUDAIsDevice &&
                funcDecl->hasAttr<CUDAGlobalAttr>()) {
-      getCIRGenModule().errorNYI(bodyRange, "CUDA kernel");
+      getCIRGenModule().getCUDARuntime().emitDeviceStub(*this, fn, args);
     } else if (isa<CXXMethodDecl>(funcDecl) &&
                cast<CXXMethodDecl>(funcDecl)->isLambdaStaticInvoker()) {
       // The lambda static invoker function is special, because it forwards or
@@ -836,7 +890,7 @@ void CIRGenFunction::emitDestructorBody(FunctionArgList &args) {
   // in fact emit references to them from other compilations, so emit them
   // as functions containing a trap instruction.
   if (dtorType != Dtor_Base && dtor->getParent()->isAbstract()) {
-    cgm.errorNYI(dtor->getSourceRange(), "abstract base class destructors");
+    emitTrap(getLoc(dtor->getSourceRange()), /*createNewBlock=*/true);
     return;
   }
 
@@ -908,7 +962,36 @@ void CIRGenFunction::emitDestructorBody(FunctionArgList &args) {
     // Enter the cleanup scopes for fields and non-virtual bases.
     enterDtorCleanups(dtor, Dtor_Base);
 
-    assert(!cir::MissingFeatures::vtableInitialization());
+    // Initialize the vtable pointers before entering the body.
+    // We can skip this for:
+    // - Non-dynamic classes (no vtable)
+    // - Final classes (vtable pointer already correct)
+    // - Classes with trivial destructor bodies AND no fields with
+    //   non-trivial destructors (no code runs that could observe the vptr)
+    {
+      const CXXRecordDecl *classDecl = dtor->getParent();
+      bool canSkip =
+          !classDecl->isDynamicClass() || classDecl->isEffectivelyFinal();
+      if (!canSkip && dtor->hasTrivialBody()) {
+        canSkip = true;
+        for (const auto *field : classDecl->fields()) {
+          QualType fieldBaseType =
+              getContext().getBaseElementType(field->getType());
+          if (auto *fieldClassDecl = fieldBaseType->getAsCXXRecordDecl()) {
+            if (!(fieldClassDecl->isUnion() &&
+                  fieldClassDecl->isAnonymousStructOrUnion()) &&
+                !fieldClassDecl->hasTrivialDestructor()) {
+              canSkip = false;
+              break;
+            }
+          }
+        }
+      }
+      if (!canSkip) {
+        assert(!cir::MissingFeatures::strictVTablePointers());
+        initializeVTablePointers(getLoc(dtor->getBeginLoc()), classDecl);
+      }
+    }
 
     if (isTryBody) {
       cgm.errorNYI(dtor->getSourceRange(), "function-try-block destructor");
@@ -968,13 +1051,19 @@ clang::QualType CIRGenFunction::buildFunctionArgList(clang::GlobalDecl gd,
     cgm.getCXXABI().buildThisParam(*this, args);
   }
 
+  // The base version of an inheriting constructor whose constructed base is a
+  // virtual base is not passed any arguments (because it doesn't actually
+  // call the inherited constructor).
+  bool passedParams = true;
   if (const auto *cd = dyn_cast<CXXConstructorDecl>(fd))
-    if (cd->getInheritedConstructor())
-      cgm.errorNYI(fd->getSourceRange(),
-                   "buildFunctionArgList: inherited constructor");
+    if (auto inherited = cd->getInheritedConstructor())
+      passedParams =
+          getTypes().inheritingCtorHasParams(inherited, gd.getCtorType());
 
-  for (auto *param : fd->parameters())
-    args.push_back(param);
+  if (passedParams) {
+    for (auto *param : fd->parameters())
+      args.push_back(param);
+  }
 
   if (md && (isa<CXXConstructorDecl>(md) || isa<CXXDestructorDecl>(md)))
     cgm.getCXXABI().addImplicitStructorParams(*this, retTy, args);
@@ -1049,8 +1138,12 @@ LValue CIRGenFunction::emitLValue(const Expr *e) {
   case Expr::DeclRefExprClass:
     return emitDeclRefLValue(cast<DeclRefExpr>(e));
   case Expr::CStyleCastExprClass:
+  case Expr::CXXFunctionalCastExprClass:
   case Expr::CXXStaticCastExprClass:
   case Expr::CXXDynamicCastExprClass:
+  case Expr::CXXReinterpretCastExprClass:
+  case Expr::CXXConstCastExprClass:
+  case Expr::CXXAddrspaceCastExprClass:
   case Expr::ImplicitCastExprClass:
     return emitCastLValue(cast<CastExpr>(e));
   case Expr::MaterializeTemporaryExprClass:
@@ -1399,6 +1492,87 @@ Address CIRGenFunction::emitVAListRef(const Expr *e) {
   if (getContext().getBuiltinVaListType()->isArrayType())
     return emitPointerWithAlignment(e);
   return emitLValue(e).getAddress();
+}
+
+void CIRGenFunction::emitVarAnnotations(const VarDecl *d, mlir::Value val) {
+  assert(d->hasAttr<AnnotateAttr>() && "no annotate attribute");
+  llvm::SmallVector<mlir::Attribute, 4> annotations;
+  for (const auto *annot : d->specific_attrs<AnnotateAttr>())
+    annotations.push_back(cgm.emitAnnotateAttr(annot));
+  auto allocaOp = val.getDefiningOp<cir::AllocaOp>();
+  assert(allocaOp && "expects available alloca");
+  allocaOp.setAnnotationsAttr(builder.getArrayAttr(annotations));
+}
+
+void CIRGenFunction::emitKernelMetadata(const FunctionDecl *fd,
+                                        cir::FuncOp fn) {
+  if (!(fd->hasAttr<DeviceKernelAttr>() &&
+        DeviceKernelAttr::isOpenCLSpelling(fd->getAttr<DeviceKernelAttr>())) &&
+      !fd->hasAttr<CUDAGlobalAttr>())
+    return;
+
+  cgm.genKernelArgMetadata(fn, fd, this);
+
+  if (!getLangOpts().OpenCL)
+    return;
+
+  using cir::OpenCLKernelMetadataAttr;
+
+  mlir::ArrayAttr workGroupSizeHintAttr, reqdWorkGroupSizeAttr;
+  mlir::TypeAttr vecTypeHintAttr;
+  std::optional<bool> vecTypeHintSignedness;
+  mlir::IntegerAttr intelReqdSubGroupSizeAttr;
+
+  if (const VecTypeHintAttr *a = fd->getAttr<VecTypeHintAttr>()) {
+    mlir::Type typeHintValue = convertType(a->getTypeHint());
+    vecTypeHintAttr = mlir::TypeAttr::get(typeHintValue);
+    vecTypeHintSignedness =
+        OpenCLKernelMetadataAttr::isSignedHint(typeHintValue);
+  }
+
+  if (const WorkGroupSizeHintAttr *a = fd->getAttr<WorkGroupSizeHintAttr>()) {
+    auto eval = [&](Expr *e) {
+      return e->EvaluateKnownConstInt(fd->getASTContext()).getExtValue();
+    };
+    workGroupSizeHintAttr = builder.getI32ArrayAttr({
+        static_cast<int32_t>(eval(a->getXDim())),
+        static_cast<int32_t>(eval(a->getYDim())),
+        static_cast<int32_t>(eval(a->getZDim())),
+    });
+  }
+
+  if (const ReqdWorkGroupSizeAttr *a = fd->getAttr<ReqdWorkGroupSizeAttr>()) {
+    auto eval = [&](Expr *e) {
+      return e->EvaluateKnownConstInt(fd->getASTContext()).getExtValue();
+    };
+    reqdWorkGroupSizeAttr = builder.getI32ArrayAttr({
+        static_cast<int32_t>(eval(a->getXDim())),
+        static_cast<int32_t>(eval(a->getYDim())),
+        static_cast<int32_t>(eval(a->getZDim())),
+    });
+  }
+
+  if (const OpenCLIntelReqdSubGroupSizeAttr *a =
+          fd->getAttr<OpenCLIntelReqdSubGroupSizeAttr>()) {
+    intelReqdSubGroupSizeAttr = builder.getI32IntegerAttr(a->getSubGroupSize());
+  }
+
+  // Skip the metadata attr if no hints are present.
+  if (!vecTypeHintAttr && !workGroupSizeHintAttr && !reqdWorkGroupSizeAttr &&
+      !intelReqdSubGroupSizeAttr)
+    return;
+
+  // Append the kernel metadata to the extra attributes dictionary.
+  mlir::NamedAttrList attrs;
+  attrs.append(fn.getExtraAttrs()->getElements());
+
+  auto kernelMetadataAttr = OpenCLKernelMetadataAttr::get(
+      &getMLIRContext(), workGroupSizeHintAttr, reqdWorkGroupSizeAttr,
+      vecTypeHintAttr, vecTypeHintSignedness, intelReqdSubGroupSizeAttr);
+  attrs.append(kernelMetadataAttr.getMnemonic(), kernelMetadataAttr);
+
+  fn.setExtraAttrsAttr(cir::ExtraFuncAttributesAttr::get(
+      attrs.getDictionary(&getMLIRContext())));
 }
 
 } // namespace clang::CIRGen

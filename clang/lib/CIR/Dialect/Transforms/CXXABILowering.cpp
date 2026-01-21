@@ -57,8 +57,9 @@ public:
   matchAndRewrite(mlir::Operation *op, llvm::ArrayRef<mlir::Value> operands,
                   mlir::ConversionPatternRewriter &rewriter) const override {
     // Do not match on operations that have dedicated ABI lowering rewrite rules
-    if (llvm::isa<cir::AllocaOp, cir::BaseDataMemberOp, cir::CastOp, cir::CmpOp,
-                  cir::ConstantOp, cir::DerivedDataMemberOp, cir::FuncOp,
+    if (llvm::isa<cir::AllocaOp, cir::BaseDataMemberOp, cir::BaseMethodOp,
+                  cir::CastOp, cir::CmpOp, cir::ConstantOp,
+                  cir::DerivedDataMemberOp, cir::DerivedMethodOp, cir::FuncOp,
                   cir::GetMethodOp, cir::GetRuntimeMemberOp, cir::GlobalOp>(op))
       return mlir::failure();
 
@@ -76,9 +77,6 @@ public:
       // the match fails.
       return mlir::failure();
     }
-
-    assert(op->getNumRegions() == 0 && "CIRGenericCXXABILoweringPattern cannot "
-                                       "deal with operations with regions");
 
     mlir::OperationState loweredOpState(op->getLoc(), op->getName());
     loweredOpState.addOperands(operands);
@@ -294,14 +292,31 @@ mlir::LogicalResult CIRDerivedDataMemberOpABILowering::matchAndRewrite(
   return mlir::success();
 }
 
+mlir::LogicalResult CIRBaseMethodOpABILowering::matchAndRewrite(
+    cir::BaseMethodOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Value loweredResult =
+      lowerModule->getCXXABI().lowerBaseMethod(op, adaptor.getSrc(), rewriter);
+  rewriter.replaceOp(op, loweredResult);
+  return mlir::success();
+}
+
+mlir::LogicalResult CIRDerivedMethodOpABILowering::matchAndRewrite(
+    cir::DerivedMethodOp op, OpAdaptor adaptor,
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Value loweredResult = lowerModule->getCXXABI().lowerDerivedMethod(
+      op, adaptor.getSrc(), rewriter);
+  rewriter.replaceOp(op, loweredResult);
+  return mlir::success();
+}
+
 mlir::LogicalResult CIRGetMethodOpABILowering::matchAndRewrite(
     cir::GetMethodOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
-  mlir::Value callee;
-  mlir::Value thisArg;
+  mlir::Value loweredResults[2];
   lowerModule->getCXXABI().lowerGetMethod(
-      op, callee, thisArg, adaptor.getMethod(), adaptor.getObject(), rewriter);
-  rewriter.replaceOp(op, {callee, thisArg});
+      op, loweredResults, adaptor.getMethod(), adaptor.getObject(), rewriter);
+  rewriter.replaceOp(op, {loweredResults[0], loweredResults[1]});
   return mlir::success();
 }
 
@@ -340,6 +355,29 @@ static void prepareCXXABITypeConverter(mlir::TypeConverter &converter,
         lowerModule.getCXXABI().lowerMethodType(type, converter);
     return converter.convertType(abiType);
   });
+  // Record types may contain MethodType or DataMemberType members that
+  // need to be lowered. Convert the member types and update the record.
+  // Use a set to guard against infinite recursion from recursive record types.
+  auto recordsBeingConverted =
+      std::make_shared<llvm::SmallDenseSet<mlir::Type, 4>>();
+  converter.addConversion(
+      [&, recordsBeingConverted](cir::RecordType type) -> mlir::Type {
+        // Guard against infinite recursion from recursive record types.
+        if (!recordsBeingConverted->insert(type).second)
+          return type;
+        bool needsConversion = false;
+        llvm::SmallVector<mlir::Type> convertedMembers;
+        for (mlir::Type member : type.getMembers()) {
+          mlir::Type converted = converter.convertType(member);
+          convertedMembers.push_back(converted);
+          if (converted != member)
+            needsConversion = true;
+        }
+        if (needsConversion)
+          type.complete(convertedMembers, type.getPacked(), type.getPadded());
+        recordsBeingConverted->erase(type);
+        return type;
+      });
   // This is necessary in order to convert CIR function types that have argument
   // or return types that use CIR types that we are lowering in this pass.
   converter.addConversion([&](cir::FuncType type) -> mlir::Type {
@@ -390,6 +428,64 @@ populateCXXABIConversionTarget(mlir::ConversionTarget &target,
 // The Pass
 //===----------------------------------------------------------------------===//
 
+/// Before running the dialect conversion, walk the module to find all record
+/// types that have MethodType or DataMemberType members. Replace those members
+/// with their ABI-lowered equivalents. This is needed because RecordType is
+/// identified and mutable, so the type converter cannot create new record types
+/// with different members - it must modify the existing ones in place.
+static void lowerRecordTypeMembers(mlir::ModuleOp module,
+                                   mlir::TypeConverter &typeConverter) {
+  // Collect all record types used in the module.
+  llvm::DenseSet<cir::RecordType> recordTypes;
+  module.walk([&](mlir::Operation *op) {
+    // Check result types.
+    for (mlir::Type ty : op->getResultTypes()) {
+      if (auto ptrTy = mlir::dyn_cast<cir::PointerType>(ty))
+        ty = ptrTy.getPointee();
+      if (auto recTy = mlir::dyn_cast<cir::RecordType>(ty))
+        recordTypes.insert(recTy);
+    }
+    // Check operand types.
+    for (mlir::Value operand : op->getOperands()) {
+      mlir::Type ty = operand.getType();
+      if (auto ptrTy = mlir::dyn_cast<cir::PointerType>(ty))
+        ty = ptrTy.getPointee();
+      if (auto recTy = mlir::dyn_cast<cir::RecordType>(ty))
+        recordTypes.insert(recTy);
+    }
+    // Check attributes that may reference record types (e.g. globals).
+    if (auto globalOp = mlir::dyn_cast<cir::GlobalOp>(op)) {
+      if (auto recTy = mlir::dyn_cast<cir::RecordType>(globalOp.getSymType()))
+        recordTypes.insert(recTy);
+    }
+  });
+
+  // For each record type, check if any members need lowering.
+  for (cir::RecordType recTy : recordTypes) {
+    if (!recTy.getName() || recTy.isIncomplete())
+      continue;
+
+    llvm::ArrayRef<mlir::Type> members = recTy.getMembers();
+    bool needsUpdate = false;
+    for (mlir::Type memberTy : members) {
+      if (mlir::isa<cir::MethodType, cir::DataMemberType>(memberTy)) {
+        needsUpdate = true;
+        break;
+      }
+    }
+
+    if (!needsUpdate)
+      continue;
+
+    llvm::SmallVector<mlir::Type> newMembers;
+    newMembers.reserve(members.size());
+    for (mlir::Type memberTy : members)
+      newMembers.push_back(typeConverter.convertType(memberTy));
+
+    recTy.replaceMemberTypes(newMembers);
+  }
+}
+
 void CXXABILoweringPass::runOnOperation() {
   auto module = mlir::cast<mlir::ModuleOp>(getOperation());
   mlir::MLIRContext *ctx = module.getContext();
@@ -408,6 +504,12 @@ void CXXABILoweringPass::runOnOperation() {
   mlir::DataLayout dataLayout(module);
   mlir::TypeConverter typeConverter;
   prepareCXXABITypeConverter(typeConverter, dataLayout, *lowerModule);
+
+  // Lower MethodType and DataMemberType members inside record types before
+  // running the dialect conversion. This is needed because RecordType is
+  // identified by name and its members cannot be changed by the type
+  // converter.
+  lowerRecordTypeMembers(module, typeConverter);
 
   mlir::RewritePatternSet patterns(ctx);
   patterns.add<CIRGenericCXXABILoweringPattern>(patterns.getContext(),

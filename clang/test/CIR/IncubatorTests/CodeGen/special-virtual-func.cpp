@@ -11,6 +11,12 @@ class A {
 
 A::A() = default;
 
-// CHECK: @_ZTV1A = #cir.vtable<{#cir.const_array<[#cir.ptr<null> : !cir.ptr<!u8i>, #cir.global_view<@_ZTI1A> : !cir.ptr<!u8i>, #cir.global_view<@__cxa_pure_virtual> : !cir.ptr<!u8i>, #cir.global_view<@__cxa_deleted_virtual> : !cir.ptr<!u8i>]>
-// CHECK: cir.func {{.*}} @__cxa_pure_virtual()
-// CHECK: cir.func {{.*}} @__cxa_deleted_virtual()
+// Vtable includes __cxa_pure_virtual and __cxa_deleted_virtual
+// CHECK: cir.global  linkonce_odr comdat @_ZTV1A = #cir.vtable<{
+// CHECK-SAME: #cir.global_view<@__cxa_pure_virtual>
+// CHECK-SAME: #cir.global_view<@__cxa_deleted_virtual>
+
+// Constructor sets up vtable
+// CHECK: cir.func {{.*}} @_ZN1AC2Ev
+// CHECK:   cir.vtable.address_point(@_ZTV1A, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CHECK:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_A> -> !cir.ptr<!cir.vptr>

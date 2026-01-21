@@ -30,6 +30,10 @@ class CIRGenVTables {
 
   clang::VTableContextBase *vtContext;
 
+  /// Cached special virtual function declarations.
+  cir::FuncOp pureVirtualFn;
+  cir::FuncOp deletedVirtualFn;
+
   /// Address points for a single vtable.
   using VTableAddressPointsMapTy = clang::VTableLayout::AddressPointsMapTy;
   using BaseSubobjectPairTy =
@@ -50,6 +54,11 @@ class CIRGenVTables {
   getVTableComponent(const VTableLayout &layout, unsigned componentIndex,
                      mlir::Attribute rtti, unsigned &nextVTableThunkIndex,
                      unsigned vtableAddressPoint, bool vtableHasLocalLinkage);
+
+  /// Get the address of a thunk and emit it if necessary.
+  cir::FuncOp maybeEmitThunk(clang::GlobalDecl gd,
+                             const clang::ThunkInfo &thunkAdjustments,
+                             bool forVTable);
 
   mlir::Type getVTableComponentType();
 

@@ -13,7 +13,7 @@ struct S1 {
   unsigned f5:8;
 };
 
-// CIR-DAG: !rec_S1 = !cir.record<struct "S1" {!u8i, !u8i, !u16i} #cir.record.decl.ast>
+// CIR-DAG: !rec_S1 = !cir.record<struct "S1" {!u8i, !u8i, !u16i}>
 // LLVM-DAG: %struct.S1 = type { i8, i8, i16 }
 // OGCG-DAG: %struct.S1 = type { i8, i8, i16 }
 
@@ -23,7 +23,7 @@ struct S2 {
   unsigned long f3:6;
 };
 
-// CIR-DAG: !rec_S2 = !cir.record<struct "S2" padded {!u16i, !u16i, !u8i, !cir.array<!u8i x 3>} #cir.record.decl.ast>
+// CIR-DAG: !rec_S2 = !cir.record<struct "S2" padded {!u16i, !u16i, !u8i, !cir.array<!u8i x 3>}>
 // LLVM-DAG: %struct.S2 = type { i16, i16, i8, [3 x i8] }
 // OGCG-DAG: %struct.S2 = type { i16, i16, i8, [3 x i8] }
 
@@ -33,7 +33,7 @@ struct S3 {
   unsigned long f3:32;
 };
 
-// CIR-DAG: !rec_S3 = !cir.record<struct "S3" {!u32i, !u32i} #cir.record.decl.ast>
+// CIR-DAG: !rec_S3 = !cir.record<struct "S3" {!u32i, !u32i}>
 // LLVM-DAG: %struct.S3 = type { i32, i32 }
 // OGCG-DAG: %struct.S3 = type { i32, i32 }
 
@@ -69,10 +69,9 @@ void write8_1() {
 }
 
 // CIR-LABEL: @_Z8write8_1v
-// CIR: [[CONST3:%.*]] = cir.const #cir.int<3> : !s32i
-// CIR: [[INT3:%.*]] = cir.cast integral [[CONST3]] : !s32i -> !u32i
+// CIR: [[CONST3:%.*]] = cir.const #cir.int<3> : !u32i
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[1] {name = "f3"} : !cir.ptr<!rec_S1> -> !cir.ptr<!u8i>
-// CIR: cir.set_bitfield align(1) (#bfi_f3, [[MEMBER]] : !cir.ptr<!u8i>, [[INT3]] : !u32i) -> !u32i
+// CIR: cir.set_bitfield align(1) (#bfi_f3, [[MEMBER]] : !cir.ptr<!u8i>, [[CONST3]] : !u32i) -> !u32i
 
 // LLVM-LABEL: @_Z8write8_1v
 // LLVM:  store i8 3, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 1), align 1
@@ -115,10 +114,9 @@ void write8_2() {
 }
 
 // CIR-LABEL: @_Z8write8_2v
-// CIR: [[CONST3:%.*]] = cir.const #cir.int<3> : !s32i
-// CIR: [[INT3:%.*]] = cir.cast integral [[CONST3]] : !s32i -> !u32i
+// CIR: [[CONST3:%.*]] = cir.const #cir.int<3> : !u32i
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[2] {name = "f5"} : !cir.ptr<!rec_S1> -> !cir.ptr<!u16i>
-// CIR: cir.set_bitfield align(2) (#bfi_f5, %3 : !cir.ptr<!u16i>, {{.*}} : !u32i) -> !u32i
+// CIR: cir.set_bitfield align(2) (#bfi_f5, {{.*}} : !cir.ptr<!u16i>, {{.*}} : !u32i) -> !u32i
 
 // LLVM-LABEL: @_Z8write8_2v
 // LLVM:  [[BFLOAD:%.*]] = load i16, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 2), align 2
@@ -191,10 +189,9 @@ void write16_1() {
 }
 
 // CIR-LABEL: @_Z9write16_1v
-// CIR: [[CONST5:%.*]] = cir.const #cir.int<5> : !s32i
-// CIR: [[INT5:%.*]] = cir.cast integral [[CONST5]] : !s32i -> !u64i
+// CIR: [[CONST5:%.*]] = cir.const #cir.int<5> : !u64i
 // CIR: [[MEMBER:%.*]]  = cir.get_member {{.*}}[0] {name = "f1"} : !cir.ptr<!rec_S2> -> !cir.ptr<!u16i>
-// CIR: cir.set_bitfield align(8) (#bfi_f1, [[MEMBER]] : !cir.ptr<!u16i>, [[INT5]] : !u64i) -> !u64i
+// CIR: cir.set_bitfield align(8) (#bfi_f1, [[MEMBER]] : !cir.ptr<!u16i>, [[CONST5]] : !u64i) -> !u64i
 // CIR: cir.return
 
 // LLVM-LABEL: @_Z9write16_1v
@@ -211,8 +208,7 @@ void write16_2() {
 }
 
 // CIR-LABEL: @_Z9write16_2v
-// CIR: [[CONST5:%.*]] = cir.const #cir.int<5> : !s32i
-// CIR: [[INT5:%.*]] = cir.cast integral [[CONST5]] : !s32i -> !u64i
+// CIR: [[CONST5:%.*]] = cir.const #cir.int<5> : !u64i
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[1] {name = "f2"} : !cir.ptr<!rec_S2> -> !cir.ptr<!u16i>
 // CIR: cir.set_bitfield align(2) (#bfi_f2, [[MEMBER]] : !cir.ptr<!u16i>, {{.*}} : !u64i) -> !u64i
 // CIR: cir.return
@@ -256,10 +252,9 @@ void write32_1() {
 }
 
 // CIR-LABEL: @_Z9write32_1v
-// CIR: [[CONST5:%.*]] = cir.const #cir.int<5> : !s32i
-// CIR: [[INT5:%.*]] = cir.cast integral [[CONST5]] : !s32i -> !u64i
+// CIR: [[CONST5:%.*]] = cir.const #cir.int<5> : !u64i
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[1] {name = "f3"} : !cir.ptr<!rec_S3> -> !cir.ptr<!u32i>
-// CIR: cir.set_bitfield align(4) (#bfi_f3_1, [[MEMBER]] : !cir.ptr<!u32i>, [[INT5]] : !u64i) -> !u64i
+// CIR: cir.set_bitfield align(4) (#bfi_f3_1, [[MEMBER]] : !cir.ptr<!u32i>, [[CONST5]] : !u64i) -> !u64i
 // CIR: cir.return
 
 // LLVM-LABEL: @_Z9write32_1v

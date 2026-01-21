@@ -183,21 +183,17 @@ void foo() {
 
 // CIR: cir.func {{.*}} @foo
 // CIR:   cir.scope {
-// CIR:     %0 = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["agg.tmp0"]
-// CIR:      cir.br ^bb1
+// CIR:     cir.br ^bb1
 // CIR:    ^bb1:
 // CIR:     cir.label "label"
+// CIR:     cir.call %{{.+}}() : (!cir.ptr<!cir.func<()>>) -> ()
+// CIR:     cir.call @bar() : () -> ()
 
 // LLVM: define dso_local void @foo(){{.*}} {
-// LLVM:  [[ALLOC:%.*]] = alloca %struct.S, i64 1, align 1
-// LLVM:  br label %2
-// LLVM:2:
-// LLVM:  br label %3
-// LLVM:3:
-// LLVM:  [[CALL:%.*]] = call %struct.S @get()
-// LLVM:  store %struct.S [[CALL]], ptr [[ALLOC]], align 1
-// LLVM:  [[LOAD:%.*]] = load %struct.S, ptr [[ALLOC]], align 1
-// LLVM:  call void @bar(%struct.S [[LOAD]])
+// LLVM:  br label %{{.+}}
+// LLVM:  br label %{{.+}}
+// LLVM:  call void @get()
+// LLVM:  call void @bar()
 
 // OGCG: define dso_local void @foo()
 // OGCG:   %agg.tmp = alloca %struct.S, align 1

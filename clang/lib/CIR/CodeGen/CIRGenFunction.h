@@ -153,6 +153,10 @@ public:
   /// This is the inner-most code context, which includes blocks.
   const clang::Decl *curCodeDecl = nullptr;
 
+  /// In C++, whether we are code generating a thunk. This controls whether we
+  /// should emit cleanups.
+  bool curFuncIsThunk = false;
+
   /// The current function or global initializer that is generated code for.
   /// This is usually a cir::FuncOp, but it can also be a cir::GlobalOp for
   /// global initializers.
@@ -177,9 +181,12 @@ public:
   const CIRGenModule &getCIRGenModule() const { return cgm; }
 
   mlir::Block *getCurFunctionEntryBlock() {
-    // We currently assume this isn't called for a global initializer.
-    auto fn = mlir::cast<cir::FuncOp>(curFn);
-    return &fn.getRegion().front();
+    if (auto fn = mlir::dyn_cast<cir::FuncOp>(curFn))
+      return &fn.getRegion().front();
+    // For global initializers, use the ctor region of the GlobalOp.
+    if (auto globalOp = mlir::dyn_cast<cir::GlobalOp>(curFn))
+      return &globalOp.getCtorRegion().front();
+    llvm_unreachable("unexpected curFn type");
   }
 
   /// Sanitizers enabled for this function.
@@ -537,6 +544,50 @@ public:
 
   void finishFunction(SourceLocation endLoc);
 
+  // Many of MSVC builtins are on x64, ARM and AArch64; to avoid repeating code,
+  // we handle them here.
+  enum class MSVCIntrin {
+    _BitScanForward,
+    _BitScanReverse,
+    _InterlockedAnd,
+    _InterlockedDecrement,
+    _InterlockedExchange,
+    _InterlockedExchangeAdd,
+    _InterlockedExchangeSub,
+    _InterlockedIncrement,
+    _InterlockedOr,
+    _InterlockedXor,
+    _InterlockedExchangeAdd_acq,
+    _InterlockedExchangeAdd_rel,
+    _InterlockedExchangeAdd_nf,
+    _InterlockedExchange_acq,
+    _InterlockedExchange_rel,
+    _InterlockedExchange_nf,
+    _InterlockedCompareExchange_acq,
+    _InterlockedCompareExchange_rel,
+    _InterlockedCompareExchange_nf,
+    _InterlockedCompareExchange128,
+    _InterlockedCompareExchange128_acq,
+    _InterlockedCompareExchange128_rel,
+    _InterlockedCompareExchange128_nf,
+    _InterlockedOr_acq,
+    _InterlockedOr_rel,
+    _InterlockedOr_nf,
+    _InterlockedXor_acq,
+    _InterlockedXor_rel,
+    _InterlockedXor_nf,
+    _InterlockedAnd_acq,
+    _InterlockedAnd_rel,
+    _InterlockedAnd_nf,
+    _InterlockedIncrement_acq,
+    _InterlockedIncrement_rel,
+    _InterlockedIncrement_nf,
+    _InterlockedDecrement_acq,
+    _InterlockedDecrement_rel,
+    _InterlockedDecrement_nf,
+    __fastfail,
+  };
+
   /// Determine whether the given initializer is trivial in the sense
   /// that it requires no code to be generated.
   bool isTrivialInitializer(const Expr *init);
@@ -872,11 +923,19 @@ public:
 
   LValue makeAddrLValue(Address addr, QualType ty,
                         AlignmentSource source = AlignmentSource::Type) {
-    return makeAddrLValue(addr, ty, LValueBaseInfo(source));
+    return makeAddrLValue(addr, ty, LValueBaseInfo(source),
+                          cgm.getTBAAAccessInfo(ty));
   }
 
   LValue makeAddrLValue(Address addr, QualType ty, LValueBaseInfo baseInfo) {
-    return LValue::makeAddr(addr, ty, baseInfo);
+    return makeAddrLValue(addr, ty, baseInfo, cgm.getTBAAAccessInfo(ty));
+  }
+
+  LValue makeAddrLValue(Address addr, QualType ty, LValueBaseInfo baseInfo,
+                        TBAAAccessInfo tbaaInfo) {
+    LValue lv = LValue::makeAddr(addr, ty, baseInfo);
+    lv.setTBAAInfo(tbaaInfo);
+    return lv;
   }
 
   void initializeVTablePointers(mlir::Location loc,
@@ -978,6 +1037,10 @@ public:
   void populateEHCatchRegions(EHScopeStack::stable_iterator scope,
                               cir::TryOp tryOp);
 
+  /// Tracks the current call operation that may throw, used to populate
+  /// its cleanup region during exception handling.
+  cir::CallOp callWithExceptionCtx = nullptr;
+
   /// The cleanup depth enclosing all the cleanups associated with the
   /// parameters.
   EHScopeStack::stable_iterator prologueCleanupDepth;
@@ -989,6 +1052,10 @@ public:
   /// that have been added.
   void popCleanupBlocks(EHScopeStack::stable_iterator oldCleanupStackDepth);
   void popCleanupBlock();
+
+  /// Deactivate a cleanup that was created in a active state.
+  void deactivateCleanupBlock(EHScopeStack::stable_iterator cleanup,
+                              mlir::Operation *dominatingIP);
 
   /// Push a cleanup to be run at the end of the current full-expression.  Safe
   /// against the possibility that we're currently inside a
@@ -1260,6 +1327,12 @@ public:
   void pushDestroy(CleanupKind kind, Address addr, QualType type,
                    Destroyer *destroyer);
 
+  void pushIrregularPartialArrayCleanup(mlir::Value arrayBegin,
+                                        Address arrayEndPointer,
+                                        QualType elementType,
+                                        CharUnits elementAlign,
+                                        Destroyer *destroyer);
+
   Destroyer *getDestroyer(clang::QualType::DestructionKind kind);
 
   /// ----------------------
@@ -1277,6 +1350,11 @@ public:
                                                        const CallExpr *expr);
   std::optional<mlir::Value> emitAArch64SVEBuiltinExpr(unsigned builtinID,
                                                        const CallExpr *expr);
+  mlir::Value emitCommonNeonBuiltinExpr(
+      unsigned builtinID, unsigned llvmIntrinsic, unsigned altLLVMIntrinsic,
+      const char *nameHint, unsigned modifier, const CallExpr *e,
+      llvm::SmallVectorImpl<mlir::Value> &ops, Address ptrOp0, Address ptrOp1,
+      llvm::Triple::ArchType arch);
 
   mlir::Value emitAlignmentAssumption(mlir::Value ptrValue, QualType ty,
                                       SourceLocation loc,
@@ -1381,6 +1459,9 @@ public:
   AutoVarEmission emitAutoVarAlloca(const clang::VarDecl &d,
                                     mlir::OpBuilder::InsertPoint ip = {});
 
+  /// Emit local annotations for the local variable, declared by D.
+  void emitVarAnnotations(const clang::VarDecl *d, mlir::Value val);
+
   /// Emit code and set up symbol table for a variable declaration with auto,
   /// register, or no storage class specifier. These turn into simple stack
   /// objects, globals depending on target.
@@ -1472,6 +1553,11 @@ public:
                                    mlir::Type condType,
                                    bool buildingTopLevelCase);
 
+  const clang::CaseStmt *foldCaseStmt(const clang::CaseStmt &s,
+                                      mlir::Type condType,
+                                      mlir::ArrayAttr &value,
+                                      cir::CaseOpKind &kind);
+
   LValue emitCastLValue(const CastExpr *e);
 
   /// Emits an argument for a call to a `__builtin_assume`. If the builtin
@@ -1526,6 +1612,10 @@ public:
                               clang::CXXCtorType type, bool forVirtualBase,
                               bool delegating, Address thisAddr,
                               CallArgList &args, clang::SourceLocation loc);
+
+  void emitInheritedCXXConstructorCall(
+      const clang::CXXConstructorDecl *d, bool forVirtualBase, Address thisAddr,
+      bool inheritedFromVBase, const clang::CXXInheritedCtorInitExpr *e);
 
   void emitCXXDeleteExpr(const CXXDeleteExpr *e);
 
@@ -1626,6 +1716,8 @@ public:
 
   mlir::LogicalResult emitFunctionBody(const clang::Stmt *body);
 
+  void emitKernelMetadata(const clang::FunctionDecl *fd, cir::FuncOp fn);
+
   mlir::LogicalResult emitGotoStmt(const clang::GotoStmt &s);
 
   mlir::LogicalResult emitIndirectGotoStmt(const IndirectGotoStmt &s);
@@ -1707,6 +1799,8 @@ public:
   mlir::LogicalResult emitDeclStmt(const clang::DeclStmt &s);
   LValue emitDeclRefLValue(const clang::DeclRefExpr *e);
 
+  mlir::LogicalResult emitAttributedStmt(const clang::AttributedStmt &s);
+
   mlir::LogicalResult emitDefaultStmt(const clang::DefaultStmt &s,
                                       mlir::Type condType,
                                       bool buildingTopLevelCase);
@@ -1778,7 +1872,9 @@ public:
   /// l-value.
   mlir::Value emitLoadOfScalar(LValue lvalue, SourceLocation loc);
   mlir::Value emitLoadOfScalar(Address addr, bool isVolatile, QualType ty,
-                               SourceLocation loc, LValueBaseInfo baseInfo);
+                               SourceLocation loc, LValueBaseInfo baseInfo,
+                               TBAAAccessInfo tbaaInfo,
+                               bool isNontemporal = false);
 
   /// Emit code to compute a designator that specifies the location
   /// of the expression.
@@ -1803,6 +1899,10 @@ public:
   LValue emitMemberExpr(const MemberExpr *e);
 
   LValue emitOpaqueValueLValue(const OpaqueValueExpr *e);
+
+  RValue emitPseudoObjectRValue(const PseudoObjectExpr *e,
+                                AggValueSlot slot = AggValueSlot::ignored());
+  LValue emitPseudoObjectLValue(const PseudoObjectExpr *e);
 
   LValue emitConditionalOperatorLValue(const AbstractConditionalOperator *expr);
 
@@ -1847,13 +1947,16 @@ public:
 
   void emitStoreOfScalar(mlir::Value value, Address addr, bool isVolatile,
                          clang::QualType ty, LValueBaseInfo baseInfo,
-                         bool isInit = false, bool isNontemporal = false);
+                         TBAAAccessInfo tbaaInfo, bool isInit = false,
+                         bool isNontemporal = false);
   void emitStoreOfScalar(mlir::Value value, LValue lvalue, bool isInit);
 
   /// Store the specified rvalue into the specified
   /// lvalue, where both are guaranteed to the have the same type, and that type
   /// is 'Ty'.
   void emitStoreThroughLValue(RValue src, LValue dst, bool isInit = false);
+
+  void emitStoreThroughExtVectorComponentLValue(RValue src, LValue dst);
 
   mlir::Value emitStoreThroughBitfieldLValue(RValue src, LValue dstresult);
 
@@ -1914,10 +2017,37 @@ public:
   std::optional<mlir::Value> emitX86BuiltinExpr(unsigned builtinID,
                                                 const CallExpr *expr);
 
+  mlir::Value emitNVPTXBuiltinExpr(unsigned builtinID, const CallExpr *expr);
+
+  mlir::Value emitNVPTXDevicePrintfCallExpr(const CallExpr *expr);
+
   /// Given an assignment `*lhs = rhs`, emit a test that checks if \p rhs is
   /// nonnull, if 1\p LHS is marked _Nonnull.
   void emitNullabilityCheck(LValue lhs, mlir::Value rhs,
                             clang::SourceLocation loc);
+
+  //===--------------------------------------------------------------------===//
+  //                         Thunk Emission
+  //===--------------------------------------------------------------------===//
+
+  /// Generate a thunk for the given method.
+  void generateThunk(cir::FuncOp fn, const CIRGenFunctionInfo &fnInfo,
+                     clang::GlobalDecl gd, const clang::ThunkInfo &thunk,
+                     bool isUnprototyped);
+
+  void startThunk(cir::FuncOp fn, clang::GlobalDecl gd,
+                  const CIRGenFunctionInfo &fnInfo, bool isUnprototyped);
+
+  void emitCallAndReturnForThunk(cir::FuncOp callee,
+                                 const clang::ThunkInfo *thunk,
+                                 bool isUnprototyped);
+
+  /// Finish thunk generation.
+  void finishThunk();
+
+  /// Emit a musttail call for a thunk with a potentially adjusted this pointer.
+  void emitMustTailThunk(clang::GlobalDecl gd, mlir::Value adjustedThisPtr,
+                         cir::FuncOp callee);
 
   /// An object to manage conditionally-evaluated expressions.
   class ConditionalEvaluation {
@@ -1964,6 +2094,7 @@ public:
       builder.restoreInsertionPoint(outermostConditional->getInsertPoint());
       builder.createStore(
           value.getLoc(), value, addr, /*isVolatile=*/false,
+          /*isNontemporal=*/false,
           mlir::IntegerAttr::get(
               mlir::IntegerType::get(value.getContext(), 64),
               (uint64_t)addr.getAlignment().getAsAlign().value()));
