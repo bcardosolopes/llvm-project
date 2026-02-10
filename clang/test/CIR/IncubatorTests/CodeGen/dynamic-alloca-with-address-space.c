@@ -30,9 +30,9 @@ void allocas(unsigned long n) {
 
 // CIR-LABEL: cir.func {{.*}} @allocas
 // CIR:         %[[ALLOCA1:.*]] = cir.alloca !u8i, !cir.ptr<!u8i>, {{.*}} ["bi_alloca"]
-// CIR:         cir.cast address_space %[[ALLOCA1]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
+// CIR:         cir.cast bitcast %[[ALLOCA1]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
 // CIR:         %[[ALLOCA2:.*]] = cir.alloca !u8i, !cir.ptr<!u8i>, {{.*}} ["bi_alloca"]
-// CIR:         cir.cast address_space %[[ALLOCA2]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
+// CIR:         cir.cast bitcast %[[ALLOCA2]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
 
 // LLVM-LABEL: define {{.*}} void @allocas(i64 %{{.*}})
 // LLVM:         %[[BI_ALLOCA1:.*]] = alloca i8, i64 %{{.*}}, align 8, addrspace(5)

@@ -27,8 +27,7 @@ int *B;
 int test1(void) { return foo; }
 
 // CIR-LABEL: cir.func {{.*}} @test2
-// CIR: %[[I_ALLOCA:.*]] = cir.alloca !s32i, !cir.ptr<!s32i, lang_address_space(offload_private)>, ["i", init]
-// CIR: cir.cast address_space %[[I_ALLOCA]] : !cir.ptr<!s32i, lang_address_space(offload_private)> -> !cir.ptr<!s32i>
+// CIR: %[[I_ALLOCA:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["i", init]
 // LLVM-LABEL: define{{.*}} i32 @test2(i32 %0)
 // LLVM: alloca i32,{{.*}} addrspace(5)
 // LLVM: addrspacecast ptr addrspace(5)
@@ -44,8 +43,7 @@ int test2(int i) { return ban[i]; }
 // This is the key test - static alloca with address space cast.
 // The alloca is in addrspace(5) and must be cast to generic addrspace(0).
 // CIR-LABEL: cir.func {{.*}} @test4
-// CIR: %[[A_ALLOCA:.*]] = cir.alloca !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>, lang_address_space(offload_private)>, ["a", init]
-// CIR: cir.cast address_space %[[A_ALLOCA]] : !cir.ptr<!cir.ptr<!s32i>, lang_address_space(offload_private)> -> !cir.ptr<!cir.ptr<!s32i>>
+// CIR: %[[A_ALLOCA:.*]] = cir.alloca !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>, ["a", init]
 // LLVM-LABEL: define{{.*}} void @test4(ptr %0)
 // LLVM: %[[alloca:.*]] = alloca ptr,{{.*}} addrspace(5)
 // LLVM: %[[a_addr:.*]] = addrspacecast ptr addrspace(5) %[[alloca]] to ptr

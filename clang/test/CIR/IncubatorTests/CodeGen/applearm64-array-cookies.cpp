@@ -12,18 +12,13 @@ void t_constant_size_nontrivial() {
 
 // CHECK:  cir.func{{.*}} @_Z26t_constant_size_nontrivialv()
 // CHECK:    %[[#NUM_ELEMENTS:]] = cir.const #cir.int<3> : !u64i
-// CHECK:    %[[#SIZE_WITHOUT_COOKIE:]] = cir.const #cir.int<3> : !u64i
-// CHECK:    %[[#ALLOCATION_SIZE:]] = cir.const #cir.int<19> : !u64i
+// CHECK:    %[[#ALLOCATION_SIZE:]] = cir.const #cir.int<11> : !u64i
 // CHECK:    %[[#ALLOC_PTR:]] = cir.call @_Znam(%[[#ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %[[#COOKIE_PTR:]] = cir.cast bitcast %[[#ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!u64i>
-// CHECK:    %[[#ELEMENT_SIZE:]] = cir.const #cir.int<1> : !u64i
-// CHECK:    cir.store{{.*}} %[[#ELEMENT_SIZE]], %[[#COOKIE_PTR]] : !u64i, !cir.ptr<!u64i>
-// CHECK:    %[[#SECOND_COOKIE_OFFSET:]] = cir.const #cir.int<1> : !s32i
-// CHECK:    %[[#COOKIE_PTR2:]] = cir.ptr_stride %[[#COOKIE_PTR]], %[[#SECOND_COOKIE_OFFSET]] : (!cir.ptr<!u64i>, !s32i) -> !cir.ptr<!u64i>
-// CHECK:    cir.store{{.*}} %[[#NUM_ELEMENTS]], %[[#COOKIE_PTR2]] : !u64i, !cir.ptr<!u64i>
-// CHECK:    %[[#COOKIE_SIZE:]] = cir.const #cir.int<16> : !s32i
-// CHECK:    %[[#ALLOC_AS_I8:]] = cir.cast bitcast %[[#ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!u8i>
-// CHECK:    cir.ptr_stride %[[#ALLOC_AS_I8]], %[[#COOKIE_SIZE]] : (!cir.ptr<!u8i>, !s32i) -> !cir.ptr<!u8i>
+// CHECK:    %[[#COOKIE_PTR:]] = cir.cast bitcast %[[#ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!cir.ptr<!u8i>>
+// CHECK:    %[[#COOKIE_AS_U64:]] = cir.cast bitcast %[[#COOKIE_PTR]] : !cir.ptr<!cir.ptr<!u8i>> -> !cir.ptr<!u64i>
+// CHECK:    cir.store{{.*}} %[[#NUM_ELEMENTS]], %[[#COOKIE_AS_U64]] : !u64i, !cir.ptr<!u64i>
+// CHECK:    %[[#COOKIE_SIZE:]] = cir.const #cir.int<8> : !s32i
+// CHECK:    cir.ptr_stride %[[#COOKIE_PTR]], %[[#COOKIE_SIZE]] : (!cir.ptr<!cir.ptr<!u8i>>, !s32i) -> !cir.ptr<!cir.ptr<!u8i>>
 
 class D {
   public:
@@ -40,15 +35,10 @@ void t_constant_size_nontrivial2() {
 
 // CHECK:  cir.func{{.*}} @_Z27t_constant_size_nontrivial2v()
 // CHECK:    %[[#NUM_ELEMENTS:]] = cir.const #cir.int<3> : !u64i
-// CHECK:    %[[#SIZE_WITHOUT_COOKIE:]] = cir.const #cir.int<12> : !u64i
-// CHECK:    %[[#ALLOCATION_SIZE:]] = cir.const #cir.int<28> : !u64i
+// CHECK:    %[[#ALLOCATION_SIZE:]] = cir.const #cir.int<20> : !u64i
 // CHECK:    %[[#ALLOC_PTR:]] = cir.call @_Znam(%[[#ALLOCATION_SIZE]]) : (!u64i) -> !cir.ptr<!void>
-// CHECK:    %[[#COOKIE_PTR:]] = cir.cast bitcast %[[#ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!u64i>
-// CHECK:    %[[#ELEMENT_SIZE:]] = cir.const #cir.int<4> : !u64i
-// CHECK:    cir.store{{.*}} %[[#ELEMENT_SIZE]], %[[#COOKIE_PTR]] : !u64i, !cir.ptr<!u64i>
-// CHECK:    %[[#SECOND_COOKIE_OFFSET:]] = cir.const #cir.int<1> : !s32i
-// CHECK:    %[[#COOKIE_PTR2:]] = cir.ptr_stride %[[#COOKIE_PTR]], %[[#SECOND_COOKIE_OFFSET]] : (!cir.ptr<!u64i>, !s32i) -> !cir.ptr<!u64i>
-// CHECK:    cir.store{{.*}} %[[#NUM_ELEMENTS]], %[[#COOKIE_PTR2]] : !u64i, !cir.ptr<!u64i>
-// CHECK:    %[[#COOKIE_SIZE:]] = cir.const #cir.int<16> : !s32i
-// CHECK:    %[[#ALLOC_AS_I8:]] = cir.cast bitcast %[[#ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!u8i>
-// CHECK:    cir.ptr_stride %[[#ALLOC_AS_I8]], %[[#COOKIE_SIZE]] : (!cir.ptr<!u8i>, !s32i) -> !cir.ptr<!u8i>
+// CHECK:    %[[#COOKIE_PTR:]] = cir.cast bitcast %[[#ALLOC_PTR]] : !cir.ptr<!void> -> !cir.ptr<!cir.ptr<!u8i>>
+// CHECK:    %[[#COOKIE_AS_U64:]] = cir.cast bitcast %[[#COOKIE_PTR]] : !cir.ptr<!cir.ptr<!u8i>> -> !cir.ptr<!u64i>
+// CHECK:    cir.store{{.*}} %[[#NUM_ELEMENTS]], %[[#COOKIE_AS_U64]] : !u64i, !cir.ptr<!u64i>
+// CHECK:    %[[#COOKIE_SIZE:]] = cir.const #cir.int<8> : !s32i
+// CHECK:    cir.ptr_stride %[[#COOKIE_PTR]], %[[#COOKIE_SIZE]] : (!cir.ptr<!cir.ptr<!u8i>>, !s32i) -> !cir.ptr<!cir.ptr<!u8i>>
