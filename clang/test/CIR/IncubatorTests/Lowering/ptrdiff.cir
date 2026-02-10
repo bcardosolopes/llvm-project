@@ -14,5 +14,5 @@ module {
 //      CHECK: %3 = ptrtoint ptr %0 to i64
 // CHECK-NEXT: %4 = ptrtoint ptr %1 to i64
 // CHECK-NEXT: %5 = sub i64 %3, %4
-// CHECK-NEXT: %6 = udiv i64 %5, 4
+// CHECK-NEXT: %6 = udiv exact i64 %5, 4
 // CHECK-NEXT: %7 = trunc i64 %6 to i32
