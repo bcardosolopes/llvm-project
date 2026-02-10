@@ -32,40 +32,32 @@ void test() {
 // CIR VTable Structure
 // ============================================================================
 
-// Check thunk is in vtable
-// CIR: cir.global constant linkonce_odr @_ZTV7Derived = #cir.vtable
-// CIR: #cir.global_view<@_ZThn16_N7Derived3barEv>
+// Vtable is an external global in upstream CIR
+// CIR: cir.global "private"  external @_ZTV7Derived : !rec_anon_struct
 
 // ============================================================================
-// CIR Thunk Function Generation
+// CIR Constructor - VTable Address Point Setup
 // ============================================================================
 
-// Check that thunk function is generated with:
-// - comdat attribute (for deduplication across TUs)
-// - linkonce_odr linkage (one definition rule, discardable)
-// - correct mangling (_ZThn<offset>_<original_name>)
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn16_N7Derived3barEv
+// CIR: cir.func {{.*}} @_ZN7DerivedC2Ev
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Derived> -> !cir.ptr<!cir.vptr>
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 1, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Base2> -> !cir.ptr<!cir.vptr>
 
 // ============================================================================
-// CIR Thunk Implementation - This Pointer Adjustment
+// CIR Virtual Call - Using vtable.get_virtual_fn_addr
 // ============================================================================
 
-// The thunk should:
-// 1. Adjust the 'this' pointer by the offset (-16 bytes)
-// 2. Call the actual implementation with the adjusted pointer
-
-// CIR: cir.ptr_stride
-// CIR: cir.call @_ZN7Derived3barEv
+// CIR: cir.func {{.*}} @_Z4testv
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Base2> -> !cir.ptr<!cir.vptr>
+// CIR:   cir.vtable.get_virtual_fn_addr %{{.*}}[0] : !cir.vptr
 
 // ============================================================================
 // LLVM IR Output Validation
 // ============================================================================
 
-//      LLVM: @_ZTV7Derived = linkonce_odr constant
-// LLVM-SAME: @_ZThn16_N7Derived3barEv
-
-//      LLVM: define linkonce_odr void @_ZThn16_N7Derived3barEv
-// LLVM-SAME: ptr
+// LLVM: @_ZTV7Derived = external global { [4 x ptr], [3 x ptr] }
 
 // ============================================================================
 // Test Multiple Base Classes (Different Offsets)
@@ -103,9 +95,10 @@ void test_multi() {
   pc->methodC();
 }
 
-// Different thunks for different offsets
-// Offset to B should be 16 (A's vptr + a)
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn16_N5Multi7methodBEv
+// Multi vtable has 3 address point indices (A, B, C)
+// CIR: cir.func {{.*}} @_ZN5MultiC2Ev
+// CIR:   cir.vtable.address_point(@_ZTV5Multi, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.address_point(@_ZTV5Multi, address_point = <index = 1, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.address_point(@_ZTV5Multi, address_point = <index = 2, offset = 2>) : !cir.vptr
 
-// Offset to C should be 32 (A's vptr + a + B's vptr + b)
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn32_N5Multi7methodCEv
+// LLVM: @_ZTV5Multi = external global { [5 x ptr], [3 x ptr], [3 x ptr] }

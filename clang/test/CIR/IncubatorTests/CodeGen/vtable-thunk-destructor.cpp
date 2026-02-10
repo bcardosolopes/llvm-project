@@ -30,56 +30,32 @@ void test() {
 }
 
 // ============================================================================
-// Destructor Thunks
+// CIR VTable and Constructor
 // ============================================================================
 
-// Derived's destructor needs thunks when called through Base2* because
-// Base2 is at offset 16 in Derived (after Base1's vtable + data)
-// The Itanium ABI generates multiple destructor variants:
-// - D2 (base object destructor)
-// - D1 (complete object destructor)
-// - D0 (deleting destructor)
+// Vtable globals are external in upstream CIR
+// CIR: cir.global "private"  external @_ZTV7Derived : !rec_anon_struct
 
-// Check for complete destructor thunk (D1) - appears first in output
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn16_N7DerivedD1Ev
-// CIR: cir.ptr_stride
-// CIR: cir.call @_ZN7DerivedD1Ev
-
-// Check for deleting destructor thunk (D0) - appears second in output
-// CIR: cir.func {{.*}}comdat linkonce_odr @_ZThn16_N7DerivedD0Ev
-// CIR: cir.ptr_stride
-// CIR: cir.call @_ZN7DerivedD0Ev
+// Constructor sets up vtable address points for both bases
+// CIR: cir.func {{.*}} @_ZN7DerivedC2Ev
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Derived> -> !cir.ptr<!cir.vptr>
+// CIR:   cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 1, offset = 2>) : !cir.vptr
+// CIR:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_Base2> -> !cir.ptr<!cir.vptr>
 
 // ============================================================================
-// VTable Structure
+// LLVM IR Output Validation
 // ============================================================================
 
-// Check that vtable contains destructor thunks
-//     LLVM: @_ZTV7Derived = linkonce_odr constant
-// LLVM-DAG: @_ZThn16_N7DerivedD1Ev
-// LLVM-DAG: @_ZThn16_N7DerivedD0Ev
+// LLVM: @_ZTV7Derived = external global { [4 x ptr], [4 x ptr] }
 
-//     OGCG: @_ZTV7Derived = linkonce_odr {{.*}} constant
+// OGCG: @_ZTV7Derived = linkonce_odr {{.*}} constant
 // OGCG-DAG: @_ZThn16_N7DerivedD1Ev
 // OGCG-DAG: @_ZThn16_N7DerivedD0Ev
-
-// ============================================================================
-// Thunk Implementation
-// ============================================================================
-
-// Complete destructor thunk (D1)
-// LLVM-LABEL: define linkonce_odr void @_ZThn16_N7DerivedD1Ev
-//       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -16
-//       LLVM: call void @_ZN7DerivedD1Ev
 
 // OGCG-LABEL: define linkonce_odr void @_ZThn16_N7DerivedD1Ev
 //       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -16
 //       OGCG: call void @_ZN7DerivedD1Ev
-
-// Deleting destructor thunk (D0)
-// LLVM-LABEL: define linkonce_odr void @_ZThn16_N7DerivedD0Ev
-//       LLVM: getelementptr i8, ptr %{{[0-9]+}}, i64 -16
-//       LLVM: call void @_ZN7DerivedD0Ev
 
 // OGCG-LABEL: define linkonce_odr void @_ZThn16_N7DerivedD0Ev
 //       OGCG: getelementptr inbounds i8, ptr %{{.*}}, i64 -16

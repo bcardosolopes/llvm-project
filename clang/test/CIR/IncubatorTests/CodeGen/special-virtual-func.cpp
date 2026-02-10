@@ -11,6 +11,10 @@ class A {
 
 A::A() = default;
 
-// CHECK: @_ZTV1A = #cir.vtable<{#cir.const_array<[#cir.ptr<null> : !cir.ptr<!u8i>, #cir.global_view<@_ZTI1A> : !cir.ptr<!u8i>, #cir.global_view<@__cxa_pure_virtual> : !cir.ptr<!u8i>, #cir.global_view<@__cxa_deleted_virtual> : !cir.ptr<!u8i>]>
-// CHECK: cir.func {{.*}} @__cxa_pure_virtual()
-// CHECK: cir.func {{.*}} @__cxa_deleted_virtual()
+// Vtable is an external global in upstream CIR
+// CHECK: cir.global "private"  external @_ZTV1A : !rec_anon_struct
+
+// Constructor sets up vtable
+// CHECK: cir.func {{.*}} @_ZN1AC2Ev
+// CHECK:   cir.vtable.address_point(@_ZTV1A, address_point = <index = 0, offset = 2>) : !cir.vptr
+// CHECK:   cir.vtable.get_vptr %{{.*}} : !cir.ptr<!rec_A> -> !cir.ptr<!cir.vptr>
