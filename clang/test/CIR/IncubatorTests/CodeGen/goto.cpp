@@ -86,7 +86,7 @@ err:
   return -1;
 }
 // NOFLAT:  cir.func {{.*}} @_Z21shouldNotGenBranchReti
-// NOFLAT:    cir.if %8 {
+// NOFLAT:    cir.if {{%[0-9]+}} {
 // NOFLAT:      cir.goto "err"
 // NOFLAT:    }
 // NOFLAT:  ^bb1:
@@ -103,7 +103,7 @@ err:
   return -1;
 }
 // NOFLAT:  cir.func {{.*}} @_Z15shouldGenBranchi
-// NOFLAT:    cir.if %9 {
+// NOFLAT:    cir.if {{%[0-9]+}} {
 // NOFLAT:      cir.goto "err"
 // NOFLAT:    }
 // NOFLAT:    cir.br ^bb1
@@ -371,7 +371,8 @@ extern "C" void default_follow_label(int v) {
 
 // NOFLAT: cir.func {{.*}} @default_follow_label
 // NOFLAT: cir.switch
-// NOFLAT: cir.case(anyof, [#cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
+// NOFLAT: cir.case(equal, [#cir.int<1> : !s32i]) {
+// NOFLAT: cir.case(equal, [#cir.int<2> : !s32i]) {
 // NOFLAT: cir.call @action1()
 // NOFLAT: cir.break
 // NOFLAT: cir.label "label"
