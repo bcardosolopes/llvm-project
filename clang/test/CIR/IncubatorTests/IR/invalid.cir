@@ -130,7 +130,7 @@ cir.func @cast2(%p: !cir.ptr<!u32i>) {
 
 !u32i = !cir.int<u, 32>
 cir.func @cast3(%p: !cir.ptr<!u32i>) {
-  %0 = cir.alloca !cir.array<!u32i x 10>, !cir.ptr<!cir.array<!u32i x 10>>, ["x", init]
+  %0 = cir.alloca !cir.array<!u32i x 10>, !cir.ptr<!cir.array<!u32i x 10>>, ["x", init] {alignment = 4 : i64}
   %2 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!u32i x 10>> -> !cir.ptr<!cir.float> // expected-error {{requires same type for array element and pointee result}}
   cir.return
 }
@@ -840,7 +840,7 @@ module {
 module {
   cir.func @tmp(%arg0: !cir.float) {
     // expected-error@+1 {{operand #0 must be fundamental integer type}}
-    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, %arg0 : !cir.float, ["tmp"]
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, %arg0 : !cir.float, ["tmp"] {alignment = 4 : i64}
     cir.return
   }
 }
@@ -1368,7 +1368,7 @@ module {
 
 module {
   cir.func @array_to_ptrdecay_addrspace() {
-    %0 = cir.alloca !cir.array<!s32i x 32>, !cir.ptr<!cir.array<!s32i x 32>, lang_address_space(offload_private)>, ["x", init]
+    %0 = cir.alloca !cir.array<!s32i x 32>, !cir.ptr<!cir.array<!s32i x 32>, lang_address_space(offload_private)>, ["x", init] {alignment = 4 : i64}
     // expected-error@+1 {{requires same address space for source and result}}
     %1 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!s32i x 32>, lang_address_space(offload_private)> -> !cir.ptr<!s32i>
     cir.return
