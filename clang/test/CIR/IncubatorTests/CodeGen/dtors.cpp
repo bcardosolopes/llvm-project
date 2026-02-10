@@ -40,7 +40,7 @@ public:
 };
 
 // Class A
-// CHECK: ![[ClassA:rec_.*]] = !cir.record<class "A" {!cir.vptr} #cir.record.decl.ast>
+// CHECK: ![[ClassA:rec_.*]] = !cir.record<class "A" {!cir.vptr}>
 
 // Class B
 // CHECK: ![[ClassB:rec_.*]] = !cir.record<class "B" {![[ClassA]]}>
@@ -48,9 +48,10 @@ public:
 // CHECK: cir.func {{.*}} @_Z4bluev()
 // CHECK:   %0 = cir.alloca !rec_PSEvent, !cir.ptr<!rec_PSEvent>, ["p", init] {alignment = 8 : i64}
 // CHECK:   %1 = cir.const #cir.int<1> : !s32i
-// CHECK:   %2 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 5>>
+// CHECK:   %2 = cir.get_global @__FUNCTION__._Z4bluev : !cir.ptr<!cir.array<!s8i x 5>>
 // CHECK:   %3 = cir.cast array_to_ptrdecay %2 : !cir.ptr<!cir.array<!s8i x 5>> -> !cir.ptr<!s8i>
 // CHECK:   cir.call @_ZN7PSEventC1E6EFModePKc(%0, %1, %3) : (!cir.ptr<!rec_PSEvent>, !s32i, !cir.ptr<!s8i>) -> ()
+// CHECK:   cir.call @_ZN7PSEventD1Ev(%0) nothrow : (!cir.ptr<!rec_PSEvent>) -> ()
 // CHECK:   cir.return
 // CHECK: }
 
@@ -78,18 +79,11 @@ bool bar() { return foo(1) || foo(2); }
 // CHECK:       %[[V7:.*]] = cir.const #cir.int<2> : !s32i
 // CHECK:       cir.call @_ZN1XC2Ei(%[[V6]], %[[V7]]) : (!cir.ptr<!rec_X>, !s32i) -> ()
 // CHECK:       %[[V8:.*]] = cir.call @_Z3fooRK1X(%[[V6]]) : (!cir.ptr<!rec_X>) -> !cir.bool
-// CHECK:       %[[V9:.*]] = cir.ternary(%[[V8]], true {
-// CHECK:         %[[V10:.*]] = cir.const #true
-// CHECK:         cir.yield %[[V10]] : !cir.bool
-// CHECK:       }, false {
-// CHECK:         %[[V10:.*]] = cir.const #false
-// CHECK:         cir.yield %[[V10]] : !cir.bool
-// CHECK:       }) : (!cir.bool) -> !cir.bool
-// CHECK:       cir.call @_ZN1XD2Ev(%[[V6]]) : (!cir.ptr<!rec_X>) -> ()
-// CHECK:       cir.yield %[[V9]] : !cir.bool
+// CHECK:       cir.call @_ZN1XD2Ev(%[[V6]]) nothrow : (!cir.ptr<!rec_X>) -> ()
+// CHECK:       cir.yield %[[V8]] : !cir.bool
 // CHECK:     }) : (!cir.bool) -> !cir.bool
 // CHECK:     cir.store %[[V5]], %[[V0]] : !cir.bool, !cir.ptr<!cir.bool>
-// CHECK:     cir.call @_ZN1XD2Ev(%[[V2]]) : (!cir.ptr<!rec_X>) -> ()
+// CHECK:     cir.call @_ZN1XD2Ev(%[[V2]]) nothrow : (!cir.ptr<!rec_X>) -> ()
 // CHECK:   }
 // CHECK:   %[[V1:.*]] = cir.load{{.*}} %[[V0]] : !cir.ptr<!cir.bool>, !cir.bool
 // CHECK:   cir.return %[[V1]] : !cir.bool
@@ -127,8 +121,8 @@ void pseudo_dtor() {
 // void foo()
 // CHECK: cir.func {{.*}} @_Z3foov()
 // CHECK:   cir.scope {
-// CHECK:     cir.call @_ZN1BC2Ev(%0) : (!cir.ptr<!rec_B>) -> ()
-// CHECK:     cir.call @_ZN1BD2Ev(%0) : (!cir.ptr<!rec_B>) -> ()
+// CHECK:     cir.call @_ZN1BC2Ev(%0) nothrow : (!cir.ptr<!rec_B>) -> ()
+// CHECK:     cir.call @_ZN1BD2Ev(%0) nothrow : (!cir.ptr<!rec_B>) -> ()
 
 // operator delete(void*) declaration
 // CHECK:   cir.func {{.*}} @_ZdlPvm(!cir.ptr<!void>, !u64i)
