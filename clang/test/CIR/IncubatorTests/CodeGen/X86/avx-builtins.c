@@ -30,9 +30,9 @@
 
 __m256 test_mm256_undefined_ps(void) {
   // CIR-X64-LABEL: _mm256_undefined_ps
-  // CIR-X64: %[[A:.*]] = cir.const #cir.zero : !cir.vector<!cir.double x 4>
-  // CIR-X64: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<!cir.double x 4> -> !cir.vector<!cir.float x 8>
-  // CIR-X64: cir.return %{{.*}} : !cir.vector<!cir.float x 8>
+  // CIR-X64: %[[A:.*]] = cir.const #cir.zero : !cir.vector<4 x !cir.double>
+  // CIR-X64: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<4 x !cir.double> -> !cir.vector<8 x !cir.float>
+  // CIR-X64: cir.return %{{.*}} : !cir.vector<8 x !cir.float>
 
   // LLVM-X64-LABEL: test_mm256_undefined_ps
   // LLVM-X64: store <8 x float> zeroinitializer, ptr %[[A:.*]], align 32
@@ -44,8 +44,8 @@ __m256 test_mm256_undefined_ps(void) {
 
 __m256d test_mm256_undefined_pd(void) {
   // CIR-X64-LABEL: _mm256_undefined_pd
-  // CIR-X64: %{{.*}} = cir.const #cir.zero : !cir.vector<!cir.double x 4>
-  // CIR-X64: cir.return %{{.*}} : !cir.vector<!cir.double x 4>
+  // CIR-X64: %{{.*}} = cir.const #cir.zero : !cir.vector<4 x !cir.double>
+  // CIR-X64: cir.return %{{.*}} : !cir.vector<4 x !cir.double>
 
   // LLVM-X64-LABEL: test_mm256_undefined_pd
   // LLVM-X64: store <4 x double> zeroinitializer, ptr %[[A:.*]], align 32
@@ -57,9 +57,9 @@ __m256d test_mm256_undefined_pd(void) {
 
 __m256i test_mm256_undefined_si256(void) {
   // CIR-X64-LABEL: _mm256_undefined_si256
-  // CIR-X64: %[[A:.*]] = cir.const #cir.zero : !cir.vector<!cir.double x 4>
-  // CIR-X64: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<!cir.double x 4> -> !cir.vector<!s64i x 4>
-  // CIR-X64: cir.return %{{.*}} : !cir.vector<!s64i x 4>
+  // CIR-X64: %[[A:.*]] = cir.const #cir.zero : !cir.vector<4 x !cir.double>
+  // CIR-X64: %{{.*}} = cir.cast bitcast %[[A]] : !cir.vector<4 x !cir.double> -> !cir.vector<4 x !s64i>
+  // CIR-X64: cir.return %{{.*}} : !cir.vector<4 x !s64i>
   
   // LLVM-X64-LABEL: test_mm256_undefined_si256
   // LLVM-X64: store <4 x i64> zeroinitializer, ptr %[[A:.*]], align 32
@@ -70,7 +70,7 @@ __m256i test_mm256_undefined_si256(void) {
 
 int test_mm256_extract_epi8(__m256i A) {
   // CIR-CHECK-LABEL: test_mm256_extract_epi8
-  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : {{!u32i|!u64i}}] : !cir.vector<!s8i x 32>
+  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : {{!u32i|!u64i}}] : !cir.vector<32 x !s8i>
   // CIR-CHECK %{{.*}} = cir.cast integral %{{.*}} : !u8i -> !s32i
 
   // LLVM-CHECK-LABEL: test_mm256_extract_epi8
@@ -81,7 +81,7 @@ int test_mm256_extract_epi8(__m256i A) {
 
 int test_mm256_extract_epi16(__m256i A) {
   // CIR-CHECK-LABEL: test_mm256_extract_epi16
-  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : {{!u32i|!u64i}}] : !cir.vector<!s16i x 16>
+  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : {{!u32i|!u64i}}] : !cir.vector<16 x !s16i>
   // CIR-CHECK %{{.*}} = cir.cast integral %{{.*}} : !u16i -> !s32i
 
   // LLVM-CHECK-LABEL: test_mm256_extract_epi16
@@ -92,7 +92,7 @@ int test_mm256_extract_epi16(__m256i A) {
 
 int test_mm256_extract_epi32(__m256i A) {
   // CIR-CHECK-LABEL: test_mm256_extract_epi32
-  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : {{!u32i|!u64i}}] : !cir.vector<!s32i x 8>
+  // CIR-CHECK %{{.*}} = cir.vec.extract %{{.*}}[%{{.*}} : {{!u32i|!u64i}}] : !cir.vector<8 x !s32i>
 
   // LLVM-CHECK-LABEL: test_mm256_extract_epi32
   // LLVM-CHECK: extractelement <8 x i32> %{{.*}}, {{i32|i64}} 7
@@ -110,7 +110,7 @@ long long test_mm256_extract_epi64(__m256i A) {
 __m256i test_mm256_insert_epi8(__m256i x, char b) {
 
   // CIR-CHECK-LABEL: test_mm256_insert_epi8
-  // CIR-CHECK-LABEL: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<{{!s8i|!u8i}} x 32>
+  // CIR-CHECK: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<32 x {{!s8i|!u8i}}>
 
   // LLVM-CHECK-LABEL: test_mm256_insert_epi8
   // LLVM-CHECK: insertelement <32 x i8> %{{.*}}, i8 %{{.*}}, {{i32|i64}} 14
@@ -120,7 +120,7 @@ __m256i test_mm256_insert_epi8(__m256i x, char b) {
 __m256i test_mm256_insert_epi16(__m256i x, int b) {
 
   // CIR-CHECK-LABEL: test_mm256_insert_epi16
-  // CIR-CHECK: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<!s16i x 16>
+  // CIR-CHECK: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<16 x !s16i>
 
   // LLVM-CHECK-LABEL: test_mm256_insert_epi16
   // LLVM-CHECK: insertelement <16 x i16> %{{.*}}, i16 %{{.*}}, {{i32|i64}} 4
@@ -130,7 +130,7 @@ __m256i test_mm256_insert_epi16(__m256i x, int b) {
 __m256i test_mm256_insert_epi32(__m256i x, int b) {
 
   // CIR-CHECK-LABEL: test_mm256_insert_epi32
-  // CIR-CHECK: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<!s32i x 8>
+  // CIR-CHECK: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<8 x !s32i>
 
   // LLVM-CHECK-LABEL: test_mm256_insert_epi32
   // LLVM-CHECK: insertelement <8 x i32> %{{.*}}, i32 %{{.*}}, {{i32|i64}} 5
@@ -141,7 +141,7 @@ __m256i test_mm256_insert_epi32(__m256i x, int b) {
 __m256i test_mm256_insert_epi64(__m256i x, long long b) {
 
   // CIR-X64-LABEL: test_mm256_insert_epi64
-  // CIR-X64: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<!s64i x 4>
+  // CIR-X64: {{%.*}} = cir.vec.insert {{%.*}}, {{%.*}}[{{%.*}} : {{!u32i|!u64i}}] : !cir.vector<4 x !s64i>
 
   // LLVM-X64-LABEL: test_mm256_insert_epi64
   // LLVM-X64: insertelement <4 x i64> %{{.*}}, i64 %{{.*}}, {{i32|i64}} 2
@@ -151,7 +151,7 @@ __m256i test_mm256_insert_epi64(__m256i x, long long b) {
 
 __m256d test_mm256_blend_pd(__m256d A, __m256d B) {
   // CIR-LABEL: test_mm256_blend_pd
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 4>) [#cir.int<4> : !s32i, #cir.int<1> : !s32i, #cir.int<6> : !s32i, #cir.int<3> : !s32i] : !cir.vector<!cir.double x 4>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.double>) [#cir.int<4> : !s32i, #cir.int<1> : !s32i, #cir.int<6> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
 
   // LLVM-LABEL: test_mm256_blend_pd
   // LLVM: shufflevector <4 x double> %{{.*}}, <4 x double> %{{.*}}, <4 x i32> <i32 4, i32 1, i32 6, i32 3>
@@ -163,7 +163,7 @@ __m256d test_mm256_blend_pd(__m256d A, __m256d B) {
 
 __m256 test_mm256_blend_ps(__m256 A, __m256 B) {
   // CIR-LABEL: test_mm256_blend_ps
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 8>) [#cir.int<8> : !s32i, #cir.int<1> : !s32i, #cir.int<10> : !s32i, #cir.int<3> : !s32i, #cir.int<12> : !s32i, #cir.int<13> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i] : !cir.vector<!cir.float x 8>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.float>) [#cir.int<8> : !s32i, #cir.int<1> : !s32i, #cir.int<10> : !s32i, #cir.int<3> : !s32i, #cir.int<12> : !s32i, #cir.int<13> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i] : !cir.vector<8 x !cir.float>
 
   // LLVM-LABEL: test_mm256_blend_ps
   // LLVM: shufflevector <8 x float> %{{.*}}, <8 x float> %{{.*}}, <8 x i32> <i32 8, i32 1, i32 10, i32 3, i32 12, i32 13, i32 6, i32 7>
@@ -175,8 +175,8 @@ __m256 test_mm256_blend_ps(__m256 A, __m256 B) {
 
 __m256d test_mm256_insertf128_pd(__m256d A, __m128d B) {
   // CIR-LABEL: test_mm256_insertf128_pd
-  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 2>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<!cir.double x 4>
-  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 4>) [#cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<!cir.double x 4>
+  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
+  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.double>) [#cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
 
   // LLVM-LABEL: test_mm256_insertf128_pd
   // LLVM: shufflevector <2 x double> %{{.*}}, <2 x double> poison, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
@@ -186,8 +186,8 @@ __m256d test_mm256_insertf128_pd(__m256d A, __m128d B) {
 
 __m256 test_mm256_insertf128_ps(__m256 A, __m128 B) {
   // CIR-LABEL: test_mm256_insertf128_ps
-  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 4>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<!cir.float x 8>
-  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 8>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i] : !cir.vector<!cir.float x 8>
+  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.float>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<8 x !cir.float>
+  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.float>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i] : !cir.vector<8 x !cir.float>
 
   // LLVM-LABEL: test_mm256_insertf128_ps
   // LLVM: shufflevector <4 x float> %{{.*}}, <4 x float> poison, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
@@ -197,8 +197,8 @@ __m256 test_mm256_insertf128_ps(__m256 A, __m128 B) {
 
 __m256i test_mm256_insertf128_si256(__m256i A, __m128i B) {
   // CIR-LABEL: test_mm256_insertf128_si256
-  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s32i x 4>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<!s32i x 8>
-  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s32i x 8>) [#cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i]
+  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !s32i>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<8 x !s32i>
+  // %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !s32i>) [#cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i]
 
   // LLVM-LABEL: test_mm256_insertf128_si256
   // LLVM: shufflevector <4 x i32> %{{.*}}, <4 x i32> poison, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
@@ -208,7 +208,7 @@ __m256i test_mm256_insertf128_si256(__m256i A, __m128i B) {
 
 __m256d test_mm256_shuffle_pd(__m256d A, __m256d B) {
   // CIR-LABEL: test_mm256_shuffle_pd
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 4>) [#cir.int<0> : !s32i, #cir.int<4> : !s32i, #cir.int<2> : !s32i, #cir.int<6> : !s32i] : !cir.vector<!cir.double x 4>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<4> : !s32i, #cir.int<2> : !s32i, #cir.int<6> : !s32i] : !cir.vector<4 x !cir.double>
 
   // CHECK-LABEL: test_mm256_shuffle_pd
   // CHECK: shufflevector <4 x double> %{{.*}}, <4 x double> %{{.*}}, <4 x i32> <i32 0, i32 4, i32 2, i32 6>
@@ -220,7 +220,7 @@ __m256d test_mm256_shuffle_pd(__m256d A, __m256d B) {
 
 __m256 test_mm256_shuffle_ps(__m256 A, __m256 B) {
   // CIR-LABEL: test_mm256_shuffle_ps
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 8>) [#cir.int<0> : !s32i, #cir.int<0> : !s32i, #cir.int<8> : !s32i, #cir.int<8> : !s32i, #cir.int<4> : !s32i, #cir.int<4> : !s32i, #cir.int<12> : !s32i, #cir.int<12> : !s32i] : !cir.vector<!cir.float x 8>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.float>) [#cir.int<0> : !s32i, #cir.int<0> : !s32i, #cir.int<8> : !s32i, #cir.int<8> : !s32i, #cir.int<4> : !s32i, #cir.int<4> : !s32i, #cir.int<12> : !s32i, #cir.int<12> : !s32i] : !cir.vector<8 x !cir.float>
 
   // CHECK-LABEL: test_mm256_shuffle_ps
   // CHECK: shufflevector <8 x float> %{{.*}}, <8 x float> %{{.*}}, <8 x i32> <i32 0, i32 0, i32 8, i32 8, i32 4, i32 4, i32 12, i32 12>
