@@ -12,14 +12,11 @@ int s0(int a, int b) {
   return x;
 }
 
-// CIR: #loc3 = loc("{{.*}}sourcelocation.cpp":6:8)
-// CIR: #loc4 = loc("{{.*}}sourcelocation.cpp":6:12)
-// CIR: #loc5 = loc("{{.*}}sourcelocation.cpp":6:15)
-// CIR: #loc6 = loc("{{.*}}sourcelocation.cpp":6:19)
-// CIR: #loc22 = loc(fused[#loc3, #loc4])
-// CIR: #loc23 = loc(fused[#loc5, #loc6])
+// CIR: #loc1 = loc("{{.*}}sourcelocation.cpp":6:1)
+// CIR: #loc2 = loc("{{.*}}sourcelocation.cpp":13:1)
+// CIR: #loc21 = loc(fused[#loc1, #loc2])
 // CIR: module @"{{.*}}sourcelocation.cpp" attributes {{{.*}}cir.lang = #cir.lang<cxx>, {{.*}}cir.sob = #cir.signed_overflow_behavior<undefined>
-// CIR:   cir.func {{.*}} @_Z2s0ii(%arg0: !s32i loc(fused[#loc3, #loc4]), %arg1: !s32i loc(fused[#loc5, #loc6])) -> !s32i
+// CIR:   cir.func {{.*}} @_Z2s0ii(%arg0: !s32i loc(fused[#loc1, #loc2]), %arg1: !s32i loc(fused[#loc1, #loc2])) -> !s32i
 // CIR:     %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init] {alignment = 4 : i64} loc(#loc22)
 // CIR:     %1 = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", init] {alignment = 4 : i64} loc(#loc23)
 // CIR:     %2 = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64} loc(#loc2)
@@ -49,8 +46,10 @@ int s0(int a, int b) {
 // CIR:   } loc(#loc21)
 // CIR: } loc(#loc)
 // CIR: #loc = loc("{{.*}}sourcelocation.cpp":0:0)
-// CIR: #loc1 = loc("{{.*}}sourcelocation.cpp":6:1)
-// CIR: #loc2 = loc("{{.*}}sourcelocation.cpp":13:1)
+// CIR: #loc3 = loc("{{.*}}sourcelocation.cpp":6:8)
+// CIR: #loc4 = loc("{{.*}}sourcelocation.cpp":6:12)
+// CIR: #loc5 = loc("{{.*}}sourcelocation.cpp":6:15)
+// CIR: #loc6 = loc("{{.*}}sourcelocation.cpp":6:19)
 // CIR: #loc7 = loc("{{.*}}sourcelocation.cpp":7:3)
 // CIR: #loc8 = loc("{{.*}}sourcelocation.cpp":7:15)
 // CIR: #loc9 = loc("{{.*}}sourcelocation.cpp":6:22)
@@ -65,7 +64,8 @@ int s0(int a, int b) {
 // CIR: #loc18 = loc("{{.*}}sourcelocation.cpp":11:5)
 // CIR: #loc19 = loc("{{.*}}sourcelocation.cpp":12:10)
 // CIR: #loc20 = loc("{{.*}}sourcelocation.cpp":12:3)
-// CIR: #loc21 = loc(fused[#loc1, #loc2])
+// CIR: #loc22 = loc(fused[#loc3, #loc4])
+// CIR: #loc23 = loc(fused[#loc5, #loc6])
 // CIR: #loc24 = loc(fused[#loc7, #loc8])
 // CIR: #loc25 = loc(fused[#loc10, #loc8])
 // CIR: #loc26 = loc(fused[#loc11, #loc12])

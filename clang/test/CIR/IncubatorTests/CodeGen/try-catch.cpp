@@ -185,8 +185,8 @@ void tc8() {
 // CHECK: cir.scope {
 // CHECK:   %[[V0:.*]] = cir.alloca !rec_S2, !cir.ptr<!rec_S2>, ["s", init] {alignment = 4 : i64}
 // CHECK:   cir.try {
-// CHECK:     %[[V1:.*]] = cir.const #cir.const_record<{#cir.int<1> : !s32i, #cir.int<2> : !s32i}> : !rec_S2
-// CHECK:     cir.store align(4) %[[V1]], %[[V0]] : !rec_S2, !cir.ptr<!rec_S2>
+// CHECK:     %[[V1:.*]] = cir.get_global @__const._Z3tc8v.s : !cir.ptr<!rec_S2>
+// CHECK:     cir.copy %[[V1]] to %[[V0]] : !cir.ptr<!rec_S2>
 // CHECK:     cir.yield
 // CHECK:   }
 // CHECK: }
@@ -197,8 +197,8 @@ void tc8() {
 // FLAT: ^bb[[#B1]]:
 // FLAT:   cir.br ^bb[[#B2:]]
 // FLAT: ^bb[[#B2]]:
-// FLAT:   %[[V1:.*]] = cir.const #cir.const_record<{#cir.int<1> : !s32i, #cir.int<2> : !s32i}> : !rec_S2
-// FLAT:   cir.store align(4) %[[V1]], %[[V0]] : !rec_S2, !cir.ptr<!rec_S2>
+// FLAT:   %[[V1:.*]] = cir.get_global @__const._Z3tc8v.s : !cir.ptr<!rec_S2>
+// FLAT:   cir.copy %[[V1]] to %[[V0]] : !cir.ptr<!rec_S2>
 // FLAT:   cir.br ^bb[[#B3:]]
 // FLAT: ^bb[[#B3]]:
 // FLAT:   cir.br ^bb[[#B4:]]
