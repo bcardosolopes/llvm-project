@@ -752,7 +752,7 @@ module {
 
 // -----
 !s8i = !cir.int<s, 8>
-!rec_Init = !cir.record<class "Init" {!s8i} #cir.record.decl.ast>
+!rec_Init = !cir.record<class "Init" {!s8i}>
 module {
   cir.global "private" internal @_ZL8__ioinit = ctor : !rec_Init {
   }
@@ -762,7 +762,7 @@ module {
 // -----
 !s8i = !cir.int<s, 8>
 #true = #cir.bool<true> : !cir.bool
-!rec_Init = !cir.record<class "Init" {!s8i} #cir.record.decl.ast>
+!rec_Init = !cir.record<class "Init" {!s8i}>
 module {
   cir.func private @_ZN4InitC1Eb(!cir.ptr<!rec_Init>)
   cir.global "private" internal @_ZL8__ioinit = ctor : !rec_Init {
@@ -1640,7 +1640,7 @@ cir.func @invalidConditionTerminator (%arg0 : !cir.bool) -> !cir.void {
 !s16i = !cir.int<s, 16>
 !s32i = !cir.int<s, 32>
 #fn_attr = #cir<extra({nothrow = #cir.nothrow, uwtable = #cir.uwtable<async>})>
-!rec_S = !cir.record<struct "S" {!s16i} #cir.record.decl.ast>
+!rec_S = !cir.record<struct "S" {!s16i}>
 #tbaa_scalar = #cir.tbaa_scalar<id = "short", type = !s16i>
 // expected-error @below {{invalid kind of attribute specified}}
 // expected-error @below {{failed to parse CIR_TBAAStructAttr parameter 'members'}}
