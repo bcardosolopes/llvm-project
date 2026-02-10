@@ -105,7 +105,7 @@ void if1(int a, bool b, bool c) {
   }
 }
 
-// CHECK: cir.func {{.*}} @_Z3if1ibb(%arg0: !s32i loc({{.*}}), %arg1: !cir.bool loc({{.*}}), %arg2: !cir.bool loc({{.*}}))
+// CHECK: cir.func {{.*}} @_Z3if1ibb(%arg0: !s32i loc({{.*}}), %arg1: !cir.bool {cir.zeroext} loc({{.*}}), %arg2: !cir.bool {cir.zeroext} loc({{.*}}))
 // CHECK: cir.scope {
 // CHECK:   %5 = cir.load{{.*}} %0 : !cir.ptr<!s32i>, !s32i
 // CHECK:   %6 = cir.cast int_to_bool %5 : !s32i -> !cir.bool
