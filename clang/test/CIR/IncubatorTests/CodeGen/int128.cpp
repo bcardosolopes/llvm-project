@@ -10,7 +10,7 @@
 // LLVM-LABEL: @_Z5test1n
 __int128 test1(__int128 x) {
   return x;
-  // CHECK: cir.return %{{.+}} : !s128i
+  // CHECK: cir.return %{{.+}} : !rec_anon_struct
   // LLVM: ret i128 %{{.+}}
 }
 
@@ -18,7 +18,7 @@ __int128 test1(__int128 x) {
 // LLVM-LABEL: @_Z5test2o
 unsigned __int128 test2(unsigned __int128 x) {
   return x;
-  // CHECK: cir.return %{{.+}} : !u128i
+  // CHECK: cir.return %{{.+}} : !rec_anon_struct1
   // LLVM: ret i128 %{{.+}}
 }
 
