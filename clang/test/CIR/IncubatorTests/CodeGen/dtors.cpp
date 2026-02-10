@@ -171,7 +171,7 @@ public:
 int j;
 void m() { G l(j); }
 
-// CHECK: cir.func {{.*}} @_ZN1G1kE2A2(!cir.ptr<!rec_G>, !rec_A2) -> !s64i
+// CHECK: cir.func {{.*}} @_ZN1G1kE2A2(!cir.ptr<!rec_G>, !u8i) -> !s64i
 // CHECK: cir.func {{.*}} @_ZN1G1iEv(%arg0: !cir.ptr<!rec_G>
 // CHECK:   %[[V0:.*]] = cir.alloca !cir.ptr<!rec_G>, !cir.ptr<!cir.ptr<!rec_G>>, ["this", init] {alignment = 8 : i64}
 // CHECK:   %[[V1:.*]] = cir.alloca !s64i, !cir.ptr<!s64i>, ["__retval"] {alignment = 8 : i64}
@@ -180,9 +180,11 @@ void m() { G l(j); }
 // Trivial default constructor call is lowered away.
 // CHECK:   %[[V3:.*]] = cir.scope {
 // CHECK:     %[[V4:.*]] = cir.alloca !rec_A2, !cir.ptr<!rec_A2>, ["agg.tmp0"] {alignment = 1 : i64}
-// CHECK:     %[[V5:.*]] = cir.load{{.*}} %[[V4]] : !cir.ptr<!rec_A2>, !rec_A2
-// CHECK:     %[[V6:.*]] = cir.call @_ZN1G1kE2A2(%[[V2]], %[[V5]]) : (!cir.ptr<!rec_G>, !rec_A2) -> !s64i
-// CHECK:     cir.call @_ZN2A2D1Ev(%[[V4]]) : (!cir.ptr<!rec_A2>) -> ()
+// CHECK:     %{{.*}} = cir.load{{.*}} %[[V4]] : !cir.ptr<!rec_A2>, !rec_A2
+// CHECK:     %{{.*}} = cir.cast bitcast %[[V4]] : !cir.ptr<!rec_A2> -> !cir.ptr<!u8i>
+// CHECK:     %{{.*}} = cir.load %{{.*}} : !cir.ptr<!u8i>, !u8i
+// CHECK:     %[[V6:.*]] = cir.call @_ZN1G1kE2A2(%[[V2]], %{{.*}}) : (!cir.ptr<!rec_G>, !u8i) -> !s64i
+// CHECK:     cir.call @_ZN2A2D1Ev(%[[V4]]) nothrow : (!cir.ptr<!rec_A2>) -> ()
 // CHECK:     cir.yield %[[V6]] : !s64i
 // CHECK:   } : !s64i
 // CHECK:   cir.trap
