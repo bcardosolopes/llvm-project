@@ -16,7 +16,7 @@ int8_t test_vdupb_lane_s8(int8x8_t src) {
 
 // CIR-LABEL: test_vdupb_lane_s8
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<7> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u8i x 8>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<8 x !u8i>
 
 // LLVM: define dso_local i8 @test_vdupb_lane_s8(<8 x i8> [[ARG:%.*]])
 // LLVM: alloca <8 x i8>
@@ -34,7 +34,7 @@ int8_t test_vdupb_laneq_s8(int8x16_t a) {
 
 // CIR-LABEL: test_vdupb_laneq_s8
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<15> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u8i x 16>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<16 x !u8i>
 
 // LLVM: define dso_local i8 @test_vdupb_laneq_s8(<16 x i8> [[ARG:%.*]])
 // LLVM: alloca <16 x i8>
@@ -52,7 +52,7 @@ int16_t test_vduph_lane_s16(int16x4_t src) {
 
 // CIR-LABEL: test_vduph_lane_s16
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<3> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u16i x 4>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<4 x !u16i>
 
 
 // LLVM: define dso_local i16 @test_vduph_lane_s16(<4 x i16> [[ARG:%.*]])
@@ -71,7 +71,7 @@ int16_t test_vduph_laneq_s16(int16x8_t a) {
 
 // CIR-LABEL: test_vduph_laneq_s16
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<7> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u16i x 8>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<8 x !u16i>
 
 // LLVM: define dso_local i16 @test_vduph_laneq_s16(<8 x i16> [[ARG:%.*]])
 // LLVM: alloca <8 x i16>
@@ -89,7 +89,7 @@ int32_t test_vdups_lane_s32(int32x2_t a) {
 
 // CIR-LABEL: test_vdups_lane_s32
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<1> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u32i x 2>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<2 x !u32i>
 
 // LLVM: define dso_local i32 @test_vdups_lane_s32(<2 x i32> [[ARG:%.*]])
 // LLVM: alloca <2 x i32>
@@ -107,7 +107,7 @@ int32_t test_vdups_laneq_s32(int32x4_t a) {
 
 // CIR-LABEL: test_vdups_laneq_s32
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<3> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u32i x 4>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<4 x !u32i>
 
 // LLVM: define dso_local i32 @test_vdups_laneq_s32(<4 x i32> [[ARG:%.*]])
 // LLVM: alloca <4 x i32>
@@ -125,7 +125,7 @@ int64_t test_vdupd_lane_s64(int64x1_t src) {
 
 // CIR-LABEL: test_vdupd_lane_s64
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<0> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u64i x 1>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<1 x !u64i>
 
 // LLVM: define dso_local i64 @test_vdupd_lane_s64(<1 x i64> [[ARG:%.*]])
 // LLVM: alloca <1 x i64>
@@ -143,7 +143,7 @@ int64_t test_vdupd_laneq_s64(int64x2_t a) {
 
 // CIR-LABEL: test_vdupd_laneq_s64
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<1> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!u64i x 2>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<2 x !u64i>
 
 // LLVM: define dso_local i64 @test_vdupd_laneq_s64(<2 x i64> [[ARG:%.*]])
 // LLVM: alloca <2 x i64>
@@ -161,7 +161,7 @@ float32_t test_vdups_lane_f32(float32x2_t src) {
 
 // CIR-LABEL: test_vdups_lane_f32
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<1> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!cir.float x 2>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<2 x !cir.float>
 
 // LLVM: define dso_local float @test_vdups_lane_f32(<2 x float> [[ARG:%.*]])
 // LLVM: alloca <2 x float>
@@ -179,7 +179,7 @@ float64_t test_vdupd_lane_f64(float64x1_t src) {
 
 // CIR-LABEL: test_vdupd_lane_f64
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<0> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!cir.double x 1>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<1 x !cir.double>
 
 // LLVM: define dso_local double @test_vdupd_lane_f64(<1 x double> [[ARG:%.*]])
 // LLVM: alloca <1 x double>
@@ -197,7 +197,7 @@ float32_t test_vdups_laneq_f32(float32x4_t src) {
 
 // CIR-LABEL: test_vdups_laneq_f32
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<3> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!cir.float x 4>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<4 x !cir.float>
 
 // LLVM: define dso_local float @test_vdups_laneq_f32(<4 x float> [[ARG:%.*]])
 // LLVM: alloca <4 x float>
@@ -215,7 +215,7 @@ float64_t test_vdupd_laneq_f64(float64x2_t src) {
 
 // CIR-LABEL: test_vdupd_laneq_f64
 // CIR: [[IDX:%.*]]  = cir.const #cir.int<1> : !s32i
-// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<!cir.double x 2>
+// CIR: {{%.*}} = cir.vec.extract {{%.*}}[[[IDX]] : !s32i] : !cir.vector<2 x !cir.double>
 
 // LLVM: define dso_local double @test_vdupd_laneq_f64(<2 x double> [[ARG:%.*]])
 // LLVM: alloca <2 x double>
