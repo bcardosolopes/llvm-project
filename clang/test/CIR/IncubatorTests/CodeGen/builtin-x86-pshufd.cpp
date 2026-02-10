@@ -23,7 +23,7 @@ typedef __v8df __m512d;
 // CHECK-LABEL: @_Z11test_pshufdv
 void test_pshufd() {
     __m128i vec = {1, 2, 3, 4};
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s32i x 4>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<!s32i x 4>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !s32i>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<4 x !s32i>
     __m128i result = __builtin_ia32_pshufd(vec, 0x4E);
 }
 
@@ -31,7 +31,7 @@ void test_pshufd() {
 void test_different_mask() {
     __m128i vec = {10, 20, 30, 40};
     // Test different immediate value: 0x1B = 00011011 = [3,2,1,0] reversed
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s32i x 4>) [#cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i] : !cir.vector<!s32i x 4>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !s32i>) [#cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i] : !cir.vector<4 x !s32i>
     __m128i result = __builtin_ia32_pshufd(vec, 0x1B);
 }
 
@@ -42,7 +42,7 @@ void test_case() {
     // This reproduces the exact pattern from stb_image.h:2685 that was failing:
     // _mm_storel_epi64((__m128i *) out, _mm_shuffle_epi32(p0, 0x4e));
     // Which expands to: __builtin_ia32_pshufd(p0, 0x4e)
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s32i x 4>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<!s32i x 4>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !s32i>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<4 x !s32i>
     __m128i out_vec = __builtin_ia32_pshufd(p0, 0x4e);
 }
 
@@ -50,7 +50,7 @@ void test_case() {
 void test_vpermilps4() {
     __m128 vec = {1.0f, 2.0f, 3.0f, 4.0f};
     // vpermilps with immediate 0x4E = 01001110 = [1,3,2,0] for 4 elements
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} :  !cir.vector<!cir.float x 4>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<!cir.float x 4>  
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} :  !cir.vector<4 x !cir.float>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i] : !cir.vector<4 x !cir.float>  
     __m128 result = __builtin_ia32_vpermilps(vec, 0x4E);
 }
 
@@ -58,7 +58,7 @@ void test_vpermilps4() {
 void test_vpermilpd2() {
     __m128d vec = {1.0, 2.0};
     // vpermilpd with immediate 0x1 = 01 = [1,0] for 2 elements
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 2>) [#cir.int<1> : !s32i, #cir.int<0> : !s32i] : !cir.vector<!cir.double x 2>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<1> : !s32i, #cir.int<0> : !s32i] : !cir.vector<2 x !cir.double>
     __m128d result = __builtin_ia32_vpermilpd(vec, 0x1);
 }
 
@@ -66,7 +66,7 @@ void test_vpermilpd2() {
 void test_vpermilps256() {
     __m256 vec = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
     // vpermilps256 with immediate 0x1B = 00011011 = [3,2,1,0] for each 128-bit lane
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 8>) [#cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<7> : !s32i, #cir.int<6> : !s32i, #cir.int<5> : !s32i, #cir.int<4> : !s32i] : !cir.vector<!cir.float x 8>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.float>) [#cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<7> : !s32i, #cir.int<6> : !s32i, #cir.int<5> : !s32i, #cir.int<4> : !s32i] : !cir.vector<8 x !cir.float>
     __m256 result = __builtin_ia32_vpermilps256(vec, 0x1B);
 }
 
@@ -74,7 +74,7 @@ void test_vpermilps256() {
 void test_vpermilpd256() {
     __m256d vec = {1.0, 2.0, 3.0, 4.0};
     // vpermilpd256 with immediate 0x5 = 0101 = [1,0,1,0] for 4 elements
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 4>) [#cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<3> : !s32i, #cir.int<2> : !s32i] : !cir.vector<!cir.double x 4> 
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.double>) [#cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<3> : !s32i, #cir.int<2> : !s32i] : !cir.vector<4 x !cir.double> 
     __m256d result = __builtin_ia32_vpermilpd256(vec, 0x5);
 }
 
@@ -83,7 +83,7 @@ void test_vpermilps512() {
     __m512 vec = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 
                   9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f};
     // vpermilps512 with immediate 0x4E = 01001110 = [1,3,2,0] for each 128-bit lane
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 16>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i, #cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<14> : !s32i, #cir.int<15> : !s32i, #cir.int<12> : !s32i, #cir.int<13> : !s32i] : !cir.vector<!cir.float x 16>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<16 x !cir.float>) [#cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i, #cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<14> : !s32i, #cir.int<15> : !s32i, #cir.int<12> : !s32i, #cir.int<13> : !s32i] : !cir.vector<16 x !cir.float>
     __m512 result = __builtin_ia32_vpermilps512(vec, 0x4E);
 }
 
@@ -91,7 +91,7 @@ void test_vpermilps512() {
 void test_vpermilpd512() {
     __m512d vec = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
     // vpermilpd512 with immediate 0x55 = 01010101 = [1,0,1,0,1,0,1,0] for 8 elements
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 8>) [#cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<5> : !s32i, #cir.int<4> : !s32i, #cir.int<7> : !s32i, #cir.int<6> : !s32i] : !cir.vector<!cir.double x 8> 
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.double>) [#cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<5> : !s32i, #cir.int<4> : !s32i, #cir.int<7> : !s32i, #cir.int<6> : !s32i] : !cir.vector<8 x !cir.double> 
     __m512d result = __builtin_ia32_vpermilpd512(vec, 0x55);
 }
 
@@ -100,7 +100,7 @@ void test_vpermilpd512() {
 void test_vpermilps_different() {
     __m128 vec = {10.0f, 20.0f, 30.0f, 40.0f};
     // Test different immediate value: 0x1B = 00011011 = [3,2,1,0] reversed
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.float x 4>) [#cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i] : !cir.vector<!cir.float x 4> 
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<4 x !cir.float>) [#cir.int<3> : !s32i, #cir.int<2> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i] : !cir.vector<4 x !cir.float> 
     __m128 result = __builtin_ia32_vpermilps(vec, 0x1B);
 }
 
@@ -108,6 +108,6 @@ void test_vpermilps_different() {
 void test_vpermilpd_different() {
     __m128d vec = {100.0, 200.0};
     // Test immediate 0x0 = 00 = [0,0] - duplicate first element
-    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!cir.double x 2>) [#cir.int<0> : !s32i, #cir.int<0> : !s32i] : !cir.vector<!cir.double x 2>
+    // CHECK: cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<0> : !s32i] : !cir.vector<2 x !cir.double>
     __m128d result = __builtin_ia32_vpermilpd(vec, 0x0);
 }

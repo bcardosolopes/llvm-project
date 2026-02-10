@@ -57,7 +57,7 @@ _BitInt(20) sb20;
 // CHECK: cir.global external @sb20 = #cir.int<0> : !cir.int<s, 20>
 
 unsigned _BitInt(48) ub48;
-// CHECK: external @ub48 = #cir.int<0> : !u48i
+// CHECK: external @ub48 = #cir.int<0> : !cir.int<u, 48>
 
 _Float16 f16;
 // CHECK: cir.global external @f16 = #cir.fp<0.000000e+00> : !cir.f16
