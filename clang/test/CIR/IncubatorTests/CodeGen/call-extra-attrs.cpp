@@ -20,9 +20,9 @@ int s2(int a, int b) {
 
 // CIR: cir.func{{.*}} no_inline optnone {{.*}} @_Z2s0ii(%{{.*}}, %{{.*}}) -> {{.*}} extra(#cir<extra({nothrow = #cir.nothrow})>)
 // CIR: cir.func{{.*}} no_inline optnone {{.*}} @_Z2s1ii(%{{.*}}, %{{.*}}) -> {{.*}} extra(#cir<extra({nothrow = #cir.nothrow})>)
-// CIR: cir.call @_Z2s0ii(%{{.*}}, %{{.*}}) : ({{.*}}, {{.*}}) -> {{.*}} extra(#cir<extra({nothrow = #cir.nothrow})>)
+// CIR: cir.call @_Z2s0ii(%{{.*}}, %{{.*}}) nothrow : ({{.*}}, {{.*}}) -> {{.*}}
 // CIR: cir.func {{.*}} optnone {{.*}} @_Z2s2ii(%{{.*}}, %{{.*}}) -> {{.*}}
-// CIR-NOT: cir.call @_Z2s1ii(%{{.*}}, %{{.*}}) : ({{.*}}, {{.*}}) -> {{.*}} extra(#cir<extra({nothrow
+// CIR-NOT: cir.call @_Z2s1ii(%{{.*}}, %{{.*}}) : ({{.*}}, {{.*}}) -> {{.*}} nothrow
 
 // LLVM: define dso_local i32 @_Z2s0ii(i32 %0, i32 %1) #[[#ATTR1:]]
 // LLVM: define dso_local i32 @_Z2s1ii(i32 %0, i32 %1) #[[#ATTR1:]]
