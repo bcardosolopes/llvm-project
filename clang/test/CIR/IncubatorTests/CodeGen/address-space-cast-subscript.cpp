@@ -19,16 +19,14 @@
 void test_cast_then_subscript(AS1 int *p1) {
   // Explicit cast to AS2, then subscript - this goes through emitPointerWithAlignment
   int val = ((AS2 int *)p1)[0];
-  // CIR:      %[[#LOAD:]] = cir.load {{.*}} : !cir.ptr<!cir.ptr<!s32i, target_address_space(1)>>, !cir.ptr<!s32i, target_address_space(1)>
-  // CIR-NEXT: %[[#CAST:]] = cir.cast address_space %[[#LOAD]] : !cir.ptr<!s32i, target_address_space(1)> -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR-NEXT: %[[#IDX:]] = cir.const #cir.int<0> : !s32i
-  // CIR-NEXT: %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %[[#IDX]] : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR-NEXT: %{{.+}} = cir.load {{.*}} %[[#PTR]] : !cir.ptr<!s32i, target_address_space(2)>, !s32i
+  // CIR:      %[[#IDX:]] = cir.const #cir.int<0> : !s32i
+  // CIR-NEXT: %[[#LOAD:]] = cir.load {{.*}} : !cir.ptr<!cir.ptr<!s32i, target_address_space(1)>>, !cir.ptr<!s32i, target_address_space(1)>
+  // CIR-NEXT: %[[#PTR:]] = cir.ptr_stride %[[#LOAD]], %[[#IDX]] : (!cir.ptr<!s32i, target_address_space(1)>, !s32i) -> !cir.ptr<!s32i, target_address_space(1)>
+  // CIR-NEXT: %{{.+}} = cir.load {{.*}} %[[#PTR]] : !cir.ptr<!s32i, target_address_space(1)>, !s32i
 
   // LLVM:      %[[#LOAD:]] = load ptr addrspace(1), ptr %{{.+}}, align 8
-  // LLVM-NEXT: %[[#CAST:]] = addrspacecast ptr addrspace(1) %[[#LOAD]] to ptr addrspace(2)
-  // LLVM-NEXT: %[[#GEP:]] = getelementptr i32, ptr addrspace(2) %[[#CAST]], i64 0
-  // LLVM-NEXT: %{{.+}} = load i32, ptr addrspace(2) %[[#GEP]], align 4
+  // LLVM-NEXT: %[[#GEP:]] = getelementptr i32, ptr addrspace(1) %[[#LOAD]], i64 0
+  // LLVM-NEXT: %{{.+}} = load i32, ptr addrspace(1) %[[#GEP]], align 4
 
   // OGCG:      %[[#LOAD:]] = load ptr addrspace(1), ptr %{{.+}}, align 8
   // OGCG-NEXT: %[[#CAST:]] = addrspacecast ptr addrspace(1) %[[#LOAD]] to ptr addrspace(2)
@@ -41,13 +39,13 @@ void test_cast_then_subscript(AS1 int *p1) {
 void test_cast_then_subscript_write(AS1 int *p1, int val) {
   // Explicit cast to AS2, then subscript for write
   ((AS2 int *)p1)[0] = val;
-  // CIR:      %[[#CAST:]] = cir.cast address_space %{{.+}} : !cir.ptr<!s32i, target_address_space(1)> -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR:      %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %{{.+}} : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR-NEXT: cir.store {{.*}}, %[[#PTR]] : !s32i, !cir.ptr<!s32i, target_address_space(2)>
+  // CIR:      %[[#LOAD:]] = cir.load {{.*}} : !cir.ptr<!cir.ptr<!s32i, target_address_space(1)>>, !cir.ptr<!s32i, target_address_space(1)>
+  // CIR:      %[[#PTR:]] = cir.ptr_stride %[[#LOAD]], %{{.+}} : (!cir.ptr<!s32i, target_address_space(1)>, !s32i) -> !cir.ptr<!s32i, target_address_space(1)>
+  // CIR-NEXT: cir.store {{.*}}, %[[#PTR]] : !s32i, !cir.ptr<!s32i, target_address_space(1)>
 
-  // LLVM:      %[[#CAST:]] = addrspacecast ptr addrspace(1) %{{.+}} to ptr addrspace(2)
-  // LLVM-NEXT: %[[#GEP:]] = getelementptr i32, ptr addrspace(2) %[[#CAST]], i64 0
-  // LLVM-NEXT: store i32 %{{.+}}, ptr addrspace(2) %[[#GEP]], align 4
+  // LLVM:      %[[#LOAD:]] = load ptr addrspace(1), ptr %{{.+}}, align 8
+  // LLVM-NEXT: %[[#GEP:]] = getelementptr i32, ptr addrspace(1) %[[#LOAD]], i64 0
+  // LLVM-NEXT: store i32 %{{.+}}, ptr addrspace(1) %[[#GEP]], align 4
 
   // OGCG:      %[[#CAST:]] = addrspacecast ptr addrspace(1) %{{.+}} to ptr addrspace(2)
   // OGCG:      getelementptr inbounds i32, ptr addrspace(2) %[[#CAST]], i64 0
@@ -59,14 +57,14 @@ void test_cast_then_subscript_write(AS1 int *p1, int val) {
 void test_cast_then_subscript_nonzero_index(AS1 int *p1) {
   // Cast then subscript with non-zero index
   int val = ((AS2 int *)p1)[5];
-  // CIR:      %[[#CAST:]] = cir.cast address_space %{{.+}} : !cir.ptr<!s32i, target_address_space(1)> -> !cir.ptr<!s32i, target_address_space(2)>
   // CIR:      %[[#IDX:]] = cir.const #cir.int<5> : !s32i
-  // CIR-NEXT: %[[#PTR:]] = cir.ptr_stride %[[#CAST]], %[[#IDX]] : (!cir.ptr<!s32i, target_address_space(2)>, !s32i) -> !cir.ptr<!s32i, target_address_space(2)>
-  // CIR-NEXT: %{{.+}} = cir.load {{.*}} %[[#PTR]] : !cir.ptr<!s32i, target_address_space(2)>, !s32i
+  // CIR:      %[[#LOAD:]] = cir.load {{.*}} : !cir.ptr<!cir.ptr<!s32i, target_address_space(1)>>, !cir.ptr<!s32i, target_address_space(1)>
+  // CIR-NEXT: %[[#PTR:]] = cir.ptr_stride %[[#LOAD]], %[[#IDX]] : (!cir.ptr<!s32i, target_address_space(1)>, !s32i) -> !cir.ptr<!s32i, target_address_space(1)>
+  // CIR-NEXT: %{{.+}} = cir.load {{.*}} %[[#PTR]] : !cir.ptr<!s32i, target_address_space(1)>, !s32i
 
-  // LLVM:      %[[#CAST:]] = addrspacecast ptr addrspace(1) %{{.+}} to ptr addrspace(2)
-  // LLVM:      %[[#GEP:]] = getelementptr i32, ptr addrspace(2) %[[#CAST]], i64 5
-  // LLVM-NEXT: %{{.+}} = load i32, ptr addrspace(2) %[[#GEP]], align 4
+  // LLVM:      %[[#LOAD:]] = load ptr addrspace(1), ptr %{{.+}}, align 8
+  // LLVM:      %[[#GEP:]] = getelementptr i32, ptr addrspace(1) %[[#LOAD]], i64 5
+  // LLVM-NEXT: %{{.+}} = load i32, ptr addrspace(1) %[[#GEP]], align 4
 
   // OGCG:      %[[#CAST:]] = addrspacecast ptr addrspace(1) %{{.+}} to ptr addrspace(2)
   // OGCG:      getelementptr inbounds i32, ptr addrspace(2) %[[#CAST]], i64 5
