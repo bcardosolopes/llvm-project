@@ -5,8 +5,9 @@
 
 #include "typeinfo"
 
+// In upstream, vtable is always an external global regardless of optimization level
 // CHECK: cir.global{{.*}} external @_ZTV1A
-// CHECK-FORCE-EMIT-DAG: cir.global{{.*}} available_externally @_ZTV1A
+// CHECK-FORCE-EMIT: cir.global{{.*}} external @_ZTV1A
 struct A {
   A();
   virtual void f();
