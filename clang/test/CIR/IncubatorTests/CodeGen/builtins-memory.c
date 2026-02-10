@@ -14,19 +14,21 @@ void test_memcpy_chk(void *dest, const void *src, size_t n) {
   // CIR:         %[[#SRC:]] = cir.alloca {{.*}} ["src", init]
   // CIR:         %[[#N:]] = cir.alloca {{.*}} ["n", init]
 
-  // An unchecked memcpy should be emitted when the count and buffer size are
-  // constants and the count is less than or equal to the buffer size.
+  // Upstream does not fold __memcpy_chk into cir.libc.memcpy even when
+  // count <= buffer size. It always emits __memcpy_chk.
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<8>
-  // CIR: cir.libc.memcpy %[[#COUNT]] bytes from %[[#SRC_LOAD]] to %[[#DEST_LOAD]]
+  // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
+  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]])
   __builtin___memcpy_chk(dest, src, 8, 10);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
-  // CIR: cir.libc.memcpy %[[#COUNT]] bytes from %[[#SRC_LOAD]] to %[[#DEST_LOAD]]
+  // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
+  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]])
   __builtin___memcpy_chk(dest, src, 10, 10);
 
   // __memcpy_chk should be called when the count is greater than the buffer
@@ -36,28 +38,28 @@ void test_memcpy_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
   // CIR: %[[#SIZE:]] = cir.const #cir.int<8>
-  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]])
+  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   __builtin___memcpy_chk(dest, src, 10lu, 8lu);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#N_LOAD:]] = cir.load{{.*}} %[[#N]]
   // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
-  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD]], %[[#SIZE]])
+  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD]], %[[#SIZE]]) nothrow
   __builtin___memcpy_chk(dest, src, n, 10lu);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
   // CIR: %[[#N_LOAD:]] = cir.load{{.*}} %[[#N]]
-  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#N_LOAD]])
+  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#N_LOAD]]) nothrow
   __builtin___memcpy_chk(dest, src, 10lu, n);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#N_LOAD1:]] = cir.load{{.*}} %[[#N]]
   // CIR: %[[#N_LOAD2:]] = cir.load{{.*}} %[[#N]]
-  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD1]], %[[#N_LOAD2]])
+  // CIR: cir.call @__memcpy_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD1]], %[[#N_LOAD2]]) nothrow
   __builtin___memcpy_chk(dest, src, n, n);
 }
 
@@ -75,7 +77,8 @@ void test_memmove_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<8>
-  // CIR: cir.libc.memmove %[[#COUNT]] bytes from %[[#SRC_LOAD]] to %[[#DEST_LOAD]]
+  // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
+  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   // LLVM: call void @llvm.memmove.p0.p0.i64(ptr {{%.*}}, ptr {{%.*}}, i64 8, i1 false)
   // COM: LLVM: call void @llvm.memmove.p0.p0.i64(ptr align 1 {{%.*}}, ptr align 1 {{%.*}}, i64 8, i1 false)
   __builtin___memmove_chk(dest, src, 8, 10);
@@ -83,7 +86,8 @@ void test_memmove_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
-  // CIR: cir.libc.memmove %[[#COUNT]] bytes from %[[#SRC_LOAD]] to %[[#DEST_LOAD]]
+  // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
+  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   // LLVM: call void @llvm.memmove.p0.p0.i64(ptr {{%.*}}, ptr {{%.*}}, i64 10, i1 false)
   // COM: LLVM: call void @llvm.memmove.p0.p0.i64(ptr align 1 {{%.*}}, ptr align 1 {{%.*}}, i64 10, i1 false)
   __builtin___memmove_chk(dest, src, 10, 10);
@@ -92,7 +96,7 @@ void test_memmove_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
   // CIR: %[[#SIZE:]] = cir.const #cir.int<8>
-  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]])
+  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   // LLVM: call ptr @__memmove_chk(ptr {{%.*}}, ptr {{%.*}}, i64 10, i64 8)
   // COM: LLVM: call ptr @__memmove_chk(ptr noundef %4, ptr noundef %5, i64 noundef 10, i64 noundef 8)
   __builtin___memmove_chk(dest, src, 10lu, 8lu);
@@ -101,7 +105,7 @@ void test_memmove_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#N_LOAD:]] = cir.load{{.*}} %[[#N]]
   // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
-  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD]], %[[#SIZE]])
+  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD]], %[[#SIZE]]) nothrow
   // LLVM: call ptr @__memmove_chk(ptr {{%.*}}, ptr {{%.*}}, i64 {{%.*}}, i64 10)
   // COM: LLVM: call ptr @__memmove_chk(ptr noundef {{%.*}}, ptr noundef {{%.*}}, i64 noundef {{%.*}}, i64 noundef 10)
   __builtin___memmove_chk(dest, src, n, 10lu);
@@ -110,7 +114,7 @@ void test_memmove_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
   // CIR: %[[#N_LOAD:]] = cir.load{{.*}} %[[#N]]
-  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#N_LOAD]])
+  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#COUNT]], %[[#N_LOAD]]) nothrow
   // LLVM: call ptr @__memmove_chk(ptr {{%.*}}, ptr {{%.*}}, i64 10, i64 {{%.*}})
   // COM: LLVM: call ptr @__memmove_chk(ptr noundef {{%.*}}, ptr noundef {{%.*}}, i64 noundef 10, i64 noundef {{%.*}})
   __builtin___memmove_chk(dest, src, 10lu, n);
@@ -119,7 +123,7 @@ void test_memmove_chk(void *dest, const void *src, size_t n) {
   // CIR: %[[#SRC_LOAD:]] = cir.load{{.*}} %[[#SRC]]
   // CIR: %[[#N_LOAD1:]] = cir.load{{.*}} %[[#N]]
   // CIR: %[[#N_LOAD2:]] = cir.load{{.*}} %[[#N]]
-  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD1]], %[[#N_LOAD2]])
+  // CIR: cir.call @__memmove_chk(%[[#DEST_LOAD]], %[[#SRC_LOAD]], %[[#N_LOAD1]], %[[#N_LOAD2]]) nothrow
   // LLVM: call ptr @__memmove_chk(ptr {{%.*}}, ptr {{%.*}}, i64 {{%.*}}, i64 {{%.*}})
   // COM: LLVM: call ptr @__memmove_chk(ptr noundef {{%.*}}, ptr noundef {{%.*}}, i64 noundef {{%.*}}, i64 noundef {{%.*}})
   __builtin___memmove_chk(dest, src, n, n);
@@ -138,13 +142,15 @@ void test_memset_chk(void *dest, int ch, size_t n) {
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#CH_LOAD:]] = cir.load{{.*}} %[[#CH]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<8>
-  // CIR: cir.libc.memset %[[#COUNT]] bytes from %[[#DEST_LOAD]] set to %[[#CH_LOAD]]
+  // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
+  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   __builtin___memset_chk(dest, ch, 8, 10);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#CH_LOAD:]] = cir.load{{.*}} %[[#CH]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
-  // CIR: cir.libc.memset %[[#COUNT]] bytes from %[[#DEST_LOAD]] set to %[[#CH_LOAD]]
+  // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
+  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   __builtin___memset_chk(dest, ch, 10, 10);
 
   // __memset_chk should be called when the count is greater than the buffer
@@ -154,28 +160,28 @@ void test_memset_chk(void *dest, int ch, size_t n) {
   // CIR: %[[#CH_LOAD:]] = cir.load{{.*}} %[[#CH]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
   // CIR: %[[#SIZE:]] = cir.const #cir.int<8>
-  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#COUNT]], %[[#SIZE]])
+  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#COUNT]], %[[#SIZE]]) nothrow
   __builtin___memset_chk(dest, ch, 10lu, 8lu);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#CH_LOAD:]] = cir.load{{.*}} %[[#CH]]
   // CIR: %[[#N_LOAD:]] = cir.load{{.*}} %[[#N]]
   // CIR: %[[#SIZE:]] = cir.const #cir.int<10>
-  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#N_LOAD]], %[[#SIZE]])
+  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#N_LOAD]], %[[#SIZE]]) nothrow
   __builtin___memset_chk(dest, ch, n, 10lu);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#CH_LOAD:]] = cir.load{{.*}} %[[#CH]]
   // CIR: %[[#COUNT:]] = cir.const #cir.int<10>
   // CIR: %[[#N_LOAD:]] = cir.load{{.*}} %[[#N]]
-  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#COUNT]], %[[#N_LOAD]])
+  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#COUNT]], %[[#N_LOAD]]) nothrow
   __builtin___memset_chk(dest, ch, 10lu, n);
 
   // CIR: %[[#DEST_LOAD:]] = cir.load{{.*}} %[[#DEST]]
   // CIR: %[[#CH_LOAD:]] = cir.load{{.*}} %[[#CH]]
   // CIR: %[[#N_LOAD1:]] = cir.load{{.*}} %[[#N]]
   // CIR: %[[#N_LOAD2:]] = cir.load{{.*}} %[[#N]]
-  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#N_LOAD1]], %[[#N_LOAD2]])
+  // CIR: cir.call @__memset_chk(%[[#DEST_LOAD]], %[[#CH_LOAD]], %[[#N_LOAD1]], %[[#N_LOAD2]]) nothrow
   __builtin___memset_chk(dest, ch, n, n);
 }
 
@@ -237,11 +243,8 @@ void test_memset_inline(void *dst, int val) {
 void* test_builtin_mempcpy(void *dest, void *src, size_t n) {
   // CIR-LABEL: test_builtin_mempcpy
   // CIR: [[ALLOCA:%.*]] = cir.alloca !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>, ["__retval"]
-  // CIR: cir.libc.memcpy [[NUM:%.*]] bytes from [[S:.*]] to [[DST:.*]] :
-  // CIR: [[CAST2:%.*]] = cir.cast bitcast [[DST]] : !cir.ptr<!void> -> !cir.ptr<!cir.ptr<!u8i>>
-  // CIR: [[GEP:%.*]] = cir.ptr_stride [[CAST2]], [[NUM]] : (!cir.ptr<!cir.ptr<!u8i>>, !u64i) -> !cir.ptr<!cir.ptr<!u8i>>
-  // CIR: [[CAST3:%.*]] = cir.cast bitcast [[ALLOCA]]
-  // CIR: cir.store [[GEP]], [[CAST3:%.*]]
+  // CIR: %{{.*}} = cir.call @mempcpy({{.*}}) nothrow
+  // CIR: cir.store {{.*}}, [[ALLOCA]]
   // CIR-NEXT: [[LD:%.*]] = cir.load [[ALLOCA]]
   // CIR-NEXT: cir.return [[LD]]
  
