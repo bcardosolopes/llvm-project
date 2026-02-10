@@ -27,7 +27,7 @@ module {
 }
 
 // MLIR-LABEL: @f
-// MLIR:   %[[VAL_1:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:   %[[VAL_1:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:   %[[VAL_2:.*]] = llvm.alloca %[[VAL_1]] x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
 // MLIR:   llvm.store {{.*}}, %[[VAL_2]] {{.*}}: !llvm.ptr, !llvm.ptr
 // MLIR:   %[[VAL_3:.*]] = llvm.load %[[VAL_2]] {alignment = 8 : i64} : !llvm.ptr -> !llvm.ptr

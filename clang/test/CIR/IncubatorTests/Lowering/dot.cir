@@ -52,17 +52,17 @@ module {
 }
 
 // MLIR-LABEL:   llvm.func @dot(
-// MLIR:           %[[VAL_1:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_1:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_2:.*]] = llvm.alloca %[[VAL_1]] x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
-// MLIR:           %[[VAL_3:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_3:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_4:.*]] = llvm.alloca %[[VAL_3]] x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
-// MLIR:           %[[VAL_5:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_5:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_6:.*]] = llvm.alloca %[[VAL_5]] x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
-// MLIR:           %[[VAL_7:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_7:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_8:.*]] = llvm.alloca %[[VAL_7]] x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
-// MLIR:           %[[VAL_9:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_9:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_10:.*]] = llvm.alloca %[[VAL_9]] x f64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-// MLIR:           %[[VAL_11:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_11:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_12:.*]] = llvm.alloca %[[VAL_11]] x f64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
 // MLIR:           llvm.store {{.*}}, %[[VAL_4]] {{.*}}: !llvm.ptr, !llvm.ptr
 // MLIR:           llvm.store {{.*}}, %[[VAL_6]] {{.*}}: !llvm.ptr, !llvm.ptr

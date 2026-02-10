@@ -21,11 +21,11 @@ module {
 
 
 //      MLIR: module {
-// MLIR-NEXT:   llvm.func @foo() -> i32 attributes {calling_conv = 1 : i32, extra_attrs = #cir<extra({})>}
+// MLIR-NEXT:   llvm.func @foo() -> i32 attributes {calling_conv = 1 : i32, cir.extra_attrs = #cir<extra({})>, global_visibility = #cir<visibility default>}
 // MLIR-NEXT:     %0 = llvm.mlir.constant(1 : i64) : i64
 // MLIR-NEXT:     %1 = llvm.alloca %0 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
 // MLIR-NEXT:     %2 = llvm.mlir.constant(1 : i32) : i32
-// MLIR-NEXT:     llvm.store %2, %1 {{.*}}: i32, !llvm.ptr
+// MLIR-NEXT:     llvm.store %2, %1 {alignment = 4 : i64} : i32, !llvm.ptr
 // MLIR-NEXT:     %3 = llvm.load %1 {alignment = 4 : i64} : !llvm.ptr -> i32
 // MLIR-NEXT:     llvm.return %3 : i32
 
@@ -34,7 +34,7 @@ module {
 // MLIR-NEXT:     %0 = llvm.mlir.constant(1 : i64) : i64
 // MLIR-NEXT:     %1 = llvm.alloca %0 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
 // MLIR-NEXT:     %2 = llvm.mlir.constant(1 : i32) : i32
-// MLIR-NEXT:     llvm.store volatile %2, %1 {{.*}}: i32, !llvm.ptr
+// MLIR-NEXT:     llvm.store volatile %2, %1 {alignment = 4 : i64} : i32, !llvm.ptr
 // MLIR-NEXT:     %3 = llvm.load volatile %1 {alignment = 4 : i64} : !llvm.ptr -> i32
 // MLIR-NEXT:     llvm.return %3 : i32
 

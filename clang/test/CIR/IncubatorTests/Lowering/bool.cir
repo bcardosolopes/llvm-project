@@ -17,7 +17,7 @@ module {
   }
 //      MLIR: llvm.func @foo()
 //  MLIR-DAG: %[[TRUE:.*]] = llvm.mlir.constant(true) : i1
-//  MLIR-DAG: %[[VALUE:.*]] = llvm.mlir.constant(1 : index) : i64
+//  MLIR-DAG: %[[VALUE:.*]] = llvm.mlir.constant(1 : i64) : i64
 //  MLIR-DAG: %[[ADDR:.*]] = llvm.alloca %[[VALUE]] x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
 //  MLIR-DAG: %[[TRUE_EXT:.*]] = llvm.zext %[[TRUE]] : i1 to i8
 //  MLIR-DAG: llvm.store %[[TRUE_EXT]], %[[ADDR]] {{.*}} : i8, !llvm.ptr
