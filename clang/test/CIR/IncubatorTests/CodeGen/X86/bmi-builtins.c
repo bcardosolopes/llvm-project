@@ -12,7 +12,7 @@ unsigned short test__tzcnt_u16(unsigned short __X) {
   // CIR-LABEL: __tzcnt_u16
   // LLVM-LABEL: __tzcnt_u16
   return __tzcnt_u16(__X);
-  // CIR: {{%.*}} = cir.llvm.intrinsic "cttz" {{%.*}} : (!u16i, !cir.bool) -> !u16i
+  // CIR: {{%.*}} = cir.call_llvm_intrinsic "cttz" {{%.*}} : (!u16i, !cir.bool) -> !u16i
   // LLVM: i16 @llvm.cttz.i16(i16 %{{.*}}, i1 false)
 }
 
@@ -20,7 +20,7 @@ unsigned int test__tzcnt_u32(unsigned int __X) {
   // CIR-LABEL: __tzcnt_u32
   // LLVM-LABEL: __tzcnt_u32
   return __tzcnt_u32(__X);
-  // CIR: {{%.*}} = cir.llvm.intrinsic "cttz" {{%.*}} : (!u32i, !cir.bool) -> !u32i
+  // CIR: {{%.*}} = cir.call_llvm_intrinsic "cttz" {{%.*}} : (!u32i, !cir.bool) -> !u32i
   // LLVM: i32 @llvm.cttz.i32(i32 %{{.*}}, i1 false)
 }
 
@@ -29,7 +29,7 @@ unsigned long long test__tzcnt_u64(unsigned long long __X) {
   // CIR-LABEL: __tzcnt_u64
   // LLVM-LABEL: __tzcnt_u64
   return __tzcnt_u64(__X);
-  // CIR: {{%.*}} = cir.llvm.intrinsic "cttz" {{%.*}} : (!u64i, !cir.bool) -> !u64i
+  // CIR: {{%.*}} = cir.call_llvm_intrinsic "cttz" {{%.*}} : (!u64i, !cir.bool) -> !u64i
   // LLVM: i64 @llvm.cttz.i64(i64 %{{.*}}, i1 false)
 }
 #endif

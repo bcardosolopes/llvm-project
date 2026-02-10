@@ -15,18 +15,17 @@ short use() {
   U u;
   return **g3;
 }
-// CHECK:       !rec_U = !cir.record<union "U" padded {!s16i, !u16i, !u8i, !u8i, !cir.array<!u8i x 2>}>
-// CHECK:       !rec_anon_struct = !cir.record<struct  {!s16i, !cir.array<!u8i x 2>}>
+// CHECK-DAG:   !rec_U = !cir.record<union "U" padded {!s16i, !u16i, !u8i, !u8i, !cir.array<!u8i x 2>}>
+// CHECK-DAG:   !rec_anon_struct = !cir.record<struct  {!s16i}>
+
 
 // CHECK:       @g3 = #cir.global_view<@g2> : !cir.ptr<!cir.ptr<!s16i>>
-// CHECK:       @g2 = #cir.const_array<[#cir.global_view<@g1, [1]> : !cir.ptr<!s16i>]> : !cir.array<!cir.ptr<!s16i> x 1>
+// CHECK:       @g2 = #cir.const_array<[#cir.global_view<@g1, [2 : i32]> : !cir.ptr<!s16i>]> : !cir.array<!cir.ptr<!s16i> x 1>
 
-// CHECK:       @g1 = 
+// CHECK:       @g1 =
 // CHECK-SAME:    #cir.const_array<[
-// CHECK-SAME:      #cir.const_record<{#cir.int<-2> : !s16i, 
-// CHECK-SAME:      #cir.const_array<[#cir.zero : !u8i, #cir.zero : !u8i]> : !cir.array<!u8i x 2>}> : !rec_anon_struct, 
-// CHECK-SAME:      #cir.const_record<{#cir.int<-2> : !s16i,
-// CHECK-SAME:      #cir.const_array<[#cir.zero : !u8i, #cir.zero : !u8i]> : !cir.array<!u8i x 2>}> : !rec_anon_struct
+// CHECK-SAME:      #cir.const_record<{#cir.int<-2> : !s16i}> : !rec_anon_struct,
+// CHECK-SAME:      #cir.const_record<{#cir.int<-2> : !s16i}> : !rec_anon_struct
 // CHECK-SAME:    ]> : !cir.array<!rec_anon_struct x 2>
 
 
