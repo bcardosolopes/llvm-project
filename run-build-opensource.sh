@@ -13,7 +13,7 @@ fi
 PY=`echo $(uname) | if grep Linux >/dev/null; then echo python3.9; else echo /usr/bin/python3; fi`
 echo "Python: $PY"
 
-HOST_CC=/home/brunolopes/fbsource/fbcode/third-party-buck/platform010/build/llvm-fb/19/bin/clang
+HOST_CC=/home/brunolopes/fbsource/fbcode/third-party-buck/platform010/build/llvm-fb/21/bin/clang
 
 # Configure build if build directory doesn't exist
 if [ ! -d "build" ]; then
