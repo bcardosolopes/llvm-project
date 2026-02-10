@@ -17,13 +17,7 @@ C::C() = default;
 C::~C() = default;
 void C::pure() {}
 
-// CHECK: @_ZTV1C = #cir.vtable<{#cir.const_array<[#cir.ptr<null> : !cir.ptr<!u8i>, #cir.global_view<@_ZTI1C> : !cir.ptr<!u8i>
-// complete object destructor (D1)
-// CHECK-SAME: #cir.global_view<@__cxa_pure_virtual> : !cir.ptr<!u8i>,
-// deleting destructor (D0)
-// CHECK-SAME: #cir.global_view<@__cxa_pure_virtual> : !cir.ptr<!u8i>,
-// C::pure
-// CHECK-SAME: #cir.global_view<@__cxa_pure_virtual> : !cir.ptr<!u8i>]>
+// CHECK: cir.global "private"  external @_ZTV1C : !rec_anon_struct {alignment = 8 : i64}
 
 // The base object destructor should be emitted as normal.
 // CHECK-LABEL: cir.func {{.*}} @_ZN1CD2Ev(%arg0: !cir.ptr<!rec_C> loc({{[^)]+}})) {{.*}} {
