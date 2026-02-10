@@ -18,7 +18,7 @@
 
 void test_mm512_mask_storeu_epi16(void *__P, __mmask32 __U, __m512i __A) {
   // CIR-LABEL: _mm512_mask_storeu_epi16
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.store" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<!s16i x 32>, !cir.ptr<!cir.vector<!s16i x 32>>, !u32i, !cir.vector<!cir.int<s, 1> x 32>) -> !void
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.store" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<32 x !s16i>, !cir.ptr<!cir.vector<32 x !s16i>>, !u32i, !cir.vector<32 x !cir.int<s, 1>>) -> !void
 
   // LLVM-LABEL: @test_mm512_mask_storeu_epi16
   // LLVM: call void @llvm.masked.store.v32i16.p0(<32 x i16> %{{.*}}, ptr elementtype(<32 x i16>) align 1 %{{.*}}, <32 x i1> %{{.*}})
@@ -27,7 +27,7 @@ void test_mm512_mask_storeu_epi16(void *__P, __mmask32 __U, __m512i __A) {
 
 void test_mm512_mask_storeu_epi8(void *__P, __mmask64 __U, __m512i __A) {
   // CIR-LABEL: _mm512_mask_storeu_epi8
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.store" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<{{!s8i|!u8i}} x 64>, !cir.ptr<!cir.vector<{{!s8i|!u8i}} x 64>>, !u32i, !cir.vector<!cir.int<s, 1> x 64>) -> !void
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.store" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<{{!s8i|!u8i}} x 64>, !cir.ptr<!cir.vector<{{!s8i|!u8i}} x 64>>, !u32i, !cir.vector<64 x !cir.int<s, 1>>) -> !void
 
   // LLVM-LABEL: @test_mm512_mask_storeu_epi8
   // LLVM: call void @llvm.masked.store.v64i8.p0(<64 x i8> %{{.*}}, ptr elementtype(<64 x i8>) align 1 %{{.*}}, <64 x i1> %{{.*}})
@@ -36,8 +36,8 @@ void test_mm512_mask_storeu_epi8(void *__P, __mmask64 __U, __m512i __A) {
 
 __m512i test_mm512_movm_epi16(__mmask32 __A) {
   // CIR-LABEL: _mm512_movm_epi16
-  // CIR: %{{.*}} = cir.cast bitcast %{{.*}} : !u32i -> !cir.vector<!cir.int<s, 1> x 32>
-  // CIR: %{{.*}} = cir.cast integral %{{.*}} : !cir.vector<!cir.int<s, 1> x 32> -> !cir.vector<!s16i x 32>
+  // CIR: %{{.*}} = cir.cast bitcast %{{.*}} : !u32i -> !cir.vector<32 x !cir.int<s, 1>>
+  // CIR: %{{.*}} = cir.cast integral %{{.*}} : !cir.vector<32 x !cir.int<s, 1>> -> !cir.vector<32 x !s16i>
   // LLVM-LABEL: @test_mm512_movm_epi16
   // LLVM:  %{{.*}} = bitcast i32 %{{.*}} to <32 x i1>
   // LLVM:  %{{.*}} = sext <32 x i1> %{{.*}} to <32 x i16>
@@ -46,7 +46,7 @@ __m512i test_mm512_movm_epi16(__mmask32 __A) {
 
 __m512i test_mm512_mask_loadu_epi8(__m512i __W, __mmask64 __U, void const *__P) {
   // CIR-LABEL: _mm512_mask_loadu_epi8
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<{{!s8i|!u8i}} x 64>>, !u32i, !cir.vector<!cir.int<s, 1> x 64>, !cir.vector<{{!s8i|!u8i}} x 64>) -> !cir.vector<{{!s8i|!u8i}} x 64>
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<{{!s8i|!u8i}} x 64>>, !u32i, !cir.vector<64 x !cir.int<s, 1>>, !cir.vector<{{!s8i|!u8i}} x 64>) -> !cir.vector<{{!s8i|!u8i}} x 64>
 
   // LLVM-LABEL: @test_mm512_mask_loadu_epi8
   // LLVM: @llvm.masked.load.v64i8.p0(ptr elementtype(<64 x i8>) align 1 %{{.*}}, <64 x i1> %{{.*}}, <64 x i8> %{{.*}})
@@ -55,7 +55,7 @@ __m512i test_mm512_mask_loadu_epi8(__m512i __W, __mmask64 __U, void const *__P) 
 
 __m512i test_mm512_mask_loadu_epi16(__m512i __W, __mmask32 __U, void const *__P) {
   // CIR-LABEL: _mm512_mask_loadu_epi16
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<!s16i x 32>>, !u32i, !cir.vector<!cir.int<s, 1> x 32>, !cir.vector<!s16i x 32>) -> !cir.vector<!s16i x 32>
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<32 x !s16i>>, !u32i, !cir.vector<32 x !cir.int<s, 1>>, !cir.vector<32 x !s16i>) -> !cir.vector<32 x !s16i>
 
   // LLVM-LABEL: @test_mm512_mask_loadu_epi16
   // LLVM: @llvm.masked.load.v32i16.p0(ptr elementtype(<32 x i16>) align 1 %{{.*}}, <32 x i1> %{{.*}}, <32 x i16> %{{.*}})
@@ -64,7 +64,7 @@ __m512i test_mm512_mask_loadu_epi16(__m512i __W, __mmask32 __U, void const *__P)
 
 __m512i test_mm512_maskz_loadu_epi16(__mmask32 __U, void const *__P) {
   // CIR-LABEL: _mm512_maskz_loadu_epi16
-  // CIR: %{{.*}} = cir.llvm.intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<!s16i x 32>>, !u32i, !cir.vector<!cir.int<s, 1> x 32>, !cir.vector<!s16i x 32>) -> !cir.vector<!s16i x 32>
+  // CIR: %{{.*}} = cir.call_llvm_intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<32 x !s16i>>, !u32i, !cir.vector<32 x !cir.int<s, 1>>, !cir.vector<32 x !s16i>) -> !cir.vector<32 x !s16i>
 
   // LLVM-LABEL: @test_mm512_maskz_loadu_epi16
   // LLVM: @llvm.masked.load.v32i16.p0(ptr elementtype(<32 x i16>) align 1 %{{.*}}, <32 x i1> %{{.*}}, <32 x i16> %{{.*}})
@@ -73,7 +73,7 @@ __m512i test_mm512_maskz_loadu_epi16(__mmask32 __U, void const *__P) {
 
 __m512i test_mm512_maskz_loadu_epi8(__mmask64 __U, void const *__P) {
   // CIR-LABEL: _mm512_maskz_loadu_epi8
-  // CIR: cir.llvm.intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<{{!s8i|!u8i}} x 64>>, !u32i, !cir.vector<!cir.int<s, 1> x 64>, !cir.vector<{{!s8i|!u8i}} x 64>) -> !cir.vector<{{!s8i|!u8i}} x 64>
+  // CIR: cir.call_llvm_intrinsic "masked.load" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.ptr<!cir.vector<{{!s8i|!u8i}} x 64>>, !u32i, !cir.vector<64 x !cir.int<s, 1>>, !cir.vector<{{!s8i|!u8i}} x 64>) -> !cir.vector<{{!s8i|!u8i}} x 64>
 
   // LLVM-LABEL: @test_mm512_maskz_loadu_epi8
   // LLVM: @llvm.masked.load.v64i8.p0(ptr elementtype(<64 x i8>) align 1 %{{.*}}, <64 x i1> %{{.*}}, <64 x i8> %{{.*}})
@@ -82,7 +82,7 @@ __m512i test_mm512_maskz_loadu_epi8(__mmask64 __U, void const *__P) {
 
 __mmask64 test_mm512_movepi8_mask(__m512i __A) {
   // CIR-LABEL: @_mm512_movepi8_mask
-  // CIR: %{{.*}} = cir.vec.cmp(lt, %{{.*}}, %{{.*}}) : !cir.vector<{{!s8i|!u8i}} x 64>, !cir.vector<!cir.int<u, 1> x 64>
+  // CIR: %{{.*}} = cir.vec.cmp(lt, %{{.*}}, %{{.*}}) : !cir.vector<{{!s8i|!u8i}} x 64>, !cir.vector<64 x !cir.int<u, 1>>
 
   // LLVM-LABEL: @test_mm512_movepi8_mask
   // LLVM: [[CMP:%.*]] = icmp slt <64 x i8> %{{.*}}, zeroinitializer
@@ -98,7 +98,7 @@ __mmask64 test_mm512_movepi8_mask(__m512i __A) {
 
 __mmask32 test_mm512_movepi16_mask(__m512i __A) {
   // CIR-LABEL: @_mm512_movepi16_mask
-  // CIR: %{{.*}} = cir.vec.cmp(lt, %{{.*}}, %{{.*}}) : !cir.vector<!s16i x 32>, !cir.vector<!cir.int<u, 1> x 32>
+  // CIR: %{{.*}} = cir.vec.cmp(lt, %{{.*}}, %{{.*}}) : !cir.vector<32 x !s16i>, !cir.vector<32 x !cir.int<u, 1>>
 
   // LLVM-LABEL: @test_mm512_movepi16_mask
   // LLVM: [[CMP:%.*]] = icmp slt <32 x i16> %{{.*}}, zeroinitializer
@@ -110,7 +110,7 @@ __mmask32 test_mm512_movepi16_mask(__m512i __A) {
 
 __m512i test_mm512_shufflelo_epi16(__m512i __A) {
   // CIR-LABEL: _mm512_shufflelo_epi16
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s16i x 32>) [#cir.int<1> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<0> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i, #cir.int<9> : !s32i, #cir.int<9> : !s32i, #cir.int<8> : !s32i, #cir.int<8> : !s32i, #cir.int<12> : !s32i, #cir.int<13> : !s32i, #cir.int<14> : !s32i, #cir.int<15> : !s32i, #cir.int<17> : !s32i, #cir.int<17> : !s32i, #cir.int<16> : !s32i, #cir.int<16> : !s32i, #cir.int<20> : !s32i, #cir.int<21> : !s32i, #cir.int<22> : !s32i, #cir.int<23> : !s32i, #cir.int<25> : !s32i, #cir.int<25> : !s32i, #cir.int<24> : !s32i, #cir.int<24> : !s32i, #cir.int<28> : !s32i, #cir.int<29> : !s32i, #cir.int<30> : !s32i, #cir.int<31> : !s32i] : !cir.vector<!s16i x 32>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<32 x !s16i>) [#cir.int<1> : !s32i, #cir.int<1> : !s32i, #cir.int<0> : !s32i, #cir.int<0> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i, #cir.int<6> : !s32i, #cir.int<7> : !s32i, #cir.int<9> : !s32i, #cir.int<9> : !s32i, #cir.int<8> : !s32i, #cir.int<8> : !s32i, #cir.int<12> : !s32i, #cir.int<13> : !s32i, #cir.int<14> : !s32i, #cir.int<15> : !s32i, #cir.int<17> : !s32i, #cir.int<17> : !s32i, #cir.int<16> : !s32i, #cir.int<16> : !s32i, #cir.int<20> : !s32i, #cir.int<21> : !s32i, #cir.int<22> : !s32i, #cir.int<23> : !s32i, #cir.int<25> : !s32i, #cir.int<25> : !s32i, #cir.int<24> : !s32i, #cir.int<24> : !s32i, #cir.int<28> : !s32i, #cir.int<29> : !s32i, #cir.int<30> : !s32i, #cir.int<31> : !s32i] : !cir.vector<32 x !s16i>
 
   // LLVM-LABEL: @test_mm512_shufflelo_epi16
   // LLVM: shufflevector <32 x i16> %{{.*}}, <32 x i16> poison, <32 x i32> <i32 1, i32 1, i32 0, i32 0, i32 4, i32 5, i32 6, i32 7, i32 9, i32 9, i32 8, i32 8, i32 12, i32 13, i32 14, i32 15, i32 17, i32 17, i32 16, i32 16, i32 20, i32 21, i32 22, i32 23, i32 25, i32 25, i32 24, i32 24, i32 28, i32 29, i32 30, i32 31>
@@ -122,7 +122,7 @@ __m512i test_mm512_shufflelo_epi16(__m512i __A) {
 
 __m512i test_mm512_shufflehi_epi16(__m512i __A) {
   // CIR-LABEL: _mm512_shufflehi_epi16
-  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<!s16i x 32>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<5> : !s32i, #cir.int<4> : !s32i, #cir.int<4> : !s32i, #cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i, #cir.int<13> : !s32i, #cir.int<13> : !s32i, #cir.int<12> : !s32i, #cir.int<12> : !s32i, #cir.int<16> : !s32i, #cir.int<17> : !s32i, #cir.int<18> : !s32i, #cir.int<19> : !s32i, #cir.int<21> : !s32i, #cir.int<21> : !s32i, #cir.int<20> : !s32i, #cir.int<20> : !s32i, #cir.int<24> : !s32i, #cir.int<25> : !s32i, #cir.int<26> : !s32i, #cir.int<27> : !s32i, #cir.int<29> : !s32i, #cir.int<29> : !s32i, #cir.int<28> : !s32i, #cir.int<28> : !s32i] : !cir.vector<!s16i x 32>
+  // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<32 x !s16i>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<5> : !s32i, #cir.int<5> : !s32i, #cir.int<4> : !s32i, #cir.int<4> : !s32i, #cir.int<8> : !s32i, #cir.int<9> : !s32i, #cir.int<10> : !s32i, #cir.int<11> : !s32i, #cir.int<13> : !s32i, #cir.int<13> : !s32i, #cir.int<12> : !s32i, #cir.int<12> : !s32i, #cir.int<16> : !s32i, #cir.int<17> : !s32i, #cir.int<18> : !s32i, #cir.int<19> : !s32i, #cir.int<21> : !s32i, #cir.int<21> : !s32i, #cir.int<20> : !s32i, #cir.int<20> : !s32i, #cir.int<24> : !s32i, #cir.int<25> : !s32i, #cir.int<26> : !s32i, #cir.int<27> : !s32i, #cir.int<29> : !s32i, #cir.int<29> : !s32i, #cir.int<28> : !s32i, #cir.int<28> : !s32i] : !cir.vector<32 x !s16i>
 
   // LLVM-LABEL: @test_mm512_shufflehi_epi16
   // LLVM: shufflevector <32 x i16> %{{.*}}, <32 x i16> poison, <32 x i32> <i32 0, i32 1, i32 2, i32 3, i32 5, i32 5, i32 4, i32 4, i32 8, i32 9, i32 10, i32 11, i32 13, i32 13, i32 12, i32 12, i32 16, i32 17, i32 18, i32 19, i32 21, i32 21, i32 20, i32 20, i32 24, i32 25, i32 26, i32 27, i32 29, i32 29, i32 28, i32 28>
