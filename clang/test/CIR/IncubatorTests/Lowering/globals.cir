@@ -11,11 +11,11 @@
 !u32i = !cir.int<u, 32>
 !u64i = !cir.int<u, 64>
 !u8i = !cir.int<u, 8>
-!rec_A = !cir.record<struct "A" {!s32i, !cir.array<!cir.array<!s32i x 2> x 2>} #cir.record.decl.ast>
-!rec_Bar = !cir.record<struct "Bar" {!s32i, !s8i} #cir.record.decl.ast>
-!rec_StringStruct = !cir.record<struct "StringStruct" {!cir.array<!s8i x 3>, !cir.array<!s8i x 3>, !cir.array<!s8i x 3>} #cir.record.decl.ast>
-!rec_StringStructPtr = !cir.record<struct "StringStructPtr" {!cir.ptr<!s8i>} #cir.record.decl.ast>
-!rec_anon2E1_ = !cir.record<struct "anon.1" {!cir.ptr<!cir.func<(!cir.int<s, 32>)>>} #cir.record.decl.ast>
+!rec_A = !cir.record<struct "A" {!s32i, !cir.array<!cir.array<!s32i x 2> x 2>}>
+!rec_Bar = !cir.record<struct "Bar" {!s32i, !s8i}>
+!rec_StringStruct = !cir.record<struct "StringStruct" {!cir.array<!s8i x 3>, !cir.array<!s8i x 3>, !cir.array<!s8i x 3>}>
+!rec_StringStructPtr = !cir.record<struct "StringStructPtr" {!cir.ptr<!s8i>}>
+!rec_anon2E1_ = !cir.record<struct "anon.1" {!cir.ptr<!cir.func<(!cir.int<s, 32>)>>}>
 
 module {
   cir.global external @a = #cir.int<3> : !s32i

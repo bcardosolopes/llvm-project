@@ -4,9 +4,9 @@
 !s16i = !cir.int<s, 16>
 !u16i = !cir.int<u, 16>
 
-cir.func @vec_cmp(%0: !cir.vector<!s16i x 16>, %1: !cir.vector<!s16i x 16>) -> () {
-  %2 = cir.vec.cmp(lt, %0, %1) : !cir.vector<!s16i x 16>, !cir.vector<!cir.int<u, 1> x 16> 
-  %3 = cir.cast bitcast %2 : !cir.vector<!cir.int<u, 1> x 16> -> !u16i
+cir.func @vec_cmp(%0: !cir.vector<16 x !s16i>, %1: !cir.vector<16 x !s16i>) -> () {
+  %2 = cir.vec.cmp(lt, %0, %1) : !cir.vector<16 x !s16i>, !cir.vector<16 x !cir.int<u, 1>> 
+  %3 = cir.cast bitcast %2 : !cir.vector<16 x !cir.int<u, 1>> -> !u16i
   cir.return
 }
     
