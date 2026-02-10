@@ -5,6 +5,6 @@
 module  {
 
 // expected-error @below {{the number of vector elements must be non-zero}}
-cir.global external @vec_a = #cir.zero : !cir.vector<!s32i x 0>
+cir.global external @vec_a = #cir.zero : !cir.vector<0 x !s32i>
 
 }

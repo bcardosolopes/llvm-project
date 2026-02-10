@@ -9,4 +9,4 @@ module {
 
 // CIR: cir.func no_inline @l0()
 
-// MLIR: llvm.func @l0() attributes {cir.extra_attrs = #fn_attr, global_visibility = #cir<visibility default>, no_inline
+// MLIR: llvm.func @l0() attributes {calling_conv = 1 : i32, cir.extra_attrs = #cir<extra({})>, global_visibility = #cir<visibility default>, no_inline

@@ -23,13 +23,13 @@ module {
     %2 = cir.clrsb %s32 : !s32i
     %3 = cir.clrsb %s64 : !s64i
 
-    %4 = cir.clz %u16 zero_poison : !u16i
+    %4 = cir.clz %u16 poison_zero : !u16i
     %5 = cir.clz %u32 : !u32i
-    %6 = cir.clz %u64 zero_poison : !u64i
+    %6 = cir.clz %u64 poison_zero : !u64i
 
-    %7 = cir.ctz %u16 zero_poison : !u16i
+    %7 = cir.ctz %u16 poison_zero : !u16i
     %8 = cir.ctz %u32 : !u32i
-    %9 = cir.ctz %u64 zero_poison : !u64i
+    %9 = cir.ctz %u64 poison_zero : !u64i
 
     %10 = cir.ffs %s32 : !s32i
     %11 = cir.ffs %s64 : !s64i
@@ -57,12 +57,12 @@ module {
 // CHECK-NEXT:     %7 = cir.const #cir.int<1> : !u64i
 // CHECK-NEXT:     %8 = cir.clrsb %2 : !s32i
 // CHECK-NEXT:     %9 = cir.clrsb %3 : !s64i
-// CHECK-NEXT:     %10 = cir.clz %5 zero_poison : !u16i
+// CHECK-NEXT:     %10 = cir.clz %5 poison_zero : !u16i
 // CHECK-NEXT:     %11 = cir.clz %6 : !u32i
-// CHECK-NEXT:     %12 = cir.clz %7 zero_poison : !u64i
-// CHECK-NEXT:     %13 = cir.ctz %5 zero_poison : !u16i
+// CHECK-NEXT:     %12 = cir.clz %7 poison_zero : !u64i
+// CHECK-NEXT:     %13 = cir.ctz %5 poison_zero : !u16i
 // CHECK-NEXT:     %14 = cir.ctz %6 : !u32i
-// CHECK-NEXT:     %15 = cir.ctz %7 zero_poison : !u64i
+// CHECK-NEXT:     %15 = cir.ctz %7 poison_zero : !u64i
 // CHECK-NEXT:     %16 = cir.ffs %2 : !s32i
 // CHECK-NEXT:     %17 = cir.ffs %3 : !s64i
 // CHECK-NEXT:     %18 = cir.parity %6 : !u32i
