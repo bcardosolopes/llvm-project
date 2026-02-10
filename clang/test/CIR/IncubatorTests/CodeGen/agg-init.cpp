@@ -49,8 +49,8 @@ void yo() {
 // CHECK: cir.func {{.*}} @_Z2yov()
 // CHECK:   %0 = cir.alloca !rec_Yo, !cir.ptr<!rec_Yo>, ["ext", init] {alignment = 8 : i64}
 // CHECK:   %1 = cir.alloca !rec_Yo, !cir.ptr<!rec_Yo>, ["ext2", init] {alignment = 8 : i64}
-// CHECK:   %2 = cir.const #cir.const_record<{#cir.int<1000070000> : !u32i, #cir.ptr<null> : !cir.ptr<!void>, #cir.int<0> : !u64i}> : !rec_Yo
-// CHECK:   cir.store{{.*}} %2, %0 : !rec_Yo, !cir.ptr<!rec_Yo>
+// CHECK:   %2 = cir.get_global @__const._Z2yov.ext : !cir.ptr<!rec_Yo>
+// CHECK:   cir.copy %2 to %0 : !cir.ptr<!rec_Yo>
 // CHECK:   %3 = cir.get_member %1[0] {name = "type"} : !cir.ptr<!rec_Yo> -> !cir.ptr<!u32i>
 // CHECK:   %4 = cir.const #cir.int<1000066001> : !u32i
 // CHECK:   cir.store{{.*}} %4, %3 : !u32i, !cir.ptr<!u32i>
