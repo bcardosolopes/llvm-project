@@ -3,7 +3,7 @@
 
 !s32i = !cir.int<s, 32>
 !rec_A = !cir.record<union "A" {!s32i}>
-!rec_anon2E0 = !cir.record<union "anon.0" {!rec_A} #cir.record.decl.ast>
+!rec_anon2E0 = !cir.record<union "anon.0" {!rec_A}>
 
 module {
 cir.func @_Z1xi(%arg0: !s32i) -> !s32i {
@@ -26,9 +26,9 @@ cir.func @_Z1xi(%arg0: !s32i) -> !s32i {
   }
 
 //      MLIR:  llvm.func @_Z1xi(%arg0: i32) -> i32
-// MLIR-NEXT:    %0 = llvm.mlir.constant(1 : index) : i64
+// MLIR-NEXT:    %0 = llvm.mlir.constant(1 : i64) : i64
 // MLIR-NEXT:    %1 = llvm.alloca %0 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
-// MLIR-NEXT:    %2 = llvm.mlir.constant(1 : index) : i64
+// MLIR-NEXT:    %2 = llvm.mlir.constant(1 : i64) : i64
 // MLIR-NEXT:    %3 = llvm.alloca %2 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
 // MLIR-NEXT:    llvm.store %arg0, %1 {{.*}}: i32, !llvm.ptr
 // MLIR-NEXT:    %4 = llvm.load %1 {alignment = 4 : i64} : !llvm.ptr -> i32
@@ -64,7 +64,7 @@ cir.func no_proto dso_local @B() -> !rec_A {
     %14 = cir.get_global @a : !cir.ptr<!cir.array<!rec_anon2E0 x 1>>
     %15 = cir.cast bitcast %14 : !cir.ptr<!cir.array<!rec_anon2E0 x 1>> -> !cir.ptr<!cir.array<!rec_anon2E0 x 0>>
     %16 = cir.const #cir.int<0> : !s32i
-    %17 = cir.get_element %15[%16] : (!cir.ptr<!cir.array<!rec_anon2E0 x 0>>, !s32i) -> !cir.ptr<!rec_anon2E0>
+    %17 = cir.get_element %15[%16 : !s32i] : !cir.ptr<!cir.array<!rec_anon2E0 x 0>> -> !cir.ptr<!rec_anon2E0>
     %18 = cir.get_member %17[0] {name = "B"} : !cir.ptr<!rec_anon2E0> -> !cir.ptr<!rec_A>
     %19 = cir.get_member %18[0] {name = "A"} : !cir.ptr<!rec_A> -> !cir.ptr<!s32i>
     %20 = cir.load align(4) %19 : !cir.ptr<!s32i>, !s32i
@@ -72,12 +72,12 @@ cir.func no_proto dso_local @B() -> !rec_A {
   }) : (!cir.bool) -> !s32i
   %10 = cir.const #cir.int<0> : !s32i
   %11 = cir.binop(sub, %9, %10) nsw : !s32i
-  %12 = cir.get_element %2[%11] : (!cir.ptr<!cir.array<!rec_anon2E0 x 0>>, !s32i) -> !cir.ptr<!rec_anon2E0>
+  %12 = cir.get_element %2[%11 : !s32i] : !cir.ptr<!cir.array<!rec_anon2E0 x 0>> -> !cir.ptr<!rec_anon2E0>
   %13 = cir.load %0 : !cir.ptr<!rec_A>, !rec_A
   cir.return %13 : !rec_A
 }
 // MLIR-LABEL:   llvm.func @B() -> !llvm.struct<"union.A", (i32)>
-// MLIR:           %[[VAL_0:.*]] = llvm.mlir.constant(1 : index) : i64
+// MLIR:           %[[VAL_0:.*]] = llvm.mlir.constant(1 : i64) : i64
 // MLIR:           %[[VAL_1:.*]] = llvm.alloca %[[VAL_0]] x !llvm.struct<"union.A", (i32)> {alignment = 4 : i64} : (i64) -> !llvm.ptr
 // MLIR:           %[[VAL_2:.*]] = llvm.mlir.addressof @a : !llvm.ptr
 // MLIR:           %[[VAL_3:.*]] = llvm.bitcast %[[VAL_2]] : !llvm.ptr to !llvm.ptr
