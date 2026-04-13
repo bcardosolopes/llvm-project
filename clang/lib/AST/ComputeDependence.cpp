@@ -19,6 +19,7 @@
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
 #include "clang/Basic/ExceptionSpecificationType.h"
+#include "clang/Lex/Token.h"
 #include "llvm/ADT/ArrayRef.h"
 
 using namespace clang;
@@ -1013,11 +1014,27 @@ ExprDependence clang::computeDependence(CXXReflectExpr *E,
   case ReflectionKind::Namespace:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::Identifier:
     return ExprDependence::None;
   case ReflectionKind::EntityProxy:
     llvm_unreachable("should already have been unwrapped");
   }
   llvm_unreachable("unknown reflection kind while computing dependence");
+}
+
+ExprDependence clang::computeDependence(CXXTokenSequenceExpr *E) {
+  // Token sequences may contain dependent interpolation expressions.
+  ExprDependence D = ExprDependence::None;
+  TokenSequenceData TSD = E->getTokenSequence();
+  for (const Token &Tok : TSD) {
+    if (Tok.is(tok::annot_token_seq_expr)) {
+      const Expr *InterpExpr =
+          reinterpret_cast<const Expr *>(Tok.getAnnotationValue());
+      if (InterpExpr)
+        D |= InterpExpr->getDependence();
+    }
+  }
+  return D;
 }
 
 ExprDependence clang::computeDependence(CXXMetafunctionExpr *E) {
@@ -1066,6 +1083,10 @@ ExprDependence clang::computeDependence(ExplDependentCallExpr *E) {
   if (E->getTemplateDepth() > 0)
     D |= ExprDependence::Value;
   return D;
+}
+
+ExprDependence clang::computeDependence(CXXBuiltinStringizeExpr *E) {
+  return E->getOperand()->getDependence();
 }
 
 ExprDependence clang::computeDependence(CXXExpansionInitListExpr *E) {

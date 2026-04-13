@@ -193,6 +193,7 @@ class TemplateInstantiationCallback;
 class TemplatePartialOrderingContext;
 class TemplateSpecCandidateSet;
 class Token;
+struct TokenSequenceData;
 class TypeConstraint;
 class TypoCorrectionConsumer;
 class TypeLocBuilder;
@@ -1355,14 +1356,79 @@ public:
   sema::AnalysisBasedWarnings AnalysisWarnings;
   threadSafety::BeforeSet *ThreadSafetyDeclCache;
 
-  /// Callback to the parser to parse templated functions when needed.
-  typedef void LateTemplateParserCB(void *P, LateParsedTemplate &LPT);
-  LateTemplateParserCB *LateTemplateParser;
-  void *OpaqueParser;
+  /// Bridge back into the parser for late parsing and token injection.
+  class SemaParserBridge {
+  public:
+    typedef void LateTemplateParserCB(void *P, LateParsedTemplate &LPT);
+    typedef void LateTemplateParserCleanupCB(void *P);
+    typedef void TokenInjectionCB(
+        void *P, SmallVectorImpl<Expr::EvalStatus::TokenInjection> &);
 
-  void SetLateTemplateParser(LateTemplateParserCB *LTP, void *P) {
-    LateTemplateParser = LTP;
-    OpaqueParser = P;
+    void setParser(void *P) { OpaqueParser = P; }
+
+    void setLateTemplateParser(LateTemplateParserCB *LTP,
+                               LateTemplateParserCleanupCB *LTPCleanup) {
+      LateTemplateParser = LTP;
+      LateTemplateParserCleanup = LTPCleanup;
+    }
+
+    void setTokenInjectionCallback(TokenInjectionCB *CB) {
+      TokenInjectionCallback = CB;
+    }
+
+    bool hasLateTemplateParser() const { return LateTemplateParser; }
+
+    void parseLateTemplate(LateParsedTemplate &LPT) const {
+      assert(LateTemplateParser && OpaqueParser &&
+             "late template parsing requested without a parser bridge");
+      LateTemplateParser(OpaqueParser, LPT);
+    }
+
+    void cleanup() const {
+      if (LateTemplateParserCleanup && OpaqueParser)
+        LateTemplateParserCleanup(OpaqueParser);
+    }
+
+    bool canProcessTokenInjections() const {
+      return TokenInjectionCallback && OpaqueParser;
+    }
+
+    void processTokenInjections(
+        SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) const {
+      assert(TokenInjectionCallback && OpaqueParser &&
+             "token injection requested without a parser bridge");
+      TokenInjectionCallback(OpaqueParser, Injections);
+    }
+
+  private:
+    LateTemplateParserCB *LateTemplateParser = nullptr;
+    LateTemplateParserCleanupCB *LateTemplateParserCleanup = nullptr;
+    TokenInjectionCB *TokenInjectionCallback = nullptr;
+    void *OpaqueParser = nullptr;
+  };
+
+  void SetParserBridge(void *P) { ParserBridge.setParser(P); }
+  void SetLateTemplateParser(
+      SemaParserBridge::LateTemplateParserCB *LTP,
+      SemaParserBridge::LateTemplateParserCleanupCB *LTPCleanup) {
+    ParserBridge.setLateTemplateParser(LTP, LTPCleanup);
+  }
+  void SetTokenInjectionCallback(SemaParserBridge::TokenInjectionCB *CB) {
+    ParserBridge.setTokenInjectionCallback(CB);
+  }
+  bool HasLateTemplateParser() const {
+    return ParserBridge.hasLateTemplateParser();
+  }
+  void ParseLateTemplate(LateParsedTemplate &LPT) {
+    ParserBridge.parseLateTemplate(LPT);
+  }
+  void CleanupParserBridge() { ParserBridge.cleanup(); }
+  bool CanProcessTokenInjections() const {
+    return ParserBridge.canProcessTokenInjections();
+  }
+  void ProcessTokenInjectionsFromParserBridge(
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
+    ParserBridge.processTokenInjections(Injections);
   }
 
   /// Callback to the parser to parse a type expressed as a string.
@@ -15948,6 +16014,42 @@ public:
                                  ParsedTemplateArgument Template);
   ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc, CXXSpliceExpr *E);
 
+  ExprResult ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
+                                             SourceRange OperandRange,
+                                             ArrayRef<Token> Tokens);
+
+  ExprResult ActOnTokenSequenceInterpolation(Expr *E);
+
+  ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
+                                   SourceLocation LParenLoc,
+                                   ArrayRef<Expr *> Args,
+                                   SourceLocation RParenLoc);
+
+  ExprResult ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
+                                         SourceLocation LParenLoc,
+                                         ArrayRef<Expr *> Args,
+                                         SourceLocation RParenLoc);
+
+  ExprResult ActOnCXXBuiltinId(SourceLocation KwLoc,
+                               SourceLocation LParenLoc,
+                               ArrayRef<Expr *> Args,
+                               SourceLocation RParenLoc);
+
+  ExprResult ActOnCXXBuiltinStrLiteral(SourceLocation KwLoc,
+                                       SourceLocation LParenLoc,
+                                       ArrayRef<Expr *> Args,
+                                       SourceLocation RParenLoc);
+
+  ExprResult ActOnCXXBuiltinTokenize(SourceLocation KwLoc,
+                                     SourceLocation LParenLoc,
+                                     ArrayRef<Expr *> Args,
+                                     SourceLocation RParenLoc);
+
+  ExprResult ActOnCXXBuiltinStringize(SourceLocation KwLoc,
+                                      SourceLocation LParenLoc,
+                                      ArrayRef<Expr *> Args,
+                                      SourceLocation RParenLoc);
+
   ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,
                                   SourceLocation LParenLoc,
                                   SmallVectorImpl<Expr *> &Args,
@@ -16069,7 +16171,29 @@ public:
     return nullptr;
   }
 
+  // Token sequences pending injection from consteval block evaluation.
+  SmallVector<Expr::EvalStatus::TokenInjection> PendingInjections;
+
+  // Statements parsed from injected token sequences that need to be added
+  // to the enclosing compound statement.
+  SmallVector<Stmt *> PendingInjectedStmts;
+
+  // Declarations used to seed temporary parser scopes so later injected token
+  // sequences can look up earlier visible locals during template
+  // instantiation. This normally holds locals parsed from injected token
+  // sequences in the current compound statement, and template instantiation
+  // may temporarily preload already-visible source locals as well.
+  SmallVector<NamedDecl *> InjectedLocalDeclsForLookup;
+
+  void ProcessPendingTokenInjections();
+
+  /// After a class definition completes, check its [[=expr]] annotations
+  /// for an on_complete member function and call it with ^^TheType.
+  void HandleAnnotationOnComplete(Decl *TagDecl);
+
 private:
+  SemaParserBridge ParserBridge;
+
   // Lambdas having bound references to this Sema object, used to evaluate
   // metafunction (C++26, P2996) at constant evaluation time.
   llvm::SmallDenseMap<unsigned, std::unique_ptr<CXXMetafunctionExpr::ImplFn>>

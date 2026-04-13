@@ -33,10 +33,189 @@
 #include "clang/Sema/SemaSwift.h"
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateInstCallback.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <optional>
 
 using namespace clang;
+
+static void collectLocalDeclsForLookup(
+    const DeclStmt *DS, SmallVectorImpl<const NamedDecl *> &Decls) {
+  auto AddDecl = [&](const NamedDecl *ND) {
+    if (!ND->getDeclName() || llvm::is_contained(Decls, ND))
+      return;
+    Decls.push_back(ND);
+  };
+
+  for (const Decl *D : DS->decls()) {
+    auto *ND = dyn_cast<NamedDecl>(D);
+    if (!ND)
+      continue;
+
+    AddDecl(ND);
+    if (auto *ED = dyn_cast<EnumDecl>(ND))
+      for (const auto *ECD : ED->enumerators())
+        AddDecl(ECD);
+  }
+}
+
+static bool containsConstevalBlockDecl(const Stmt *S,
+                                       const ConstevalBlockDecl *Target) {
+  if (!S)
+    return false;
+
+  if (auto *DS = dyn_cast<DeclStmt>(S))
+    for (const Decl *D : DS->decls())
+      if (D == Target)
+        return true;
+
+  for (const Stmt *Child : S->children())
+    if (containsConstevalBlockDecl(Child, Target))
+      return true;
+  return false;
+}
+
+static bool collectVisibleLocalDeclsForConstevalBlock(
+    const Stmt *S, const ConstevalBlockDecl *Target,
+    SmallVectorImpl<const NamedDecl *> &Decls) {
+  if (!S)
+    return false;
+
+  if (auto *DS = dyn_cast<DeclStmt>(S)) {
+    if (containsConstevalBlockDecl(DS, Target))
+      return true;
+    collectLocalDeclsForLookup(DS, Decls);
+    return false;
+  }
+
+  if (auto *CS = dyn_cast<CompoundStmt>(S)) {
+    for (const Stmt *Child : CS->body()) {
+      if (auto *DS = dyn_cast<DeclStmt>(Child)) {
+        if (containsConstevalBlockDecl(DS, Target))
+          return true;
+        collectLocalDeclsForLookup(DS, Decls);
+        continue;
+      }
+
+      if (containsConstevalBlockDecl(Child, Target))
+        return collectVisibleLocalDeclsForConstevalBlock(Child, Target, Decls);
+    }
+    return false;
+  }
+
+  if (auto *IS = dyn_cast<IfStmt>(S)) {
+    if (containsConstevalBlockDecl(IS->getInit(), Target))
+      return collectVisibleLocalDeclsForConstevalBlock(IS->getInit(), Target,
+                                                       Decls);
+    collectVisibleLocalDeclsForConstevalBlock(IS->getInit(), Target, Decls);
+
+    auto AddCondDecls = [&] {
+      if (const DeclStmt *Cond = IS->getConditionVariableDeclStmt())
+        collectLocalDeclsForLookup(Cond, Decls);
+    };
+
+    if (containsConstevalBlockDecl(IS->getThen(), Target)) {
+      AddCondDecls();
+      return collectVisibleLocalDeclsForConstevalBlock(IS->getThen(), Target,
+                                                       Decls);
+    }
+    if (containsConstevalBlockDecl(IS->getElse(), Target)) {
+      AddCondDecls();
+      return collectVisibleLocalDeclsForConstevalBlock(IS->getElse(), Target,
+                                                       Decls);
+    }
+    return false;
+  }
+
+  if (auto *SS = dyn_cast<SwitchStmt>(S)) {
+    if (containsConstevalBlockDecl(SS->getInit(), Target))
+      return collectVisibleLocalDeclsForConstevalBlock(SS->getInit(), Target,
+                                                       Decls);
+    collectVisibleLocalDeclsForConstevalBlock(SS->getInit(), Target, Decls);
+
+    if (containsConstevalBlockDecl(SS->getBody(), Target)) {
+      if (const DeclStmt *Cond = SS->getConditionVariableDeclStmt())
+        collectLocalDeclsForLookup(Cond, Decls);
+      return collectVisibleLocalDeclsForConstevalBlock(SS->getBody(), Target,
+                                                       Decls);
+    }
+    return false;
+  }
+
+  if (auto *WS = dyn_cast<WhileStmt>(S)) {
+    if (containsConstevalBlockDecl(WS->getBody(), Target)) {
+      if (const DeclStmt *Cond = WS->getConditionVariableDeclStmt())
+        collectLocalDeclsForLookup(Cond, Decls);
+      return collectVisibleLocalDeclsForConstevalBlock(WS->getBody(), Target,
+                                                       Decls);
+    }
+    return false;
+  }
+
+  if (auto *FS = dyn_cast<ForStmt>(S)) {
+    if (containsConstevalBlockDecl(FS->getInit(), Target))
+      return collectVisibleLocalDeclsForConstevalBlock(FS->getInit(), Target,
+                                                       Decls);
+    collectVisibleLocalDeclsForConstevalBlock(FS->getInit(), Target, Decls);
+
+    if (containsConstevalBlockDecl(FS->getBody(), Target)) {
+      if (const DeclStmt *Cond = FS->getConditionVariableDeclStmt())
+        collectLocalDeclsForLookup(Cond, Decls);
+      return collectVisibleLocalDeclsForConstevalBlock(FS->getBody(), Target,
+                                                       Decls);
+    }
+    return false;
+  }
+
+  if (auto *FRS = dyn_cast<CXXForRangeStmt>(S)) {
+    if (containsConstevalBlockDecl(FRS->getInit(), Target))
+      return collectVisibleLocalDeclsForConstevalBlock(FRS->getInit(), Target,
+                                                       Decls);
+    collectVisibleLocalDeclsForConstevalBlock(FRS->getInit(), Target, Decls);
+
+    if (containsConstevalBlockDecl(FRS->getLoopVarStmt(), Target))
+      return collectVisibleLocalDeclsForConstevalBlock(
+          FRS->getLoopVarStmt(), Target, Decls);
+    collectVisibleLocalDeclsForConstevalBlock(FRS->getLoopVarStmt(), Target,
+                                              Decls);
+
+    if (containsConstevalBlockDecl(FRS->getBody(), Target))
+      return collectVisibleLocalDeclsForConstevalBlock(FRS->getBody(), Target,
+                                                       Decls);
+    return false;
+  }
+
+  for (const Stmt *Child : S->children())
+    if (containsConstevalBlockDecl(Child, Target))
+      return collectVisibleLocalDeclsForConstevalBlock(Child, Target, Decls);
+  return false;
+}
+
+static void collectInstantiatedLocalDeclsForConstevalLookup(
+    Sema &SemaRef, const ConstevalBlockDecl *PatternBlock,
+    SmallVectorImpl<NamedDecl *> &Decls) {
+  auto *Scope = SemaRef.CurrentInstantiationScope;
+  auto *FD = dyn_cast<FunctionDecl>(PatternBlock->getDeclContext());
+  if (!Scope || !FD || !FD->hasBody())
+    return;
+
+  SmallVector<const NamedDecl *, 8> VisiblePatternDecls;
+  if (!collectVisibleLocalDeclsForConstevalBlock(FD->getBody(), PatternBlock,
+                                                 VisiblePatternDecls))
+    return;
+
+  for (const NamedDecl *ND : VisiblePatternDecls) {
+    auto *Inst = Scope->getInstantiationOfIfExists(ND);
+    if (!Inst)
+      continue;
+
+    auto *InstDecl = Inst->dyn_cast<Decl *>();
+    auto *InstND = dyn_cast_or_null<NamedDecl>(InstDecl);
+    if (!InstND || !InstND->getDeclName() || llvm::is_contained(Decls, InstND))
+      continue;
+    Decls.push_back(InstND);
+  }
+}
 
 static bool isDeclWithinFunction(const Decl *D) {
   const DeclContext *DC = D->getDeclContext();
@@ -2187,8 +2366,30 @@ Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
   if (InstantiatedEvaluatingExpr.isInvalid())
     return nullptr;
 
-  return SemaRef.BuildConstevalBlockDeclaration(
+  Decl *Result = SemaRef.BuildConstevalBlockDeclaration(
        D->getLocation(), InstantiatedEvaluatingExpr.get());
+
+  // Process any pending token injections from queue_injection calls.
+  // During normal parsing, ParseConstevalBlockDeclaration handles this,
+  // but during template instantiation we need to invoke the parser via
+  // callback.
+  SmallVector<NamedDecl *> AddedInjectedLocalDeclsForLookup;
+  SmallVector<NamedDecl *> VisibleLocalDeclsForLookup;
+  collectInstantiatedLocalDeclsForConstevalLookup(
+      SemaRef, D, VisibleLocalDeclsForLookup);
+  for (NamedDecl *ND : VisibleLocalDeclsForLookup) {
+    if (llvm::is_contained(SemaRef.InjectedLocalDeclsForLookup, ND))
+      continue;
+    SemaRef.InjectedLocalDeclsForLookup.push_back(ND);
+    AddedInjectedLocalDeclsForLookup.push_back(ND);
+  }
+  auto RestoreLookupDecls = llvm::make_scope_exit([&] {
+    for (NamedDecl *ND : AddedInjectedLocalDeclsForLookup)
+      llvm::erase(SemaRef.InjectedLocalDeclsForLookup, ND);
+  });
+  SemaRef.ProcessPendingTokenInjections();
+
+  return Result;
 }
 
 Decl *TemplateDeclInstantiator::VisitExpansionStmtDecl(ExpansionStmtDecl *D) {
@@ -5760,7 +5961,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
 
   // Postpone late parsed template instantiations.
   if (PatternDecl->isLateTemplateParsed() &&
-      !LateTemplateParser) {
+      !HasLateTemplateParser()) {
     Function->setInstantiationIsPending(true);
     LateParsedInstantiations.push_back(
         std::make_pair(Function, PointOfInstantiation));
@@ -5794,7 +5995,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
   // Call the LateTemplateParser callback if there is a need to late parse
   // a templated function definition.
   if (!Pattern && PatternDecl->isLateTemplateParsed() &&
-      LateTemplateParser) {
+      HasLateTemplateParser()) {
     // FIXME: Optimize to allow individual templates to be deserialized.
     if (PatternDecl->isFromASTFile())
       ExternalSource->ReadLateParsedTemplates(LateParsedTemplateMap);
@@ -5802,7 +6003,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
     auto LPTIter = LateParsedTemplateMap.find(PatternDecl);
     assert(LPTIter != LateParsedTemplateMap.end() &&
            "missing LateParsedTemplate");
-    LateTemplateParser(OpaqueParser, *LPTIter->second);
+    ParseLateTemplate(*LPTIter->second);
     Pattern = PatternDecl->getBody(PatternDecl);
     updateAttrsForLateParsedTemplate(PatternDecl, Function);
   }
@@ -6033,6 +6234,15 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
       else
         DC = (*It)->getLexicalDeclContext();
       Innermost.emplace(Function->getTemplateSpecializationArgs()->asArray());
+
+      // If this function template was injected into a class template
+      // specialization (rather than instantiated from a member of the class
+      // template pattern), its template parameters are at depth 0. We should
+      // not walk up to the enclosing class template specialization to add
+      // its template arguments, as that would create a depth collision.
+      if (!Primary->getInstantiatedFromMemberTemplate() &&
+          isa<ClassTemplateSpecializationDecl>(Function->getDeclContext()))
+        DC = Function->getASTContext().getTranslationUnitDecl();
     }
     MultiLevelTemplateArgumentList TemplateArgs = getTemplateInstantiationArgs(
         Function, DC, /*Final=*/false, Innermost, false, PatternDecl);

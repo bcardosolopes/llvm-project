@@ -276,7 +276,7 @@ public:
       for (const auto *FD : v.LateParsedDecls) {
         clang::LateParsedTemplate &LPT =
             *S.LateParsedTemplateMap.find(cast<FunctionDecl>(FD))->second;
-        S.LateTemplateParser(S.OpaqueParser, LPT);
+        S.ParseLateTemplate(LPT);
         HandleNamedDecl(FD, Symbols, (FromTU | IsLate));
       }
     }

@@ -33,6 +33,7 @@
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
+#include "clang/Lex/Token.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cassert>
@@ -1954,6 +1955,72 @@ CXXReflectExpr::CXXReflectExpr(const ASTContext &C, QualType ExprTy, APValue RV)
   setDependence(computeDependence(this, C));
 }
 
+static unsigned countInterpolationExprs(TokenSequenceData TSD) {
+  unsigned Count = 0;
+  for (const Token &Tok : TSD)
+    if (Tok.is(tok::annot_token_seq_expr))
+      ++Count;
+  return Count;
+}
+
+CXXTokenSequenceExpr::CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
+                                           TokenSequenceData TSD,
+                                           unsigned NumInterpolationExprs)
+    : Expr(CXXTokenSequenceExprClass, ExprTy, VK_PRValue, OK_Ordinary),
+      TokSeq(TSD), NumInterpolationExprs(NumInterpolationExprs) {
+  initializeInterpolationExprs();
+  setDependence(computeDependence(this));
+}
+
+CXXTokenSequenceExpr::CXXTokenSequenceExpr(EmptyShell Empty,
+                                           unsigned NumInterpolationExprs)
+    : Expr(CXXTokenSequenceExprClass, Empty), TokSeq(),
+      NumInterpolationExprs(NumInterpolationExprs) {
+  for (unsigned I = 0; I != NumInterpolationExprs; ++I)
+    setInterpolationExpr(I, nullptr);
+}
+
+void CXXTokenSequenceExpr::initializeInterpolationExprs() {
+  unsigned I = 0;
+  for (const Token &Tok : TokSeq) {
+    if (!Tok.is(tok::annot_token_seq_expr))
+      continue;
+    if (I == NumInterpolationExprs)
+      break;
+    setInterpolationExpr(I++,
+                         static_cast<Expr *>(Tok.getAnnotationValue()));
+  }
+  for (; I != NumInterpolationExprs; ++I)
+    setInterpolationExpr(I, nullptr);
+}
+
+CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
+                                                   SourceLocation OperatorLoc,
+                                                   SourceRange OperandRange,
+                                                   TokenSequenceData TSD) {
+  unsigned NumInterpolationExprs = countInterpolationExprs(TSD);
+  void *Mem =
+      C.Allocate(totalSizeToAlloc<Stmt *>(NumInterpolationExprs));
+  auto *E =
+      new (Mem) CXXTokenSequenceExpr(C, C.TokenSequenceTy, TSD,
+                                     NumInterpolationExprs);
+  E->setOperatorLoc(OperatorLoc);
+  E->setOperandRange(OperandRange);
+  return E;
+}
+
+CXXTokenSequenceExpr *
+CXXTokenSequenceExpr::CreateEmpty(const ASTContext &C,
+                                  unsigned NumInterpolationExprs) {
+  void *Mem =
+      C.Allocate(totalSizeToAlloc<Stmt *>(NumInterpolationExprs));
+  return new (Mem) CXXTokenSequenceExpr(EmptyShell{}, NumInterpolationExprs);
+}
+
+APValue CXXTokenSequenceExpr::getValue() const {
+  return APValue(TokSeq);
+}
+
 CXXReflectExpr::CXXReflectExpr(EmptyShell Empty)
     : Expr(CXXReflectExprClass, Empty), Kind(OperandKind::Unset) {
 }
@@ -1973,6 +2040,16 @@ CXXReflectExpr *CXXReflectExpr::Create(ASTContext &C,
                                        SourceLocation OperatorLoc,
                                        SourceRange OperandRange, APValue RV) {
   CXXReflectExpr *E = new (C) CXXReflectExpr(C, C.MetaInfoTy, RV);
+  E->setOperatorLoc(OperatorLoc);
+  E->setOperandRange(OperandRange);
+  return E;
+}
+
+CXXReflectExpr *CXXReflectExpr::Create(ASTContext &C,
+                                       SourceLocation OperatorLoc,
+                                       SourceRange OperandRange, APValue RV,
+                                       QualType Ty) {
+  CXXReflectExpr *E = new (C) CXXReflectExpr(C, Ty, RV);
   E->setOperatorLoc(OperatorLoc);
   E->setOperandRange(OperandRange);
   return E;
@@ -2068,6 +2145,239 @@ CXXSpliceExpr *CXXSpliceExpr::Create(ASTContext &C, ExprValueKind ValueKind,
 
 CXXSpliceExpr *CXXSpliceExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXSpliceExpr(EmptyShell());
+}
+
+CXXBuiltinInjectExpr::CXXBuiltinInjectExpr(QualType Ty, Expr *Operand,
+                                             SourceLocation KwLoc,
+                                             SourceLocation LParenLoc,
+                                             SourceLocation RParenLoc,
+                                             Expr *TargetNS)
+    : Expr(CXXBuiltinInjectExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumArgs(TargetNS ? 2 : 1), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  Args[0] = Operand;
+  Args[1] = TargetNS;
+  ExprDependence Deps = Operand->getDependence();
+  if (TargetNS)
+    Deps = Deps | TargetNS->getDependence();
+  setDependence(Deps);
+}
+
+CXXBuiltinInjectExpr::CXXBuiltinInjectExpr(EmptyShell Empty)
+    : Expr(CXXBuiltinInjectExprClass, Empty), NumArgs(1) {
+  Args[0] = nullptr;
+  Args[1] = nullptr;
+}
+
+CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::Create(ASTContext &C, QualType Ty,
+                                                     Expr *Operand,
+                                                     SourceLocation KwLoc,
+                                                     SourceLocation LParenLoc,
+                                                     SourceLocation RParenLoc,
+                                                     Expr *TargetNS) {
+  return new (C) CXXBuiltinInjectExpr(Ty, Operand, KwLoc, LParenLoc,
+                                       RParenLoc, TargetNS);
+}
+
+CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXBuiltinInjectExpr(EmptyShell());
+}
+
+CXXBuiltinReportTokensExpr::CXXBuiltinReportTokensExpr(
+    QualType Ty, Expr *Msg, Expr *MsgSizeCall, Expr *MsgDataCall,
+    Expr *Operand, SourceLocation KwLoc, SourceLocation LParenLoc,
+    SourceLocation RParenLoc)
+    : Expr(CXXBuiltinReportTokensExprClass, Ty, VK_PRValue, OK_Ordinary),
+      KwLoc(KwLoc), LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
+  Args[0] = Msg;
+  Args[1] = MsgSizeCall;
+  Args[2] = MsgDataCall;
+  Args[3] = Operand;
+  ExprDependence Deps = Msg->getDependence() | Operand->getDependence();
+  if (MsgSizeCall)
+    Deps |= MsgSizeCall->getDependence();
+  if (MsgDataCall)
+    Deps |= MsgDataCall->getDependence();
+  setDependence(Deps);
+}
+
+CXXBuiltinReportTokensExpr::CXXBuiltinReportTokensExpr(EmptyShell Empty)
+    : Expr(CXXBuiltinReportTokensExprClass, Empty) {
+  Args[0] = nullptr;
+  Args[1] = nullptr;
+  Args[2] = nullptr;
+  Args[3] = nullptr;
+}
+
+CXXBuiltinReportTokensExpr *CXXBuiltinReportTokensExpr::Create(
+    ASTContext &C, QualType Ty, Expr *Msg, Expr *MsgSizeCall,
+    Expr *MsgDataCall, Expr *Operand, SourceLocation KwLoc,
+    SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinReportTokensExpr(Ty, Msg, MsgSizeCall, MsgDataCall,
+                                             Operand, KwLoc, LParenLoc,
+                                             RParenLoc);
+}
+
+CXXBuiltinReportTokensExpr *
+CXXBuiltinReportTokensExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXBuiltinReportTokensExpr(EmptyShell());
+}
+
+CXXBuiltinIdExpr::CXXBuiltinIdExpr(ASTContext &C, QualType Ty,
+                                     ArrayRef<Expr *> Args,
+                                     ArrayRef<Expr *> SizeCalls,
+                                     ArrayRef<Expr *> DataCalls,
+                                     SourceLocation KwLoc,
+                                     SourceLocation LParenLoc,
+                                     SourceLocation RParenLoc)
+    : Expr(CXXBuiltinIdExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumArgs(Args.size()), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  assert(SizeCalls.size() == NumArgs && DataCalls.size() == NumArgs);
+  this->Args = new (C) Stmt *[3 * NumArgs];
+  ExprDependence Deps = ExprDependence::None;
+  for (unsigned I = 0; I < NumArgs; ++I) {
+    this->Args[3 * I + 0] = Args[I];
+    this->Args[3 * I + 1] = SizeCalls[I];
+    this->Args[3 * I + 2] = DataCalls[I];
+    Deps |= Args[I]->getDependence();
+    if (SizeCalls[I])
+      Deps |= SizeCalls[I]->getDependence();
+    if (DataCalls[I])
+      Deps |= DataCalls[I]->getDependence();
+  }
+  setDependence(Deps);
+}
+
+CXXBuiltinIdExpr::CXXBuiltinIdExpr(EmptyShell Empty, unsigned NumArgs)
+    : Expr(CXXBuiltinIdExprClass, Empty), Args(nullptr), NumArgs(NumArgs) {}
+
+CXXBuiltinIdExpr *CXXBuiltinIdExpr::Create(ASTContext &C, QualType Ty,
+                                             ArrayRef<Expr *> Args,
+                                             ArrayRef<Expr *> SizeCalls,
+                                             ArrayRef<Expr *> DataCalls,
+                                             SourceLocation KwLoc,
+                                             SourceLocation LParenLoc,
+                                             SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinIdExpr(C, Ty, Args, SizeCalls, DataCalls, KwLoc,
+                                  LParenLoc, RParenLoc);
+}
+
+CXXBuiltinIdExpr *CXXBuiltinIdExpr::CreateEmpty(ASTContext &C,
+                                                   unsigned NumArgs) {
+  auto *E = new (C) CXXBuiltinIdExpr(EmptyShell(), NumArgs);
+  E->Args = new (C) Stmt *[3 * NumArgs];
+  return E;
+}
+
+CXXBuiltinStrLiteralExpr::CXXBuiltinStrLiteralExpr(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc)
+    : Expr(CXXBuiltinStrLiteralExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumArgs(Args.size()), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  assert(SizeCalls.size() == NumArgs && DataCalls.size() == NumArgs);
+  this->Args = new (C) Stmt *[3 * NumArgs];
+  ExprDependence Deps = ExprDependence::None;
+  for (unsigned I = 0; I < NumArgs; ++I) {
+    this->Args[3 * I + 0] = Args[I];
+    this->Args[3 * I + 1] = SizeCalls[I];
+    this->Args[3 * I + 2] = DataCalls[I];
+    Deps |= Args[I]->getDependence();
+    if (SizeCalls[I])
+      Deps |= SizeCalls[I]->getDependence();
+    if (DataCalls[I])
+      Deps |= DataCalls[I]->getDependence();
+  }
+  setDependence(Deps);
+}
+
+CXXBuiltinStrLiteralExpr::CXXBuiltinStrLiteralExpr(EmptyShell Empty,
+                                                   unsigned NumArgs)
+    : Expr(CXXBuiltinStrLiteralExprClass, Empty), Args(nullptr),
+      NumArgs(NumArgs) {}
+
+CXXBuiltinStrLiteralExpr *CXXBuiltinStrLiteralExpr::Create(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinStrLiteralExpr(C, Ty, Args, SizeCalls, DataCalls,
+                                          KwLoc, LParenLoc, RParenLoc);
+}
+
+CXXBuiltinStrLiteralExpr *
+CXXBuiltinStrLiteralExpr::CreateEmpty(ASTContext &C, unsigned NumArgs) {
+  auto *E = new (C) CXXBuiltinStrLiteralExpr(EmptyShell(), NumArgs);
+  E->Args = new (C) Stmt *[3 * NumArgs];
+  return E;
+}
+
+CXXBuiltinTokenizeExpr::CXXBuiltinTokenizeExpr(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc)
+    : Expr(CXXBuiltinTokenizeExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumArgs(Args.size()), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  assert(SizeCalls.size() == NumArgs && DataCalls.size() == NumArgs);
+  this->Args = new (C) Stmt *[3 * NumArgs];
+  ExprDependence Deps = ExprDependence::None;
+  for (unsigned I = 0; I < NumArgs; ++I) {
+    this->Args[3 * I + 0] = Args[I];
+    this->Args[3 * I + 1] = SizeCalls[I];
+    this->Args[3 * I + 2] = DataCalls[I];
+    Deps |= Args[I]->getDependence();
+    if (SizeCalls[I])
+      Deps |= SizeCalls[I]->getDependence();
+    if (DataCalls[I])
+      Deps |= DataCalls[I]->getDependence();
+  }
+  setDependence(Deps);
+}
+
+CXXBuiltinTokenizeExpr::CXXBuiltinTokenizeExpr(EmptyShell Empty,
+                                               unsigned NumArgs)
+    : Expr(CXXBuiltinTokenizeExprClass, Empty), Args(nullptr),
+      NumArgs(NumArgs) {}
+
+CXXBuiltinTokenizeExpr *CXXBuiltinTokenizeExpr::Create(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinTokenizeExpr(C, Ty, Args, SizeCalls, DataCalls,
+                                        KwLoc, LParenLoc, RParenLoc);
+}
+
+CXXBuiltinTokenizeExpr *
+CXXBuiltinTokenizeExpr::CreateEmpty(ASTContext &C, unsigned NumArgs) {
+  auto *E = new (C) CXXBuiltinTokenizeExpr(EmptyShell(), NumArgs);
+  E->Args = new (C) Stmt *[3 * NumArgs];
+  return E;
+}
+
+CXXBuiltinStringizeExpr::CXXBuiltinStringizeExpr(QualType Ty, Expr *Operand,
+                                                 SourceLocation KwLoc,
+                                                 SourceLocation LParenLoc,
+                                                 SourceLocation RParenLoc)
+    : Expr(CXXBuiltinStringizeExprClass, Ty, VK_PRValue, OK_Ordinary),
+      Operand(Operand), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  setDependence(computeDependence(this));
+}
+
+CXXBuiltinStringizeExpr::CXXBuiltinStringizeExpr(EmptyShell Empty)
+    : Expr(CXXBuiltinStringizeExprClass, Empty), Operand(nullptr) {}
+
+CXXBuiltinStringizeExpr *CXXBuiltinStringizeExpr::Create(
+    ASTContext &C, QualType Ty, Expr *Operand, SourceLocation KwLoc,
+    SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C)
+      CXXBuiltinStringizeExpr(Ty, Operand, KwLoc, LParenLoc, RParenLoc);
+}
+
+CXXBuiltinStringizeExpr *CXXBuiltinStringizeExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXBuiltinStringizeExpr(EmptyShell());
 }
 
 StackLocationExpr::StackLocationExpr(QualType ResultTy, SourceRange Range,

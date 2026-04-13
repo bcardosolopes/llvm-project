@@ -232,6 +232,9 @@ BUILTIN_TYPE(NullPtr, NullPtrTy)
 // internal compiler objects reflected by a value.
 BUILTIN_TYPE(MetaInfo, MetaInfoTy)
 
+// This is the type for C++2c token sequences (^^{ tokens }).
+BUILTIN_TYPE(TokenSequence, TokenSequenceTy)
+
 // The primitive Objective C 'id' type.  The user-visible 'id'
 // type is a typedef of an ObjCObjectPointerType to an
 // ObjCObjectType with this as its base.  In fact, this only ever

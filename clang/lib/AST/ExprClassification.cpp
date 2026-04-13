@@ -224,6 +224,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::ConceptSpecializationExprClass:
   case Expr::RequiresExprClass:
   case Expr::CXXReflectExprClass:
+  case Expr::CXXTokenSequenceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::CXXExpansionInitListExprClass:
   case Expr::CXXExpansionInitListSelectExprClass:
@@ -234,6 +235,14 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
 
   case Expr::CXXMetafunctionExprClass:
     return E->getValueKind() == VK_LValue ? Cl::CL_LValue : Cl::CL_PRValue;
+
+  case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXBuiltinIdExprClass:
+  case Expr::CXXBuiltinStrLiteralExprClass:
+  case Expr::CXXBuiltinTokenizeExprClass:
+  case Expr::CXXBuiltinStringizeExprClass:
+    return Cl::CL_PRValue;
 
   case Expr::EmbedExprClass:
     // Nominally, this just goes through as a PRValue until we actually expand

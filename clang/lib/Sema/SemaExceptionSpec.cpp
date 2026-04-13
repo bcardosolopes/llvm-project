@@ -1399,7 +1399,11 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::CXXNullPtrLiteralExprClass:
   case Expr::CXXPseudoDestructorExprClass:
   case Expr::CXXReflectExprClass:
+  case Expr::CXXTokenSequenceExprClass:
   case Expr::CXXMetafunctionExprClass:
+  case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

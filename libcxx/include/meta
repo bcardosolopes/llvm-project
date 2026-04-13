@@ -65,6 +65,8 @@ consteval auto static_data_members_of(info class_type,
                                       access_context ctx) -> vector<info>;
 consteval auto nonstatic_data_members_of(info class_type,
                                          access_context ctx) -> vector<info>;
+consteval auto subobjects_of(info class_type,
+                             access_context ctx) -> vector<info>;
 consteval auto enumerators_of(info enum_type) -> vector<info>;
 
 // substitute
@@ -418,6 +420,9 @@ _LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
 
 // An opaque handle to a reflected entity.
 using info = decltype(^^int);
+
+// An opaque handle to a token sequence.
+using token_sequence = decltype(^^{ });
 
 template <typename R>
 concept reflection_range =
@@ -1085,6 +1090,13 @@ consteval auto nonstatic_data_members_of(info r,
     throw "Namespaces cannot have non-static data members";
 
   return __filtered(members_of(r, ctx), is_nonstatic_data_member);
+}
+
+consteval auto subobjects_of(info r, access_context ctx) -> vector<info> {
+  auto result = bases_of(r, ctx);
+  auto nsdms = nonstatic_data_members_of(r, ctx);
+  result.insert(result.end(), nsdms.begin(), nsdms.end());
+  return result;
 }
 
 // Returns true if the reflected entity is an enumerable type.
@@ -3036,6 +3048,56 @@ consteval auto display_string_of(info R) -> string_view {
 consteval auto u8display_string_of(info R) -> u8string_view {
   return detail::pretty_printer<char8_t>::print(R);
 }
+
+// helper for building up delimited lists of token sequences
+class list_builder {
+  token_sequence body = ^^{};
+  token_sequence delim;
+  bool first = true;
+
+public:
+  // default to no delimiter
+  consteval explicit list_builder(token_sequence delim = ^^{ }) : delim(delim) { }
+
+  consteval auto operator+=(token_sequence tok) -> void {
+    if (tok != ^^{ }) {
+      if (not first) {
+        body += delim;
+      }
+      first = false;
+      body += tok;
+    }
+  }
+
+  consteval operator token_sequence() const {
+    return body;
+  }
+};
+
+template <class... Ts>
+consteval auto id(Ts const&...) -> info;
+
+template <class... Ts>
+consteval auto str_lit(Ts const&...) -> token_sequence;
+
+// Tokenize strings into a token_sequence.
+// Arguments are concatenated and then lexed as C++ source code.
+// Accepts integers, characters, string literals, and types with data()/size().
+template <class... Ts>
+consteval auto tokenize(Ts const&...) -> token_sequence;
+
+// Convert a token_sequence back into a string.
+// Preserves whitespace between tokens.
+consteval auto stringize(token_sequence) -> char const*;
+
+// Queue token injection into the current or specified namespace.
+// Accepts any type convertible to token_sequence.
+consteval auto queue_injection(token_sequence tokens) -> void;
+consteval auto queue_injection(info target_ns, token_sequence tokens) -> void;
+
+// Report tokens for debugging (emits a warning with the token content).
+template <class M>
+consteval auto report_tokens(M const& msg, token_sequence tokens) -> void;
 
 _LIBCPP_END_NAMESPACE_REFLECTION_V2
 

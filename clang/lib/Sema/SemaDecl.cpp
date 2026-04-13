@@ -14906,11 +14906,15 @@ void Sema::addLifetimeBoundToImplicitThis(CXXMethodDecl *MD) {
 
 
 // Helper function to recursively check if an APValue contains consteval-only values
-// (reflection values or references to consteval variables)
+// (reflection values, token sequences, or references to consteval variables)
 bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
   // Non-null reflection value (null reflections are safe zero-initialized values)
   if (V.isReflection())
     return !V.isNullReflection();
+
+  // Token sequences are always consteval-only
+  if (V.isTokenSequence())
+    return true;
 
   // Check arrays
   if (V.isArray()) {
@@ -14978,7 +14982,8 @@ std::optional<bool> Sema::TryEvaluateConstevalOnlyValue(VarDecl *VD) {
 
 // Check if an expression (tree) contains a consteval-only value.
 // Walks into ConstantExprs (checking their APValue results) and
-// recognizes CXXReflectExprs as always producing consteval-only values.
+// recognizes CXXReflectExprs/CXXTokenSequenceExprs as always producing
+// consteval-only values.
 bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   if (!E)
     return false;
@@ -14998,8 +15003,9 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   // expression. This handles cases like `(f)` where `f` is consteval.
   E = E->IgnoreParenImpCasts();
 
-  // A CXXReflectExpr always produces a reflection (consteval-only value).
-  if (isa<CXXReflectExpr>(E))
+  // A CXXReflectExpr/CXXTokenSequenceExpr always produces a consteval-only
+  // value.
+  if (isa<CXXReflectExpr>(E) || isa<CXXTokenSequenceExpr>(E))
     return true;
 
   // A DeclRefExpr to an immediate function or consteval variable produces
@@ -15093,6 +15099,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   // We save and restore var's evaluation state to prevent that from
   // interfering with checkForConstantInitialization's assertion.
   if (!var->isConsteval() && var->hasInit() &&
+      !var->getInit()->isValueDependent() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext()) {
     EvaluatedStmt *Eval = var->ensureEvaluatedStmt();

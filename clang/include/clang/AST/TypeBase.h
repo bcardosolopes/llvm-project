@@ -2650,8 +2650,9 @@ public:
   bool isRealType() const;         // C99 6.2.5p17 (real floating + integer)
   bool isArithmeticType() const;   // C99 6.2.5p18 (integer + floating)
   bool isVoidType() const;         // C99 6.2.5p19
-  bool isReflectionType() const;   // C++2c reflection [P2996]
-  bool isScalarType() const;       // C99 6.2.5p21 (arithmetic + pointers)
+  bool isReflectionType() const;     // C++2c reflection [P2996]
+  bool isTokenSequenceType() const;  // C++2c token sequences
+  bool isScalarType() const;         // C99 6.2.5p21 (arithmetic + pointers)
   bool isAggregateType() const;
   bool isFundamentalType() const;
   bool isCompoundType() const;
@@ -2828,6 +2829,7 @@ public:
     STK_FloatingComplex,
     STK_FixedPoint,
     STK_Reflection,
+    STK_TokenSequence,
   };
 
   /// Given that this is a scalar type, classify it.
@@ -8709,6 +8711,7 @@ inline bool QualType::isCForbiddenLValueType() const {
 inline bool Type::isFundamentalType() const {
   return isVoidType() ||
          isNullPtrType() ||
+         isTokenSequenceType() ||
          // FIXME: It's really annoying that we don't have an
          // 'isArithmeticType()' which agrees with the standard definition.
          (isArithmeticType() && !isEnumeralType());
@@ -9119,6 +9122,13 @@ inline bool Type::isReflectionType() const {
   return false;
 }
 
+inline bool Type::isTokenSequenceType() const {
+  if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType)) {
+    return BT->getKind() == BuiltinType::TokenSequence;
+  }
+  return false;
+}
+
 inline bool Type::isHalfType() const {
   // FIXME: Should we allow complex __fp16? Probably not.
   return isSpecificBuiltinType(BuiltinType::Half);
@@ -9224,7 +9234,7 @@ inline bool Type::isUnsignedFixedPointType() const {
 inline bool Type::isScalarType() const {
   if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
     return BT->getKind() > BuiltinType::Void &&
-           BT->getKind() <= BuiltinType::MetaInfo;
+           BT->getKind() <= BuiltinType::TokenSequence;
   if (const EnumType *ET = dyn_cast<EnumType>(CanonicalType))
     // Enums are scalar types, but only if they are defined.  Incomplete enums
     // are not treated as scalar types.

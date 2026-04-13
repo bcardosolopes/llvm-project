@@ -33,6 +33,7 @@ public:
   enum ResultKind : unsigned {
     MFRK_bool,
     MFRK_metaInfo,
+    MFRK_tokenSequence,
     MFRK_sizeT,
     MFRK_sourceLoc,
     MFRK_spliceFromArg,

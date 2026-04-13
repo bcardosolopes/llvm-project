@@ -1709,7 +1709,8 @@ bool get_begin_enumerator_decl_of(APValue &Result, ASTContext &C,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
-  case ReflectionKind::Annotation: {
+  case ReflectionKind::Annotation:
+  {
     return DiagnoseReflectionKind(Diagnoser, Range, "an enum type",
                                   DescriptionOf(RV));
   }
@@ -1752,7 +1753,8 @@ bool get_next_enumerator_decl_of(APValue &Result, ASTContext &C,
   case ReflectionKind::Parameter:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
-  case ReflectionKind::Annotation: {
+  case ReflectionKind::Annotation:
+  {
     llvm_unreachable("should have failed in 'get_begin_enumerator_decl_of'");
   }
   }

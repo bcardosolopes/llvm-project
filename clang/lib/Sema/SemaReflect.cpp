@@ -17,9 +17,12 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/MetaActions.h"
+#include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/Token.h"
 #include "clang/AST/Metafunction.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
+#include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Sema.h"
@@ -120,6 +123,11 @@ bool CheckReflectVar(Sema &S, VarDecl *VD, SourceRange Range) {
        DC = DC->getParent()) {
     assert(DC && "Var context not a parent of the current context");
     if (auto *RD = dyn_cast<CXXRecordDecl>(DC); RD && RD->isLambda()) {
+      // Consteval blocks are implemented as immediately-invoked lambdas.
+      // They shouldn't prevent reflecting on local entities since
+      // everything is resolved at compile time.
+      if (RD->isConstevalBlockLambda())
+        continue;
       S.Diag(Range.getBegin(), diag::err_reflect_intervening_lambda) << Range;
       return true;
     }
@@ -980,6 +988,495 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
   return BuildCXXReflectExpr(OperatorLoc, E);
 }
 
+ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
+                                                  SourceRange OperandRange,
+                                                  ArrayRef<Token> Tokens) {
+  TokenSequenceData TSD = CreateTokenSequenceData(Context, Tokens);
+  return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD);
+}
+
+enum class TokenOpTarget { MetaInfo, TokenSequence };
+
+static Expr *TryConvertTo(Sema &S, Expr *E, TokenOpTarget Target) {
+  QualType ExprTy = E->getType();
+  if (ExprTy->isDependentType())
+    return E;
+
+  // If the expression is already of the desired type, no conversion needed.
+  if (Target == TokenOpTarget::MetaInfo && ExprTy->isReflectionType())
+    return E;
+  if (Target == TokenOpTarget::TokenSequence && ExprTy->isTokenSequenceType())
+    return E;
+
+  QualType TargetTy = Target == TokenOpTarget::MetaInfo
+                          ? S.Context.MetaInfoTy
+                          : S.Context.TokenSequenceTy;
+  InitializedEntity Entity =
+      InitializedEntity::InitializeTemporary(TargetTy);
+  InitializationKind Kind =
+      InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
+  InitializationSequence Seq(S, Entity, Kind, E);
+  if (Seq) {
+    ExprResult Conv = Seq.Perform(S, Entity, Kind, E);
+    if (!Conv.isInvalid())
+      return Conv.get();
+  }
+
+  return E;
+}
+
+// Try to convert to token_sequence first; if that fails, try meta::info.
+// Used for interpolation contexts where either is acceptable but a
+// token_sequence conversion is preferred (so it can be expanded inline
+// rather than splice-evaluated).
+static Expr *TryConvertToTokenSequenceOrMetaInfo(Sema &S, Expr *E) {
+  Expr *Converted = TryConvertTo(S, E, TokenOpTarget::TokenSequence);
+  if (Converted != E)
+    return Converted;
+  return TryConvertTo(S, E, TokenOpTarget::MetaInfo);
+}
+
+ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
+  // Don't evaluate here — the expression may reference consteval function
+  // parameters that aren't constant expressions at parse time but will have
+  // concrete values when the token sequence is evaluated during consteval
+  // evaluation. Evaluation happens in the ReflectionEvaluator when the
+  // ^^{ ... } expression is evaluated.
+
+  // If the expression is convertible to std::meta::token_sequence or
+  // std::meta::info, insert that conversion. token_sequence is preferred so
+  // a list_builder or similar wrapper can be expanded as raw tokens.
+  return TryConvertToTokenSequenceOrMetaInfo(*this, E);
+}
+
+ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
+                                       SourceLocation LParenLoc,
+                                       ArrayRef<Expr *> Args,
+                                       SourceLocation RParenLoc) {
+  // queue_injection(tokens) or queue_injection(target_ns, tokens)
+  Expr *TargetNS = nullptr;
+  Expr *Operand = nullptr;
+  if (Args.size() == 1) {
+    Operand = Args[0];
+  } else if (Args.size() == 2) {
+    TargetNS = Args[0];
+    Operand = Args[1];
+  } else {
+    llvm_unreachable("invalid number of arguments");
+  }
+  if (TargetNS)
+    TargetNS = TryConvertTo(*this, TargetNS, TokenOpTarget::MetaInfo);
+  Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
+  return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
+                                       KwLoc, LParenLoc, RParenLoc, TargetNS);
+}
+
+ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
+                                             SourceLocation LParenLoc,
+                                             ArrayRef<Expr *> Args,
+                                             SourceLocation RParenLoc) {
+  // report_tokens(msg, tokens)
+  assert(Args.size() == 2 && "expected 2 arguments");
+  Expr *Msg = Args[0];
+  Expr *Operand = Args[1];
+  Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
+
+  // Process the message argument using the same rules as id/str_lit: supports
+  // string literals, pointers, arrays, and user-defined types with data()/size().
+  Expr *MsgSizeCall = nullptr;
+  Expr *MsgDataCall = nullptr;
+
+  if (!Msg->isTypeDependent() && !Msg->isValueDependent()) {
+    QualType T = Msg->getType().getNonReferenceType();
+
+    // String-literal / pointer / array args evaluate directly.
+    if (!T->isPointerType() && !T->isArrayType()) {
+      // Class type: must have data() returning const char* and size() returning
+      // size_t (matching static_assert user-defined message rules).
+      auto *RD = T->getAsCXXRecordDecl();
+      if (!RD) {
+        Diag(Msg->getExprLoc(), diag::err_user_defined_msg_invalid)
+            << /*StringEvaluationContext::StaticAssert=*/0;
+        return ExprError();
+      }
+
+      SourceLocation Loc = Msg->getBeginLoc();
+      auto FindMember = [&](StringRef Name) -> std::optional<LookupResult> {
+        DeclarationName DN = PP.getIdentifierInfo(Name);
+        LookupResult R(*this, DN, Loc, Sema::LookupMemberName);
+        LookupQualifiedName(R, RD);
+        if (R.empty())
+          return std::nullopt;
+        return std::move(R);
+      };
+      auto Size = FindMember("size");
+      auto Data = FindMember("data");
+      if (!Size || !Data) {
+        Diag(Loc, diag::err_user_defined_msg_missing_member_function)
+            << /*StringEvaluationContext::StaticAssert=*/0
+            << ((!Size && !Data) ? 2 : !Size ? 0 : 1);
+        return ExprError();
+      }
+
+      auto BuildCall = [&](LookupResult &LR) -> ExprResult {
+        ExprResult Ref = BuildMemberReferenceExpr(
+            Msg, Msg->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+            SourceLocation(), nullptr, LR, nullptr, nullptr);
+        if (Ref.isInvalid())
+          return ExprError();
+        ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc, nullptr,
+                                         false, true);
+        if (Call.isInvalid())
+          return ExprError();
+        return TemporaryMaterializationConversion(Call.get());
+      };
+
+      QualType SizeT = Context.getSizeType();
+      QualType ConstCharPtr = Context.getPointerType(
+          Context.getConstType(Context.CharTy));
+
+      ExprResult SizeCall = BuildCall(*Size);
+      ExprResult DataCall = BuildCall(*Data);
+      if (SizeCall.isInvalid() || DataCall.isInvalid())
+        return ExprError();
+
+      ExprResult SizeConv = BuildConvertedConstantExpression(
+          SizeCall.get(), SizeT, CCEKind::StaticAssertMessageSize);
+      ExprResult DataConv = BuildConvertedConstantExpression(
+          DataCall.get(), ConstCharPtr, CCEKind::StaticAssertMessageData);
+      if (SizeConv.isInvalid() || DataConv.isInvalid()) {
+        Diag(Loc, diag::err_user_defined_msg_invalid_mem_fn_ret_ty)
+            << /*StringEvaluationContext::StaticAssert=*/0
+            << (SizeConv.isInvalid() ? /*size*/ 0 : /*data*/ 1);
+        return ExprError();
+      }
+
+      MsgSizeCall = SizeConv.get();
+      MsgDataCall = DataConv.get();
+    }
+  }
+
+  return CXXBuiltinReportTokensExpr::Create(Context, Context.VoidTy, Msg,
+                                             MsgSizeCall, MsgDataCall, Operand,
+                                             KwLoc, LParenLoc, RParenLoc);
+}
+
+ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
+                                   SourceLocation LParenLoc,
+                                   ArrayRef<Expr *> Args,
+                                   SourceLocation RParenLoc) {
+  // For each argument, classify and (for user-defined string-like types)
+  // build the size() and data() member calls so the constant evaluator
+  // doesn't need Sema-level lookup. Uses the same data()/size() member
+  // duck-typing rule as user-defined static_assert messages.
+  SmallVector<Expr *, 4> SizeCalls(Args.size(), nullptr);
+  SmallVector<Expr *, 4> DataCalls(Args.size(), nullptr);
+
+  QualType SizeT = Context.getSizeType();
+  QualType ConstCharPtr = Context.getPointerType(
+      Context.getConstType(Context.CharTy));
+
+  for (unsigned I = 0; I < Args.size(); ++I) {
+    Expr *Arg = Args[I];
+
+    // Defer to instantiation for dependent args.
+    if (Arg->isTypeDependent() || Arg->isValueDependent())
+      continue;
+
+    QualType T = Arg->getType().getNonReferenceType();
+
+    // Integer and string-literal / pointer / array args evaluate directly.
+    if (T->isIntegralOrEnumerationType() || T->isPointerType() ||
+        T->isArrayType())
+      continue;
+
+    // Class type: must have data() returning const char* and size() returning
+    // size_t (matching static_assert user-defined message rules).
+    auto *RD = T->getAsCXXRecordDecl();
+    if (!RD) {
+      Diag(Arg->getExprLoc(), diag::err_user_defined_msg_invalid)
+          << /*StringEvaluationContext::StaticAssert=*/0;
+      return ExprError();
+    }
+
+    SourceLocation Loc = Arg->getBeginLoc();
+    auto FindMember = [&](StringRef Name) -> std::optional<LookupResult> {
+      DeclarationName DN = PP.getIdentifierInfo(Name);
+      LookupResult R(*this, DN, Loc, Sema::LookupMemberName);
+      LookupQualifiedName(R, RD);
+      if (R.empty())
+        return std::nullopt;
+      return std::move(R);
+    };
+    auto Size = FindMember("size");
+    auto Data = FindMember("data");
+    if (!Size || !Data) {
+      Diag(Loc, diag::err_user_defined_msg_missing_member_function)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << ((!Size && !Data) ? 2 : !Size ? 0 : 1);
+      return ExprError();
+    }
+
+    auto BuildCall = [&](LookupResult &LR) -> ExprResult {
+      ExprResult Ref = BuildMemberReferenceExpr(
+          Arg, Arg->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+          SourceLocation(), nullptr, LR, nullptr, nullptr);
+      if (Ref.isInvalid())
+        return ExprError();
+      ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc, nullptr,
+                                       false, true);
+      if (Call.isInvalid())
+        return ExprError();
+      return TemporaryMaterializationConversion(Call.get());
+    };
+
+    ExprResult SizeCall = BuildCall(*Size);
+    ExprResult DataCall = BuildCall(*Data);
+    if (SizeCall.isInvalid() || DataCall.isInvalid())
+      return ExprError();
+
+    ExprResult SizeConv = BuildConvertedConstantExpression(
+        SizeCall.get(), SizeT, CCEKind::StaticAssertMessageSize);
+    ExprResult DataConv = BuildConvertedConstantExpression(
+        DataCall.get(), ConstCharPtr, CCEKind::StaticAssertMessageData);
+    if (SizeConv.isInvalid() || DataConv.isInvalid()) {
+      Diag(Loc, diag::err_user_defined_msg_invalid_mem_fn_ret_ty)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << (SizeConv.isInvalid() ? /*size*/ 0 : /*data*/ 1);
+      return ExprError();
+    }
+
+    SizeCalls[I] = SizeConv.get();
+    DataCalls[I] = DataConv.get();
+  }
+
+  return CXXBuiltinIdExpr::Create(Context, Context.MetaInfoTy,
+                                  ArrayRef<Expr *>(Args), SizeCalls, DataCalls,
+                                  KwLoc, LParenLoc, RParenLoc);
+}
+
+ExprResult Sema::ActOnCXXBuiltinStrLiteral(SourceLocation KwLoc,
+                                           SourceLocation LParenLoc,
+                                           ArrayRef<Expr *> Args,
+                                           SourceLocation RParenLoc) {
+  // Same argument validation as std::meta::id, but with no first-argument
+  // restriction (integers can come first since "123" is a valid literal).
+  SmallVector<Expr *, 4> SizeCalls(Args.size(), nullptr);
+  SmallVector<Expr *, 4> DataCalls(Args.size(), nullptr);
+
+  QualType SizeT = Context.getSizeType();
+  QualType ConstCharPtr = Context.getPointerType(
+      Context.getConstType(Context.CharTy));
+
+  for (unsigned I = 0; I < Args.size(); ++I) {
+    Expr *Arg = Args[I];
+
+    // Defer to instantiation for dependent args.
+    if (Arg->isTypeDependent() || Arg->isValueDependent())
+      continue;
+
+    QualType T = Arg->getType().getNonReferenceType();
+
+    // Integer and string-literal / pointer / array args evaluate directly.
+    if (T->isIntegralOrEnumerationType() || T->isPointerType() ||
+        T->isArrayType())
+      continue;
+
+    // Class type: must have data() returning const char* and size() returning
+    // size_t (matching static_assert user-defined message rules).
+    auto *RD = T->getAsCXXRecordDecl();
+    if (!RD) {
+      Diag(Arg->getExprLoc(), diag::err_user_defined_msg_invalid)
+          << /*StringEvaluationContext::StaticAssert=*/0;
+      return ExprError();
+    }
+
+    SourceLocation Loc = Arg->getBeginLoc();
+    auto FindMember = [&](StringRef Name) -> std::optional<LookupResult> {
+      DeclarationName DN = PP.getIdentifierInfo(Name);
+      LookupResult R(*this, DN, Loc, Sema::LookupMemberName);
+      LookupQualifiedName(R, RD);
+      if (R.empty())
+        return std::nullopt;
+      return std::move(R);
+    };
+    auto Size = FindMember("size");
+    auto Data = FindMember("data");
+    if (!Size || !Data) {
+      Diag(Loc, diag::err_user_defined_msg_missing_member_function)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << ((!Size && !Data) ? 2 : !Size ? 0 : 1);
+      return ExprError();
+    }
+
+    auto BuildCall = [&](LookupResult &LR) -> ExprResult {
+      ExprResult Ref = BuildMemberReferenceExpr(
+          Arg, Arg->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+          SourceLocation(), nullptr, LR, nullptr, nullptr);
+      if (Ref.isInvalid())
+        return ExprError();
+      ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc, nullptr,
+                                       false, true);
+      if (Call.isInvalid())
+        return ExprError();
+      return TemporaryMaterializationConversion(Call.get());
+    };
+
+    ExprResult SizeCall = BuildCall(*Size);
+    ExprResult DataCall = BuildCall(*Data);
+    if (SizeCall.isInvalid() || DataCall.isInvalid())
+      return ExprError();
+
+    ExprResult SizeConv = BuildConvertedConstantExpression(
+        SizeCall.get(), SizeT, CCEKind::StaticAssertMessageSize);
+    ExprResult DataConv = BuildConvertedConstantExpression(
+        DataCall.get(), ConstCharPtr, CCEKind::StaticAssertMessageData);
+    if (SizeConv.isInvalid() || DataConv.isInvalid()) {
+      Diag(Loc, diag::err_user_defined_msg_invalid_mem_fn_ret_ty)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << (SizeConv.isInvalid() ? /*size*/ 0 : /*data*/ 1);
+      return ExprError();
+    }
+
+    SizeCalls[I] = SizeConv.get();
+    DataCalls[I] = DataConv.get();
+  }
+
+  return CXXBuiltinStrLiteralExpr::Create(Context, Context.TokenSequenceTy,
+                                          ArrayRef<Expr *>(Args), SizeCalls,
+                                          DataCalls, KwLoc, LParenLoc,
+                                          RParenLoc);
+}
+
+ExprResult Sema::ActOnCXXBuiltinTokenize(SourceLocation KwLoc,
+                                         SourceLocation LParenLoc,
+                                         ArrayRef<Expr *> Args,
+                                         SourceLocation RParenLoc) {
+  if (Args.empty()) {
+    Diag(KwLoc, diag::err_typecheck_call_too_few_args_at_least)
+        << 0 << 1 << 0;
+    return ExprError();
+  }
+
+  // For each argument, classify and (for user-defined string-like types)
+  // build the size() and data() member calls so the constant evaluator
+  // doesn't need Sema-level lookup. Uses the same data()/size() member
+  // duck-typing rule as user-defined static_assert messages.
+  SmallVector<Expr *, 4> SizeCalls(Args.size(), nullptr);
+  SmallVector<Expr *, 4> DataCalls(Args.size(), nullptr);
+
+  QualType SizeT = Context.getSizeType();
+  QualType ConstCharPtr = Context.getPointerType(
+      Context.getConstType(Context.CharTy));
+
+  for (unsigned I = 0; I < Args.size(); ++I) {
+    Expr *Arg = Args[I];
+
+    // Defer to instantiation for dependent args.
+    if (Arg->isTypeDependent() || Arg->isValueDependent())
+      continue;
+
+    QualType T = Arg->getType().getNonReferenceType();
+
+    // Integer and string-literal / pointer / array args evaluate directly.
+    if (T->isIntegralOrEnumerationType() || T->isPointerType() ||
+        T->isArrayType())
+      continue;
+
+    // Class type: must have data() returning const char* and size() returning
+    // size_t (matching static_assert user-defined message rules).
+    auto *RD = T->getAsCXXRecordDecl();
+    if (!RD) {
+      Diag(Arg->getExprLoc(), diag::err_user_defined_msg_invalid)
+          << /*StringEvaluationContext::StaticAssert=*/0;
+      return ExprError();
+    }
+
+    SourceLocation Loc = Arg->getBeginLoc();
+    auto FindMember = [&](StringRef Name) -> std::optional<LookupResult> {
+      DeclarationName DN = PP.getIdentifierInfo(Name);
+      LookupResult R(*this, DN, Loc, Sema::LookupMemberName);
+      LookupQualifiedName(R, RD);
+      if (R.empty())
+        return std::nullopt;
+      return std::move(R);
+    };
+    auto Size = FindMember("size");
+    auto Data = FindMember("data");
+    if (!Size || !Data) {
+      Diag(Loc, diag::err_user_defined_msg_missing_member_function)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << ((!Size && !Data) ? 2 : !Size ? 0 : 1);
+      return ExprError();
+    }
+
+    auto BuildCall = [&](LookupResult &LR) -> ExprResult {
+      ExprResult Ref = BuildMemberReferenceExpr(
+          Arg, Arg->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+          SourceLocation(), nullptr, LR, nullptr, nullptr);
+      if (Ref.isInvalid())
+        return ExprError();
+      ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc, nullptr,
+                                       false, true);
+      if (Call.isInvalid())
+        return ExprError();
+      return TemporaryMaterializationConversion(Call.get());
+    };
+
+    ExprResult SizeCall = BuildCall(*Size);
+    ExprResult DataCall = BuildCall(*Data);
+    if (SizeCall.isInvalid() || DataCall.isInvalid())
+      return ExprError();
+
+    ExprResult SizeConv = BuildConvertedConstantExpression(
+        SizeCall.get(), SizeT, CCEKind::StaticAssertMessageSize);
+    ExprResult DataConv = BuildConvertedConstantExpression(
+        DataCall.get(), ConstCharPtr, CCEKind::StaticAssertMessageData);
+    if (SizeConv.isInvalid() || DataConv.isInvalid()) {
+      Diag(Loc, diag::err_user_defined_msg_invalid_mem_fn_ret_ty)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << (SizeConv.isInvalid() ? /*size*/ 0 : /*data*/ 1);
+      return ExprError();
+    }
+
+    SizeCalls[I] = SizeConv.get();
+    DataCalls[I] = DataConv.get();
+  }
+
+  return CXXBuiltinTokenizeExpr::Create(Context, Context.TokenSequenceTy,
+                                        ArrayRef<Expr *>(Args), SizeCalls,
+                                        DataCalls, KwLoc, LParenLoc,
+                                        RParenLoc);
+}
+
+ExprResult Sema::ActOnCXXBuiltinStringize(SourceLocation KwLoc,
+                                          SourceLocation LParenLoc,
+                                          ArrayRef<Expr *> Args,
+                                          SourceLocation RParenLoc) {
+  if (Args.size() != 1) {
+    Diag(KwLoc, diag::err_typecheck_call_too_few_args_at_least)
+        << 0 << 1 << static_cast<unsigned>(Args.size());
+    return ExprError();
+  }
+
+  Expr *Operand = Args[0];
+
+  // Handle dependent arguments.
+  if (Operand->isTypeDependent() || Operand->isValueDependent()) {
+    QualType ResultTy = Context.getPointerType(Context.getConstType(Context.CharTy));
+    return CXXBuiltinStringizeExpr::Create(Context, ResultTy, Operand, KwLoc,
+                                           LParenLoc, RParenLoc);
+  }
+
+  // The operand must be convertible to token_sequence.
+  Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
+
+  // Result type is char const*.
+  QualType ResultTy = Context.getPointerType(Context.getConstType(Context.CharTy));
+  return CXXBuiltinStringizeExpr::Create(Context, ResultTy, Operand, KwLoc,
+                                         LParenLoc, RParenLoc);
+}
+
 /// Returns an expression representing the result of a metafunction operating
 /// on a reflection.
 ExprResult Sema::ActOnCXXMetafunction(SourceLocation KwLoc,
@@ -1739,13 +2236,27 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
                                      Splice, Result, AllowMemberReference);
       break;
     }
+    case ReflectionKind::BaseSpecifier:
+      if (AllowMemberReference) {
+        // Base specifier splices are only valid as member references.
+        // Create a CXXSpliceExpr that holds the evaluated reflection value
+        // so BuildMemberReferenceExpr can handle it.
+        Expr *OVE = new (Context) OpaqueValueExpr(Splice->getBeginLoc(),
+                                                  Context.MetaInfoTy,
+                                                  VK_PRValue);
+        Expr *CE = ConstantExpr::Create(Context, OVE, Refl);
+        Result = CXXSpliceExpr::Create(Context, VK_LValue, TemplateKWLoc,
+                                       Splice, CE, AllowMemberReference);
+        break;
+      }
+      [[fallthrough]];
     case ReflectionKind::Null:
     case ReflectionKind::Type:
     case ReflectionKind::Namespace:
-    case ReflectionKind::BaseSpecifier:
     case ReflectionKind::Parameter:
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::Annotation:
+    case ReflectionKind::Identifier:
       Diag(Splice->getBeginLoc(),
            diag::err_unexpected_reflection_kind_in_splice)
           << 1 << Splice->getSourceRange();
@@ -1809,9 +2320,101 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
       Diag(ConstevalLoc, diag::err_consteval_block_not_constexpr);
       for (PartialDiagnosticAt PD : Diags)
         Diag(PD.first, PD.second);
+    } else {
+      // Collect any pending token injections from queue_injection calls.
+      PendingInjections.append(ER.PendingInjections.begin(),
+                               ER.PendingInjections.end());
     }
   }
   return Result;
+}
+
+void Sema::ProcessPendingTokenInjections() {
+  if (PendingInjections.empty() || !CanProcessTokenInjections())
+    return;
+  // Move the injections out so the callback doesn't re-process them.
+  SmallVector<Expr::EvalStatus::TokenInjection, 4>
+      Injections = std::move(PendingInjections);
+  PendingInjections.clear();
+  ProcessTokenInjectionsFromParserBridge(Injections);
+}
+
+void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
+  auto *RD = dyn_cast_or_null<CXXRecordDecl>(TagDecl);
+  if (!RD || !RD->isCompleteDefinition())
+    return;
+
+  // Skip dependent types (e.g., template patterns). on_complete callbacks
+  // will fire when the template is instantiated instead.
+  if (RD->isDependentType())
+    return;
+
+  for (auto *Attr : RD->attrs()) {
+    auto *A = dyn_cast<CXX26AnnotationAttr>(Attr);
+    if (!A)
+      continue;
+
+    QualType AnnotTy = A->getArg()->getType();
+    auto *AnnotRD = AnnotTy->getAsCXXRecordDecl();
+    if (!AnnotRD)
+      continue;
+
+    // Look up "on_complete" in the annotation's type.
+    IdentifierInfo *II = &Context.Idents.get("on_complete");
+    SourceLocation Loc = RD->getEndLoc();
+    DeclarationNameInfo DNI(II, Loc);
+    LookupResult R(*this, DNI, LookupMemberName);
+    if (!LookupQualifiedName(R, AnnotRD))
+      continue;
+
+    // Build: annotation_value.on_complete(^^RD)
+    // Use ImmediateFunctionContext so that consteval calls and
+    // queue_injection inside on_complete are treated as plainly
+    // constant-evaluated.
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+
+    // 1. Object expression from the annotation's ConstantExpr.
+    Expr *ObjExpr = const_cast<Expr *>(A->getArg());
+
+    // 2. ^^RD
+    QualType ClassTy = Context.getCanonicalTagType(RD);
+    ExprResult ReflExpr = BuildCXXReflectExpr(Loc, Loc, ClassTy);
+    if (ReflExpr.isInvalid())
+      continue;
+
+    // 3. Build member reference: ObjExpr.on_complete
+    CXXScopeSpec SS;
+    ExprResult MemberRef = BuildMemberReferenceExpr(
+        ObjExpr, AnnotTy, Loc, /*IsArrow=*/false,
+        SS, SourceLocation(), nullptr, R, nullptr, nullptr);
+    if (MemberRef.isInvalid())
+      continue;
+
+    // 4. Build call: ObjExpr.on_complete(ReflExpr)
+    Expr *Args[] = {ReflExpr.get()};
+    ExprResult Call = BuildCallExpr(nullptr, MemberRef.get(),
+                                    Loc, Args, Loc);
+    if (Call.isInvalid())
+      continue;
+
+    // 5. Evaluate as constant expression (like consteval block).
+    SmallVector<PartialDiagnosticAt, 4> Diags;
+    Expr::EvalResult ER;
+    ER.Diag = &Diags;
+
+    ConstantExprKind Kind = ConstantExprKind::PlainlyConstantEvaluated;
+    if (!Call.get()->EvaluateAsConstantExpr(ER, Context, Kind, RD)) {
+      Diag(Loc, diag::err_consteval_block_not_constexpr);
+      for (auto &PD : Diags)
+        Diag(PD.first, PD.second);
+      continue;
+    }
+
+    // 6. Collect pending token injections.
+    PendingInjections.append(ER.PendingInjections.begin(),
+                             ER.PendingInjections.end());
+  }
 }
 
 DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
@@ -1884,6 +2487,7 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
+  case ReflectionKind::Identifier:
     Diag(Splice->getBeginLoc(), diag::err_expected_class_or_namespace)
         << "spliced entity" << getLangOpts().CPlusPlus;
     return nullptr;

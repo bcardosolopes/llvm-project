@@ -5921,7 +5921,7 @@ static void TryDefaultInitialization(Sema &S,
     return;
   }
 
-  if (DestType->isReflectionType()) {
+  if (DestType->isReflectionType() || DestType->isTokenSequenceType()) {
     Sequence.AddZeroInitializationStep(Entity.getType());
     return;
   }

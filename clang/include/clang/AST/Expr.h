@@ -59,6 +59,7 @@ namespace clang {
   class ParmVarDecl;
   class StringLiteral;
   class TargetInfo;
+  struct TokenSequenceData;
   class ValueDecl;
   class WarnUnusedResultAttr;
 
@@ -645,6 +646,17 @@ public:
     /// (which may include expensive operations like converting APValue objects
     /// to a string representation).
     SmallVectorImpl<PartialDiagnosticAt> *Diag = nullptr;
+
+    /// A token injection request from std::meta::queue_injection.
+    struct TokenInjection {
+      SourceLocation Loc;
+      DeclContext *TargetDC = nullptr; // null = inject at current context
+      TokenSequenceData TSD;
+    };
+
+    /// Token sequences pending injection from std::meta::queue_injection calls
+    /// during consteval block evaluation.
+    SmallVector<TokenInjection> PendingInjections;
 
     EvalStatus() = default;
 

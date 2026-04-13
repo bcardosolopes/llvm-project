@@ -13,14 +13,110 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/LocInfoType.h"
+#include "clang/AST/Reflection.h"
 #include "clang/Basic/DiagnosticParse.h"
+#include "clang/Lex/Token.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
+#include "clang/Sema/Lookup.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 using namespace clang;
 
 ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
   SourceLocation OperandLoc = Tok.getLocation();
+
+  // Handle token sequence: ^^{ balanced tokens }
+  if (Tok.is(tok::l_brace)) {
+    SourceLocation LBraceLoc = ConsumeBrace();
+
+    SmallVector<Token, 16> Tokens;
+    unsigned BraceDepth = 1;
+    while (BraceDepth > 0 && Tok.isNot(tok::eof)) {
+      if (Tok.is(tok::l_brace))
+        ++BraceDepth;
+      else if (Tok.is(tok::r_brace)) {
+        --BraceDepth;
+        if (BraceDepth == 0)
+          break;
+      }
+
+      // Check for interpolation: \(expr)
+      if (Tok.is(tok::unknown) && Tok.getLength() == 1 &&
+          *PP.getSourceManager().getCharacterData(Tok.getLocation()) == '\\' &&
+          NextToken().is(tok::l_paren)) {
+        SourceLocation BackslashLoc = Tok.getLocation();
+        // Preserve leading space from the backslash token so that stringize
+        // can correctly reproduce whitespace (e.g., "int \(id("x"))" should
+        // become "int x", not "intx").
+        bool HadLeadingSpace = Tok.hasLeadingSpace();
+        ConsumeToken();  // consume '\'
+        ConsumeParen();  // consume '('
+
+        ExprResult Expr = ParseAssignmentExpression();
+        if (Expr.isInvalid()) {
+          SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch);
+          if (Tok.is(tok::r_paren))
+            ConsumeParen();
+          continue;
+        }
+
+        SourceLocation RParenLoc = Tok.getLocation();
+        if (ExpectAndConsume(tok::r_paren)) {
+          continue;
+        }
+
+        ExprResult CE = Actions.ActOnTokenSequenceInterpolation(Expr.get());
+        if (CE.isInvalid())
+          continue;
+
+        Token AnnTok;
+        AnnTok.startToken();
+        AnnTok.setKind(tok::annot_token_seq_expr);
+        AnnTok.setLocation(BackslashLoc);
+        AnnTok.setAnnotationEndLoc(RParenLoc);
+        if (HadLeadingSpace)
+          AnnTok.setFlag(Token::LeadingSpace);
+        setExprAnnotation(AnnTok, CE);
+        Tokens.push_back(AnnTok);
+        continue;
+      }
+
+      Tokens.push_back(Tok);
+      ConsumeAnyToken();
+    }
+
+    if (Tok.isNot(tok::r_brace)) {
+      Diag(LBraceLoc, diag::err_expected) << tok::r_brace;
+      return ExprError();
+    }
+    SourceLocation RBraceLoc = Tok.getLocation();
+    ConsumeBrace();
+
+    // Mark any identifiers in the token sequence that refer to local variables
+    // or parameters as referenced, to suppress -Wunused-parameter and
+    // -Wunused-variable warnings. The token sequence will use them when
+    // injected. Lookup happens in the capture scope — for the common case
+    // where capture and injection share a scope this is correct; for
+    // cross-scope cases this is a heuristic and may match unrelated names of
+    // the same spelling. Use \(expr) to interpolate when precision matters.
+    for (const Token &T : Tokens) {
+      if (T.is(tok::identifier)) {
+        if (IdentifierInfo *II = T.getIdentifierInfo()) {
+          LookupResult R(Actions, II, T.getLocation(),
+                         Sema::LookupOrdinaryName);
+          if (Actions.LookupName(R, getCurScope(),
+                                 /*AllowBuiltinCreation=*/false)) {
+            if (auto *VD = R.getAsSingle<VarDecl>())
+              VD->setReferenced();
+          }
+        }
+      }
+    }
+
+    SourceRange OperandRange(LBraceLoc, RBraceLoc);
+    return Actions.ActOnCXXTokenSequenceReflection(OpLoc, OperandRange,
+                                                   Tokens);
+  }
 
   Sema::ConstevalOnlyRecorder RecordConstevalOnly(Actions);
   EnterExpressionEvaluationContext EvalContext(

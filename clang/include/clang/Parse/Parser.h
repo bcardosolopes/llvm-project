@@ -45,6 +45,7 @@ class ParsingDeclarator;
 class ParsingFieldDeclarator;
 class ColonProtectionRAIIObject;
 class InMessageExpressionRAIIObject;
+struct TokenSequenceData;
 class PoisonSEHIdentifiersRAIIObject;
 class OMPClause;
 class OpenACCClause;
@@ -4783,14 +4784,12 @@ private:
   ParseLambdaIntroducer(LambdaIntroducer &Intro,
                         LambdaIntroducerTentativeParse *Tentative = nullptr);
 
-  // Explicit 'ConstevalLoc' is allowed to facilitate C++2C consteval-blocks.
-  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro,
-                                                  SourceLocation ConstevalLoc,
-                                                  TypeResult ReturnTy = {});
-  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro) {
-    SourceLocation ConstevalLoc;
-    return ParseLambdaExpressionAfterIntroducer(Intro, ConstevalLoc);
-  }
+  /// Parse a lambda expression after the introducer.
+  /// \param ConstevalBlockLoc If set, this lambda is the implementation of a
+  ///        consteval block at the given location.
+  ExprResult ParseLambdaExpressionAfterIntroducer(
+      LambdaIntroducer &Intro,
+      std::optional<SourceLocation> ConstevalBlockLoc = {});
 
   //===--------------------------------------------------------------------===//
   // C++ 5.2p1: C++ Casts
@@ -8137,6 +8136,15 @@ private:
   void ParseLateTemplatedFuncDef(LateParsedTemplate &LPT);
 
   static void LateTemplateParserCallback(void *P, LateParsedTemplate &LPT);
+  static void TokenInjectionCallback(void *P,
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections);
+  void ProcessTokenInjections(
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections);
+
+  /// Drain any pending token injections accumulated on Sema, processing
+  /// each batch and any further injections produced by parsing them, until
+  /// no injections remain.
+  void DrainPendingTokenInjections();
 
   /// We've parsed something that could plausibly be intended to be a template
   /// name (\p LHS) followed by a '<' token, and the following code can't

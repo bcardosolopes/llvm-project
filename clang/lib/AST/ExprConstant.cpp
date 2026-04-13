@@ -55,8 +55,12 @@
 #include "clang/AST/Type.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/Builtins.h"
+#include "clang/Basic/DiagnosticMetafn.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/TargetBuiltins.h"
+#include "clang/Lex/Lexer.h"
+#include "clang/Lex/Token.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/APFixedPoint.h"
 #include "llvm/ADT/Sequence.h"
@@ -5159,6 +5163,8 @@ struct CompoundAssignSubobjectHandler {
       return foundPointer(Subobj, SubobjType);
     case APValue::Vector:
       return foundVector(Subobj, SubobjType);
+    case APValue::TokenSequence:
+      return foundTokenSequence(Subobj, SubobjType);
     case APValue::Indeterminate:
       Info.FFDiag(E, diag::note_constexpr_access_uninit)
           << /*read of=*/0 << /*uninitialized object=*/1
@@ -5245,6 +5251,26 @@ struct CompoundAssignSubobjectHandler {
     if (!HandleLValueArrayAdjustment(Info, E, LVal, PointeeType, Offset))
       return false;
     LVal.moveInto(Subobj);
+    return true;
+  }
+
+  bool foundTokenSequence(APValue &Subobj, QualType SubobjType) {
+    if (!checkConst(SubobjType))
+      return false;
+
+    if (!SubobjType->isTokenSequenceType() || Opcode != BO_Add) {
+      Info.FFDiag(E);
+      return false;
+    }
+
+    if (!RHS.isTokenSequence() || !Subobj.isTokenSequence()) {
+      Info.FFDiag(E);
+      return false;
+    }
+
+    TokenSequenceData NewTSD =
+        CreateTokenSequenceData(Info.Ctx, Subobj.getTokenSequence(), RHS.getTokenSequence());
+    Subobj = APValue(NewTSD);
     return true;
   }
 };
@@ -10100,6 +10126,20 @@ bool LValueExprEvaluator::VisitCompoundAssignOperator(
     Success = false;
   }
 
+  // For reflection/token_sequence types, perform lvalue-to-rvalue conversion
+  // on the RHS since handleCompoundAssignment expects the actual value.
+  QualType RHSTy = CAO->getRHS()->getType();
+  if (Success && CAO->getRHS()->isGLValue() &&
+      (RHSTy->isReflectionType() || RHSTy->isTokenSequenceType())) {
+    LValue LV;
+    LV.setFrom(Info.Ctx, RHS);
+    if (!handleLValueToRValueConversion(Info, CAO->getRHS(), RHSTy, LV, RHS)) {
+      if (!Info.noteFailure())
+        return false;
+      Success = false;
+    }
+  }
+
   // The overall lvalue result is the result of evaluating the LHS.
   if (!this->Visit(CAO->getLHS()) || !Success)
     return false;
@@ -10341,6 +10381,55 @@ public:
     StringLiteral *SL =
         StringLiteral::Create(Info.Ctx, ResultStr, StringLiteralKind::Ordinary,
                               /*Pascal*/ false, ArrayTy, E->getLocation());
+
+    evaluateLValue(SL, Result);
+    Result.addArray(Info, E, cast<ConstantArrayType>(ArrayTy));
+    return true;
+  }
+
+  bool VisitCXXBuiltinStringizeExpr(const CXXBuiltinStringizeExpr *E) {
+    // Evaluate the token_sequence operand.
+    APValue Operand;
+    if (!EvaluateAsRValue(Info, E->getOperand(), Operand))
+      return false;
+
+    if (!Operand.isTokenSequence()) {
+      Info.FFDiag(E->getOperand()->getExprLoc());
+      return false;
+    }
+
+    TokenSequenceData TSD = Operand.getTokenSequence();
+
+    // Convert tokens to string, preserving whitespace using Token::hasLeadingSpace().
+    std::string ResultStr;
+    bool IsFirst = true;
+    for (const Token &Tok : TSD) {
+      // Add space if this token had leading space (preserves original spacing).
+      if (!IsFirst && Tok.hasLeadingSpace())
+        ResultStr += ' ';
+      IsFirst = false;
+
+      // Get the token's text representation.
+      if (Tok.isLiteral() && Tok.getLiteralData()) {
+        ResultStr.append(Tok.getLiteralData(), Tok.getLength());
+      } else if (const IdentifierInfo *II = Tok.getIdentifierInfo()) {
+        ResultStr += II->getName();
+      } else {
+        // For punctuation and other tokens, get the spelling.
+        ResultStr += tok::getPunctuatorSpelling(Tok.getKind());
+      }
+    }
+
+    // Create a string literal with the result.
+    QualType CharTy = Info.Ctx.CharTy.withConst();
+    APInt Size(Info.Ctx.getTypeSize(Info.Ctx.getSizeType()),
+               ResultStr.size() + 1);
+    QualType ArrayTy = Info.Ctx.getConstantArrayType(
+        CharTy, Size, nullptr, ArraySizeModifier::Normal, 0);
+
+    StringLiteral *SL =
+        StringLiteral::Create(Info.Ctx, ResultStr, StringLiteralKind::Ordinary,
+                              /*Pascal*/ false, ArrayTy, E->getBeginLoc());
 
     evaluateLValue(SL, Result);
     Result.addArray(Info, E, cast<ConstantArrayType>(ArrayTy));
@@ -19245,7 +19334,8 @@ EvaluateComparisonBinaryOperator(EvalInfo &Info, const BinaryOperator *E,
     return Success(CmpResult::Equal, E);
   }
 
-  if (LHSTy->isReflectionType() && RHSTy->isReflectionType()) {
+  if ((LHSTy->isReflectionType() && RHSTy->isReflectionType()) ||
+      (LHSTy->isTokenSequenceType() && RHSTy->isTokenSequenceType())) {
     APValue LHSValue, RHSValue;
     llvm::FoldingSetNodeID LID, RID;
     if (!Evaluate(LHSValue, Info, E->getLHS()))
@@ -21317,8 +21407,328 @@ public:
   }
 
   bool VisitCXXDeleteExpr(const CXXDeleteExpr *E);
+  bool VisitCXXBuiltinInjectExpr(const CXXBuiltinInjectExpr *E);
+  bool VisitCXXBuiltinReportTokensExpr(const CXXBuiltinReportTokensExpr *E);
 };
 } // end anonymous namespace
+
+/// Evaluate \p SubExpr to an APValue rvalue. Sema is responsible for
+/// inserting any user-defined conversion to std::meta::info or
+/// std::meta::token_sequence at AST construction time, so this helper
+/// simply evaluates and applies lvalue-to-rvalue conversion if needed.
+static bool EvaluateOperandAsRValue(EvalInfo &Info, const Expr *SubExpr,
+                                    APValue &Result) {
+  if (!::Evaluate(Result, Info, SubExpr))
+    return false;
+  if (SubExpr->isGLValue()) {
+    LValue LV;
+    LV.setFrom(Info.Ctx, Result);
+    if (!handleLValueToRValueConversion(Info, SubExpr, SubExpr->getType(),
+                                        LV, Result))
+      return false;
+  }
+  return true;
+}
+
+/// Extract a string from an argument expression, appending to Result.
+/// Handles four cases:
+/// 1. User-defined string types with size()/data() (when SizeCall is provided)
+/// 2. String literals and pointers/arrays to char
+/// 3. Char types (appended as single character)
+/// 4. Other integers (converted to decimal string)
+/// Returns false on error.
+static bool ExtractStringFromArg(EvalInfo &Info, Expr *Arg,
+                                 Expr *SizeCall, Expr *DataCall,
+                                 SmallVectorImpl<char> &Result) {
+  // User-defined string-like argument: Sema pre-built the size() and data()
+  // calls. Evaluate them inline against the current Info so that any
+  // function parameters in the surrounding call frame are visible.
+  if (SizeCall) {
+    assert(DataCall && "size without data");
+    APSInt SizeValue;
+    if (!::EvaluateInteger(SizeCall, SizeValue, Info))
+      return false;
+    uint64_t Size = SizeValue.getZExtValue();
+    LValue Pointer;
+    if (!::EvaluatePointer(DataCall, Pointer, Info))
+      return false;
+    QualType CharTy = DataCall->getType()->getPointeeType();
+    for (uint64_t J = 0; J < Size; ++J) {
+      APValue Char;
+      if (!handleLValueToRValueConversion(Info, DataCall, CharTy, Pointer,
+                                           Char))
+        return false;
+      Result.push_back(static_cast<char>(Char.getInt().getExtValue()));
+      if (!HandleLValueArrayAdjustment(Info, DataCall, Pointer, CharTy, 1))
+        return false;
+    }
+    return true;
+  }
+
+  if (Arg->getType()->isCharType()) {
+    // Char argument: append as single character.
+    APValue Val;
+    if (!EvaluateAsRValue(Info, Arg, Val))
+      return false;
+    Result.push_back(static_cast<char>(Val.getInt().getExtValue()));
+    return true;
+  }
+
+  if (Arg->getType()->isIntegralOrEnumerationType()) {
+    // Integer argument: convert to decimal string.
+    APValue Val;
+    if (!EvaluateAsRValue(Info, Arg, Val))
+      return false;
+    Val.getInt().toString(Result, 10);
+    return true;
+  }
+
+  if (Arg->getType()->isPointerType() || Arg->getType()->isArrayType()) {
+    // String argument: try to extract a string literal.
+    // Strip implicit casts to find the underlying StringLiteral.
+    const Expr *Stripped = Arg->IgnoreParenImpCasts();
+    if (const auto *SL = dyn_cast<StringLiteral>(Stripped)) {
+      StringRef Str = SL->getString();
+      // Exclude the null terminator if present.
+      if (!Str.empty() && Str.back() == '\0')
+        Str = Str.drop_back();
+      Result.append(Str.begin(), Str.end());
+      return true;
+    }
+
+    // Non-literal: evaluate and follow the LValue base back to a
+    // StringLiteral. For array-typed glvalues (e.g. a forwarding
+    // reference parameter `Ts const&` bound to a string literal), we
+    // must use EvaluateLValue rather than EvaluateAsRValue — the
+    // latter would lvalue-to-rvalue-load the array contents into an
+    // Array APValue and lose the base we want to follow.
+    APValue Val;
+    if (Arg->getType()->isArrayType()) {
+      LValue LV;
+      if (!EvaluateLValue(Arg, LV, Info))
+        return false;
+      LV.moveInto(Val);
+    } else if (!EvaluateAsRValue(Info, Arg, Val)) {
+      return false;
+    }
+
+    if (!Val.isLValue()) {
+      Info.FFDiag(Arg->getExprLoc());
+      return false;
+    }
+
+    APValue::LValueBase Base = Val.getLValueBase();
+    if (!Base) {
+      Info.FFDiag(Arg->getExprLoc());
+      return false;
+    }
+
+    if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
+            Base.dyn_cast<const Expr *>())) {
+      StringRef Str = SLit->getString();
+      int64_t Off = Val.getLValueOffset().getQuantity();
+      if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
+        Str = Str.substr(Off);
+        StringRef::size_type Pos = Str.find(0);
+        if (Pos != StringRef::npos)
+          Str = Str.substr(0, Pos);
+        Result.append(Str.begin(), Str.end());
+      }
+      return true;
+    }
+
+    Info.FFDiag(Arg->getExprLoc());
+    return false;
+  }
+
+  // Class-typed args reach here only if Sema didn't pre-build the
+  // size()/data() calls — which means the type was rejected.
+  Info.FFDiag(Arg->getExprLoc());
+  return false;
+}
+
+static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
+                                       ASTContext &Ctx) {
+  llvm::raw_fd_ostream &OS = llvm::errs();
+  PrintingPolicy PP(Ctx.getLangOpts());
+  OS << "^^{ ";
+
+  bool NeedSpace = false;
+  assert(TSD && "token sequence must have token data");
+
+  for (const Token &Tok : *TSD) {
+    // Spacing: don't add space before closing/separating punctuation,
+    // or after opening punctuation.
+    bool IsOpenPunct = Tok.isOneOf(tok::l_paren, tok::l_brace, tok::l_square);
+    bool IsClosePunct = Tok.isOneOf(tok::r_paren, tok::r_brace, tok::r_square,
+                                    tok::comma, tok::semi, tok::ellipsis);
+    if (NeedSpace && !IsClosePunct)
+      OS << ' ';
+
+    if (Tok.is(tok::annot_typename)) {
+      // Interpolated type.
+      QualType QT = QualType::getFromOpaquePtr(Tok.getAnnotationValue());
+      OS << "\\(";
+      QT.print(OS, PP);
+      OS << ")";
+    } else if (Tok.is(tok::annot_token_seq_expr)) {
+      // Interpolated expression.
+      Expr *E = static_cast<Expr *>(Tok.getAnnotationValue());
+      OS << "\\(";
+      if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+        DRE->getDecl()->printQualifiedName(OS);
+      } else if (auto *CE = dyn_cast<ConstantExpr>(E)) {
+        if (CE->hasAPValueResult()) {
+          const APValue &V = CE->getAPValueResult();
+          if (V.isReflection()) {
+            switch (V.getReflectionKind()) {
+            case ReflectionKind::Type:
+              V.getReflectedType().print(OS, PP);
+              break;
+            case ReflectionKind::Declaration:
+              if (auto *ND = dyn_cast<NamedDecl>(V.getReflectedDecl()))
+                ND->printQualifiedName(OS);
+              else
+                OS << "<decl>";
+              break;
+            case ReflectionKind::BaseSpecifier: {
+              // Print the base class type for base specifier reflections.
+              const CXXBaseSpecifier *Base = V.getReflectedBaseSpecifier();
+              Base->getType().print(OS, PP);
+              break;
+            }
+            default:
+              // For other reflection kinds, use the expression's type
+              // (which is std::meta::info) to avoid null type issues when
+              // the reflection is stored as an LValue.
+              V.printPretty(OS, PP, CE->getType(), &Ctx);
+              break;
+            }
+          } else {
+            V.printPretty(OS, PP, CE->getType(), &Ctx);
+          }
+        } else {
+          E->printPretty(OS, nullptr, PP);
+        }
+      } else {
+        E->printPretty(OS, nullptr, PP);
+      }
+      OS << ")";
+    } else if (Tok.isLiteral() && Tok.getLiteralData()) {
+      OS << StringRef(Tok.getLiteralData(), Tok.getLength());
+    } else if (const auto *II = Tok.getIdentifierInfo()) {
+      OS << II->getName();
+    } else if (const char *Punc = tok::getPunctuatorSpelling(Tok.getKind())) {
+      OS << Punc;
+    } else if (const char *Kw = tok::getKeywordSpelling(Tok.getKind())) {
+      OS << Kw;
+    } else {
+      OS << tok::getTokenName(Tok.getKind());
+    }
+
+    NeedSpace = !IsOpenPunct;
+  }
+
+  OS << " }";
+}
+
+bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
+    const CXXBuiltinReportTokensExpr *E) {
+  if (Info.checkingPotentialConstantExpression())
+    return false;
+
+  // Extract the message string.
+  SmallString<64> MsgStr;
+  if (!ExtractStringFromArg(Info, E->getMessage(), E->getMsgSizeCall(),
+                            E->getMsgDataCall(), MsgStr))
+    return false;
+
+  // Evaluate the operand. Sema has already inserted any user-defined
+  // conversion to std::meta::token_sequence on the operand expression.
+  APValue Operand;
+  if (!EvaluateOperandAsRValue(Info, E->getOperand(), Operand))
+    return false;
+
+  if (!Operand.isTokenSequence()) {
+    Info.FFDiag(E->getBeginLoc(),
+                diag::metafn_builtin_inject_not_token_sequence);
+    return false;
+  }
+
+  // Print the report.
+  SourceLocation Loc = E->getKwLoc();
+  PresumedLoc PLoc = Info.Ctx.getSourceManager().getPresumedLoc(Loc);
+
+  llvm::raw_fd_ostream &OS = llvm::errs();
+  OS << "std::meta::report_tokens";
+  if (PLoc.isValid())
+    OS << " at " << PLoc.getFilename() << ":" << PLoc.getLine();
+  OS << " \"" << MsgStr << "\":\n  ";
+
+  TokenSequenceData TSD = Operand.getTokenSequence();
+  PrintTokenSequenceToStderr(&TSD, Info.Ctx);
+  OS << "\n";
+
+  return true;
+}
+
+bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
+    const CXXBuiltinInjectExpr *E) {
+  if (Info.checkingPotentialConstantExpression())
+    return false;
+
+  // Check that injection is allowed (must be plainly constant evaluated).
+  bool AllowInjection =
+      (Info.EvalMode ==
+       EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
+  if (!AllowInjection) {
+    Info.FFDiag(E->getBeginLoc(),
+                diag::metafn_injected_decl_non_plainly_consteval);
+    return false;
+  }
+
+  // Evaluate the operand. Sema has already inserted any user-defined
+  // conversion to std::meta::token_sequence on the operand expression.
+  APValue Operand;
+  if (!EvaluateOperandAsRValue(Info, E->getOperand(), Operand))
+    return false;
+
+  if (!Operand.isTokenSequence()) {
+    Info.FFDiag(E->getBeginLoc(),
+                diag::metafn_builtin_inject_not_token_sequence);
+    return false;
+  }
+
+  // Evaluate the optional target namespace.
+  DeclContext *TargetDC = nullptr;
+  if (E->hasTargetNS()) {
+    APValue TargetNS;
+    if (!::Evaluate(TargetNS, Info, E->getTargetNS()))
+      return false;
+    if (E->getTargetNS()->isGLValue()) {
+      LValue LV;
+      LV.setFrom(Info.Ctx, TargetNS);
+      if (!handleLValueToRValueConversion(Info, E->getTargetNS(),
+                                           E->getTargetNS()->getType(), LV,
+                                           TargetNS))
+        return false;
+    }
+
+    if (!TargetNS.isReflection() ||
+        TargetNS.getReflectionKind() != ReflectionKind::Namespace) {
+      Info.FFDiag(E->getTargetNS()->getExprLoc(),
+                  diag::metafn_builtin_inject_target_not_namespace);
+      return false;
+    }
+    Decl *NSDecl = TargetNS.getReflectedNamespace();
+    TargetDC = dyn_cast<DeclContext>(NSDecl);
+  }
+
+  TokenSequenceData TSD = Operand.getTokenSequence();
+  Info.EvalStatus.PendingInjections.push_back(
+      {E->getBeginLoc(), TargetDC, TSD});
+  return true;
+}
 
 bool VoidExprEvaluator::VisitCXXDeleteExpr(const CXXDeleteExpr *E) {
   // We cannot speculatively evaluate a delete expression.
@@ -21426,7 +21836,12 @@ public:
   }
 
   bool ZeroInitialization(const Expr *E) {
-    Result = APValue(ReflectionKind::Null, nullptr);
+    if (E->getType()->isTokenSequenceType()) {
+      Result = APValue(CreateEmptyTokenSequenceData(Info.Ctx));
+    } else {
+      // Zero-init for info is the null reflection.
+      Result = APValue(ReflectionKind::Null, nullptr);
+    }
     return true;
   }
 
@@ -21435,13 +21850,167 @@ public:
   }
 
   bool VisitCXXReflectExpr(const CXXReflectExpr *E);
+  bool VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E);
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
+  bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
+  bool VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E);
+  bool VisitCXXBuiltinTokenizeExpr(const CXXBuiltinTokenizeExpr *E);
+  bool VisitBinaryOperator(const BinaryOperator *E);
 };
 
 bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
-  APValue Result(E->getReflection());
-  return Success(Result, E);
+  return Success(E->getReflection(), E);
+}
+
+bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
+    const CXXTokenSequenceExpr *E) {
+  APValue Refl(E->getValue());
+
+  // Resolve any interpolation expressions in the token sequence.
+  {
+    TokenSequenceData TSD = Refl.getTokenSequence();
+    bool HasInterpolations = false;
+    for (const Token &Tok : TSD) {
+      if (Tok.is(tok::annot_token_seq_expr)) {
+        HasInterpolations = true;
+        break;
+      }
+    }
+
+    if (HasInterpolations) {
+      // Build a new token array with interpolations resolved.
+      // Use a SmallVector since token sequence interpolation can change the
+      // number of tokens.
+      SmallVector<Token, 32> NewTokens;
+      NewTokens.reserve(TSD.size());
+      for (const Token &SrcTok : TSD) {
+        if (SrcTok.is(tok::annot_token_seq_expr)) {
+          // Extract the unevaluated expression from the annotation token.
+          // The annotation value is the Expr* stored by setExprAnnotation.
+          Expr *SubExpr = static_cast<Expr *>(
+              SrcTok.getAnnotationValue());
+
+          // Evaluate the expression in the current constexpr context.
+          APValue Val;
+          QualType ExprTy = SubExpr->getType();
+          if (ExprTy->isTokenSequenceType()) {
+            // Token sequence interpolation: splice tokens inline.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
+            assert(Val.isTokenSequence());
+            TokenSequenceData Inner = Val.getTokenSequence();
+            // The first token of the inner sequence should inherit the leading
+            // space from the annotation token to preserve whitespace for stringize.
+            if (!Inner.empty()) {
+              Token First = Inner.front();
+              if (SrcTok.hasLeadingSpace())
+                First.setFlag(Token::LeadingSpace);
+              NewTokens.push_back(First);
+
+              auto Rest = Inner.drop_front(1);
+              NewTokens.append(Rest.begin(), Rest.end());
+            }
+          } else if (ExprTy->isReflectionType()) {
+            // Reflection-typed expression: evaluate and check kind.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
+
+            if (Val.isReflectedType()) {
+              QualType QT = Val.getReflectedType();
+
+              // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
+              // so the injected type is the concrete type, not 'auto'.
+              if (const auto *AT = dyn_cast<AutoType>(QT))
+                if (AT->isDeduced())
+                  QT = AT->getDeducedType();
+
+              // Create an annot_typename token carrying the type.
+              Token Tok = SrcTok;
+              Tok.setKind(tok::annot_typename);
+              Tok.setAnnotationValue(QT.getAsOpaquePtr());
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedIdentifier()) {
+              IdentifierInfo *II = Val.getReflectedIdentifier();
+
+              // Create a tok::identifier token.
+              Token Tok = SrcTok;
+              Tok.setKind(tok::identifier);
+              Tok.setIdentifierInfo(II);
+              Tok.setLength(II->getLength());
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedDecl() &&
+                       isa<ValueDecl>(Val.getReflectedDecl()) &&
+                       !isa<FieldDecl>(Val.getReflectedDecl())) {
+              // Non-field declaration reflection: create a DeclRefExpr for
+              // the reflected declaration and emit as annot_primary_expr.
+              ValueDecl *VD = cast<ValueDecl>(Val.getReflectedDecl());
+              QualType DeclTy = VD->getType().getNonReferenceType();
+              ExprValueKind VK = VD->getType()->isReferenceType()
+                                     ? VK_LValue : VK_LValue;
+              DeclRefExpr *DRE = DeclRefExpr::Create(
+                  Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(),
+                  VD, /*RefersToEnclosingVariableOrCapture=*/false,
+                  SubExpr->getExprLoc(), DeclTy, VK);
+
+              Token Tok = SrcTok;
+              Tok.setAnnotationValue(static_cast<void *>(DRE));
+              NewTokens.push_back(Tok);
+            } else {
+              // For FieldDecl, base specifiers, and other reflection kinds:
+              // emit as annot_primary_expr with a ConstantExpr carrying the
+              // reflection value. The parser handles this in member access
+              // context by treating it as a splice.
+              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                  OK_Ordinary, SubExpr);
+              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+              Token Tok = SrcTok;
+              Tok.setAnnotationValue(static_cast<void *>(CE));
+              NewTokens.push_back(Tok);
+            }
+          } else if (ExprTy->isRecordType()) {
+            // Record type without a conversion to std::meta::info or
+            // std::meta::token_sequence (Sema would have inserted one
+            // otherwise). Interpolate the value literally.
+            if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
+              return false;
+            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                OK_Ordinary, SubExpr);
+            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+            Token Tok = SrcTok;
+            Tok.setAnnotationValue(static_cast<void *>(CE));
+            NewTokens.push_back(Tok);
+          } else {
+            // Non-reflection, non-record interpolation: evaluate as
+            // rvalue and wrap in a ConstantExpr.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
+            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                OK_Ordinary, SubExpr);
+            OVE->setIsUnique(true);
+            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+            Token Tok = SrcTok;
+            Tok.setAnnotationValue(static_cast<void *>(CE));
+            NewTokens.push_back(Tok);
+          }
+        } else {
+          NewTokens.push_back(SrcTok);
+        }
+      }
+
+      TokenSequenceData NewTSD =
+          CreateTokenSequenceData(Info.Ctx, NewTokens);
+      return Success(APValue(NewTSD), E);
+    }
+  }
+
+  return Success(Refl, E);
 }
 
 bool ReflectionEvaluator::VisitCXXMetafunctionExpr(
@@ -21452,10 +22021,140 @@ bool ReflectionEvaluator::VisitCXXMetafunctionExpr(
 bool ReflectionEvaluator::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
   return BaseType::VisitCXXSpliceExpr(E);
 }
+
+bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
+  // Evaluate each argument and concatenate into an identifier string.
+  SmallString<64> Name;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    if (!ExtractStringFromArg(Info, E->getArg(I), E->getSizeCall(I),
+                              E->getDataCall(I), Name))
+      return false;
+  }
+
+  IdentifierInfo &II = Info.Ctx.Idents.get(Name);
+  return Success(APValue(ReflectionKind::Identifier, &II), E);
+}
+
+bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
+    const CXXBuiltinStrLiteralExpr *E) {
+  // Evaluate each argument and concatenate into a string.
+  SmallString<64> Content;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    if (!ExtractStringFromArg(Info, E->getArg(I), E->getSizeCall(I),
+                              E->getDataCall(I), Content))
+      return false;
+  }
+
+  // Build the string literal token. The literal data includes quotes.
+  SmallString<68> LiteralData;
+  LiteralData.push_back('"');
+  LiteralData.append(Content);
+  LiteralData.push_back('"');
+
+  // Allocate the literal data in ASTContext.
+  char *StoredData = new (Info.Ctx) char[LiteralData.size()];
+  std::copy(LiteralData.begin(), LiteralData.end(), StoredData);
+
+  // Create the string literal token.
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::string_literal);
+  Tok.setLocation(E->getBeginLoc());
+  Tok.setLiteralData(StoredData);
+  Tok.setLength(LiteralData.size());
+
+  // Create a token sequence containing just this token.
+  Token Tokens[] = {Tok};
+  TokenSequenceData TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
+  return Success(APValue(TSD), E);
+}
+
+bool ReflectionEvaluator::VisitCXXBuiltinTokenizeExpr(
+    const CXXBuiltinTokenizeExpr *E) {
+  // Extract and concatenate string content from all arguments.
+  SmallString<64> Content;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    if (!ExtractStringFromArg(Info, E->getArg(I), E->getSizeCall(I),
+                              E->getDataCall(I), Content))
+      return false;
+  }
+
+  // Lex the string content into tokens.
+  // We use a raw lexer since we don't have a Preprocessor available here.
+  // The Lexer requires null-terminated input, so ensure the buffer is
+  // null-terminated.
+  Content.push_back('\0');
+  SmallVector<Token, 16> Tokens;
+  const char *BufStart = Content.data();
+  const char *BufEnd = Content.data() + Content.size() - 1;
+
+  Lexer RawLex(E->getBeginLoc(), Info.Ctx.getLangOpts(),
+               BufStart, BufStart, BufEnd);
+
+  Token Tok;
+  while (true) {
+    RawLex.LexFromRawLexer(Tok);
+    if (Tok.is(tok::eof))
+      break;
+
+    // Handle raw identifiers - we need to convert them to proper identifiers
+    // or keywords.
+    if (Tok.is(tok::raw_identifier)) {
+      // Look up the identifier to see if it's a keyword.
+      IdentifierInfo &II = Info.Ctx.Idents.get(
+          StringRef(Tok.getRawIdentifier()));
+      Tok.setKind(II.getTokenID());
+      Tok.setIdentifierInfo(&II);
+    }
+
+    // For literals, we need to store the literal data in ASTContext.
+    if (Tok.isLiteral() && Tok.getLiteralData()) {
+      unsigned Len = Tok.getLength();
+      char *StoredData = new (Info.Ctx) char[Len];
+      std::memcpy(StoredData, Tok.getLiteralData(), Len);
+      Tok.setLiteralData(StoredData);
+    }
+
+    // Set location to the expression location for all tokens.
+    Tok.setLocation(E->getBeginLoc());
+    Tokens.push_back(Tok);
+  }
+
+  TokenSequenceData TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
+  return Success(APValue(TSD), E);
+}
+
+bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
+  // Handle token_sequence + token_sequence concatenation.
+  if (E->getOpcode() != BO_Add)
+    return BaseType::VisitBinaryOperator(E);
+
+  QualType LHSTy = E->getLHS()->getType();
+  QualType RHSTy = E->getRHS()->getType();
+  if (!LHSTy->isTokenSequenceType() || !RHSTy->isTokenSequenceType())
+    return BaseType::VisitBinaryOperator(E);
+
+  APValue LHSVal, RHSVal;
+  if (!EvaluateAsRValue(Info, E->getLHS(), LHSVal))
+    return false;
+  if (!EvaluateAsRValue(Info, E->getRHS(), RHSVal))
+    return false;
+
+  if (!LHSVal.isTokenSequence() || !RHSVal.isTokenSequence()) {
+    Info.FFDiag(E->getExprLoc());
+    return false;
+  }
+
+  TokenSequenceData NewTSD =
+    CreateTokenSequenceData(Info.Ctx, LHSVal.getTokenSequence(), RHSVal.getTokenSequence());
+  return Success(APValue(NewTSD), E);
+}
 }  // end anonymous namespace
 
 static bool EvaluateReflection(const Expr *E, APValue &Result, EvalInfo &Info) {
-  assert(E->isPRValue() && E->getType()->isReflectionType());
+  assert(E->isPRValue() &&
+         (E->getType()->isReflectionType() ||
+          E->getType()->isTokenSequenceType()));
   return ReflectionEvaluator(Info, Result).Visit(E);
 }
 
@@ -21482,7 +22181,7 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
   } else if (T->isIntegralOrEnumerationType()) {
     if (!IntExprEvaluator(Info, Result).Visit(E))
       return false;
-  } else if (T->isReflectionType()) {
+  } else if (T->isReflectionType() || T->isTokenSequenceType()) {
     if (!EvaluateReflection(E, Result, Info))
       return false;
   } else if (T->hasPointerRepresentation()) {
@@ -22328,7 +23027,13 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::ExpressionTraitExprClass:
   case Expr::CXXNoexceptExprClass:
   case Expr::CXXReflectExprClass:
+  case Expr::CXXTokenSequenceExprClass:
   case Expr::CXXMetafunctionExprClass:
+  case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXBuiltinIdExprClass:
+  case Expr::CXXBuiltinStrLiteralExprClass:
+  case Expr::CXXBuiltinTokenizeExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

@@ -7155,6 +7155,61 @@ ExprResult Sema::ActOnConvertVectorExpr(Expr *E, ParsedType ParsedDestTy,
   return ConvertVectorExpr(E, TInfo, BuiltinLoc, RParenLoc);
 }
 
+// Type alias for intercepted std::meta function handlers.
+// All intercepted functions have the same signature.
+using InterceptedMetaFnPtr = ExprResult (Sema::*)(SourceLocation KwLoc,
+                                                   SourceLocation LParenLoc,
+                                                   ArrayRef<Expr *> Args,
+                                                   SourceLocation RParenLoc);
+
+// Check if DC is namespace 'std::meta' (or an inline namespace within it).
+static bool isStdMetaNamespace(const DeclContext *DC) {
+  // Walk through any inline namespaces (e.g., std::meta::reflection_v2).
+  while (DC && DC->isInlineNamespace())
+    DC = DC->getParent();
+
+  // Should be namespace 'meta'.
+  auto *Meta = dyn_cast_or_null<NamespaceDecl>(DC);
+  if (!Meta || !Meta->getIdentifier() || Meta->getName() != "meta")
+    return false;
+
+  // Parent should be namespace 'std'.
+  DC = Meta->getParent();
+  while (DC && DC->isInlineNamespace())
+    DC = DC->getParent();
+
+  auto *Std = dyn_cast_or_null<NamespaceDecl>(DC);
+  if (!Std || !Std->getIdentifier() || Std->getName() != "std")
+    return false;
+
+  // Parent should be the translation unit.
+  return Std->getParent()->isTranslationUnit();
+}
+
+// Returns a pointer to the Sema handler for intercepted std::meta functions,
+// or nullptr if the function is not intercepted.
+static InterceptedMetaFnPtr getInterceptedMetaFn(const FunctionDecl *FDecl) {
+  if (!FDecl || !FDecl->getDeclName().isIdentifier())
+    return nullptr;
+
+  // Quick check: must be in std::meta namespace.
+  if (!isStdMetaNamespace(FDecl->getDeclContext()))
+    return nullptr;
+
+  // Map from unqualified name to handler.
+  static const llvm::StringMap<InterceptedMetaFnPtr> Handlers = {
+      {"id", &Sema::ActOnCXXBuiltinId},
+      {"str_lit", &Sema::ActOnCXXBuiltinStrLiteral},
+      {"tokenize", &Sema::ActOnCXXBuiltinTokenize},
+      {"stringize", &Sema::ActOnCXXBuiltinStringize},
+      {"queue_injection", &Sema::ActOnCXXBuiltinInject},
+      {"report_tokens", &Sema::ActOnCXXBuiltinReportTokens},
+  };
+
+  auto It = Handlers.find(FDecl->getName());
+  return It != Handlers.end() ? It->second : nullptr;
+}
+
 ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
                                        SourceLocation LParenLoc,
                                        ArrayRef<Expr *> Args,
@@ -7189,6 +7244,15 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
     if (DeferParent->Contains(*CurScope) &&
         (!Block || !DeferParent->Contains(*Block)))
       Diag(Fn->getExprLoc(), diag::err_defer_invalid_sjlj) << FDecl;
+  }
+
+  // Intercept calls to certain std::meta functions that are declared as
+  // consteval functions but implemented as compiler builtins.
+  if (auto Handler = getInterceptedMetaFn(FDecl)) {
+    // Because we intercept this call, remove it from undefined tracking.
+    UndefinedButUsed.erase(FDecl->getCanonicalDecl());
+    SourceLocation KwLoc = Fn->getBeginLoc();
+    return (this->*Handler)(KwLoc, LParenLoc, Args, RParenLoc);
   }
 
   // Functions with 'interrupt' attribute cannot be called directly.
@@ -11692,6 +11756,14 @@ QualType Sema::CheckAdditionOperands(ExprResult &LHS, ExprResult &RHS,
                                      QualType* CompLHSTy) {
   checkArithmeticNull(*this, LHS, RHS, Loc, /*IsCompare=*/false);
 
+  // Token sequence concatenation: token_sequence + token_sequence.
+  if (LHS.get()->getType()->isTokenSequenceType() &&
+      RHS.get()->getType()->isTokenSequenceType()) {
+    if (CompLHSTy)
+      *CompLHSTy = Context.TokenSequenceTy;
+    return Context.TokenSequenceTy;
+  }
+
   if (LHS.get()->getType()->isVectorType() ||
       RHS.get()->getType()->isVectorType()) {
     QualType compType =
@@ -13452,6 +13524,14 @@ QualType Sema::CheckCompareOperands(ExprResult &LHS, ExprResult &RHS,
   // Reflection equality.
   if (LHSType->isReflectionType() && RHSType->isReflectionType()) {
     // Only == and != are defined for meta::info values.
+    if (!BinaryOperator::isEqualityOp(Opc))
+      return InvalidOperands(Loc, LHS, RHS);
+    return computeResultTy();
+  }
+
+  // Token sequence equality.
+  if (LHSType->isTokenSequenceType() && RHSType->isTokenSequenceType()) {
+    // Only == and != are defined for token_sequence values.
     if (!BinaryOperator::isEqualityOp(Opc))
       return InvalidOperands(Loc, LHS, RHS);
     return computeResultTy();

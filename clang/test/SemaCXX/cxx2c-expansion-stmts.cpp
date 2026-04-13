@@ -407,6 +407,33 @@ constexpr auto lambda_capture_in_expansion2(auto i) -> int {
 static_assert(lambda_capture_in_expansion1(1) == 17);
 static_assert(lambda_capture_in_expansion2(1) == 17);
 
+namespace deep_const_range {
+
+// Test a range where both non-const begin() and const begin() are viable.
+// This catches the bug where the range variable was typed without const,
+// causing overload resolution to select the deleted non-const begin().
+template <int... Vs>
+struct deep_const_rng {
+  int vs[sizeof...(Vs)] = {Vs...};
+
+  constexpr int *begin() { return &vs[0]; }
+  constexpr int *end() { return &vs[sizeof...(Vs)]; }
+
+  constexpr const int *begin() const { return &vs[0]; }
+  constexpr const int *end() const { return &vs[sizeof...(Vs)]; }
+};
+
+template <int... Vs>
+consteval int sum_const_required_range() {
+  int result = 0;
+  template for (constexpr auto e : deep_const_rng<Vs...>{})
+    result += e;
+  return result;
+}
+static_assert(sum_const_required_range<1, 2, 3, 4, 5>() == 15);
+
+}  // namespace deep_const_range
+
 using info = decltype(^^::);
 
 consteval auto process(info) -> int {

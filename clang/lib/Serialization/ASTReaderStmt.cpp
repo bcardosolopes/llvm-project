@@ -521,6 +521,19 @@ void ASTStmtReader::VisitCXXReflectExpr(CXXReflectExpr *E) {
   }
 }
 
+void ASTStmtReader::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+  VisitExpr(E);
+  unsigned NumInterpolationExprs = Record.readUInt32();
+  assert(NumInterpolationExprs == E->getNumInterpolationExprs() &&
+         "wrong number of token sequence interpolation expressions");
+  E->setOperatorLoc(Record.readSourceLocation());
+  APValue V = Record.readAPValue();
+  E->setTokenSequence(V.getTokenSequence());
+  for (unsigned I = 0; I != NumInterpolationExprs; ++I)
+    E->setInterpolationExpr(I, Record.readSubExpr());
+  E->setOperandRange(Record.readSourceRange());
+}
+
 void ASTStmtReader::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
   VisitExpr(E);
   E->setKwLoc(Record.readSourceLocation());
@@ -535,6 +548,73 @@ void ASTStmtReader::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
   for (unsigned k = 0; k < NumArgs; ++k)
     Args[k] = Record.readExpr();
   E->setArgs(Args, NumArgs);
+}
+
+void ASTStmtReader::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  bool HasTargetNS = Record.readInt();
+  E->setOperand(Record.readExpr());
+  if (HasTargetNS)
+    E->setTargetNS(Record.readExpr());
+}
+
+void ASTStmtReader::VisitCXXBuiltinReportTokensExpr(
+    CXXBuiltinReportTokensExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setMessage(Record.readExpr());
+  E->setMsgSizeCall(Record.readExpr());
+  E->setMsgDataCall(Record.readExpr());
+  E->setOperand(Record.readExpr());
+}
+
+void ASTStmtReader::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    E->setArg(I, Record.readExpr());
+    E->setSizeCall(I, Record.readExpr());
+    E->setDataCall(I, Record.readExpr());
+  }
+}
+
+void ASTStmtReader::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    E->setArg(I, Record.readExpr());
+    E->setSizeCall(I, Record.readExpr());
+    E->setDataCall(I, Record.readExpr());
+  }
+}
+
+void ASTStmtReader::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    E->setArg(I, Record.readExpr());
+    E->setSizeCall(I, Record.readExpr());
+    E->setDataCall(I, Record.readExpr());
+  }
+}
+
+void ASTStmtReader::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setOperand(Record.readExpr());
 }
 
 void ASTStmtReader::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
@@ -4755,8 +4835,40 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       S = CXXReflectExpr::CreateEmpty(Context);
       break;
     }
+    case EXPR_TOKEN_SEQUENCE: {
+      S = CXXTokenSequenceExpr::CreateEmpty(
+          Context, Record[ASTStmtReader::NumExprFields]);
+      break;
+    }
     case EXPR_METAFUNCTION: {
       S = CXXMetafunctionExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_BUILTIN_INJECT: {
+      S = CXXBuiltinInjectExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_BUILTIN_REPORT_TOKENS: {
+      S = CXXBuiltinReportTokensExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_BUILTIN_ID: {
+      unsigned NumArgs = Record[ASTStmtReader::NumExprFields];
+      S = CXXBuiltinIdExpr::CreateEmpty(Context, NumArgs);
+      break;
+    }
+    case EXPR_BUILTIN_STR_LITERAL: {
+      unsigned NumArgs = Record[ASTStmtReader::NumExprFields];
+      S = CXXBuiltinStrLiteralExpr::CreateEmpty(Context, NumArgs);
+      break;
+    }
+    case EXPR_BUILTIN_TOKENIZE: {
+      unsigned NumArgs = Record[ASTStmtReader::NumExprFields];
+      S = CXXBuiltinTokenizeExpr::CreateEmpty(Context, NumArgs);
+      break;
+    }
+    case EXPR_BUILTIN_STRINGIZE: {
+      S = CXXBuiltinStringizeExpr::CreateEmpty(Context);
       break;
     }
     case EXPR_SPLICE: {

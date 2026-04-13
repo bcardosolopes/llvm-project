@@ -849,6 +849,7 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     break;
 
   case tok::annot_primary_expr:
+  case tok::annot_token_seq_expr:
   case tok::annot_overload_set:
     Res = getExprAnnotation(Tok);
     if (!Res.isInvalid() && Tok.getKind() == tok::annot_overload_set)
@@ -2090,9 +2091,27 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         IdentifierInfo *Id = Tok.getIdentifierInfo();
         SourceLocation Loc = ConsumeToken();
         Name.setIdentifier(Id, Loc);
-      } else if (Tok.is(tok::annot_splice)) {
-        ExprResult Res = ParseCXXSpliceAsExpr(TemplateKWLoc,
-                                              /*AllowMemberReference=*/true);
+      } else if (Tok.is(tok::annot_splice) ||
+                 Tok.is(tok::annot_token_seq_expr)) {
+        // For annot_splice, parse it directly as a splice expression.
+        // For annot_token_seq_expr (from token sequence interpolation \(r)
+        // where r is a reflection), treat it as an implicit splice so
+        // that e.g. a.\(r) works like a.[:r:].
+        ExprResult Res;
+        if (Tok.is(tok::annot_splice)) {
+          Res = ParseCXXSpliceAsExpr(TemplateKWLoc,
+                                     /*AllowMemberReference=*/true);
+        } else {
+          Res = getExprAnnotation(Tok);
+          SourceLocation ExprLoc = Tok.getLocation();
+          ConsumeAnnotationToken();
+          if (!Res.isInvalid()) {
+            auto *Splice = SpliceSpecifier::Create(
+                Actions.Context, ExprLoc, Res.get(), ExprLoc, nullptr);
+            Res = Actions.ActOnCXXSpliceExpression(
+                SourceLocation(), Splice, /*AllowMemberReference=*/true);
+          }
+        }
         if (!Res.isInvalid()) {
           LHS = Actions.ActOnMemberAccessExpr(getCurScope(), LHS.get(), OpLoc,
                                               OpKind,

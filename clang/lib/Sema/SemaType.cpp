@@ -10024,8 +10024,13 @@ QualType Sema::BuildCountAttributedArrayOrPointerType(QualType WrappedTy,
 QualType Sema::getDecltypeForExpr(Expr *E) {
 
   Expr *IDExpr = E;
+  // Strip implicit casts for decltype, but NOT derived-to-base casts which
+  // represent a semantic base subobject access (e.g., from base specifier
+  // splices like d.[:base:]).
   if (auto *ImplCastExpr = dyn_cast<ImplicitCastExpr>(E))
-    IDExpr = ImplCastExpr->getSubExpr();
+    if (ImplCastExpr->getCastKind() != CK_DerivedToBase &&
+        ImplCastExpr->getCastKind() != CK_UncheckedDerivedToBase)
+      IDExpr = ImplCastExpr->getSubExpr();
 
   if (auto *PackExpr = dyn_cast<PackIndexingExpr>(E)) {
     if (E->isInstantiationDependent())

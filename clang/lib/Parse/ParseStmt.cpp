@@ -1187,6 +1187,18 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
       ParsedStmtContext::Compound |
       (isStmtExpr ? ParsedStmtContext::InStmtExpr : ParsedStmtContext());
 
+  // Save outer pending injected stmts so a nested compound being parsed
+  // through this loop can't drain stmts that belong to the enclosing scope.
+  SmallVector<Stmt *> SavedPendingInjected;
+  SavedPendingInjected.swap(Actions.PendingInjectedStmts);
+  unsigned SavedInjectedLocalDeclsForLookupSize =
+      Actions.InjectedLocalDeclsForLookup.size();
+  auto RestorePending = llvm::make_scope_exit([&] {
+    SavedPendingInjected.swap(Actions.PendingInjectedStmts);
+    Actions.InjectedLocalDeclsForLookup.resize(
+        SavedInjectedLocalDeclsForLookupSize);
+  });
+
   bool LastIsError = false;
   while (!tryParseMisplacedModuleImport() && Tok.isNot(tok::r_brace) &&
          Tok.isNot(tok::eof)) {
@@ -1245,6 +1257,14 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
     if (R.isUsable())
       Stmts.push_back(R.get());
     LastIsError = R.isInvalid();
+
+    // Pick up any statements injected by consteval blocks
+    // (e.g., return statements from queue_injection).
+    if (!Actions.PendingInjectedStmts.empty()) {
+      Stmts.append(Actions.PendingInjectedStmts.begin(),
+                   Actions.PendingInjectedStmts.end());
+      Actions.PendingInjectedStmts.clear();
+    }
   }
   // StmtExpr needs to do copy initialization for last statement.
   // If last statement is invalid, the last statement in `Stmts` will be

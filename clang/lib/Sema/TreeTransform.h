@@ -50,6 +50,7 @@
 #include "clang/Sema/SemaSYCL.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include <algorithm>
@@ -4474,8 +4475,15 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
   if (!Init)
     return Init;
 
-  if (auto *FE = dyn_cast<FullExpr>(Init))
-    Init = FE->getSubExpr();
+  if (auto *FE = dyn_cast<FullExpr>(Init)) {
+    // Don't strip ConstantExpr that wraps an OpaqueValueExpr with a stored
+    // APValue result - it was created by token sequence interpolation and
+    // can't be re-evaluated.
+    if (auto *CE = dyn_cast<ConstantExpr>(FE);
+        !CE || !CE->hasAPValueResult() ||
+        !isa<OpaqueValueExpr>(CE->getSubExpr()))
+      Init = FE->getSubExpr();
+  }
 
   if (auto *AIL = dyn_cast<ArrayInitLoopExpr>(Init)) {
     OpaqueValueExpr *OVE = AIL->getCommonExpr();
@@ -4489,7 +4497,12 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
     Init = Binder->getSubExpr();
 
   if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Init))
-    Init = ICE->getSubExprAsWritten();
+    // Don't strip derived-to-base casts that represent base-specifier splices;
+    // they affect type deduction.
+    if (!((ICE->getCastKind() == CK_DerivedToBase ||
+           ICE->getCastKind() == CK_UncheckedDerivedToBase) &&
+          isa<CXXSpliceExpr>(ICE->getSubExpr())))
+      Init = ICE->getSubExprAsWritten();
 
   if (CXXStdInitializerListExpr *ILE =
           dyn_cast<CXXStdInitializerListExpr>(Init))
@@ -8233,6 +8246,18 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
   bool SubStmtInvalid = false;
   bool SubStmtChanged = false;
   SmallVector<Stmt*, 8> Statements;
+  // Save any pending injected statements from an outer compound; we'll
+  // restore them at the end so a nested transform can't drain stmts that
+  // belong to the enclosing scope.
+  SmallVector<Stmt *> SavedPendingInjected;
+  SavedPendingInjected.swap(getSema().PendingInjectedStmts);
+  unsigned SavedInjectedLocalDeclsForLookupSize =
+      getSema().InjectedLocalDeclsForLookup.size();
+  auto RestoreInjectedState = llvm::make_scope_exit([&] {
+    SavedPendingInjected.swap(getSema().PendingInjectedStmts);
+    getSema().InjectedLocalDeclsForLookup.resize(
+        SavedInjectedLocalDeclsForLookupSize);
+  });
   for (auto *B : S->body()) {
     StmtResult Result = getDerived().TransformStmt(
         B, IsStmtExpr && B == S->body_back() ? StmtDiscardKind::StmtExprResult
@@ -8251,6 +8276,15 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
 
     SubStmtChanged = SubStmtChanged || Result.get() != B;
     Statements.push_back(Result.getAs<Stmt>());
+
+    // Pick up any statements injected by consteval blocks
+    // (e.g., return statements from queue_injection).
+    if (!getSema().PendingInjectedStmts.empty()) {
+      Statements.append(getSema().PendingInjectedStmts.begin(),
+                        getSema().PendingInjectedStmts.end());
+      getSema().PendingInjectedStmts.clear();
+      SubStmtChanged = true;
+    }
   }
 
   if (SubStmtInvalid)
@@ -9179,6 +9213,7 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
   }
   case ReflectionKind::Object:
   case ReflectionKind::Value:
+  case ReflectionKind::Identifier:
     return E;
   case ReflectionKind::Null:
   case ReflectionKind::BaseSpecifier:
@@ -9187,6 +9222,15 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
     llvm_unreachable("reflect expression should not have this reflection kind");
   }
   llvm_unreachable("invalid reflection");
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+  // The default transform is a no-op since the token sequence captures raw
+  // tokens. Derived transforms (e.g., template instantiation) override this
+  // to substitute references inside the token sequence.
+  return E;
 }
 
 template <typename Derived>
@@ -9205,6 +9249,109 @@ TreeTransform<Derived>::TransformCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
                                             E->getRParenLoc(),
                                             E->getMetaFnID(), E->getImpl(),
                                             Args);
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
+  ExprResult Operand = getDerived().TransformExpr(E->getOperand());
+  if (Operand.isInvalid())
+    return ExprError();
+
+  SmallVector<Expr *, 2> Args;
+  if (E->hasTargetNS()) {
+    ExprResult TransformedTarget = getDerived().TransformExpr(E->getTargetNS());
+    if (TransformedTarget.isInvalid())
+      return ExprError();
+    Args.push_back(TransformedTarget.get());
+  }
+  Args.push_back(Operand.get());
+
+  return getSema().ActOnCXXBuiltinInject(E->getKwLoc(), E->getLParenLoc(),
+                                         Args, E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinReportTokensExpr(
+    CXXBuiltinReportTokensExpr *E) {
+  ExprResult Msg = getDerived().TransformExpr(E->getMessage());
+  if (Msg.isInvalid())
+    return ExprError();
+
+  ExprResult Operand = getDerived().TransformExpr(E->getOperand());
+  if (Operand.isInvalid())
+    return ExprError();
+
+  Expr *Args[] = {Msg.get(), Operand.get()};
+  return getSema().ActOnCXXBuiltinReportTokens(E->getKwLoc(),
+                                               E->getLParenLoc(),
+                                               Args, E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
+  // Transform only the original arguments (slot 0). The size()/data() calls
+  // for user-defined string-like args were synthesized by Sema based on the
+  // arg's type and will be re-synthesized by ActOnCXXBuiltinId once the
+  // transformed args are no longer dependent. Use TransformExprs so any
+  // PackExpansionExpr (from std::meta::id(args...) in a variadic template)
+  // is expanded.
+  SmallVector<Expr *, 4> Inputs;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+    Inputs.push_back(E->getArg(I));
+  SmallVector<Expr *, 4> TransformedArgs;
+  if (getDerived().TransformExprs(Inputs.data(), Inputs.size(),
+                                  /*IsCall=*/true, TransformedArgs))
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinId(E->getKwLoc(), E->getLParenLoc(),
+                                     TransformedArgs, E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinStrLiteralExpr(
+    CXXBuiltinStrLiteralExpr *E) {
+  SmallVector<Expr *, 4> Inputs;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+    Inputs.push_back(E->getArg(I));
+  SmallVector<Expr *, 4> TransformedArgs;
+  if (getDerived().TransformExprs(Inputs.data(), Inputs.size(),
+                                  /*IsCall=*/true, TransformedArgs))
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinStrLiteral(E->getKwLoc(), E->getLParenLoc(),
+                                             TransformedArgs, E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinTokenizeExpr(
+    CXXBuiltinTokenizeExpr *E) {
+  SmallVector<Expr *, 4> Inputs;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+    Inputs.push_back(E->getArg(I));
+  SmallVector<Expr *, 4> TransformedArgs;
+  if (getDerived().TransformExprs(Inputs.data(), Inputs.size(),
+                                  /*IsCall=*/true, TransformedArgs))
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinTokenize(E->getKwLoc(), E->getLParenLoc(),
+                                           TransformedArgs, E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinStringizeExpr(
+    CXXBuiltinStringizeExpr *E) {
+  ExprResult Operand = getDerived().TransformExpr(E->getOperand());
+  if (Operand.isInvalid())
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinStringize(E->getKwLoc(), E->getLParenLoc(),
+                                            {Operand.get()}, E->getRParenLoc());
 }
 
 template <typename Derived>
@@ -13731,6 +13878,12 @@ ExprResult TreeTransform<Derived>::TransformOpenACCAsteriskSizeExpr(
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformConstantExpr(ConstantExpr *E) {
+  // If this ConstantExpr wraps an OpaqueValueExpr and has a stored APValue
+  // result, it was created by token sequence interpolation and can't be
+  // re-evaluated. Preserve it as-is so the APValue survives template
+  // instantiation and reaches codegen.
+  if (E->hasAPValueResult() && isa<OpaqueValueExpr>(E->getSubExpr()))
+    return E;
   if (auto *SE = E->getSubExpr())
     return TransformExpr(SE);
   return E;
@@ -14634,6 +14787,38 @@ TreeTransform<Derived>::TransformConditionalOperator(ConditionalOperator *E) {
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformImplicitCastExpr(ImplicitCastExpr *E) {
+  // Derived-to-base casts from base specifier splices (e.g., object.[:base:])
+  // must be preserved. Unlike normal implicit conversions that can be
+  // recomputed by semantic analysis, these casts represent the semantic
+  // meaning of the splice expression itself. If we strip them, the expression
+  // type reverts to the derived type, causing incorrect template argument
+  // deduction.
+  if ((E->getCastKind() == CK_DerivedToBase ||
+       E->getCastKind() == CK_UncheckedDerivedToBase) &&
+      isa<CXXSpliceExpr>(E->getSubExpr())) {
+    auto *SE = cast<CXXSpliceExpr>(E->getSubExpr());
+    ExprResult Model = getDerived().TransformExpr(SE->getModel());
+    if (Model.isInvalid())
+      return ExprError();
+
+    if (!getDerived().AlwaysRebuild() && Model.get() == SE->getModel())
+      return E;
+
+    Expr *SubExpr = CXXSpliceExpr::Create(
+        getSema().Context, Model.get()->getValueKind(),
+        SE->getTemplateKeywordLoc(), SE->getSplice(), Model.get(),
+        SE->allowMemberReference());
+
+    // Copy the base path from the original cast.
+    CXXCastPath BasePath(E->path_begin(), E->path_end());
+
+    // Rebuild the derived-to-base cast with the transformed subexpression.
+    // The cast path and type should remain the same.
+    return ImplicitCastExpr::Create(
+        getSema().Context, E->getType(), E->getCastKind(), SubExpr,
+        &BasePath, E->getValueKind(), getSema().CurFPFeatureOverrides());
+  }
+
   // Implicit casts are eliminated during transformation, since they
   // will be recomputed by semantic analysis after transformation.
   return getDerived().TransformExpr(E->getSubExprAsWritten());
@@ -16527,6 +16712,8 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
   CXXRecordDecl *Class = getSema().createLambdaClosureType(
       E->getIntroducerRange(), /*Info=*/nullptr, DependencyKind,
       E->getCaptureDefault());
+  if (OldClass->isConstevalBlockLambda())
+    Class->setIsConstevalBlockLambda();
   getDerived().transformedLocalDecl(OldClass, {Class});
 
   CXXMethodDecl *NewCallOperator =

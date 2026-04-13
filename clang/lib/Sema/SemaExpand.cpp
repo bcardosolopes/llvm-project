@@ -176,7 +176,7 @@ bool tryMakeCXXIterableExpansionSelectExpr(
       return false;
 
     DeclarationNameInfo Name(II, Range->getBeginLoc());
-    VarRef = S.BuildDeclRefExpr(RangeVar, Range->getType(), VK_LValue, Name,
+    VarRef = S.BuildDeclRefExpr(RangeVar, RangeVar->getType(), VK_LValue, Name,
                                 nullptr, RangeVar);
   }
 

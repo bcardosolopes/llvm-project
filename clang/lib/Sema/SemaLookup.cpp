@@ -3327,7 +3327,7 @@ addAssociatedClassesAndNamespaces(AssociatedLookup &Result, QualType Ty) {
     T = Queue.pop_back_val();
   }
 
-  if (T->isReflectionType()) {
+  if (T->isReflectionType() || T->isTokenSequenceType()) {
     NamespaceDecl *StdMeta = Result.S.lookupStdMetaNamespace();
     if (StdMeta) {
       Result.Namespaces.insert(StdMeta);

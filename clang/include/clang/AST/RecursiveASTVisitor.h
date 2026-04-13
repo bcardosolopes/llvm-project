@@ -3197,11 +3197,19 @@ DEF_TRAVERSE_STMT(CXXReflectExpr, {
     case ReflectionKind::Namespace:
     case ReflectionKind::BaseSpecifier:
     case ReflectionKind::DataMemberSpec:
+    case ReflectionKind::Identifier:
       break;
     }
   }
 })
+DEF_TRAVERSE_STMT(CXXTokenSequenceExpr, {})
 DEF_TRAVERSE_STMT(CXXMetafunctionExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinInjectExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinReportTokensExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinIdExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinStrLiteralExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinTokenizeExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinStringizeExpr, {})
 DEF_TRAVERSE_STMT(CXXSpliceExpr, {
   TRY_TO(TraverseSpliceSpecifier(S->getSplice()));
 })

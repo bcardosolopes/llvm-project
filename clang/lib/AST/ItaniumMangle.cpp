@@ -5054,6 +5054,8 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     mangleExpression(R.getReflectedAnnotation()->getArg());
     break;
   }
+  case ReflectionKind::Identifier:
+    llvm_unreachable("token sequences and identifiers cannot be mangled");
   }
   Out << 'E';
 }
@@ -5162,6 +5164,9 @@ recurse:
   case Expr::OMPIteratorExprClass:
   case Expr::CXXInheritedCtorInitExprClass:
   case Expr::CXXParenListInitExprClass:
+  case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXBuiltinIdExprClass:
     llvm_unreachable("unexpected statement kind");
 
   case Expr::ExplDependentCallExprClass:
@@ -5176,6 +5181,10 @@ recurse:
       mangleReflection(RE->getReflection());
     break;
   }
+
+  case Expr::CXXTokenSequenceExprClass:
+    // FIXME: Token sequences in mangled names are not yet supported.
+    break;
 
   case Expr::ConstantExprClass:
     if (const Expr *SubExpr = cast<ConstantExpr>(E)->getSubExpr()) {

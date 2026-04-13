@@ -3723,6 +3723,7 @@ static bool TypeInfoIsInStandardLibrary(const BuiltinType *Ty) {
     case BuiltinType::Void:
     case BuiltinType::NullPtr:
     case BuiltinType::MetaInfo:
+    case BuiltinType::TokenSequence:
     case BuiltinType::Bool:
     case BuiltinType::WChar_S:
     case BuiltinType::WChar_U:

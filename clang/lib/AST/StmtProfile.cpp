@@ -2457,7 +2457,40 @@ void StmtProfiler::VisitCXXReflectExpr(const CXXReflectExpr *E) {
   }
 }
 
+void StmtProfiler::VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E) {
+  VisitExpr(E);
+  E->getValue().Profile(ID);
+}
+
 void StmtProfiler::VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXBuiltinInjectExpr(const CXXBuiltinInjectExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXBuiltinReportTokensExpr(
+    const CXXBuiltinReportTokensExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXBuiltinStrLiteralExpr(
+    const CXXBuiltinStrLiteralExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXBuiltinTokenizeExpr(
+    const CXXBuiltinTokenizeExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXBuiltinStringizeExpr(
+    const CXXBuiltinStringizeExpr *E) {
   VisitExpr(E);
 }
 

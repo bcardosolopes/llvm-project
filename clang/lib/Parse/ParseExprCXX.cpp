@@ -27,6 +27,7 @@
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1278,8 +1279,8 @@ static void DiagnoseStaticSpecifierRestrictions(Parser &P,
 }
 
 ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
-                     LambdaIntroducer &Intro, SourceLocation ConstevalLoc,
-                     TypeResult ReturnTy) {
+                     LambdaIntroducer &Intro,
+                     std::optional<SourceLocation> ConstevalBlockLoc) {
   SourceLocation LambdaBeginLoc = Intro.Range.getBegin();
   if (getLangOpts().HLSL)
     Diag(LambdaBeginLoc, diag::ext_hlsl_lambda) << /*HLSL*/ 1;
@@ -1305,6 +1306,10 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
   SourceLocation DeclLoc = Tok.getLocation();
 
   Actions.ActOnLambdaExpressionAfterIntroducer(Intro, getCurScope());
+
+  // Mark consteval block lambdas.
+  if (ConstevalBlockLoc)
+    Actions.getCurLambda()->Lambda->setIsConstevalBlockLambda();
 
   ParsedAttributes Attributes(AttrFactory);
   if (getLangOpts().CUDA) {
@@ -1385,13 +1390,16 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
     MaybeParseCXX11Attributes(D);
   }
 
-  TypeResult TrailingReturnType = ReturnTy;
+  TypeResult TrailingReturnType = ConstevalBlockLoc
+      ? ParsedType::make(Actions.Context.VoidTy)
+      : TypeResult{};
   SourceLocation TrailingReturnTypeLoc;
   SourceLocation LParenLoc, RParenLoc;
   SourceLocation DeclEndLoc = DeclLoc;
   bool HasParentheses = false;
   bool HasSpecifiers = false;
   SourceLocation MutableLoc;
+  SourceLocation ConstevalLoc = ConstevalBlockLoc.value_or(SourceLocation{});
 
   ParseScope Prototype(this, Scope::FunctionPrototypeScope |
                                  Scope::FunctionDeclarationScope |
@@ -1470,7 +1478,7 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
   if (!HasParentheses)
     Actions.ActOnLambdaClosureQualifiers(Intro, MutableLoc);
 
-  if (HasSpecifiers || HasParentheses || ReturnTy.get().get() != QualType{}) {
+  if (HasSpecifiers || HasParentheses || ConstevalBlockLoc) {
     // Parse exception-specification[opt].
     ExceptionSpecificationType ESpecType = EST_None;
     SourceRange ESpecRange;

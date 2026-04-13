@@ -416,6 +416,10 @@ private:
     LLVM_PREFERRED_TYPE(bool)
     unsigned HasKnownInternalLinkage : 1;
 
+    /// Whether this lambda is the implementation of a consteval block.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsConstevalBlock : 1;
+
     /// The number used to indicate this lambda expression for name
     /// mangling in the Itanium C++ ABI.
     unsigned ManglingNumber : 31;
@@ -443,7 +447,8 @@ private:
                          bool IsGeneric, LambdaCaptureDefault CaptureDefault)
         : DefinitionData(D), DependencyKind(DK), IsGenericLambda(IsGeneric),
           CaptureDefault(CaptureDefault), NumCaptures(0),
-          NumExplicitCaptures(0), HasKnownInternalLinkage(0), ManglingNumber(0),
+          NumExplicitCaptures(0), HasKnownInternalLinkage(0),
+          IsConstevalBlock(0), ManglingNumber(0),
           IndexInContext(0), MethodTyInfo(Info) {
       IsLambda = true;
 
@@ -1024,6 +1029,17 @@ public:
     // An update record can't turn a non-lambda into a lambda.
     auto *DD = DefinitionData;
     return DD && DD->IsLambda;
+  }
+
+  /// Determine whether this lambda is the implementation of a consteval block.
+  bool isConstevalBlockLambda() const {
+    return isLambda() && getLambdaData().IsConstevalBlock;
+  }
+
+  /// Mark this lambda as the implementation of a consteval block.
+  void setIsConstevalBlockLambda() {
+    assert(isLambda());
+    getLambdaData().IsConstevalBlock = true;
   }
 
   /// Determine whether this class describes a generic

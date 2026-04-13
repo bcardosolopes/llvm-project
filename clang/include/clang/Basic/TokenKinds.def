@@ -918,6 +918,8 @@ ANNOTATION(pack_indexing_type) // annotation for an indexed pack of type,
 ANNOTATION(splice)       // annotation for a splice specifier
 ANNOTATION(splice_specialization) // annotation for a splice specialization
                                   // specifier
+ANNOTATION(token_seq_expr) // annotation for an interpolation expression \(e)
+                           // captured in a ^^{ ... } token sequence
 
 // Annotation for #pragma unused(...)
 // For each argument inside the parentheses the pragma handler will produce

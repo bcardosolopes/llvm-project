@@ -2599,7 +2599,8 @@ ConstantEmitter::tryEmitPrivate(const APValue &Value, QualType DestType,
         llvm::StructType::get(Complex[0]->getType(), Complex[1]->getType());
     return llvm::ConstantStruct::get(STy, Complex);
   }
-  case APValue::Reflection: {
+  case APValue::Reflection:
+  case APValue::TokenSequence: {
     // FIXME: This emits an unused garbage value, but there's not much
     // meaningful we can emit here. This seems okay, as the value only
     // seems to be used in debug builds...But perhaps we can do better?

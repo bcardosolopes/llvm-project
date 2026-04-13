@@ -14,6 +14,7 @@
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/Reflection.h"
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/Basic/AttributeCommonInfo.h"
 #include "clang/Basic/Attributes.h"
@@ -28,9 +29,11 @@
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
+#include "clang/Sema/CXXFieldCollector.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaHLSL.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <optional>
@@ -1130,10 +1133,8 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
   FakeIntroducer.Range.setBegin(ConstevalLoc);
   FakeIntroducer.Range.setEnd(ConstevalLoc);
 
-  TypeResult ReturnTy = ParsedType::make(Actions.Context.VoidTy);
   ExprResult Lambda = ParseLambdaExpressionAfterIntroducer(FakeIntroducer,
-                                                           ConstevalLoc,
-                                                           ReturnTy);
+                                                           ConstevalLoc);
   if (Lambda.isInvalid())
     return nullptr;
 
@@ -1145,7 +1146,239 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
   if (Invocation.isInvalid())
     return nullptr;
 
-  return Actions.ActOnConstevalBlockDeclaration(ConstevalLoc, Invocation.get());
+  Decl *Result = Actions.ActOnConstevalBlockDeclaration(ConstevalLoc,
+                                                        Invocation.get());
+
+  // Process any pending token injections from queue_injection calls.
+  // (During template instantiation, BuildConstevalBlockDeclaration calls
+  // ProcessPendingTokenInjections via the callback instead.)
+  DrainPendingTokenInjections();
+
+  return Result;
+}
+
+void Parser::DrainPendingTokenInjections() {
+  while (!Actions.PendingInjections.empty()) {
+    SmallVector<Expr::EvalStatus::TokenInjection, 4> Injections;
+    Injections.swap(Actions.PendingInjections);
+    ProcessTokenInjections(Injections);
+  }
+}
+
+void Parser::TokenInjectionCallback(void *P,
+    SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
+  static_cast<Parser *>(P)->ProcessTokenInjections(Injections);
+}
+
+static void collectInjectedLocalDeclsForLookup(
+    Stmt *S, SmallVectorImpl<NamedDecl *> &Decls) {
+  auto AddDecl = [&](NamedDecl *ND) {
+    if (!ND->getDeclName() || llvm::is_contained(Decls, ND))
+      return;
+    Decls.push_back(ND);
+  };
+
+  auto *DS = dyn_cast<DeclStmt>(S);
+  if (!DS)
+    return;
+
+  for (Decl *D : DS->decls()) {
+    auto *ND = dyn_cast<NamedDecl>(D);
+    if (!ND)
+      continue;
+
+    AddDecl(ND);
+    if (auto *ED = dyn_cast<EnumDecl>(ND))
+      for (auto *ECD : ED->enumerators())
+        AddDecl(ECD);
+  }
+}
+
+void Parser::ProcessTokenInjections(
+    SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
+  for (auto &Inj : Injections) {
+    SourceLocation Loc = Inj.Loc;
+    TokenSequenceData TSD = Inj.TSD;
+    // Build a token stream with an eof sentinel at the end.
+    SmallVector<Token, 16> Toks;
+    Toks.append(TSD.begin(), TSD.end());
+    Token Eof;
+    Eof.startToken();
+    Eof.setKind(tok::eof);
+    Eof.setLocation(Loc);
+    Toks.push_back(Eof);
+
+    // Save the current token and enter the token stream.
+    Token SavedTok = Tok;
+    PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                        /*IsReinject=*/true);
+    ConsumeAnyToken();
+
+    // If a target namespace was specified, switch to that context.
+    // We need both ContextRAII (to set CurContext) and a ParseScope with
+    // the scope entity set to the target DeclContext, so that name lookup
+    // finds declarations in the target namespace.
+    //
+    // When injecting into a target namespace during template instantiation
+    // (which may happen inside a function body), we must re-root the scope
+    // chain at file scope. Otherwise the new scope would be parented on
+    // the current function-body scope, causing CppLookupName to hit a
+    // non-file-context DeclContext during unqualified lookup.
+    std::optional<Sema::ContextRAII> TargetCtx;
+    std::optional<ParseScope> TargetScope;
+    std::optional<llvm::SaveAndRestore<Scope *>> ScopeSwap;
+    if (Inj.TargetDC) {
+      TargetCtx.emplace(Actions, Inj.TargetDC);
+
+      // Walk up to find the file-scope so the new scope is parented
+      // correctly for unqualified name lookup.
+      Scope *FileScope = getCurScope();
+      while (FileScope->getParent() &&
+             !(FileScope->getEntity() &&
+               FileScope->getEntity()->isFileContext()))
+        FileScope = FileScope->getParent();
+
+      // Re-root the scope chain at file scope. RAII restores the original
+      // CurScope on any exit path, including parser bail-outs.
+      ScopeSwap.emplace(Actions.CurScope, FileScope);
+
+      TargetScope.emplace(this, Scope::DeclScope);
+      getCurScope()->setEntity(Inj.TargetDC);
+    }
+
+    // Parse the injected tokens in the appropriate context.
+    if (Actions.CurContext->isFunctionOrMethod()) {
+      // Inside a function body: parse statements and declarations.
+      // Parsed statements are added to PendingInjectedStmts so the
+      // enclosing compound statement can pick them up.
+      //
+      // If we are still parsing the original, non-dependent function body,
+      // reuse the active block scope. This makes injected local declarations
+      // visible to the following statements in the same scope.
+      auto HasCurrentDeclContextScope = [&] {
+        for (Scope *S = getCurScope(); S; S = S->getParent())
+          if (S->getEntity() == Actions.CurContext)
+            return true;
+        return false;
+      };
+      bool ReuseCurrentScope = !Actions.inTemplateInstantiation() &&
+                               !Actions.CurContext->isDependentContext() &&
+                               HasCurrentDeclContextScope();
+
+      // During template instantiation, or while parsing a dependent function
+      // body, later ordinary source cannot look up names that are injected only
+      // after a consteval block is evaluated. Use a temporary lookup scope for
+      // the injected code in those cases.
+      std::optional<ParseScope> FnScope;
+      SmallVector<NamedDecl *, 8> SeededLookupDecls;
+      SmallVector<NamedDecl *, 8> NewInjectedDecls;
+      auto SeedLookupDecl = [&](NamedDecl *D) {
+        if (!D->getDeclName() || getCurScope()->isDeclScope(D))
+          return;
+        getCurScope()->AddDecl(D);
+        Actions.IdResolver.AddDecl(D);
+        SeededLookupDecls.push_back(D);
+      };
+      if (!ReuseCurrentScope) {
+        FnScope.emplace(this, Scope::DeclScope);
+        if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext)) {
+          getCurScope()->setEntity(FD);
+          for (auto *P : FD->parameters())
+            Actions.PushOnScopeChains(P, getCurScope(), /*AddToContext=*/false);
+        }
+
+        for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup) {
+          SeedLookupDecl(D);
+        }
+      }
+      auto RemoveTemporaryInjectedDecls = llvm::make_scope_exit([&] {
+        auto RemoveFromScope = [&](NamedDecl *D) {
+          if (!getCurScope()->isDeclScope(D))
+            return;
+          getCurScope()->RemoveDecl(D);
+          Actions.IdResolver.RemoveDecl(D);
+        };
+        for (NamedDecl *D : SeededLookupDecls)
+          RemoveFromScope(D);
+        for (NamedDecl *D : NewInjectedDecls)
+          RemoveFromScope(D);
+      });
+
+      unsigned PendingInjectedStart = Actions.PendingInjectedStmts.size();
+      StmtVector Stmts;
+      while (Tok.isNot(tok::eof)) {
+        StmtResult R =
+            ParseStatementOrDeclaration(Stmts, ParsedStmtContext::Compound);
+        if (R.isUsable())
+          Actions.PendingInjectedStmts.push_back(R.get());
+      }
+
+      if (!ReuseCurrentScope) {
+        for (Stmt *S :
+             ArrayRef(Actions.PendingInjectedStmts).drop_front(
+                 PendingInjectedStart)) {
+          collectInjectedLocalDeclsForLookup(S, NewInjectedDecls);
+        }
+        for (NamedDecl *D : NewInjectedDecls)
+          if (!llvm::is_contained(Actions.InjectedLocalDeclsForLookup, D))
+            Actions.InjectedLocalDeclsForLookup.push_back(D);
+      }
+    } else if (Actions.CurContext->isRecord()) {
+      // Inside a class body: parse member declarations.
+      Decl *TagDecl = cast<Decl>(Actions.CurContext);
+      bool HasActiveClassParsing =
+          !ClassStack.empty() && getCurrentClass().TagOrTemplate == TagDecl;
+      std::optional<ParsingClassDefinition> ParsingDef;
+      std::optional<ParseScope> ClassScope;
+      if (!HasActiveClassParsing) {
+        ParsingDef.emplace(*this, TagDecl, /*TopLevelClass=*/true,
+                           /*IsInterface=*/false);
+        // Create a scope with the class as entity so that
+        // CheckTemplateDeclScope can find it when parsing member templates.
+        ClassScope.emplace(this, Scope::ClassScope | Scope::DeclScope);
+        getCurScope()->setEntity(Actions.CurContext);
+        // Ensure the field collector has a scope, since
+        // ActOnCXXMemberDeclarator unconditionally calls FieldCollector->Add()
+        // for field declarations. During template instantiation, there may not
+        // be an active scope.
+        Actions.FieldCollector->StartClass();
+      }
+      while (Tok.isNot(tok::eof)) {
+        ParsedAttributes DeclAttrs(AttrFactory);
+        ParsedTemplateInfo TemplateInfo;
+        ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
+      }
+      if (!HasActiveClassParsing) {
+        // Process late-parsed members: method declarations, member
+        // initializers, and method definitions. This must happen before
+        // PopParsingClass destroys the LateParsedDeclarations. When injecting
+        // into an actively-parsed class, leave those declarations on the
+        // existing class stack so they see the complete member-specification.
+        ParseLexedMethodDeclarations(getCurrentClass());
+        ParseLexedMemberInitializers(getCurrentClass());
+        ParseLexedMethodDefs(getCurrentClass());
+        Actions.FieldCollector->FinishClass();
+      }
+    } else {
+      // Namespace/global scope: parse external declarations.
+      while (Tok.isNot(tok::eof)) {
+        ParsedAttributes DeclAttrs(AttrFactory);
+        ParsedAttributes DeclSpecAttrs(AttrFactory);
+        ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+      }
+    }
+
+    // TargetScope/TargetCtx/ScopeSwap RAII unwinds the re-rooted scope.
+    TargetScope.reset();
+    TargetCtx.reset();
+    ScopeSwap.reset();
+
+    // Consume the eof sentinel and restore the saved token.
+    Tok = SavedTok;
+  }
+
+  // Recursively process any injections produced by parsing the injected code.
+  DrainPendingTokenInjections();
 }
 
 SourceLocation Parser::ParseDecltypeSpecifier(DeclSpec &DS) {
@@ -3876,6 +4109,18 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
 
   if (TagDecl)
     Actions.ActOnTagFinishDefinition(getCurScope(), TagDecl, T.getRange());
+
+  // Handle annotation on_complete callbacks. At this point, the class is
+  // fully complete and CurContext is the enclosing namespace, so any
+  // unary queue_injection will inject into that namespace.
+  if (TagDecl) {
+    Actions.HandleAnnotationOnComplete(TagDecl);
+    while (!Actions.PendingInjections.empty()) {
+      auto Injections = std::move(Actions.PendingInjections);
+      Actions.PendingInjections.clear();
+      ProcessTokenInjections(Injections);
+    }
+  }
 
   // Leave the class scope.
   ParsingDef.Pop();

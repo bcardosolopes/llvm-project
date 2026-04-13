@@ -2477,6 +2477,8 @@ Type::ScalarTypeKind Type::getScalarTypeKind() const {
       return STK_FixedPoint;
     if (BT->isReflectionType())
       return STK_Reflection;
+    if (BT->isTokenSequenceType())
+      return STK_TokenSequence;
     llvm_unreachable("unknown scalar builtin type");
   } else if (isa<PointerType>(T)) {
     return STK_CPointer;
@@ -3604,6 +3606,8 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
     return Policy.NullptrTypeInNamespace ? "std::nullptr_t" : "nullptr_t";
   case MetaInfo:
     return "meta::info";
+  case TokenSequence:
+    return "meta::token_sequence";
   case Overload:
     return "<overloaded function type>";
   case BoundMember:
@@ -5310,6 +5314,7 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
     case BuiltinType::BuiltinFn:
     case BuiltinType::NullPtr:
     case BuiltinType::MetaInfo:
+    case BuiltinType::TokenSequence:
     case BuiltinType::IncompleteMatrixIdx:
     case BuiltinType::ArraySection:
     case BuiltinType::OMPArrayShaping:

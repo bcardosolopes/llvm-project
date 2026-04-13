@@ -1360,6 +1360,50 @@ ExprResult Sema::ActOnPackIndexingExpr(Scope *S, Expr *PackExpression,
                                        SourceLocation RSquareLoc) {
   bool isParameterPack = ::isParameterPack(PackExpression);
   if (!isParameterPack) {
+    // Check if this is a reference to an expanded function parameter pack.
+    // After template instantiation, pack parameters are expanded into
+    // individual parameters with the same name. When token injection
+    // references these parameters with pack indexing syntax (ts...[I]),
+    // collect all same-named parameters as the expanded pack.
+    if (auto *DRE = dyn_cast<DeclRefExpr>(PackExpression)) {
+      if (auto *PVD = dyn_cast<ParmVarDecl>(DRE->getDecl())) {
+        if (auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext())) {
+          // Check if this parameter was originally a pack in the template
+          // pattern. This handles the case where a pack expands to a
+          // single element.
+          bool WasPackParam = false;
+          if (auto *Pattern = FD->getTemplateInstantiationPattern()) {
+            for (auto *PatP : Pattern->parameters()) {
+              if (PatP->isParameterPack() &&
+                  PatP->getIdentifier() == PVD->getIdentifier()) {
+                WasPackParam = true;
+                break;
+              }
+            }
+          }
+
+          if (WasPackParam) {
+            IdentifierInfo *Name = PVD->getIdentifier();
+            SmallVector<Expr *, 4> ExpandedExprs;
+            for (auto *P : FD->parameters()) {
+              if (P->getIdentifier() == Name) {
+                Expr *E = BuildDeclRefExpr(P, P->getType().getNonReferenceType(),
+                                           VK_LValue, PackExpression->getBeginLoc());
+                if (!E) break;
+                ExpandedExprs.push_back(E);
+              }
+            }
+            if (!ExpandedExprs.empty()) {
+              return BuildPackIndexingExpr(PackExpression, EllipsisLoc,
+                                           IndexExpr, RSquareLoc,
+                                           ExpandedExprs,
+                                           /*FullySubstituted=*/true);
+            }
+          }
+        }
+      }
+    }
+
     if (!PackExpression->containsErrors())
       Diag(PackExpression->getBeginLoc(), diag::err_expected_name_of_pack)
           << PackExpression;

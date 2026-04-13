@@ -22,6 +22,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/LocInfoType.h"
 #include "clang/AST/Type.h"
+#include "clang/Lex/Token.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace clang;
@@ -392,6 +393,10 @@ APValue::APValue(const APValue &RHS)
     setReflection(((const ReflectionData *)(const char *)&RHS.Data)->Kind,
                   RHS.getOpaqueReflectionData());
     break;
+  case TokenSequence:
+    MakeTokenSequence();
+    setTokenSequence(RHS.getTokenSequence());
+    break;
   }
   ReflectionDepth = RHS.ReflectionDepth;
   UnderlyingTy = RHS.UnderlyingTy;
@@ -463,6 +468,7 @@ bool APValue::needsCleanup() const {
   case None:
   case Indeterminate:
   case AddrLabelDiff:
+  case TokenSequence:
     return false;
   case Struct:
   case Union:
@@ -571,6 +577,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::EntityProxy:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Annotation:
+  case ReflectionKind::Identifier:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
   case ReflectionKind::DataMemberSpec: {
@@ -746,6 +753,33 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
   case Reflection:
     profileReflection(ID, *this);
     return;
+
+  case TokenSequence: {
+    TokenSequenceData TSD = getTokenSequence();
+    ID.AddInteger(TSD.size());
+    for (const Token &Tok : TSD) {
+      ID.AddInteger(Tok.getKind());
+      if (Tok.is(tok::annot_typename))
+        QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
+      else if (Tok.is(tok::annot_token_seq_expr)) {
+        // The annotation value is a ConstantExpr containing the evaluated
+        // APValue. Profile the value itself for structural comparison.
+        if (auto *CE = dyn_cast_or_null<ConstantExpr>(
+                static_cast<Expr *>(Tok.getAnnotationValue()))) {
+          if (CE->hasAPValueResult())
+            CE->getAPValueResult().Profile(ID);
+          else
+            ID.AddPointer(CE);
+        } else {
+          ID.AddPointer(Tok.getAnnotationValue());
+        }
+      } else if (const auto *II = Tok.getIdentifierInfo())
+        ID.AddString(II->getName());
+      else if (Tok.isLiteral() && Tok.getLiteralData())
+        ID.AddString(StringRef(Tok.getLiteralData(), Tok.getLength()));
+    }
+    return;
+  }
   }
 
   llvm_unreachable("Unknown APValue kind!");
@@ -981,6 +1015,13 @@ CXX26AnnotationAttr *APValue::getReflectedAnnotation() const {
   assert(getReflectionKind() == ReflectionKind::Annotation &&
          "not a reflection of an annotation");
   return reinterpret_cast<CXX26AnnotationAttr *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+IdentifierInfo *APValue::getReflectedIdentifier() const {
+  assert(getReflectionKind() == ReflectionKind::Identifier &&
+         "not a reflection of an identifier");
+  return reinterpret_cast<IdentifierInfo *>(
           const_cast<void *>(getOpaqueReflectionData()));
 }
 
@@ -1322,7 +1363,10 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     Out << " - ";
     Out << "&&" << getAddrLabelDiffRHS()->getLabel()->getName();
     return;
-  case APValue::Reflection:
+  case APValue::TokenSequence:
+    Out << "^^(token-sequence)";
+    return;
+  case APValue::Reflection: {
     std::string Repr("unknown-reflection");
     switch (getReflectionKind()) {
     case ReflectionKind::Null:
@@ -1361,9 +1405,13 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::Annotation:
       Repr = "annotation";
       break;
+    case ReflectionKind::Identifier:
+      Repr = "identifier";
+      break;
     }
     Out << "^^(" << Repr << ")";
     return;
+  }
   }
   llvm_unreachable("Unknown APValue kind!");
 }
@@ -1556,6 +1604,7 @@ LinkageInfo LinkageComputer::getLVForValue(const APValue &V,
   case APValue::Vector:
   case APValue::Reflection:
   case APValue::Matrix:
+  case APValue::TokenSequence:
     break;
 
   case APValue::AddrLabelDiff:
@@ -1695,6 +1744,7 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
+  case ReflectionKind::Identifier:
     SelfData.Kind = RK;
     SelfData.Data = Ptr;
     return;

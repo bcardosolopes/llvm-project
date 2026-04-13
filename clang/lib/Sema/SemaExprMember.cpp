@@ -1213,6 +1213,90 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
     return BuildDependentMemberSpliceExpr(Base, OpLoc, IsArrow, RHS);
   }
 
+  // Check if the RHS is a base specifier reflection. If so, perform a
+  // derived-to-base cast instead of member access.
+  if (auto *CE = dyn_cast_or_null<ConstantExpr>(RHS->getModel())) {
+    if (CE->hasAPValueResult()) {
+      const APValue &V = CE->getAPValueResult();
+      if (V.isReflectedBaseSpecifier()) {
+        CXXBaseSpecifier *BaseSpec = V.getReflectedBaseSpecifier();
+        QualType BaseType = BaseSpec->getType();
+
+        // Get the derived class from the base expression.
+        QualType DerivedType = Base->getType();
+        if (IsArrow)
+          DerivedType = DerivedType->getPointeeType();
+
+        // Preserve cv-qualifiers from the derived expression on the base type.
+        // e.g., if we have `const Derived&` accessing a Base, result is `const Base&`.
+        Qualifiers DerivedQuals = DerivedType.getQualifiers();
+        BaseType = Context.getQualifiedType(BaseType, DerivedQuals);
+
+        CXXRecordDecl *DerivedRD = DerivedType->getAsCXXRecordDecl();
+        if (!DerivedRD) {
+          Diag(Base->getExprLoc(), diag::err_typecheck_member_reference_struct_union)
+              << Base->getType() << Base->getSourceRange()
+              << RHS->getSourceRange();
+          return ExprError();
+        }
+
+        // Verify the base specifier's derived class matches or is a base of
+        // the expression's type.
+        CXXRecordDecl *SpecDerivedRD = BaseSpec->getDerived();
+        if (DerivedRD->getCanonicalDecl() != SpecDerivedRD->getCanonicalDecl() &&
+            !IsDerivedFrom(Base->getExprLoc(), DerivedRD, SpecDerivedRD)) {
+          Diag(Base->getExprLoc(), diag::err_class_not_derived_from_base)
+              << DerivedRD << SpecDerivedRD
+              << SourceRange(Base->getBeginLoc(), RHS->getEndLoc());
+          return ExprError();
+        }
+
+        // Build the derived-to-base cast path. If the object is more-derived
+        // than the class that owns the reflected base specifier, first cast to
+        // that owning class and then append the reflected base conversion. This
+        // preserves the specific base subobject named by the reflection instead
+        // of asking for a possibly-ambiguous conversion straight to BaseType.
+        CXXCastPath BasePath;
+        QualType SpecDerivedType = Context.getCanonicalTagType(SpecDerivedRD);
+        SpecDerivedType = Context.getQualifiedType(SpecDerivedType,
+                                                   DerivedQuals);
+        if (DerivedRD->getCanonicalDecl() != SpecDerivedRD->getCanonicalDecl()) {
+          if (CheckDerivedToBaseConversion(DerivedType, SpecDerivedType,
+                                           Base->getExprLoc(),
+                                           Base->getSourceRange(), &BasePath))
+            return ExprError();
+        }
+
+        CXXCastPath DirectBasePath;
+        if (CheckDerivedToBaseConversion(SpecDerivedType, BaseType,
+                                         Base->getExprLoc(),
+                                         Base->getSourceRange(),
+                                         &DirectBasePath))
+          return ExprError();
+        BasePath.append(DirectBasePath.begin(), DirectBasePath.end());
+
+        // For arrow operator, dereference the pointer first.
+        ExprResult BaseResult(Base);
+        if (IsArrow) {
+          BaseResult = CreateBuiltinUnaryOp(OpLoc, UO_Deref, Base);
+          if (BaseResult.isInvalid())
+            return ExprError();
+        }
+
+        // Build the derived-to-base cast. Keep the splice in the AST as a
+        // marker so template transformation can distinguish this semantic
+        // base-subobject access from ordinary derived-to-base conversions.
+        ExprValueKind VK = BaseResult.get()->getValueKind();
+        Expr *BaseSplice =
+            CXXSpliceExpr::Create(Context, VK, RHS->getTemplateKeywordLoc(),
+                                  RHS->getSplice(), BaseResult.get(),
+                                  RHS->allowMemberReference());
+        return ImpCastExprToType(BaseSplice, BaseType,
+                                 CK_DerivedToBase, VK, &BasePath);
+      }
+    }
+  }
+
   CXXScopeSpec SS;
   NamedDecl *ND = nullptr;
   TemplateArgumentListInfo TemplateArgs(RHS->getBeginLoc(), RHS->getEndLoc());

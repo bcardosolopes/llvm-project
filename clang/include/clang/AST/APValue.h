@@ -39,6 +39,7 @@ template <typename T> class BasicReaderBase;
   class DiagnosticBuilder;
   class Expr;
   class FieldDecl;
+  class IdentifierInfo;
   class NamespaceDecl;
   class ParmVarDecl;
   struct PrintingPolicy;
@@ -151,6 +152,7 @@ public:
     MemberPointer,
     AddrLabelDiff,
     Reflection,
+    TokenSequence,
   };
 
   class alignas(uint64_t) LValueBase {
@@ -333,7 +335,7 @@ private:
   typedef llvm::AlignedCharArrayUnion<void *, APSInt, APFloat, ComplexAPSInt,
                                       ComplexAPFloat, Vec, Mat, Arr, StructData,
                                       UnionData, AddrLabelDiffData,
-                                      ReflectionData>
+                                      ReflectionData, TokenSequenceData>
       DataType;
   static const size_t DataSize = sizeof(DataType);
 
@@ -498,6 +500,13 @@ public:
         ReflectionDepth() {
     MakeReflection(); setReflection(RK, Data);
   }
+  /// Creates a token sequence APValue from raw token sequence data.
+  explicit APValue(TokenSequenceData TSD)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
+    MakeTokenSequence();
+    setTokenSequence(TSD);
+  }
   static APValue IndeterminateValue() {
     APValue Result;
     Result.Kind = Indeterminate;
@@ -560,6 +569,7 @@ public:
   bool isReflection() const {
     return Kind == Reflection || getReflectionDepth() > 0;
   }
+  bool isTokenSequence() const { return Kind == TokenSequence; }
   bool isNullReflection() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Null;
   }
@@ -597,6 +607,10 @@ public:
   }
   bool isReflectedAnnotation() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Annotation;
+  }
+  bool isReflectedIdentifier() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::Identifier;
   }
 
   void dump() const;
@@ -821,6 +835,11 @@ public:
   CXXBaseSpecifier *getReflectedBaseSpecifier() const;
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
+  TokenSequenceData getTokenSequence() const {
+    assert(isTokenSequence() && "Invalid accessor");
+    return *(const TokenSequenceData *)(const char *)&Data;
+  }
+  IdentifierInfo *getReflectedIdentifier() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");
@@ -870,6 +889,10 @@ public:
     ((AddrLabelDiffData *)(char *)&Data)->RHSExpr = RHSExpr;
   }
   void setReflection(ReflectionKind RK, const void *Data);
+  void setTokenSequence(TokenSequenceData TSD) {
+    assert(isTokenSequence() && "Invalid accessor");
+    *(TokenSequenceData *)(char *)&Data = TSD;
+  }
 
 private:
   void DestroyDataAndMakeUninit();
@@ -932,6 +955,11 @@ private:
     assert(isAbsent() && "Bad state change");
     new ((void*)(char *)&Data) ReflectionData();
     Kind = Reflection;
+  }
+  void MakeTokenSequence() {
+    assert(isAbsent() && "Bad state change");
+    new ((TokenSequenceData *)(char *)&Data) TokenSequenceData();
+    Kind = TokenSequence;
   }
 
 private:

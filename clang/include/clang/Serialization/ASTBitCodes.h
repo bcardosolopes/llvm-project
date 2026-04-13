@@ -1140,6 +1140,9 @@ enum PredefinedTypeIDs {
   /// \brief The 'std::meta::info' type
   PREDEF_TYPE_META_INFO_ID = 75,
 
+  /// \brief The 'std::meta::token_sequence' type
+  PREDEF_TYPE_TOKEN_SEQUENCE_ID = 76,
+
 /// OpenCL image types with auto numeration
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
   PREDEF_TYPE_##Id##_ID,
@@ -1177,7 +1180,7 @@ enum PredefinedTypeIDs {
 ///
 /// Type IDs for non-predefined types will start at
 /// NUM_PREDEF_TYPE_IDs.
-const unsigned NUM_PREDEF_TYPE_IDS = 530;
+const unsigned NUM_PREDEF_TYPE_IDS = 531;
 
 // Ensure we do not overrun the predefined types we reserved
 // in the enum PredefinedTypeIDs above.
@@ -2070,7 +2073,14 @@ enum StmtCode {
 
   // C++2c reflection (P2996)
   EXPR_REFLECT,
+  EXPR_TOKEN_SEQUENCE,
   EXPR_METAFUNCTION,
+  EXPR_BUILTIN_INJECT,
+  EXPR_BUILTIN_REPORT_TOKENS,
+  EXPR_BUILTIN_ID,
+  EXPR_BUILTIN_STR_LITERAL,
+  EXPR_BUILTIN_TOKENIZE,
+  EXPR_BUILTIN_STRINGIZE,
   EXPR_SPLICE,
   EXPR_DEPENDENT_MEMBER_SPLICE,
   EXPR_STACK_LOCATION,
