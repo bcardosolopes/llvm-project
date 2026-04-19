@@ -369,9 +369,6 @@ def warn_alias_type_mismatch : Warning<
   "alias and aliasee have different types %0 and %1">,
   InGroup<DiagGroup<"attribute-alias">>;
 
-def err_runtime_consteval_only_type : Error<
-  "cannot emit a runtime definition of consteval-only type">;
-
 def warn_atomic_op_misaligned : Warning<
   "misaligned atomic operation may incur "
   "significant performance penalty"

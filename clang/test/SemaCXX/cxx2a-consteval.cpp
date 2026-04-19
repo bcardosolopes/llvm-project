@@ -1047,20 +1047,18 @@ int f() {
 namespace GH57682 {
 void test() {
   constexpr auto l1 = []() consteval { // expected-error {{cannot take address of consteval call operator of '(lambda at}} \
-                                       // expected-note  2{{declared here}}
+                                       // expected-note  1{{declared here}}
         return 3;
   };
-  constexpr int (*f1)(void) = l1; // expected-error {{constexpr variable 'f1' must be initialized by a constant expression}} \
-                                  // expected-note  {{pointer to a consteval declaration is not a constant expression}}
+  constexpr int (*f1)(void) = l1; // ok
 
 
   constexpr auto lstatic = []() static consteval { // expected-error {{cannot take address of consteval call operator of '(lambda at}} \
-                                       // expected-note  2{{declared here}} \
+                                       // expected-note  1{{declared here}} \
                                        // expected-warning {{extension}}
         return 3;
   };
-  constexpr int (*f2)(void) = lstatic; // expected-error {{constexpr variable 'f2' must be initialized by a constant expression}} \
-                                       // expected-note  {{pointer to a consteval declaration is not a constant expression}}
+  constexpr int (*f2)(void) = lstatic; // ok
 
   int (*f3)(void) = []() consteval { return 3; };  // expected-error {{cannot take address of consteval call operator of '(lambda at}} \
                                                    // expected-note {{declared here}}
@@ -1305,19 +1303,19 @@ void foo() {
 // https://github.com/llvm/llvm-project/issues/139160
 namespace GH139160{
   // original test case taken from Github
-  struct A {int x[1]; }; 
+  struct A {int x[1]; };
   A f(); // expected-note {{declared here}}
   typedef int *t[];
   consteval int* f(int* x) { return x; }
 
   int ** x = (t){f(f().x)}; // expected-error    {{call to consteval function 'GH139160::f' is not a constant expression}}
                             // expected-note@-1  {{non-constexpr function 'f' cannot be used in a constant expression}}
-                            // expected-error@-2 {{initializer element is not a compile-time constant}} 
+                            // expected-error@-2 {{initializer element is not a compile-time constant}}
 
   struct B {int value, value_two;};
   B make_struct() {return {10, 20};} // expected-note {{declared here}}
   consteval int get_value(B container) {return container.value;}
-  B result = (B){10, get_value(make_struct())}; // expected-error {{initializer element is not a compile-time constant}} 
+  B result = (B){10, get_value(make_struct())}; // expected-error {{initializer element is not a compile-time constant}}
                                                 // expected-error@-1 {{call to consteval function 'GH139160::get_value' is not a constant expression}}
                                                 // expected-note@-2  {{non-constexpr function 'make_struct' cannot be used in a constant expression}}
 }  // namespace GH139160

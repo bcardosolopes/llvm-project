@@ -700,7 +700,7 @@ void ASTDeclWriter::VisitEnumDecl(EnumDecl *D) {
 }
 
 void ASTDeclWriter::VisitRecordDecl(RecordDecl *D) {
-  static_assert(DeclContext::NumRecordDeclBits == 64,
+  static_assert(DeclContext::NumRecordDeclBits == 63,
                 "You need to update the serializer after you change the "
                 "RecordDeclBits");
 

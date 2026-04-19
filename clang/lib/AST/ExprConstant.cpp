@@ -45,6 +45,7 @@
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/CurrentSourceLocExprScope.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/InferAlloc.h"
 #include "clang/AST/OSLog.h"
@@ -835,7 +836,7 @@ namespace {
     /// ContainingDecl - This is the declaration within which the expression
     /// under evaluation appears. Used to verify rules around injected
     /// declarations that may be produced by plainly constant evaluations.
-    Decl *ContainingDecl;
+    Decl *ContainingDecl = nullptr;
 
     enum class EvaluatingDeclKind {
       None,
@@ -2357,46 +2358,59 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
 
   if (auto *FD = dyn_cast_or_null<FunctionDecl>(BaseVD);
       FD && FD->isImmediateFunction()) {
-    Info.FFDiag(Loc, diag::note_consteval_address_accessible)
-        << !Type->isAnyPointerType();
-    Info.Note(FD->getLocation(), diag::note_declared_at);
-    return false;
-  }
-
-  if (!Type->isConstevalOnly() &&
-      ((BaseE && BaseE->getType()->isConstevalOnly()) ||
-       (BaseVD && BaseVD->getType()->isConstevalOnly()))) {
-    Info.FFDiag(Loc, diag::note_consteval_only_smuggling)
-        << !Type->isAnyPointerType();
-    return false;
+    // Allow consteval function pointers/references in:
+    // - consteval variable initializers (they hold consteval-only values)
+    // - constexpr variable initializers (they will be upgraded to consteval
+    //   by CheckCompleteVariableDeclaration after evaluation)
+    // - non-type template parameter evaluation
+    bool Allow = false;
+    if (Info.ContainingDecl) {
+      if (auto *VD = dyn_cast<VarDecl>(Info.ContainingDecl))
+        Allow = VD->isConsteval() || VD->isConstexpr();
+      else if (isa<NonTypeTemplateParmDecl>(Info.ContainingDecl))
+        Allow = true;
+    }
+    if (!Allow) {
+      Info.FFDiag(Loc, diag::note_consteval_address_accessible)
+          << !Type->isAnyPointerType();
+      Info.Note(FD->getLocation(), diag::note_declared_at);
+      return false;
+    }
   }
 
   // Check that the object is a global. Note that the fake 'this' object we
   // manufacture when checking potential constant expressions is conservatively
   // assumed to be global here.
+  //
+  // Consteval variables are an exception: they only exist at compile time,
+  // so references/pointers to them are valid in consteval contexts even if
+  // they are non-static locals.
   if (!IsGlobalLValue(Base)) {
-    if (Info.getLangOpts().CPlusPlus11) {
-      Info.FFDiag(Loc, diag::note_constexpr_non_global, 1)
-          << IsReferenceType << !Designator.Entries.empty() << !!BaseVD
-          << BaseVD;
-      auto *VarD = dyn_cast_or_null<VarDecl>(BaseVD);
-      if (VarD && VarD->isConstexpr()) {
-        // Non-static local constexpr variables have unintuitive semantics:
-        //   constexpr int a = 1;
-        //   constexpr const int *p = &a;
-        // ... is invalid because the address of 'a' is not constant. Suggest
-        // adding a 'static' in this case.
-        Info.Note(VarD->getLocation(), diag::note_constexpr_not_static)
-            << VarD
-            << FixItHint::CreateInsertion(VarD->getBeginLoc(), "static ");
+    auto *VarD = dyn_cast_or_null<VarDecl>(BaseVD);
+    bool IsConstevalVar = VarD && VarD->isConsteval();
+    if (!IsConstevalVar) {
+      if (Info.getLangOpts().CPlusPlus11) {
+        Info.FFDiag(Loc, diag::note_constexpr_non_global, 1)
+            << IsReferenceType << !Designator.Entries.empty() << !!BaseVD
+            << BaseVD;
+        if (VarD && VarD->isConstexpr()) {
+          // Non-static local constexpr variables have unintuitive semantics:
+          //   constexpr int a = 1;
+          //   constexpr const int *p = &a;
+          // ... is invalid because the address of 'a' is not constant. Suggest
+          // adding a 'static' in this case.
+          Info.Note(VarD->getLocation(), diag::note_constexpr_not_static)
+              << VarD
+              << FixItHint::CreateInsertion(VarD->getBeginLoc(), "static ");
+        } else {
+          NoteLValueLocation(Info, Base);
+        }
       } else {
-        NoteLValueLocation(Info, Base);
+        Info.FFDiag(Loc);
       }
-    } else {
-      Info.FFDiag(Loc);
+      // Don't allow references to temporaries to escape.
+      return false;
     }
-    // Don't allow references to temporaries to escape.
-    return false;
   }
   assert((Info.checkingPotentialConstantExpression() ||
           LVal.getLValueCallIndex() == 0) &&
@@ -2516,9 +2530,19 @@ static bool CheckMemberPointerConstantExpression(EvalInfo &Info,
   if (!FD)
     return true;
   if (FD->isImmediateFunction()) {
-    Info.FFDiag(Loc, diag::note_consteval_address_accessible) << /*pointer*/ 0;
-    Info.Note(FD->getLocation(), diag::note_declared_at);
-    return false;
+    // Allow member pointers to consteval functions in consteval/constexpr
+    // variable initializers (constexpr vars will be upgraded to consteval
+    // by CheckCompleteVariableDeclaration after evaluation).
+    bool Allow = false;
+    if (Info.ContainingDecl) {
+      if (auto *VD = dyn_cast<VarDecl>(Info.ContainingDecl))
+        Allow = VD->isConsteval() || VD->isConstexpr();
+    }
+    if (!Allow) {
+      Info.FFDiag(Loc, diag::note_consteval_address_accessible) << /*pointer*/ 0;
+      Info.Note(FD->getLocation(), diag::note_declared_at);
+      return false;
+    }
   }
   return isForManglingOnly(Kind) || FD->isVirtual() ||
          !FD->hasAttr<DLLImportAttr>();

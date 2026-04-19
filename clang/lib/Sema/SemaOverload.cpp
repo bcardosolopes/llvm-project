@@ -6687,7 +6687,8 @@ ExprResult Sema::CheckConvertedConstantExpression(Expr *From, QualType T,
 ExprResult
 Sema::EvaluateConvertedConstantExpression(Expr *E, QualType T, APValue &Value,
                                           CCEKind CCE, bool RequireInt,
-                                          const APValue &PreNarrowingValue) {
+                                          const APValue &PreNarrowingValue,
+                                          Decl *ContainingDecl) {
 
   ExprResult Result = E;
   // Check the expression is a constant expression.
@@ -6705,7 +6706,7 @@ Sema::EvaluateConvertedConstantExpression(Expr *E, QualType T, APValue &Value,
   else
     Kind = ConstantExprKind::Normal;
 
-  if (!E->EvaluateAsConstantExpr(Eval, Context, Kind) ||
+  if (!E->EvaluateAsConstantExpr(Eval, Context, Kind, ContainingDecl) ||
       (RequireInt && !Eval.Val.isInt())) {
     // The expression can't be folded, so we can't keep it at this position in
     // the AST.

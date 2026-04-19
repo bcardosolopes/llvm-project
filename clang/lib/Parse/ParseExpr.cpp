@@ -654,7 +654,6 @@ bool Parser::isRevertibleTypeTrait(const IdentifierInfo *II,
 
     REVERTIBLE_TYPE_TRAIT(__is_abstract);
     REVERTIBLE_TYPE_TRAIT(__is_aggregate);
-    REVERTIBLE_TYPE_TRAIT(__is_consteval_only);
     REVERTIBLE_TYPE_TRAIT(__is_arithmetic);
     REVERTIBLE_TYPE_TRAIT(__is_array);
     REVERTIBLE_TYPE_TRAIT(__is_assignable);

@@ -76,6 +76,28 @@
 using namespace clang;
 using namespace sema;
 
+namespace {
+
+static DeclRefExpr *unwrapDeclRefToConstevalDecl(Expr *E) {
+  if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(E))
+    E = SNTTPE->getReplacement();
+  else if (auto *CE = dyn_cast<CallExpr>(E))
+    if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(CE->getCallee()))
+      E = SNTTPE->getReplacement();
+
+  auto *DRE = dyn_cast<DeclRefExpr>(E);
+  if (!DRE)
+    return nullptr;
+
+  if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
+    return FD->isImmediateFunction() ? DRE : nullptr;
+  if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
+    return VD->isConsteval() ? DRE : nullptr;
+  return nullptr;
+}
+
+} // namespace
+
 bool Sema::CanUseDecl(NamedDecl *D, bool TreatUnavailableAsInvalid) {
   // See if this is an auto-typed variable whose initializer we are parsing.
   if (ParsingInitForAutoVars.count(D))
@@ -745,6 +767,34 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   CastKind CK = T->isNullPtrType() ? CK_NullToPointer : CK_LValueToRValue;
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_PRValue,
                                  CurFPFeatureOverrides());
+
+  // When a consteval variable undergoes lvalue-to-rvalue conversion, check
+  // whether the resulting value is consteval-only. If so, track the result
+  // (and keep the original DRE tracked). If NOT, remove the DRE from
+  // ConstevalOnly — the value has been materialized and is safe to use.
+  if (!isUnevaluatedContext() &&
+      !isCheckingDefaultArgumentOrInitializer() &&
+      !RebuildingImmediateInvocation) {
+    if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+      if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        if (VD->isConsteval()) {
+          if (std::optional<bool> HasConstevalOnlyValue =
+                  TryEvaluateConstevalOnlyValue(VD);
+              HasConstevalOnlyValue) {
+            if (*HasConstevalOnlyValue) {
+              // Value is consteval-only: track the result expression too.
+              if (!ExprEvalContexts.back().ConstevalOnly.count(DRE))
+                ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
+            } else {
+              // Value is NOT consteval-only: the l-to-r conversion produced
+              // a safe value, so remove the DRE from tracking.
+              ExprEvalContexts.back().ConstevalOnly.erase(DRE);
+            }
+          }
+        }
+      }
+    }
+  }
 
   // C11 6.3.2.1p2:
   //   ... if the lvalue has atomic type, the value has the non-atomic version
@@ -15791,8 +15841,11 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
     if (ConvertHalfVec)
       return convertHalfVecBinOp(*this, LHS, RHS, Opc, ResultTy, VK, OK, false,
                                  OpLoc, CurFPFeatureOverrides());
-    return BinaryOperator::Create(Context, LHS.get(), RHS.get(), Opc, ResultTy,
-                                  VK, OK, OpLoc, CurFPFeatureOverrides());
+    ExprResult Result = BinaryOperator::Create(
+        Context, LHS.get(), RHS.get(), Opc, ResultTy, VK, OK, OpLoc,
+        CurFPFeatureOverrides());
+
+    return Result;
   }
 
   // Handle compound assignments.
@@ -18412,11 +18465,12 @@ ExprResult Sema::CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl) {
     Res->MoveIntoResult(Cached, getASTContext());
   /// Value-dependent constant expressions should not be immediately
   /// evaluated until they are instantiated. We add them the candidate anyway
-  /// in order to remove any arguments of consteval-only type nested in the
+  /// in order to remove any arguments producing consteval-only values nested in the
   /// argument expressions.
   ExprEvalContexts.back().ImmediateInvocationCandidates.emplace_back(Res, 0);
-  if (Res->getType()->isConstevalOnly())
-    ExprEvalContexts.back().ConstevalOnly.insert(Res);
+  // Note: type-based ConstevalOnly tracking is handled post-evaluation in
+  // HandleImmediateInvocations, which checks the APValue result. Doing it
+  // here (pre-evaluation) would cause false positives for failed invocations.
 
   return Res;
 }
@@ -18616,7 +18670,17 @@ HandleImmediateInvocations(Sema &SemaRef,
       // [...]
       // - it is a subexpression of a manifestly constant-evaluated expression
       //   or conversion.
-      return;
+      //
+      // However, for non-constexpr/non-consteval variables with constant
+      // initialization, don't suppress here if there are consteval-only
+      // references or values that need to be diagnosed: such variables can't be
+      // silently upgraded to consteval, so the consteval-only content must be
+      // rejected (P2996 consteval-only values).
+      bool SuppressForConstevalOnly =
+          !VD->isConstexpr() && !VD->isConsteval() &&
+          (!Rec.ConstevalOnly.empty() || !Rec.ReferenceToConsteval.empty());
+      if (!SuppressForConstevalOnly)
+        return;
     }
   }
 
@@ -18677,8 +18741,16 @@ HandleImmediateInvocations(Sema &SemaRef,
   // TODO(P2996): Can we avoid this?
   for (size_t Idx = 0; Idx < Rec.ImmediateInvocationCandidates.size(); ++Idx) {
     auto CE = Rec.ImmediateInvocationCandidates[Idx];
-    if (!CE.getInt() && !CE.getPointer()->isValueDependent())
+    if (!CE.getInt() && !CE.getPointer()->isValueDependent()) {
       EvaluateAndDiagnoseImmediateInvocation(SemaRef, CE);
+      // If the evaluated result contains a consteval-only value (e.g., a
+      // reflection), the expression must be tracked so that it is diagnosed
+      // if used outside a consteval context.
+      ConstantExpr *CEPtr = CE.getPointer();
+      if (CEPtr->hasAPValueResult() &&
+          SemaRef.APValueContainsConstevalOnlyValue(CEPtr->getAPValueResult()))
+        Rec.ConstevalOnly.insert(CEPtr);
+    }
   }
   for (auto *DR : Rec.ReferenceToConsteval) {
     // If the expression is immediate escalating, it is not an error;
@@ -18725,9 +18797,63 @@ HandleImmediateInvocations(Sema &SemaRef,
       SemaRef.MarkExpressionAsImmediateEscalating(DR);
     }
   }
+  // In a ConstantEvaluated context (static_assert, if constexpr, template
+  // arguments, etc.), consteval-only values are fine — the entire expression
+  // is constant-evaluated.
+  bool IsConstantEvaluated =
+      Rec.Context ==
+          Sema::ExpressionEvaluationContext::ConstantEvaluated ||
+      Rec.Context ==
+          Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+
+  // Helper to check if a consteval-only expression refers to a consteval
+  // variable whose VALUE is not consteval-only. Such DREs can be safely
+  // propagated to the parent context for later resolution (e.g., when
+  // DefaultLvalueConversion erases them after value copy).
+  auto HasNonConstevalOnlyValue = [&](Expr *E) -> bool {
+    Expr *Inner = E;
+    if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(Inner))
+      Inner = SNTTPE->getReplacement();
+    if (auto *DRE = dyn_cast<DeclRefExpr>(Inner)) {
+      if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        if (VD->isConsteval()) {
+          if (std::optional<bool> HasConstevalOnlyValue =
+                  SemaRef.TryEvaluateConstevalOnlyValue(VD);
+              HasConstevalOnlyValue)
+            return !*HasConstevalOnlyValue;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Get the parent context for propagation (if any).
+  Sema::ExpressionEvaluationContextRecord *ParentRec = nullptr;
+  if (SemaRef.ExprEvalContexts.size() > 1)
+    ParentRec = &SemaRef.ExprEvalContexts[SemaRef.ExprEvalContexts.size() - 2];
+
   for (auto *E : Rec.ConstevalOnly) {
     if (E->isImmediateEscalating())
       continue;
+
+    if (IsConstantEvaluated)
+      continue;
+
+    // When a sub-context (e.g., lambda init-capture) is popped, DREs to
+    // consteval variables with non-consteval-only values may be safe
+    // if the enclosing context performs a value copy (e.g., init-capture
+    // copy-init erases them via DefaultLvalueConversion). Propagate such
+    // DREs to the parent context for resolution. Only do this when:
+    // - This context has no associated decl (it's a temporary context,
+    //   like the one pushed for lambda init-capture parsing)
+    // - The parent context DOES have an associated decl (it's a variable
+    //   init context that will process the DRE through
+    //   CheckCompleteVariableDeclaration or DefaultLvalueConversion)
+    if (HasNonConstevalOnlyValue(E) && ParentRec &&
+        !Rec.ManglingContextDecl && ParentRec->ManglingContextDecl) {
+      ParentRec->ConstevalOnly.insert(E);
+      continue;
+    }
 
     bool ImmediateEscalating = false;
     bool IsPotentiallyEvaluated =
@@ -18740,7 +18866,7 @@ HandleImmediateInvocations(Sema &SemaRef,
 
     if (!Rec.InImmediateEscalatingFunctionContext ||
         (SemaRef.inTemplateInstantiation() && !ImmediateEscalating)) {
-      SemaRef.Diag(E->getExprLoc(), diag::err_expr_consteval_only_type)
+      SemaRef.Diag(E->getExprLoc(), diag::err_expr_consteval_var)
           << E->getSourceRange();
     } else {
       SemaRef.MarkExpressionAsImmediateEscalating(E);
@@ -20143,7 +20269,7 @@ bool Sema::tryCaptureVariable(
       if (VD && VD->isConstexpr() && VD->isUsableInConstantExpressions(Context)) {
         bool AllowSkipCapture = InExpansionStmt ||
                                  Var->getType()->isScalarType() ||
-                                 Var->getType()->isConstevalOnly();
+                                 VD->isConsteval();
         if (AllowSkipCapture) {
           // Constexpr expansion variables (or other compile-time constants)
           // don't need to be captured.
@@ -20646,8 +20772,7 @@ ExprResult Sema::CheckLValueToRValueConversionOperand(Expr *E) {
     return E;
 
   auto &CEO = ExprEvalContexts.back().ConstevalOnly;
-  bool ReplaceConstevalOnly = E->getType()->isConstevalOnly() &&
-                              CEO.find(E) != CEO.end();
+  bool ReplaceConstevalOnly = CEO.find(E) != CEO.end();
 
   ExprResult Result =
       rebuildPotentialResultsAsNonOdrUsed(*this, E, NOUR_Constant);
@@ -21058,6 +21183,17 @@ MarkExprReferenced(Sema &SemaRef, SourceLocation Loc, Decl *D, Expr *E,
     SemaRef.MarkAnyDeclReferenced(Loc, DM, MightBeOdrUse);
 }
 
+void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmExpr *E) {
+  // If the replacement refers to a consteval function or variable, track this
+  // substitution as a consteval-only expression so it gets diagnosed if used
+  // outside an immediate function context.
+  if (isUnevaluatedContext() || isImmediateFunctionContext())
+    return;
+
+  if (unwrapDeclRefToConstevalDecl(E))
+    ExprEvalContexts.back().ConstevalOnly.insert(E);
+}
+
 void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
   // [basic.def.odr] (CWG 1614)
   // A function is named by an expression or conversion [...]
@@ -21077,12 +21213,22 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
     if (auto *FD = dyn_cast<FunctionDecl>(E->getDecl());
         FD && FD->isImmediateFunction() && !FD->isDependentContext()) {
       ExprEvalContexts.back().ReferenceToConsteval.insert(E);
-
-      if (FD->getType()->isConstevalOnly())
-        ExprEvalContexts.back().ConstevalOnly.insert(E);
     } else if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-               VD && VD->getType()->isConstevalOnly()) {
-      ExprEvalContexts.back().ConstevalOnly.insert(E);
+               VD && !VD->getType()->getContainedAutoType()) {
+      if (VD->isConsteval()) {
+        ExprEvalContexts.back().ConstevalOnly.insert(E);
+      } else if (VD->isConstexpr() && VD->hasInit() &&
+                 !VD->getInit()->isValueDependent()) {
+        // For constexpr variables with deferred initialization (e.g., inline
+        // static data members of class templates), check if the evaluated
+        // value contains consteval-only content and upgrade if needed.
+        if (std::optional<bool> HasConstevalOnlyValue =
+                TryEvaluateConstevalOnlyValue(VD);
+            HasConstevalOnlyValue && *HasConstevalOnlyValue) {
+          VD->setConsteval(true);
+          ExprEvalContexts.back().ConstevalOnly.insert(E);
+        }
+      }
     }
   }
   MarkExprReferenced(*this, E->getLocation(), E->getDecl(), E, OdrUse,
@@ -21219,6 +21365,11 @@ public:
   void VisitMemberExpr(MemberExpr *E) {
     S.MarkMemberReferenced(E);
     Visit(E->getBase());
+  }
+
+  void VisitSubstNonTypeTemplateParmExpr(SubstNonTypeTemplateParmExpr *E) {
+    S.MarkSubstNonTypeTemplateParmExprReferenced(E);
+    Visit(E->getReplacement());
   }
 };
 } // namespace

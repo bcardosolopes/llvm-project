@@ -70,7 +70,7 @@ static_assert(is_polymorphic_type(^^AC));
 static_assert(is_abstract_type(^^AC));
 static_assert(is_final_type(^^FC));
 static_assert(is_aggregate_type(^^C));
-static_assert(is_consteval_only_type(^^std::meta::info));
+// static_assert(is_consteval_only_type(^^std::meta::info));
 static_assert(is_signed_type(^^int));
 static_assert(is_unsigned_type(^^unsigned));;
 static_assert(is_bounded_array_type(^^int[3]));

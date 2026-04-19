@@ -19251,15 +19251,6 @@ void Sema::ActOnCXXExitDeclInitializer(Scope *S, Decl *D) {
   if (S && D->isOutOfLine())
     ExitDeclaratorContext(S);
 
-  // The initializer of a variable of consteval-only type is part of the
-  // declaration. An ill-formed such declaration (neither constexpr nor in a
-  // constant-evaluated context) is diagnosed separately in
-  // CheckCompleteVariableDeclaration, so the consteval-only subexpressions of
-  // its initializer must not additionally be diagnosed as runtime uses here.
-  if (auto *VD = dyn_cast<VarDecl>(D);
-      VD && VD->getType()->isConstevalOnly() && !ExprEvalContexts.empty())
-    ExprEvalContexts.back().ConstevalOnly.clear();
-
   PopExpressionEvaluationContext();
 }
 

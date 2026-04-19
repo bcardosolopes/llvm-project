@@ -936,8 +936,7 @@ __sort_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp& 
     std::__partial_sort<_AlgPolicy>(
         std::__unwrap_iter(__first), std::__unwrap_iter(__last), std::__unwrap_iter(__last), __comp);
   } else {
-    if constexpr (!__is_consteval_only(_RandomAccessIterator))
-      std::__sort_dispatch<_AlgPolicy>(std::__unwrap_iter(__first), std::__unwrap_iter(__last), __comp);
+    std::__sort_dispatch<_AlgPolicy>(std::__unwrap_iter(__first), std::__unwrap_iter(__last), __comp);
   }
   std::__check_strict_weak_ordering_sorted(std::__unwrap_iter(__first), std::__unwrap_iter(__last), __comp);
 }

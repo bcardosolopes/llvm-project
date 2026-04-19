@@ -3242,12 +3242,9 @@ def err_placeholder_constraints_not_satisfied : Error<
   "deduced type %0 does not satisfy %1">;
 
 // Reflection (P2996)
-def err_expr_consteval_only_type : Error<
-  "expressions of consteval-only type are only allowed in constant-evaluated "
+def err_expr_consteval_var : Error<
+  "expressions involving consteval-only values are only allowed in constant-evaluated "
   "contexts">;
-def err_decl_consteval_only_type : Error<
-  "variable %0 of consteval-only type must either be constexpr or in a "
-  "constant-evaluated context">;
 
 def err_reflect_general_expression : Error<
   "reflection operand must be a named entity">;

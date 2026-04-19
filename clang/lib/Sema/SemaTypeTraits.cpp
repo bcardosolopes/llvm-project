@@ -418,10 +418,6 @@ static bool CheckUnaryTypeTraitTypeCompleteness(Sema &S, TypeTrait UTT,
     return !S.RequireCompleteType(
         Loc, ArgTy, diag::err_incomplete_type_used_in_type_trait_expr);
 
-  case UTT_IsConstevalOnly:
-    return !S.RequireCompleteType(
-        Loc, ArgTy, diag::err_incomplete_type_used_in_type_trait_expr);
-
     // has_unique_object_representations<T>
     // remove_all_extents_t<T> shall be a complete type or cv void (LWG4113).
   case UTT_HasUniqueObjectRepresentations:
@@ -763,8 +759,6 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
   // __is_interface_class only returns true when CL is invoked in /CLR mode and
   // even then only when it is used with the 'interface struct ...' syntax
   // Clang doesn't support /CLR which makes this type trait moot.
-  case UTT_IsConstevalOnly:
-    return T->isConstevalOnly();
   case UTT_IsInterfaceClass:
     return false;
   case UTT_IsFinal:

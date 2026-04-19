@@ -1126,6 +1126,10 @@ protected:
     /// loop.
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsCXXForRangeImplicitVar : 1;
+
+    /// Whether this variable is (C++26) consteval.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsConsteval : 1;
   };
 
   union {
@@ -1591,6 +1595,15 @@ public:
   void setConstexpr(bool IC) {
     assert(!isa<ParmVarDecl>(this));
     NonParmVarDeclBits.IsConstexpr = IC;
+  }
+
+  /// Whether this variable is (C++26) consteval.
+  bool isConsteval() const {
+    return isa<ParmVarDecl>(this) ? false : NonParmVarDeclBits.IsConsteval;
+  }
+  void setConsteval(bool IC) {
+    assert(!isa<ParmVarDecl>(this));
+    NonParmVarDeclBits.IsConsteval = IC;
   }
 
   /// Whether this variable is the implicit variable for a lambda init-capture.
@@ -4511,10 +4524,6 @@ public:
   bool isRandomized() const { return RecordDeclBits.IsRandomized; }
 
   void setIsRandomized(bool V) { RecordDeclBits.IsRandomized = V; }
-
-  bool isConstevalOnly() const { return RecordDeclBits.IsConstevalOnly; }
-
-  void setIsConstevalOnly(bool V) { RecordDeclBits.IsConstevalOnly = V; }
 
   void reorderDecls(const SmallVectorImpl<Decl *> &Decls);
 

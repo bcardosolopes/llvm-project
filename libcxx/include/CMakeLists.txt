@@ -851,7 +851,6 @@ set(files
   __type_traits/is_compound.h
   __type_traits/is_const.h
   __type_traits/is_constant_evaluated.h
-  __type_traits/is_consteval_only.h
   __type_traits/is_constructible.h
   __type_traits/is_convertible.h
   __type_traits/is_core_convertible.h

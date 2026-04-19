@@ -1913,12 +1913,6 @@ private:
     LLVM_PREFERRED_TYPE(bool)
     mutable unsigned FromAST : 1;
 
-    /// P2996 reflection: whether this type is "consteval-only" (i.e., may only
-    /// appear during constant evaluation, e.g. std::meta::info). Propagated
-    /// through composed types.
-    LLVM_PREFERRED_TYPE(bool)
-    unsigned ConstevalOnly : 1;
-
     bool isCacheValid() const {
       return CacheValid;
     }
@@ -2413,8 +2407,7 @@ private:
 protected:
   friend class ASTContext;
 
-  Type(TypeClass tc, QualType canon, TypeDependence Dependence,
-       bool ConstevalOnly = false)
+  Type(TypeClass tc, QualType canon, TypeDependence Dependence)
       : ExtQualsTypeCommonBase(this,
                                canon.isNull() ? QualType(this_(), 0) : canon) {
     static_assert(sizeof(*this) <=
@@ -2428,7 +2421,6 @@ protected:
     TypeBits.CachedLocalOrUnnamed = false;
     TypeBits.CachedLinkage = llvm::to_underlying(Linkage::Invalid);
     TypeBits.FromAST = false;
-    TypeBits.ConstevalOnly = ConstevalOnly;
   }
 
   // silence VC++ warning C4355: 'this' : used in base member initializer list
@@ -2439,9 +2431,6 @@ protected:
   }
 
   void addDependence(TypeDependence D) { setDependence(getDependence() | D); }
-
-  /// P2996 reflection: set whether this type is consteval-only.
-  void setConstevalOnly(bool C = true) { TypeBits.ConstevalOnly = C; }
 
 public:
   friend class ASTReader;
@@ -2662,7 +2651,6 @@ public:
   bool isArithmeticType() const;   // C99 6.2.5p18 (integer + floating)
   bool isVoidType() const;         // C99 6.2.5p19
   bool isReflectionType() const;   // C++2c reflection [P2996]
-  bool isConstevalOnly() const;    // C++2c reflection [P2996]
   bool isScalarType() const;       // C99 6.2.5p21 (arithmetic + pointers)
   bool isAggregateType() const;
   bool isFundamentalType() const;
@@ -3277,8 +3265,7 @@ private:
   BuiltinType(Kind K)
       : Type(Builtin, QualType(),
              K == Dependent ? TypeDependence::DependentInstantiation
-                            : TypeDependence::None,
-             /*ConstevalOnly=*/(K == MetaInfo)) {
+                            : TypeDependence::None) {
     static_assert(Kind::LastKind <
                       (1 << BuiltinTypeBitfields::NumOfBuiltinTypeBits) &&
                   "Defined builtin type exceeds the allocated space for serial "
@@ -3409,8 +3396,7 @@ class PointerType : public Type, public llvm::FoldingSetNode {
   QualType PointeeType;
 
   PointerType(QualType Pointee, QualType CanonicalPtr)
-      : Type(Pointer, CanonicalPtr, Pointee->getDependence(),
-             Pointee->isConstevalOnly()),
+      : Type(Pointer, CanonicalPtr, Pointee->getDependence()),
         PointeeType(Pointee) {}
 
 public:
@@ -3655,8 +3641,7 @@ class ReferenceType : public Type, public llvm::FoldingSetNode {
 protected:
   ReferenceType(TypeClass tc, QualType Referencee, QualType CanonicalRef,
                 bool SpelledAsLValue)
-      : Type(tc, CanonicalRef, Referencee->getDependence(),
-             Referencee->isConstevalOnly()),
+      : Type(tc, CanonicalRef, Referencee->getDependence()),
         PointeeType(Referencee) {
     ReferenceTypeBits.SpelledAsLValue = SpelledAsLValue;
     ReferenceTypeBits.InnerRef = Referencee->isReferenceType();
@@ -4908,8 +4893,7 @@ public:
 protected:
   FunctionType(TypeClass tc, QualType res, QualType Canonical,
                TypeDependence Dependence, ExtInfo Info)
-      : Type(tc, Canonical, Dependence,
-             /*ConstevalOnly=*/res->isConstevalOnly()), ResultType(res) {
+      : Type(tc, Canonical, Dependence), ResultType(res) {
     FunctionTypeBits.ExtInfo = Info.Bits;
   }
 
@@ -6272,8 +6256,7 @@ class MacroQualifiedType : public Type {
 
   MacroQualifiedType(QualType UnderlyingTy, QualType CanonTy,
                      const IdentifierInfo *MacroII)
-      : Type(MacroQualified, CanonTy, UnderlyingTy->getDependence(),
-             UnderlyingTy->isConstevalOnly()),
+      : Type(MacroQualified, CanonTy, UnderlyingTy->getDependence()),
         UnderlyingTy(UnderlyingTy), MacroII(MacroII) {
     assert(isa<AttributedType>(UnderlyingTy) &&
            "Expected a macro qualified type to only wrap attributed types.");

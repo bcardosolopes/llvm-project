@@ -40,42 +40,36 @@ int main() {
               // ======================
  constexpr A expectedClass{};
  reflect_invoke(^^A::fn, {^^expectedClass});
- // expected-error@-1 {{expressions of consteval-only type}}
+ // expected-error@-1 {{expressions involving consteval-only values}}
 
  reflect_invoke(^^A::void_fn, {^^expectedClass});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
  // expected-note@-2 {{cannot invoke reflection of void-returning function}}
- // expected-error@-3 {{consteval-only type}}
- 
+
  reflect_invoke(^^A::fn, {});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
  // expected-note@-2 {{expected related object reflection as a first argument for invoking non-static member function}}
- // expected-error@-3 {{consteval-only type}}
 
  reflect_invoke(^^A::fn, {std::meta::reflect_constant(42)});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
  // expected-note@-2 {{expected related object reflection as a first argument for invoking non-static member function}}
- // expected-error@-3 {{consteval-only type}}
 
  constexpr B differentClass{};
  reflect_invoke(^^A::fn, {^^differentClass});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
  // expected-note@-2 {{method is not a member of given object reflection}}
- // expected-error@-3 {{consteval-only type}}
 
  constexpr NS::A differentNamespaceClass{};
  reflect_invoke(^^A::fn, {^^differentNamespaceClass});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
  // expected-note@-2 {{method is not a member of given object reflection}}
- // expected-error@-3 {{consteval-only type}}
 
  // test that implementation workaround with getting constexpr method from pointer couldn't be abused
  constexpr int (A::*constexpr_pointer)() const = &A::fn;
  reflect_invoke(^^constexpr_pointer, {^^expectedClass}); // ok
- // expected-error@-1 {{consteval-only type}}
+ // expected-error@-1 {{consteval-only values}}
 
  int (A::*pointer)() const = &A::fn;
  reflect_invoke(^^pointer, {^^expectedClass});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
- // expected-error@-2 {{consteval-only type}}
 }

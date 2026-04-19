@@ -154,10 +154,6 @@ module std_core [system] {
       header "__type_traits/is_constant_evaluated.h"
       export std_core.type_traits.integral_constant
     }
-    module is_consteval_only {
-      header "__type_traits/is_consteval_only.h"
-      export std_core.type_traits.integral_constant
-    }
     module is_constructible {
       header "__type_traits/is_constructible.h"
       export std_core.type_traits.integral_constant

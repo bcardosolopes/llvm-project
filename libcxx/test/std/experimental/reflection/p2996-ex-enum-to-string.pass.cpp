@@ -51,6 +51,10 @@ constexpr std::optional<E> string_to_enum(std::string_view name) {
 int main() {
   enum Color { red, green, blue };
 
+  // these function templates should not escalate — they should be constepxr
+  [[maybe_unused]] auto e2s = enum_to_string<Color>;
+  [[maybe_unused]] auto s2e = string_to_enum<Color>;
+
   static_assert(enum_to_string(Color::red) == "red");
 
   static_assert(string_to_enum<Color>("red") == Color::red);

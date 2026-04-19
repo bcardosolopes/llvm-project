@@ -69,9 +69,6 @@ def note_constexpr_dynamic_alloc : Note<
 def note_consteval_address_accessible : Note<
   "%select{pointer|reference}0 to a consteval declaration "
   "is not a constant expression">;
-def note_consteval_only_smuggling : Note<
-  "%select{pointer|reference}0 into an object of consteval-only type is not "
-  "a constant expression unless it also has consteval-only type">;
 def note_constexpr_uninitialized : Note<
   "subobject %select{of type |}0%1 is not initialized">;
 def note_constexpr_uninitialized_base : Note<

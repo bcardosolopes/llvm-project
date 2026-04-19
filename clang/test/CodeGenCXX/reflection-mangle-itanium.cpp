@@ -2,6 +2,6 @@
 // RUN:   -emit-llvm -o - %s -verify
 
 int main() {
-  (void)(^^int); // expected-error {{expressions of consteval-only type are only allowed in constant-evaluated contexts}}
+  (void)(^^int); // expected-error {{expressions involving consteval-only values are only allowed in constant-evaluated contexts}}
   return 0;
 }

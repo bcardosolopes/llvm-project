@@ -365,7 +365,7 @@ static_assert(^^decltype(Cls<^^fn>::Impl(&fn)) == ^^Cls<^^fn>::Impl<void, int>);
                   // ========================================
 
 namespace bb_clang_p2996_issue_131_regression_test {
-struct Y 
+struct Y
 {
     int g(this Y const&, int, int);
 };

@@ -7377,7 +7377,7 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
     APValue PreNarrowingValue;
     ArgResult = EvaluateConvertedConstantExpression(
         ArgResult.get(), ParamType, Value, CCEKind::TemplateArg, /*RequireInt=*/
-        false, PreNarrowingValue);
+        false, PreNarrowingValue, Param);
     if (ArgResult.isInvalid())
       return ExprError();
     setDeductionArg(ArgResult.get());
@@ -8024,11 +8024,13 @@ ExprResult Sema::BuildExpressionFromDeclTemplateArgument(
       QualType TemplateParamType = NTTP->getType();
       const AutoType *AT = TemplateParamType->getAs<AutoType>();
       if (AT && AT->isDecltypeAuto()) {
-        RefExpr = new (getASTContext()) SubstNonTypeTemplateParmExpr(
+        auto *SNTTPE = new (getASTContext()) SubstNonTypeTemplateParmExpr(
             ParamType->getPointeeType(), RefExpr.get()->getValueKind(),
             RefExpr.get()->getExprLoc(), RefExpr.get(), VD, NTTP->getIndex(),
             /*PackIndex=*/std::nullopt,
             /*RefParam=*/true, /*Final=*/true);
+        MarkSubstNonTypeTemplateParmExprReferenced(SNTTPE);
+        RefExpr = SNTTPE;
       }
     }
   }

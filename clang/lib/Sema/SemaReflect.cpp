@@ -843,10 +843,7 @@ ExprResult Sema::ConstevalOnlyRecorder::RecordAndReturn(ExprResult Res) {
   if (Res.isInvalid())
     return Res;
 
-  Expr *E = Res.get();
-  assert(E->getType()->isConstevalOnly() &&
-         "expected an expression of consteval-only type");
-  TheExpr = E;
+  TheExpr = Res.get();
   return Res;
 }
 
@@ -1424,6 +1421,10 @@ Sema::BuildSpliceSpecifier(SourceLocation LSpliceLoc, Expr *Operand,
   if (Result.isInvalid())
     return SpliceError();
   Operand = Result.get();
+
+  // The splice operand is always constant-evaluated, so remove any
+  // consteval-only tracking that was added by DefaultLvalueConversion.
+  ExprEvalContexts.back().ConstevalOnly.erase(Operand);
 
   auto Dep = toSpliceSpecifierDependence(Operand->getDependence());
   if (Dep == SpliceSpecifierDependence::None &&

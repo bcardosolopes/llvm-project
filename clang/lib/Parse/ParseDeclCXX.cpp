@@ -1735,7 +1735,6 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
 #include "clang/Basic/TransformTypeTraits.def"
           tok::kw___is_abstract,
           tok::kw___is_aggregate,
-          tok::kw___is_consteval_only,
           tok::kw___is_arithmetic,
           tok::kw___is_array,
           tok::kw___is_assignable,

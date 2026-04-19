@@ -159,7 +159,10 @@ bool tryMakeCXXIterableExpansionSelectExpr(
 
     RangeVar = VarDecl::Create(S.Context, DC, Range->getBeginLoc(),
                                Range->getBeginLoc(), II, QT, TSI, SC_Auto);
-    if (ExpansionVar->isConstexpr())
+    if (ExpansionVar->isConsteval()) {
+      RangeVar->setConsteval(true);
+      RangeVar->setConstexpr(true);
+    } else if (ExpansionVar->isConstexpr())
       RangeVar->setConstexpr(true);
     else if (!LifetimeExtendTemps.empty()) {
       InitializedEntity Entity =
@@ -261,7 +264,10 @@ ExprResult makeCXXDestructurableExpansionSelectExpr(
                                                     Range->getBeginLoc(),
                                                     QT, TSI,
                                                     SC_Auto, Bindings);
-  if (ExpansionVar->isConstexpr())
+  if (ExpansionVar->isConsteval()) {
+    DD->setConsteval(true);
+    DD->setConstexpr(true);
+  } else if (ExpansionVar->isConstexpr())
     DD->setConstexpr(true);
 
   if (!LifetimeExtendTemps.empty()) {

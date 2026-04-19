@@ -19,7 +19,6 @@
 #include <__new/exceptions.h>
 #include <__type_traits/is_const.h>
 #include <__type_traits/is_constant_evaluated.h>
-#include <__type_traits/is_consteval_only.h>
 #include <__type_traits/is_same.h>
 #include <__type_traits/is_void.h>
 #include <__type_traits/is_volatile.h>
@@ -89,10 +88,6 @@ public:
       std::__throw_bad_array_new_length();
     if (__libcpp_is_constant_evaluated()) {
       return static_cast<_Tp*>(::operator new(__n * sizeof(_Tp)));
-#if _LIBCPP_STD_VER >= 26
-    } else if constexpr (is_consteval_only_v<_Tp>) {
-      return nullptr;
-#endif
     } else {
       return std::__libcpp_allocate<_Tp>(__element_count(__n));
     }
@@ -108,11 +103,7 @@ public:
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 void deallocate(_Tp* __p, size_t __n) _NOEXCEPT {
     if (__libcpp_is_constant_evaluated()) {
       ::operator delete(__p);
-#if _LIBCPP_STD_VER >= 26
-    } else if constexpr (!is_consteval_only_v<_Tp>) {
-#else
     } else {
-#endif
       std::__libcpp_deallocate<_Tp>(__p, __element_count(__n));
     }
   }

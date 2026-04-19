@@ -209,7 +209,6 @@ consteval auto is_polymorphic_type(info) -> bool;
 consteval auto is_abstract_type(info) -> bool;
 consteval auto is_final_type(info) -> bool;
 consteval auto is_aggregate_type(info) -> bool;
-consteval auto is_consteval_only_type(info) -> bool;
 consteval auto is_signed_type(info) -> bool;
 consteval auto is_unsigned_type(info) -> bool;
 consteval auto is_bounded_array_type(info) -> bool;
@@ -1584,10 +1583,6 @@ consteval auto is_final_type(info r) -> bool {
 
 consteval auto is_aggregate_type(info r) -> bool {
   return extract<bool>(substitute(^^is_aggregate_v, {r}));
-}
-
-consteval auto is_consteval_only_type(info r) -> bool {
-  return extract<bool>(substitute(^^is_consteval_only_v, {r}));
 }
 
 consteval auto is_signed_type(info r) -> bool {

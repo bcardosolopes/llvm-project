@@ -228,7 +228,7 @@ ArrayType::ArrayType(TypeClass tc, QualType et, QualType can,
                                     : TypeDependence::None) |
                (tc == DependentSizedArray
                     ? TypeDependence::DependentInstantiation
-                    : TypeDependence::None), et->isConstevalOnly()),
+                    : TypeDependence::None)),
       ElementType(et) {
   ArrayTypeBits.IndexTypeQuals = tq;
   ArrayTypeBits.SizeModifier = llvm::to_underlying(sm);
@@ -345,8 +345,7 @@ DependentVectorType::DependentVectorType(QualType ElementType,
            TypeDependence::DependentInstantiation |
                ElementType->getDependence() |
                (SizeExpr ? toTypeDependence(SizeExpr->getDependence())
-                         : TypeDependence::None),
-            ElementType->isConstevalOnly()),
+                         : TypeDependence::None)),
       ElementType(ElementType), SizeExpr(SizeExpr), Loc(Loc) {
   VectorTypeBits.VecKind = llvm::to_underlying(VecKind);
 }
@@ -368,8 +367,7 @@ DependentSizedExtVectorType::DependentSizedExtVectorType(QualType ElementType,
            TypeDependence::DependentInstantiation |
                ElementType->getDependence() |
                (SizeExpr ? toTypeDependence(SizeExpr->getDependence())
-                         : TypeDependence::None),
-            ElementType->isConstevalOnly()),
+                         : TypeDependence::None)),
       SizeExpr(SizeExpr), ElementType(ElementType), loc(loc) {}
 
 void DependentSizedExtVectorType::Profile(llvm::FoldingSetNodeID &ID,
@@ -388,8 +386,7 @@ DependentAddressSpaceType::DependentAddressSpaceType(QualType PointeeType,
            TypeDependence::DependentInstantiation |
                PointeeType->getDependence() |
                (AddrSpaceExpr ? toTypeDependence(AddrSpaceExpr->getDependence())
-                              : TypeDependence::None),
-           PointeeType->isConstevalOnly()),
+                              : TypeDependence::None)),
       AddrSpaceExpr(AddrSpaceExpr), PointeeType(PointeeType), loc(loc) {}
 
 void DependentAddressSpaceType::Profile(llvm::FoldingSetNodeID &ID,
@@ -415,8 +412,7 @@ MatrixType::MatrixType(TypeClass tc, QualType matrixType, QualType canonType,
                                  ColumnExpr->containsUnexpandedParameterPack())
                             ? TypeDependence::UnexpandedPack
                             : TypeDependence::None))
-                    : matrixType->getDependence()),
-           matrixType->isConstevalOnly()),
+                    : matrixType->getDependence())),
       ElementType(matrixType) {}
 
 ConstantMatrixType::ConstantMatrixType(QualType matrixType, unsigned nRows,
@@ -454,7 +450,7 @@ VectorType::VectorType(QualType vecType, unsigned nElements, QualType canonType,
 
 VectorType::VectorType(TypeClass tc, QualType vecType, unsigned nElements,
                        QualType canonType, VectorKind vecKind)
-    : Type(tc, canonType, vecType->getDependence(), vecType->isConstevalOnly()),
+    : Type(tc, canonType, vecType->getDependence()),
       ElementType(vecType) {
   VectorTypeBits.VecKind = llvm::to_underlying(vecKind);
   VectorTypeBits.NumElements = nElements;
@@ -467,13 +463,12 @@ bool Type::isPackedVectorBoolType(const ASTContext &ctx) const {
 }
 
 BitIntType::BitIntType(bool IsUnsigned, unsigned NumBits)
-    : Type(BitInt, QualType{}, TypeDependence::None, /*ConstevalOnly=*/false),
+    : Type(BitInt, QualType{}, TypeDependence::None),
       IsUnsigned(IsUnsigned), NumBits(NumBits) {}
 
 DependentBitIntType::DependentBitIntType(bool IsUnsigned, Expr *NumBitsExpr)
     : Type(DependentBitInt, QualType{},
-           toTypeDependence(NumBitsExpr->getDependence()),
-           /*ConstevalOnly=*/false),
+           toTypeDependence(NumBitsExpr->getDependence())),
       ExprAndUnsigned(NumBitsExpr, IsUnsigned) {}
 
 bool DependentBitIntType::isUnsigned() const {
@@ -737,25 +732,6 @@ bool Type::isStructureTypeWithFlexibleArrayMember() const {
   return Decl->getDefinitionOrSelf()->hasFlexibleArrayMember();
 }
 
-bool Type::isConstevalOnly() const {
-  const Type *CanonType = getCanonicalTypeInternal().getTypePtr();
-  if (CanonType != this)
-    return CanonType->isConstevalOnly();
-  if (TypeBits.ConstevalOnly)
-    return true;
-  // Pointers and references to consteval-only types are themselves
-  // consteval-only. Check the pointee dynamically rather than relying solely on
-  // the bit captured at construction time, which may have been computed before
-  // the pointee record's consteval-only-ness was known.
-  if (const auto *PT = dyn_cast<PointerType>(this))
-    return PT->getPointeeType()->isConstevalOnly();
-  if (const auto *RT = dyn_cast<ReferenceType>(this))
-    return RT->getPointeeType()->isConstevalOnly();
-  if (auto *RD = getAsRecordDecl())
-    return RD->isConstevalOnly();
-  return false;
-}
-
 bool Type::isObjCBoxableRecordType() const {
   if (const auto *RD = getAsRecordDecl())
     return RD->hasAttr<ObjCBoxableAttr>();
@@ -915,8 +891,7 @@ bool Type::isObjCClassOrClassKindOfType() const {
 
 ObjCTypeParamType::ObjCTypeParamType(const ObjCTypeParamDecl *D, QualType can,
                                      ArrayRef<ObjCProtocolDecl *> protocols)
-    : Type(ObjCTypeParam, can, toSemanticDependence(can->getDependence()),
-           /*ConstevalOnly=*/false),
+    : Type(ObjCTypeParam, can, toSemanticDependence(can->getDependence())),
       OTPDecl(const_cast<ObjCTypeParamDecl *>(D)) {
   initialize(protocols);
 }
@@ -925,8 +900,7 @@ ObjCObjectType::ObjCObjectType(QualType Canonical, QualType Base,
                                ArrayRef<QualType> typeArgs,
                                ArrayRef<ObjCProtocolDecl *> protocols,
                                bool isKindOf)
-    : Type(ObjCObject, Canonical, Base->getDependence(),
-           /*ConstevalOnly=*/false),
+    : Type(ObjCObject, Canonical, Base->getDependence()),
       BaseType(Base) {
   ObjCObjectTypeBits.IsKindOf = isKindOf;
 
@@ -3860,9 +3834,6 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
     addDependence(params[i]->getDependence() &
                   ~TypeDependence::VariablyModified);
     argSlot[i] = params[i];
-
-    if (params[i]->isConstevalOnly())
-      setConstevalOnly(true);
   }
 
   // Propagate the SME ACLE attributes.
@@ -4150,7 +4121,7 @@ OverflowBehaviorType::OverflowBehaviorType(
 
 BoundsAttributedType::BoundsAttributedType(TypeClass TC, QualType Wrapped,
                                            QualType Canon)
-    : Type(TC, Canon, Wrapped->getDependence(), false), WrappedTy(Wrapped) {}
+    : Type(TC, Canon, Wrapped->getDependence()), WrappedTy(Wrapped) {}
 
 CountAttributedType::CountAttributedType(
     QualType Wrapped, QualType Canon, Expr *CountExpr, bool CountInBytes,
@@ -4263,8 +4234,7 @@ TypeOfExprType::TypeOfExprType(const ASTContext &Context, Expr *E,
                : Can,
            toTypeDependence(E->getDependence()) |
                (E->getType()->getDependence() &
-                TypeDependence::VariablyModified),
-           E->getType()->isConstevalOnly()),
+                TypeDependence::VariablyModified)),
       TOExpr(E), Context(Context) {
   TypeOfBits.Kind = static_cast<unsigned>(Kind);
 }
@@ -4294,7 +4264,7 @@ TypeOfType::TypeOfType(const ASTContext &Context, QualType T, QualType Can,
            Kind == TypeOfKind::Unqualified
                ? Context.getUnqualifiedArrayType(Can).getAtomicUnqualifiedType()
                : Can,
-           T->getDependence(), /*ConstevalOnly=*/false),
+           T->getDependence()),
       TOType(T), Context(Context) {
   TypeOfBits.Kind = static_cast<unsigned>(Kind);
 }
@@ -4315,8 +4285,7 @@ DecltypeType::DecltypeType(Expr *E, QualType underlyingType, QualType can)
                (E->isInstantiationDependent() ? TypeDependence::Dependent
                                               : TypeDependence::None) |
                (E->getType()->getDependence() &
-                TypeDependence::VariablyModified),
-           E->getType()->isConstevalOnly()),
+                TypeDependence::VariablyModified)),
       E(E), UnderlyingType(underlyingType) {}
 
 bool DecltypeType::isSugared() const { return !E->isInstantiationDependent(); }
@@ -4350,8 +4319,7 @@ ReflectionSpliceType::ReflectionSpliceType(SourceLocation TypenameKWLoc,
                                            SpliceSpecifier *Splice,
                                            QualType Canon)
   : Type(ReflectionSplice, Canon,
-         ReflectionSpliceType::computeDependence(Canon, Splice),
-         Canon->isConstevalOnly()),
+         ReflectionSpliceType::computeDependence(Canon, Splice)),
     TypenameKWLoc(TypenameKWLoc), Splice(Splice), UnderlyingTy(Canon) {
 }
 
@@ -4384,8 +4352,7 @@ PackIndexingType::PackIndexingType(QualType Canonical, QualType Pattern,
                                    Expr *IndexExpr, bool FullySubstituted,
                                    ArrayRef<QualType> Expansions)
     : Type(PackIndexing, Canonical,
-           computeDependence(Pattern, IndexExpr, Expansions),
-           Canonical.isNull() ? false : Canonical->isConstevalOnly()),
+           computeDependence(Pattern, IndexExpr, Expansions)),
       Pattern(Pattern), IndexExpr(IndexExpr), Size(Expansions.size()),
       FullySubstituted(FullySubstituted) {
 
@@ -4454,8 +4421,7 @@ void PackIndexingType::Profile(llvm::FoldingSetNodeID &ID,
 UnaryTransformType::UnaryTransformType(QualType BaseType,
                                        QualType UnderlyingType, UTTKind UKind,
                                        QualType CanonicalType)
-    : Type(UnaryTransform, CanonicalType, BaseType->getDependence(),
-           BaseType->isConstevalOnly()),
+    : Type(UnaryTransform, CanonicalType, BaseType->getDependence()),
       BaseType(BaseType), UnderlyingType(UnderlyingType), UKind(UKind) {}
 
 TagType::TagType(TypeClass TC, ElaboratedTypeKeyword Keyword,
@@ -4570,8 +4536,7 @@ AttributedType::AttributedType(QualType canon, const Attr *attr,
 AttributedType::AttributedType(QualType canon, attr::Kind attrKind,
                                const Attr *attr, QualType modified,
                                QualType equivalent)
-    : Type(Attributed, canon, equivalent->getDependence(),
-           /*ConstevalOnly=*/false), Attribute(attr),
+    : Type(Attributed, canon, equivalent->getDependence()), Attribute(attr),
       ModifiedType(modified), EquivalentType(equivalent) {
   AttributedTypeBits.AttrKind = attrKind;
   assert(!attr || attr->getKind() == attrKind);
@@ -4661,7 +4626,7 @@ SubstTemplateTypeParmType::SubstTemplateTypeParmType(QualType Replacement,
                                                      UnsignedOrNone PackIndex,
                                                      bool Final)
     : Type(SubstTemplateTypeParm, Replacement.getCanonicalType(),
-           Replacement->getDependence(), /*ConstevalOnly=*/false),
+           Replacement->getDependence()),
       AssociatedDecl(AssociatedDecl) {
   SubstTemplateTypeParmTypeBits.HasNonCanonicalUnderlyingType =
       Replacement != getCanonicalTypeInternal();
@@ -5743,7 +5708,6 @@ DeducedType::DeducedType(TypeClass TC, DeducedKind DK,
     addDependence(DeducedAsTypeOrCanon->getDependence() &
                   ~TypeDependence::VariablyModified);
     DeducedAsType = DeducedAsTypeOrCanon;
-    setConstevalOnly(DeducedAsTypeOrCanon->isConstevalOnly());
     break;
   case DeducedKind::DeducedAsPack:
     addDependence(TypeDependence::UnexpandedPack);

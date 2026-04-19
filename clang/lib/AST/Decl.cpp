@@ -3301,49 +3301,6 @@ static bool isNamed(const NamedDecl *ND, const char (&Str)[Len]) {
   return II && II->isStr(Str);
 }
 
-// Recompute, from scratch, whether a type is transitively consteval-only,
-// without relying on the cached RecordDecl bit. The cached bit is computed when
-// a record's definition completes, which may be before the definitions of
-// records reachable only through pointers/references are complete; in those
-// cases the cached bit can be a stale 'false'. This is only used on the
-// (rare) destructor-escalation path, so the extra traversal is acceptable.
-static bool isTypeTransitivelyConstevalOnly(
-    QualType T, llvm::SmallPtrSetImpl<const RecordDecl *> &Visited) {
-  const Type *Ty = T.getCanonicalType().getTypePtr();
-  if (const auto *PT = Ty->getAs<PointerType>())
-    return isTypeTransitivelyConstevalOnly(PT->getPointeeType(), Visited);
-  if (const auto *RT = Ty->getAs<ReferenceType>())
-    return isTypeTransitivelyConstevalOnly(RT->getPointeeType(), Visited);
-  if (const auto *MPT = Ty->getAs<MemberPointerType>())
-    return isTypeTransitivelyConstevalOnly(MPT->getPointeeType(), Visited);
-  if (const ArrayType *AT = Ty->getAsArrayTypeUnsafe())
-    return isTypeTransitivelyConstevalOnly(AT->getElementType(), Visited);
-  if (auto *RD = Ty->getAsRecordDecl()) {
-    RD = RD->getDefinitionOrSelf();
-    if (RD->isConstevalOnly()) // Cached 'true' is always correct.
-      return true;
-    if (!RD->isCompleteDefinition())
-      return false;
-    if (!Visited.insert(RD).second)
-      return false;
-    bool Result = false;
-    for (const FieldDecl *FD : RD->fields())
-      if (isTypeTransitivelyConstevalOnly(FD->getType(), Visited)) {
-        Result = true;
-        break;
-      }
-    if (!Result)
-      if (const auto *CXXRD = dyn_cast<CXXRecordDecl>(RD))
-        for (const CXXBaseSpecifier &Base : CXXRD->bases())
-          if (isTypeTransitivelyConstevalOnly(Base.getType(), Visited)) {
-            Result = true;
-            break;
-          }
-    return Result;
-  }
-  return Ty->isConstevalOnly();
-}
-
 bool FunctionDecl::isImmediateEscalating() const {
   // C++23 [expr.const]/p17
   // An immediate-escalating function is
@@ -3360,31 +3317,9 @@ bool FunctionDecl::isImmediateEscalating() const {
       CD && CD->isInheritingConstructor())
     return CD->getInheritedConstructor().getConstructor();
 
-  // Destructors are not immediate escalating, except those of consteval-only
-  // class types (P2996): such objects only exist during constant evaluation, so
-  // their destructors must be able to escalate like the operations that use
-  // consteval-only values.
-  if (const auto *DD = dyn_cast<CXXDestructorDecl>(this)) {
-    const CXXRecordDecl *RD = DD->getParent();
-    bool ConstevalOnly = RD->isConstevalOnly();
-    if (!ConstevalOnly) {
-      llvm::SmallPtrSet<const RecordDecl *, 8> Visited;
-      Visited.insert(RD);
-      for (const FieldDecl *FD : RD->fields())
-        if (isTypeTransitivelyConstevalOnly(FD->getType(), Visited)) {
-          ConstevalOnly = true;
-          break;
-        }
-      if (!ConstevalOnly)
-        for (const CXXBaseSpecifier &Base : RD->bases())
-          if (isTypeTransitivelyConstevalOnly(Base.getType(), Visited)) {
-            ConstevalOnly = true;
-            break;
-          }
-    }
-    if (!ConstevalOnly)
-      return false;
-  }
+  // Destructors are not immediate escalating.
+  if (isa<CXXDestructorDecl>(this))
+    return false;
 
   // - a function that results from the instantiation of a templated entity
   // defined with the constexpr specifier.
@@ -5306,7 +5241,6 @@ RecordDecl::RecordDecl(Kind DK, TagKind TK, const ASTContext &C,
   setParamDestroyedInCallee(false);
   setArgPassingRestrictions(RecordArgPassingKind::CanPassInRegs);
   setIsRandomized(false);
-  setIsConstevalOnly(false);
   setODRHash(0);
 }
 
@@ -5374,23 +5308,6 @@ void RecordDecl::completeDefinition() {
   TagDecl::completeDefinition();
 
   ASTContext &Ctx = getASTContext();
-
-  // Compute whether this is a consteval-only type.
-  for (FieldDecl *FD : fields()) {
-    if (FD->getType()->isConstevalOnly()) {
-      setIsConstevalOnly(true);
-      break;
-    }
-  }
-  if (auto CXXRD = dyn_cast<CXXRecordDecl>(this);
-      CXXRD && !isConstevalOnly()) {
-    for (CXXBaseSpecifier BaseSpecifier : CXXRD->bases()) {
-      if (BaseSpecifier.getType()->isConstevalOnly()) {
-        setIsConstevalOnly(true);
-        break;
-      }
-    }
-  }
 
   // Layouts are dumped when computed, so if we are dumping for all complete
   // types, we need to force usage to get types that wouldn't be used elsewhere.

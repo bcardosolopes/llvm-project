@@ -35,9 +35,10 @@ bool Parser::isCXXDeclarationStatement(
   case tok::kw__Static_assert:
     return true;
   case tok::kw_consteval:
-    // consteval-block-declaration
-    if (getLangOpts().Reflection)
-      return NextToken().is(tok::l_brace);
+    // consteval-block-declaration or consteval variable declaration
+    if (getLangOpts().Reflection && NextToken().is(tok::l_brace))
+      return true;
+    // Otherwise check if it's a consteval variable declaration
     return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false);
   case tok::coloncolon:
   case tok::identifier: {
