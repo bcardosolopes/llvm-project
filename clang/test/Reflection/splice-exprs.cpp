@@ -19,8 +19,10 @@ struct C {
   };
 };
 
-auto c = C{.i=2};
-auto v = c.[:^^C::i:];  // expected-error {{not derived from}}
+// Splicing a member of an anonymous union normalizes to the IndirectFieldDecl
+// in the enclosing class, so member access works just like `c.i` would.
+constexpr auto c = C{.i=2};
+static_assert(c.[:^^C::i:] == 2);
 
 static union { int m; };
 constexpr auto r = ^^m;

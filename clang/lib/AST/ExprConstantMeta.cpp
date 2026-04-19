@@ -5746,10 +5746,15 @@ bool variable_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   ParmVarDecl *PVD = RV.getReflectedParameter();
   FunctionDecl *FD = cast<FunctionDecl>(PVD->getDeclContext());
 
-  if (Meta.CurrentCtx()->getCanonicalDecl() != FD->getCanonicalDecl())
-    return true;
-  assert(FD->getDefinition());
-  PVD = FD->getDefinition()->getParamDecl(PVD->getFunctionScopeIndex());
+  // Resolve to the parameter on the function definition (if there's one),
+  // so that subsequent uses see the same ParmVarDecl that the function body
+  // refers to. Note: we deliberately don't gate this on Sema's CurContext
+  // matching FD — the metafunction may be evaluated long after FD's parsing
+  // (e.g. when the function is constexpr-invoked from another scope), at
+  // which point Sema's lexical context bears no relation to whether we're
+  // "inside" FD.
+  if (FunctionDecl *Def = FD->getDefinition())
+    PVD = Def->getParamDecl(PVD->getFunctionScopeIndex());
 
   APValue Var(ReflectionKind::Declaration, PVD);
   return SetAndSucceed(Result, Var);
