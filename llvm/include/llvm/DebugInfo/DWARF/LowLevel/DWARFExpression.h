@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEBUGINFO_DWARF_DWARFEXPRESSION_H
-#define LLVM_DEBUGINFO_DWARF_DWARFEXPRESSION_H
+#ifndef LLVM_DEBUGINFO_DWARF_LOWLEVEL_DWARFEXPRESSION_H
+#define LLVM_DEBUGINFO_DWARF_LOWLEVEL_DWARFEXPRESSION_H
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator.h"
@@ -124,6 +124,9 @@ public:
     }
 
   public:
+    /// Get the byte offset of the current operation within the expression.
+    uint64_t getOffset() const { return Offset; }
+
     iterator &operator++() {
       Offset = Op.isError() ? Expr->Data.getData().size() : Op.EndOffset;
       Op.Error =
@@ -170,4 +173,4 @@ inline bool operator==(const DWARFExpression::iterator &LHS,
 
 } // end namespace llvm
 
-#endif // LLVM_DEBUGINFO_DWARF_DWARFEXPRESSION_H
+#endif // LLVM_DEBUGINFO_DWARF_LOWLEVEL_DWARFEXPRESSION_H

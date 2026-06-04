@@ -14,13 +14,16 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
+#include "clang/AST/TypeBase.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Overload.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
+#include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
 
@@ -503,13 +506,14 @@ CheckExtVectorComponent(Sema &S, QualType baseType, ExprValueKind &VK,
 
   QualType VT = S.Context.getExtVectorType(vecType->getElementType(), CompSize);
   // Now look up the TypeDefDecl from the vector type. Without this,
-  // diagostics look bad. We want extended vector types to appear built-in.
+  // diagnostics look bad. We want extended vector types to appear built-in.
   for (Sema::ExtVectorDeclsType::iterator
          I = S.ExtVectorDecls.begin(S.getExternalSource()),
          E = S.ExtVectorDecls.end();
        I != E; ++I) {
     if ((*I)->getUnderlyingType() == VT)
-      return S.Context.getTypedefType(*I);
+      return S.Context.getTypedefType(ElaboratedTypeKeyword::None,
+                                      /*Qualifier=*/std::nullopt, *I);
   }
 
   return VT; // should never get here (a typedef type should always be found).
@@ -901,7 +905,7 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
   // build a CXXDependentScopeMemberExpr.
   if (R.wasNotFoundInCurrentInstantiation() ||
       (R.getLookupName().getCXXOverloadedOperator() == OO_Equal &&
-       (SS.isSet() ? SS.getScopeRep()->isDependent()
+       (SS.isSet() ? SS.getScopeRep().isDependent()
                    : BaseExprType->isDependentType())))
     return ActOnDependentMemberExpr(BaseExpr, BaseExprType, IsArrow, OpLoc, SS,
                                     TemplateKWLoc, FirstQualifierInScope,
@@ -1145,8 +1149,9 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
       return ExprError();
     }
 
-    DeclResult VDecl = CheckVarTemplateId(VarTempl, TemplateKWLoc,
-                                          MemberNameInfo.getLoc(), *TemplateArgs);
+    DeclResult VDecl =
+        CheckVarTemplateId(VarTempl, TemplateKWLoc, MemberNameInfo.getLoc(),
+                           *TemplateArgs, /*SetWrittenArgs=*/false);
     if (VDecl.isInvalid())
       return ExprError();
 
@@ -1267,15 +1272,9 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
       FD && TemplateArgs.size() == 0) {
     if (const TemplateArgumentList *TAs = FD->getTemplateSpecializationArgs())
       for (const TemplateArgument &TA : TAs->asArray()) {
-        if (TA.getKind() == TemplateArgument::Type) {
-          QualType QT = TA.getAsType();
-          TypeSourceInfo *TSI = Context.CreateTypeSourceInfo(QT, 0);
-          TemplateArgumentLoc TAL(TA, TSI);
-          TemplateArgs.addArgument(TAL);
-        } else {
-          TemplateArgumentLoc TAL(TA, TemplateArgumentLocInfo{});
-          TemplateArgs.addArgument(TAL);
-        }
+        TemplateArgumentLoc TAL =
+            getTrivialTemplateArgumentLoc(TA, QualType(), OpLoc);
+        TemplateArgs.addArgument(TAL);
       }
   }
 
@@ -1412,6 +1411,20 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
         S.Context, IsArrow ? S.Context.getPointerType(BaseType) : BaseType,
         CK_AtomicToNonAtomic, BaseExpr.get(), nullptr,
         BaseExpr.get()->getValueKind(), FPOptionsOverride());
+  }
+
+  // In HLSL, the member access on a ConstantBuffer<T> access the members of
+  // through the handle in the ConstantBuffer<T>. If BaseType is a
+  // ConstantBuffer, the conversion function to type T is called before trying
+  // to access the member.
+  if (S.getLangOpts().HLSL && BaseType->isHLSLResourceRecord()) {
+    if (std::optional<ExprResult> ConvBase =
+            S.HLSL().tryPerformConstantBufferConversion(BaseExpr)) {
+      assert(!ConvBase->isInvalid());
+      BaseExpr = *ConvBase;
+      BaseType = BaseExpr.get()->getType();
+      IsArrow = false;
+    }
   }
 
   // Handle field access to simple records.
@@ -1742,6 +1755,21 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
         ExtVectorElementExpr(ret, VK, BaseExpr.get(), *Member, MemberLoc);
   }
 
+  if (S.getLangOpts().HLSL && BaseType->isConstantMatrixType()) {
+    IdentifierInfo *Member = MemberName.getAsIdentifierInfo();
+    ExprValueKind VK = BaseExpr.get()->getValueKind();
+    QualType Ret = S.HLSL().checkMatrixComponent(S, BaseType, VK, OpLoc, Member,
+                                                 MemberLoc);
+    if (Ret.isNull())
+      return ExprError();
+    Qualifiers BaseQ =
+        S.Context.getCanonicalType(BaseExpr.get()->getType()).getQualifiers();
+    Ret = S.Context.getQualifiedType(Ret, BaseQ);
+
+    return new (S.Context)
+        MatrixElementExpr(Ret, VK, BaseExpr.get(), *Member, MemberLoc);
+  }
+
   // Adjust builtin-sel to the appropriate redefinition type if that's
   // not just a pointer to builtin-sel again.
   if (IsArrow && BaseType->isSpecificBuiltinType(BuiltinType::ObjCSel) &&
@@ -1845,9 +1873,18 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
       Base, Base->getType(), OpLoc, IsArrow, SS, TemplateKWLoc,
       FirstQualifierInScope, NameInfo, TemplateArgs, S, &ExtraArgs);
 
-  if (!Res.isInvalid() && isa<MemberExpr>(Res.get()))
-    CheckMemberAccessOfNoDeref(cast<MemberExpr>(Res.get()));
+  if (!Res.isInvalid()) {
+    if (MemberExpr *ME = dyn_cast<MemberExpr>(Res.get())) {
+      CheckMemberAccessOfNoDeref(ME);
 
+      if (getLangOpts().HLSL) {
+        QualType Ty = Res.get()->getType();
+        if (Ty->isHLSLResourceRecord() || Ty->isHLSLResourceRecordArray())
+          if (!HLSL().ActOnResourceMemberAccessExpr(ME))
+            Res = ExprError();
+      }
+    }
+  }
   return Res;
 }
 
@@ -1929,6 +1966,12 @@ Sema::BuildFieldReferenceExpr(Expr *BaseExpr, bool IsArrow,
     // except that 'mutable' members don't pick up 'const'.
     if (Field->isMutable()) BaseQuals.removeConst();
 
+    // HLSL resource types do not pick up address space qualifiers from the
+    // base.
+    if (getLangOpts().HLSL && (MemberType->isHLSLResourceRecord() ||
+                               MemberType->isHLSLResourceRecordArray()))
+      BaseQuals.removeAddressSpace();
+
     Qualifiers MemberQuals =
         Context.getCanonicalType(MemberType).getQualifiers();
 
@@ -1991,11 +2034,11 @@ Sema::BuildImplicitMemberExpr(const CXXScopeSpec &SS,
 
   SourceLocation loc = R.getNameLoc();
 
-  if (auto *NNS = SS.getScopeRep()) {
-    if (auto *Prefix = NNS->getPrefix())
-      NNS = Prefix;
+  if (NestedNameSpecifier NNS = SS.getScopeRep()) {
+    while (NNS.getKind() == NestedNameSpecifier::Kind::Namespace)
+      NNS = NNS.getAsNamespaceAndPrefix().Prefix;
 
-    if (NNS->getAsSplice()) {
+    if (NNS.getAsSplice()) {
       Diag(SS.getBeginLoc(),
            diag::err_dependent_splice_implicit_member_reference)
           << SourceRange(SS.getBeginLoc(), R.getNameLoc());

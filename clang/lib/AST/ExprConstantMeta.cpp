@@ -960,9 +960,6 @@ static TemplateName findTemplateOfDecl(const Decl *D) {
 }
 
 static TemplateName findTemplateOfType(QualType QT) {
-  // If it's an ElaboratedType, get the underlying NamedType.
-  if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(QT))
-    QT = ET->getNamedType();
 
   if (auto *TST = dyn_cast<TemplateSpecializationType>(QT)) {
     TemplateName TName = TST->getTemplateName();
@@ -1052,16 +1049,13 @@ static ParmVarDecl *getMostRecentParmVarDecl(ParmVarDecl *PVD) {
 }
 
 static NamedDecl *findTypeDecl(QualType QT) {
-  // If it's an ElaboratedType, get the underlying NamedType.
-  if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(QT))
-    QT = ET->getNamedType();
 
   // Get the type's declaration.
   NamedDecl *D = nullptr;
   if (auto *TDT = dyn_cast<TypedefType>(QT))
     D = TDT->getDecl();
   else if (auto *UT = dyn_cast<UsingType>(QT))
-    D = UT->getFoundDecl();
+    D = UT->getDecl();
   else if (auto *TD = QT->getAsTagDecl())
     return TD;
   else if (auto *TT = dyn_cast<TagType>(QT))
@@ -1086,9 +1080,6 @@ static NamedDecl *findTypeDecl(QualType QT) {
 
 static bool findTypeDeclLoc(APValue &Result, ASTContext &C, EvalFn Evaluator,
                             QualType ResultTy, QualType QT) {
-  // If it's an ElaboratedType, get the underlying NamedType.
-  if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(QT))
-    QT = ET->getNamedType();
 
   // Get the type's declaration.
   NamedDecl *D = const_cast<NamedDecl *>(findTypeDecl(QT));
@@ -1139,11 +1130,9 @@ static QualType desugarType(QualType QT, bool UnwrapAliases, bool DropCV,
 
   while (true) {
     QT = QualType(QT.getTypePtr(), 0);
-    if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(QT))
-      QT = ET->getNamedType();
-    else if (auto *TDT = dyn_cast<TypedefType>(QT); TDT && UnwrapAliases)
+    if (auto *TDT = dyn_cast<TypedefType>(QT); TDT && UnwrapAliases)
       QT = TDT->desugar();
-    else if (auto *UT = dyn_cast<UsingType>(QT); TDT && UnwrapAliases)
+    else if (auto *UT = dyn_cast<UsingType>(QT); UT && UnwrapAliases)
       QT = UT->desugar();
     else if (auto *TST = dyn_cast<TemplateSpecializationType>(QT);
              TST && UnwrapAliases && TST->isTypeAlias())
@@ -1170,9 +1159,6 @@ static QualType desugarType(QualType QT, bool UnwrapAliases, bool DropCV,
 }
 
 static bool isTypeAlias(QualType QT) {
-  // If it's an ElaboratedType, get the underlying NamedType.
-  if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(QT))
-    QT = ET->getNamedType();
 
   // If it's a TypedefType, it's an alias.
   return QT->isTypedefNameType();
@@ -1193,8 +1179,6 @@ bool getTemplateArgumentsFromType(QualType QT,
   // Obtain the template arguments from the Type* representation
   if (auto asTmplSpecialization = QT->getAs<TemplateSpecializationType>())
     expandTemplateArgPacks(asTmplSpecialization->template_arguments(), Out);
-  else if (auto DTST = QT->getAs<DependentTemplateSpecializationType>())
-    expandTemplateArgPacks(DTST->template_arguments(), Out);
   else if (auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
         QT->getAsRecordDecl()))
     expandTemplateArgPacks(CTSD->getTemplateArgs().asArray(), Out);
@@ -1278,7 +1262,6 @@ static bool isTemplateSpecialization(QualType QT) {
     return false;
 
   return isa<TemplateSpecializationType>(QT) ||
-      isa<DependentTemplateSpecializationType>(QT) ||
       isa_and_nonnull<ClassTemplateSpecializationDecl>(
           QT->getAsCXXRecordDecl());
 }
@@ -1310,9 +1293,6 @@ static size_t getOffsetOfBase(ASTContext &C, const CXXBaseSpecifier *Base) {
 }
 
 static bool ensureDeclared(ASTContext &C, QualType QT, SourceLocation SpecLoc) {
-  // If it's an ElaboratedType, get the underlying NamedType.
-  if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(QT))
-    QT = ET->getNamedType();
 
   // Get the type's declaration.
   if (auto *TS = dyn_cast<TemplateSpecializationType>(QT)) {
@@ -1461,8 +1441,8 @@ unsigned parentOf(APValue &Result, Decl *D) {
 
   assert(DC);
   if (auto *RD = dyn_cast<TagDecl>(DC))
-    return SetAndSucceed(Result,
-                         makeReflection(QualType(RD->getTypeForDecl(), 0)));
+    return SetAndSucceed(
+        Result, makeReflection(RD->getASTContext().getCanonicalTagType(RD)));
 
   return SetAndSucceed(Result, makeReflection(cast<Decl>(DC)));
 }
@@ -1536,7 +1516,7 @@ QualType ComputeResultType(QualType ExprTy, const APValue &V) {
 
           continue;
         } else if (auto *TD = dyn_cast<CXXRecordDecl>(D)) {
-          SQT.Ty = TD->getTypeForDecl();
+          SQT.Ty = TD->getASTContext().getCanonicalTagType(TD).getTypePtr();
           continue;
         }
 
@@ -2523,7 +2503,7 @@ bool parent_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     return DiagWrapper(parentOf(Result, RV.getReflectedEntityProxy()));
   case ReflectionKind::BaseSpecifier: {
     CXXRecordDecl *RD = RV.getReflectedBaseSpecifier()->getDerived();
-    QualType QT = desugarType(QualType(RD->getTypeForDecl(), 0),
+    QualType QT = desugarType(C.getCanonicalTagType(RD),
                               /*UnwrapAliases=*/true, /*DropCV=*/false,
                               /*DropRefs=*/false);
     return SetAndSucceed(Result, makeReflection(QT));
@@ -3001,7 +2981,7 @@ bool substitute(APValue &Result, ASTContext &C, MetaActions &Meta,
     assert(TSpecDecl);
 
     APValue RV(ReflectionKind::Type,
-               const_cast<Type *>(TSpecDecl->getTypeForDecl()));
+               const_cast<Type *>(C.getCanonicalTagType(TSpecDecl).getTypePtr()));
     //C.recordCachedSubstitution(SubstitutionHash, RV);
     return SetAndSucceed(Result, RV);
   }
@@ -3085,7 +3065,7 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
     if (LambdaPtrTy.getCanonicalType().getTypePtr() !=
         ResultTy.getCanonicalType().getTypePtr())
       return Diagnoser(Range.getBegin(), diag::metafn_extract_type_mismatch)
-          << 0 << QualType(RD->getTypeForDecl(), 0) << 0 << ResultTy << Range;
+          << 0 << C.getCanonicalTagType(RD) << 0 << ResultTy << Range;
 
     // If not already done, generate a fake body for the call-operator.
     // The real body is generated during CodeGen.
@@ -3178,8 +3158,8 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
         if (auto *ParentClsDecl = dyn_cast_or_null<CXXRecordDecl>(
                 Decl->getDeclContext())) {
           TypeSourceInfo *TSI = C.CreateTypeSourceInfo(
-                  QualType(ParentClsDecl->getTypeForDecl(), 0), 0);
-          NNSLocBuilder.Extend(C, TSI->getTypeLoc(), Range.getBegin());
+                  C.getCanonicalTagType(ParentClsDecl), 0);
+          NNSLocBuilder.Make(C, TSI->getTypeLoc(), Range.getBegin());
         }
         Synthesized = DeclRefExpr::Create(C, NNSLocBuilder.getTemporary(),
                                           SourceLocation(), Decl, false,
@@ -3202,8 +3182,8 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
         if (auto *ParentClsDecl = dyn_cast_or_null<CXXRecordDecl>(
                 Decl->getDeclContext())) {
           TypeSourceInfo *TSI = C.CreateTypeSourceInfo(
-                  QualType(ParentClsDecl->getTypeForDecl(), 0), 0);
-          NNSLocBuilder.Extend(C, TSI->getTypeLoc(), Range.getBegin());
+                  C.getCanonicalTagType(ParentClsDecl), 0);
+          NNSLocBuilder.Make(C, TSI->getTypeLoc(), Range.getBegin());
         }
 
         APValue::LValuePathEntry Path[1] = {APValue::LValuePathEntry::ArrayIndex(0)};
@@ -3254,8 +3234,9 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
       else
         ObjDC = ObjDC->getParent();
 
-      QualType MemPtrTy = C.getMemberPointerType(Decl->getType(), nullptr,
-                                                 cast<CXXRecordDecl>(ObjDC));
+      auto *ObjRD = cast<CXXRecordDecl>(ObjDC);
+      QualType MemPtrTy = C.getMemberPointerType(
+          Decl->getType(), /*Qualifier=*/std::nullopt, ObjRD);
       if (MemPtrTy.getCanonicalType().getTypePtr() !=
           ResultTy.getCanonicalType().getTypePtr())
         return Diagnoser(Range.getBegin(),
@@ -5933,7 +5914,7 @@ bool current_access_context(APValue &Result, ASTContext &C, MetaActions &Meta,
 
   if (auto *RD = dyn_cast<CXXRecordDecl>(Ctx))
     return SetAndSucceed(Result,
-                         makeReflection(QualType(RD->getTypeForDecl(), 0)));
+                         makeReflection(C.getCanonicalTagType(RD)));
   return SetAndSucceed(Result, makeReflection(Ctx));
 }
 
@@ -6063,7 +6044,7 @@ bool is_accessible(APValue &Result, ASTContext &C, MetaActions &Meta,
       return Diagnoser(Range.getBegin(),
                        diag::metafn_access_query_class_being_defined)
           << DerivedDecl << Range;
-    QualType DerivedTy(BaseSpec->getDerived()->getTypeForDecl(), 0);
+    QualType DerivedTy = C.getCanonicalTagType(BaseSpec->getDerived());
 
     CXXBasePathElement bpe = { BaseSpec, BaseSpec->getDerived(), 0 };
     CXXBasePath path;

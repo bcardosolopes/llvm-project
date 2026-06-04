@@ -111,7 +111,7 @@ static_assert(test_dynamic(true));
 consteval bool test_automatic(int read_dangling) {
   int* p;
   {
-    int x = 0;
+    int x = 0; // expected-note 2{{declared here}}
     p = &x;
     if (!__builtin_is_within_lifetime(p))
       return false;
@@ -124,7 +124,7 @@ consteval bool test_automatic(int read_dangling) {
   if (read_dangling == 2)
     __builtin_is_within_lifetime(p); // expected-note {{read of object outside its lifetime is not allowed in a constant expression}}
   {
-    int x[4];
+    int x[4]; // expected-note {{declared here}}
     p = &x[2];
     if (!__builtin_is_within_lifetime(p))
       return false;
@@ -133,7 +133,7 @@ consteval bool test_automatic(int read_dangling) {
     __builtin_is_within_lifetime(p); // expected-note {{read of object outside its lifetime is not allowed in a constant expression}}
   std::nullptr_t* q;
   {
-    std::nullptr_t np = nullptr;
+    std::nullptr_t np = nullptr; // expected-note {{declared here}}
     q = &np;
     if (!__builtin_is_within_lifetime(q))
       return false;
@@ -236,10 +236,10 @@ constexpr struct NSDMI { // #NSDMI
 // expected-error@-1 {{constexpr variable 'x2' must be initialized by a constant expression}}
 //   expected-note@#NSDMI-read {{'__builtin_is_within_lifetime' cannot be called with a pointer to an object whose lifetime has not yet begun}}
 //   expected-note@-3 {{in call to 'NSDMI()'}}
-// expected-error@-4 {{call to immediate function 'NSDMI::NSDMI' is not a constant expression}}
-//   expected-note@#NSDMI {{'NSDMI' is an immediate constructor because the default initializer of 'b' contains a call to a consteval function '__builtin_is_within_lifetime' and that call is not a constant expression}}
-//   expected-note@#NSDMI-read {{'__builtin_is_within_lifetime' cannot be called with a pointer to an object whose lifetime has not yet begun}}
-//   expected-note@-7 {{in call to 'NSDMI()'}}
+// cxx20-error@-4 {{call to immediate function 'NSDMI::NSDMI' is not a constant expression}}
+//   cxx20-note@#NSDMI {{'NSDMI' is an immediate constructor because the default initializer of 'b' contains a call to a consteval function '__builtin_is_within_lifetime' and that call is not a constant expression}}
+//   cxx20-note@#NSDMI-read {{'__builtin_is_within_lifetime' cannot be called with a pointer to an object whose lifetime has not yet begun}}
+//   cxx20-note@-7 {{in call to 'NSDMI()'}}
 
 struct X3 {
   consteval X3() {
@@ -390,10 +390,10 @@ constexpr T* test_dangling() {
 }
 static_assert(__builtin_is_within_lifetime(test_dangling<int>())); // expected-note {{in instantiation of function template specialization}}
 // expected-error@-1 {{static assertion expression is not an integral constant expression}}
-//   expected-note@-2 {{read of variable whose lifetime has ended}}
+//   expected-note@-2 {{read of object outside its lifetime}}
 static_assert(__builtin_is_within_lifetime(test_dangling<int[1]>())); // expected-note {{in instantiation of function template specialization}}
 // expected-error@-1 {{static assertion expression is not an integral constant expression}}
-//   expected-note@-2 {{read of variable whose lifetime has ended}}
+//   expected-note@-2 {{read of object outside its lifetime}}
 
 template<auto F>
 concept CanCallAndPassToIsWithinLifetime = std::bool_constant<__builtin_is_within_lifetime(F())>::value;

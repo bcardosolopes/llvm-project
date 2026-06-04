@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++23 -freflection
+// RUN: %clang_cc1 %s -std=c++26 -freflection
 
 constexpr auto r = ^^int;
 typename[:r:] x = 42;       // Same as: int x = 42;

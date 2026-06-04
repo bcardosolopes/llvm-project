@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEBUGINFO_DWARF_DWARFDATAEXTRACTORSIMPLE_H
-#define LLVM_DEBUGINFO_DWARF_DWARFDATAEXTRACTORSIMPLE_H
+#ifndef LLVM_DEBUGINFO_DWARF_LOWLEVEL_DWARFDATAEXTRACTORSIMPLE_H
+#define LLVM_DEBUGINFO_DWARF_LOWLEVEL_DWARFDATAEXTRACTORSIMPLE_H
 
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/Compiler.h"
@@ -22,43 +22,87 @@ namespace llvm {
 
 template <typename Relocator>
 class DWARFDataExtractorBase : public DataExtractor {
+  unsigned AddressSize;
 
 public:
   DWARFDataExtractorBase(StringRef Data, bool IsLittleEndian,
-                         uint8_t AddressSize)
-      : DataExtractor(Data, IsLittleEndian, AddressSize) {}
+                         unsigned AddressSize)
+      : DataExtractor(Data, IsLittleEndian), AddressSize(AddressSize) {}
+
   DWARFDataExtractorBase(ArrayRef<uint8_t> Data, bool IsLittleEndian,
-                         uint8_t AddressSize)
+                         unsigned AddressSize)
       : DataExtractor(
             StringRef(reinterpret_cast<const char *>(Data.data()), Data.size()),
-            IsLittleEndian, AddressSize) {}
+            IsLittleEndian),
+        AddressSize(AddressSize) {}
 
   /// Truncating constructor
   DWARFDataExtractorBase(const DWARFDataExtractorBase &Other, size_t Length)
       : DataExtractor(Other.getData().substr(0, Length), Other.isLittleEndian(),
                       Other.getAddressSize()) {}
 
+  /// Get the address size for this extractor.
+  unsigned getAddressSize() const { return AddressSize; }
+
+  /// Set the address size for this extractor.
+  void setAddressSize(unsigned Size) { AddressSize = Size; }
+
+  //------------------------------------------------------------------
+  /// Extract an address from \a *OffsetPtr.
+  ///
+  /// Extract a single address from the data and update the offset
+  /// pointed to by \a OffsetPtr. The size of the extracted address
+  /// is \a getAddressSize(), so the address size has to be
+  /// set correctly prior to extracting any address values.
+  ///
+  /// @param[in,out] OffsetPtr
+  ///     A pointer to an offset within the data that will be advanced
+  ///     by the appropriate number of bytes if the value is extracted
+  ///     correctly. If the offset is out of bounds or there are not
+  ///     enough bytes to extract this value, the offset will be left
+  ///     unmodified.
+  ///
+  /// @return
+  ///     The extracted address value as a 64 integer.
+  uint64_t getAddress(uint64_t *OffsetPtr) const {
+    return getUnsigned(OffsetPtr, AddressSize);
+  }
+
+  /// Extract an address-sized unsigned integer from the location given by the
+  /// cursor. In case of an extraction error, or if the cursor is already in
+  /// an error state, zero is returned.
+  uint64_t getAddress(Cursor &C) const { return getUnsigned(C, AddressSize); }
+
+  /// Test the availability of enough bytes of data for an address from
+  /// \a Offset. The size of an address is \a getAddressSize().
+  ///
+  /// @return
+  ///     \b true if \a Offset is a valid offset and there are enough
+  ///     bytes for an address available at that offset, \b false
+  ///     otherwise.
+  bool isValidOffsetForAddress(uint64_t Offset) const {
+    return isValidOffsetForDataOfSize(Offset, AddressSize);
+  }
+
   /// Extracts a value and returns it as adjusted by the Relocator
-  LLVM_ABI uint64_t getRelocatedValue(uint32_t Size, uint64_t *Off,
-                                      uint64_t *SectionIndex = nullptr,
-                                      Error *Err = nullptr) const {
+  uint64_t getRelocatedValue(uint32_t Size, uint64_t *Off,
+                             uint64_t *SectionIndex = nullptr,
+                             Error *Err = nullptr) const {
     return static_cast<const Relocator *>(this)->getRelocatedValueImpl(
         Size, Off, SectionIndex, Err);
   }
 
-  LLVM_ABI uint64_t getRelocatedValue(Cursor &C, uint32_t Size,
-                                      uint64_t *SectionIndex = nullptr) const {
+  uint64_t getRelocatedValue(Cursor &C, uint32_t Size,
+                             uint64_t *SectionIndex = nullptr) const {
     return getRelocatedValue(Size, &getOffset(C), SectionIndex, &getError(C));
   }
 
   /// Extracts an address-sized value.
-  LLVM_ABI uint64_t getRelocatedAddress(uint64_t *Off,
-                                        uint64_t *SecIx = nullptr) const {
+  uint64_t getRelocatedAddress(uint64_t *Off, uint64_t *SecIx = nullptr) const {
     return getRelocatedValue(getAddressSize(), Off, SecIx);
   }
 
-  LLVM_ABI uint64_t getRelocatedAddress(Cursor &C,
-                                        uint64_t *SecIx = nullptr) const {
+  uint64_t getRelocatedAddress(Cursor &C, uint64_t *SecIx = nullptr) const {
     return getRelocatedValue(getAddressSize(), &getOffset(C), SecIx,
                              &getError(C));
   }
@@ -68,7 +112,7 @@ public:
   /// 64-bit length. Returns the actual length, and the DWARF format which is
   /// encoded in the field. In case of errors, it returns {0, DWARF32} and
   /// leaves the offset unchanged.
-  LLVM_ABI std::pair<uint64_t, dwarf::DwarfFormat>
+  std::pair<uint64_t, dwarf::DwarfFormat>
   getInitialLength(uint64_t *Off, Error *Err = nullptr) const {
     ErrorAsOutParameter ErrAsOut(Err);
     if (Err && *Err)
@@ -100,8 +144,7 @@ public:
     return {0, dwarf::DWARF32};
   }
 
-  LLVM_ABI std::pair<uint64_t, dwarf::DwarfFormat>
-  getInitialLength(Cursor &C) const {
+  std::pair<uint64_t, dwarf::DwarfFormat> getInitialLength(Cursor &C) const {
     return getInitialLength(&getOffset(C), &getError(C));
   }
 
@@ -109,9 +152,8 @@ public:
   /// There is a DWARF encoding that uses a PC-relative adjustment.
   /// For these values, \p AbsPosOffset is used to fix them, which should
   /// reflect the absolute address of this pointer.
-  LLVM_ABI std::optional<uint64_t>
-  getEncodedPointer(uint64_t *Offset, uint8_t Encoding,
-                    uint64_t PCRelOffset) const {
+  std::optional<uint64_t> getEncodedPointer(uint64_t *Offset, uint8_t Encoding,
+                                            uint64_t PCRelOffset) const {
     if (Encoding == dwarf::DW_EH_PE_omit)
       return std::nullopt;
 
@@ -183,6 +225,7 @@ public:
 
 class DWARFDataExtractorSimple
     : public DWARFDataExtractorBase<DWARFDataExtractorSimple> {
+public:
   using DWARFDataExtractorBase::DWARFDataExtractorBase;
 
   LLVM_ABI uint64_t getRelocatedValueImpl(uint32_t Size, uint64_t *Off,
@@ -195,4 +238,4 @@ class DWARFDataExtractorSimple
 };
 
 } // end namespace llvm
-#endif // LLVM_DEBUGINFO_DWARF_DWARFDATAEXTRACTOR_H
+#endif // LLVM_DEBUGINFO_DWARF_LOWLEVEL_DWARFDATAEXTRACTORSIMPLE_H

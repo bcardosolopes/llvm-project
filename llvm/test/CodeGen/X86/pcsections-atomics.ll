@@ -9,6 +9,7 @@
 ; RUN: llc -O1 -mattr=cx16 < %s | FileCheck %s --check-prefixes=O1
 ; RUN: llc -O2 -mattr=cx16 < %s | FileCheck %s --check-prefixes=O2
 ; RUN: llc -O3 -mattr=cx16 < %s | FileCheck %s --check-prefixes=O3
+; RUN: llc -O3 -mcpu=haswell -mattr=cx16 < %s | FileCheck %s --check-prefixes=HASWELL-O3
 
 target triple = "x86_64-unknown-linux-gnu"
 
@@ -50,6 +51,14 @@ define void @mixed_atomic_non_atomic(ptr %a) {
 ; O3-NEXT:    movl $1, (%rdi)
 ; O3-NEXT:    decl (%rdi)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: mixed_atomic_non_atomic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    incl (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection0:
+; HASWELL-O3-NEXT:    movl $1, (%rdi)
+; HASWELL-O3-NEXT:    decl (%rdi)
+; HASWELL-O3-NEXT:    retq
 entry:
   ; Accesses the same location atomically and non-atomically.
   %0 = load volatile i32, ptr %a, align 4
@@ -107,6 +116,17 @@ define i64 @mixed_complex_atomic_non_atomic(ptr %a, ptr %b) {
 ; O3-NEXT:    movq %rdx, (%rsi)
 ; O3-NEXT:    addq %rcx, %rax
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: mixed_complex_atomic_non_atomic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movl $1, %eax
+; HASWELL-O3-NEXT:  .Lpcsection1:
+; HASWELL-O3-NEXT:    lock xaddq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq (%rsi), %rcx
+; HASWELL-O3-NEXT:    leaq 1(%rcx), %rdx
+; HASWELL-O3-NEXT:    movq %rdx, (%rsi)
+; HASWELL-O3-NEXT:    addq %rcx, %rax
+; HASWELL-O3-NEXT:    retq
 entry:
   %0 = atomicrmw add ptr %a, i64 1 monotonic, align 8, !pcsections !0
   %1 = load i64, ptr %b, align 8
@@ -148,6 +168,14 @@ define i8 @atomic8_load_unordered(ptr %a) {
 ; O3-NEXT:    movzbl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_load_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection2:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i8, ptr %a unordered, align 1, !pcsections !0
@@ -187,6 +215,14 @@ define i8 @atomic8_load_monotonic(ptr %a) {
 ; O3-NEXT:    movzbl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_load_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection3:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i8, ptr %a monotonic, align 1, !pcsections !0
@@ -226,6 +262,14 @@ define i8 @atomic8_load_acquire(ptr %a) {
 ; O3-NEXT:    movzbl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_load_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection4:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i8, ptr %a acquire, align 1, !pcsections !0
@@ -265,6 +309,14 @@ define i8 @atomic8_load_seq_cst(ptr %a) {
 ; O3-NEXT:    movzbl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_load_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection5:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i8, ptr %a seq_cst, align 1, !pcsections !0
@@ -304,6 +356,14 @@ define void @atomic8_store_unordered(ptr %a) {
 ; O3-NEXT:    movb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_store_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection6:
+; HASWELL-O3-NEXT:    movb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i8 42, ptr %a unordered, align 1, !pcsections !0
@@ -343,6 +403,14 @@ define void @atomic8_store_monotonic(ptr %a) {
 ; O3-NEXT:    movb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_store_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection7:
+; HASWELL-O3-NEXT:    movb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i8 42, ptr %a monotonic, align 1, !pcsections !0
@@ -382,6 +450,14 @@ define void @atomic8_store_release(ptr %a) {
 ; O3-NEXT:    movb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_store_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection8:
+; HASWELL-O3-NEXT:    movb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i8 42, ptr %a release, align 1, !pcsections !0
@@ -425,6 +501,15 @@ define void @atomic8_store_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgb %al, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_store_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection9:
+; HASWELL-O3-NEXT:    xchgb %al, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i8 42, ptr %a seq_cst, align 1, !pcsections !0
@@ -468,6 +553,15 @@ define void @atomic8_xchg_monotonic(ptr %a) {
 ; O3-NEXT:    xchgb %al, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xchg_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection10:
+; HASWELL-O3-NEXT:    xchgb %al, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -507,6 +601,14 @@ define void @atomic8_add_monotonic(ptr %a) {
 ; O3-NEXT:    lock addb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_add_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection11:
+; HASWELL-O3-NEXT:    lock addb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -546,6 +648,14 @@ define void @atomic8_sub_monotonic(ptr %a) {
 ; O3-NEXT:    lock subb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_sub_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection12:
+; HASWELL-O3-NEXT:    lock subb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -585,6 +695,14 @@ define void @atomic8_and_monotonic(ptr %a) {
 ; O3-NEXT:    lock andb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_and_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection13:
+; HASWELL-O3-NEXT:    lock andb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -624,6 +742,14 @@ define void @atomic8_or_monotonic(ptr %a) {
 ; O3-NEXT:    lock orb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_or_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection14:
+; HASWELL-O3-NEXT:    lock orb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -663,6 +789,14 @@ define void @atomic8_xor_monotonic(ptr %a) {
 ; O3-NEXT:    lock xorb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xor_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection15:
+; HASWELL-O3-NEXT:    lock xorb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -689,12 +823,11 @@ define void @atomic8_nand_monotonic(ptr %a) {
 ; O0-NEXT:    orb $-43, %dl
 ; O0-NEXT:  .Lpcsection19:
 ; O0-NEXT:    lock cmpxchgb %dl, (%rcx)
-; O0-NEXT:    movb %al, %cl
 ; O0-NEXT:  .Lpcsection20:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movb %cl, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
+; O0-NEXT:    sete %cl
 ; O0-NEXT:  .Lpcsection21:
-; O0-NEXT:    testb $1, %al
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:  .Lpcsection22:
 ; O0-NEXT:    jne .LBB16_2
 ; O0-NEXT:    jmp .LBB16_1
@@ -764,6 +897,27 @@ define void @atomic8_nand_monotonic(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_nand_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection16:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB16_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection17:
+; HASWELL-O3-NEXT:    notb %cl
+; HASWELL-O3-NEXT:  .Lpcsection18:
+; HASWELL-O3-NEXT:    orb $-43, %cl
+; HASWELL-O3-NEXT:  .Lpcsection19:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection20:
+; HASWELL-O3-NEXT:    jne .LBB16_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i8 42 monotonic, align 1, !pcsections !0
@@ -807,6 +961,15 @@ define void @atomic8_xchg_acquire(ptr %a) {
 ; O3-NEXT:    xchgb %al, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xchg_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection21:
+; HASWELL-O3-NEXT:    xchgb %al, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -846,6 +1009,14 @@ define void @atomic8_add_acquire(ptr %a) {
 ; O3-NEXT:    lock addb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_add_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection22:
+; HASWELL-O3-NEXT:    lock addb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -885,6 +1056,14 @@ define void @atomic8_sub_acquire(ptr %a) {
 ; O3-NEXT:    lock subb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_sub_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection23:
+; HASWELL-O3-NEXT:    lock subb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -924,6 +1103,14 @@ define void @atomic8_and_acquire(ptr %a) {
 ; O3-NEXT:    lock andb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_and_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection24:
+; HASWELL-O3-NEXT:    lock andb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -963,6 +1150,14 @@ define void @atomic8_or_acquire(ptr %a) {
 ; O3-NEXT:    lock orb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_or_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection25:
+; HASWELL-O3-NEXT:    lock orb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -1002,6 +1197,14 @@ define void @atomic8_xor_acquire(ptr %a) {
 ; O3-NEXT:    lock xorb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xor_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection26:
+; HASWELL-O3-NEXT:    lock xorb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -1028,12 +1231,11 @@ define void @atomic8_nand_acquire(ptr %a) {
 ; O0-NEXT:    orb $-43, %dl
 ; O0-NEXT:  .Lpcsection32:
 ; O0-NEXT:    lock cmpxchgb %dl, (%rcx)
-; O0-NEXT:    movb %al, %cl
 ; O0-NEXT:  .Lpcsection33:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movb %cl, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
+; O0-NEXT:    sete %cl
 ; O0-NEXT:  .Lpcsection34:
-; O0-NEXT:    testb $1, %al
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:  .Lpcsection35:
 ; O0-NEXT:    jne .LBB23_2
 ; O0-NEXT:    jmp .LBB23_1
@@ -1103,6 +1305,27 @@ define void @atomic8_nand_acquire(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_nand_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection27:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB23_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection28:
+; HASWELL-O3-NEXT:    notb %cl
+; HASWELL-O3-NEXT:  .Lpcsection29:
+; HASWELL-O3-NEXT:    orb $-43, %cl
+; HASWELL-O3-NEXT:  .Lpcsection30:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection31:
+; HASWELL-O3-NEXT:    jne .LBB23_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i8 42 acquire, align 1, !pcsections !0
@@ -1146,6 +1369,15 @@ define void @atomic8_xchg_release(ptr %a) {
 ; O3-NEXT:    xchgb %al, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xchg_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection32:
+; HASWELL-O3-NEXT:    xchgb %al, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1185,6 +1417,14 @@ define void @atomic8_add_release(ptr %a) {
 ; O3-NEXT:    lock addb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_add_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection33:
+; HASWELL-O3-NEXT:    lock addb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1224,6 +1464,14 @@ define void @atomic8_sub_release(ptr %a) {
 ; O3-NEXT:    lock subb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_sub_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection34:
+; HASWELL-O3-NEXT:    lock subb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1263,6 +1511,14 @@ define void @atomic8_and_release(ptr %a) {
 ; O3-NEXT:    lock andb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_and_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection35:
+; HASWELL-O3-NEXT:    lock andb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1302,6 +1558,14 @@ define void @atomic8_or_release(ptr %a) {
 ; O3-NEXT:    lock orb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_or_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection36:
+; HASWELL-O3-NEXT:    lock orb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1341,6 +1605,14 @@ define void @atomic8_xor_release(ptr %a) {
 ; O3-NEXT:    lock xorb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xor_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection37:
+; HASWELL-O3-NEXT:    lock xorb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1367,12 +1639,11 @@ define void @atomic8_nand_release(ptr %a) {
 ; O0-NEXT:    orb $-43, %dl
 ; O0-NEXT:  .Lpcsection45:
 ; O0-NEXT:    lock cmpxchgb %dl, (%rcx)
-; O0-NEXT:    movb %al, %cl
 ; O0-NEXT:  .Lpcsection46:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movb %cl, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
+; O0-NEXT:    sete %cl
 ; O0-NEXT:  .Lpcsection47:
-; O0-NEXT:    testb $1, %al
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:  .Lpcsection48:
 ; O0-NEXT:    jne .LBB30_2
 ; O0-NEXT:    jmp .LBB30_1
@@ -1442,6 +1713,27 @@ define void @atomic8_nand_release(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_nand_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection38:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB30_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection39:
+; HASWELL-O3-NEXT:    notb %cl
+; HASWELL-O3-NEXT:  .Lpcsection40:
+; HASWELL-O3-NEXT:    orb $-43, %cl
+; HASWELL-O3-NEXT:  .Lpcsection41:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection42:
+; HASWELL-O3-NEXT:    jne .LBB30_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i8 42 release, align 1, !pcsections !0
@@ -1485,6 +1777,15 @@ define void @atomic8_xchg_acq_rel(ptr %a) {
 ; O3-NEXT:    xchgb %al, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xchg_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection43:
+; HASWELL-O3-NEXT:    xchgb %al, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1524,6 +1825,14 @@ define void @atomic8_add_acq_rel(ptr %a) {
 ; O3-NEXT:    lock addb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_add_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection44:
+; HASWELL-O3-NEXT:    lock addb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1563,6 +1872,14 @@ define void @atomic8_sub_acq_rel(ptr %a) {
 ; O3-NEXT:    lock subb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_sub_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection45:
+; HASWELL-O3-NEXT:    lock subb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1602,6 +1919,14 @@ define void @atomic8_and_acq_rel(ptr %a) {
 ; O3-NEXT:    lock andb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_and_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection46:
+; HASWELL-O3-NEXT:    lock andb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1641,6 +1966,14 @@ define void @atomic8_or_acq_rel(ptr %a) {
 ; O3-NEXT:    lock orb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_or_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection47:
+; HASWELL-O3-NEXT:    lock orb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1680,6 +2013,14 @@ define void @atomic8_xor_acq_rel(ptr %a) {
 ; O3-NEXT:    lock xorb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xor_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection48:
+; HASWELL-O3-NEXT:    lock xorb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1706,12 +2047,11 @@ define void @atomic8_nand_acq_rel(ptr %a) {
 ; O0-NEXT:    orb $-43, %dl
 ; O0-NEXT:  .Lpcsection58:
 ; O0-NEXT:    lock cmpxchgb %dl, (%rcx)
-; O0-NEXT:    movb %al, %cl
 ; O0-NEXT:  .Lpcsection59:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movb %cl, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
+; O0-NEXT:    sete %cl
 ; O0-NEXT:  .Lpcsection60:
-; O0-NEXT:    testb $1, %al
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:  .Lpcsection61:
 ; O0-NEXT:    jne .LBB37_2
 ; O0-NEXT:    jmp .LBB37_1
@@ -1781,6 +2121,27 @@ define void @atomic8_nand_acq_rel(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_nand_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection49:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB37_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection50:
+; HASWELL-O3-NEXT:    notb %cl
+; HASWELL-O3-NEXT:  .Lpcsection51:
+; HASWELL-O3-NEXT:    orb $-43, %cl
+; HASWELL-O3-NEXT:  .Lpcsection52:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection53:
+; HASWELL-O3-NEXT:    jne .LBB37_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i8 42 acq_rel, align 1, !pcsections !0
@@ -1824,6 +2185,15 @@ define void @atomic8_xchg_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgb %al, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xchg_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection54:
+; HASWELL-O3-NEXT:    xchgb %al, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -1863,6 +2233,14 @@ define void @atomic8_add_seq_cst(ptr %a) {
 ; O3-NEXT:    lock addb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_add_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection55:
+; HASWELL-O3-NEXT:    lock addb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -1902,6 +2280,14 @@ define void @atomic8_sub_seq_cst(ptr %a) {
 ; O3-NEXT:    lock subb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_sub_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection56:
+; HASWELL-O3-NEXT:    lock subb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -1941,6 +2327,14 @@ define void @atomic8_and_seq_cst(ptr %a) {
 ; O3-NEXT:    lock andb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_and_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection57:
+; HASWELL-O3-NEXT:    lock andb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -1980,6 +2374,14 @@ define void @atomic8_or_seq_cst(ptr %a) {
 ; O3-NEXT:    lock orb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_or_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection58:
+; HASWELL-O3-NEXT:    lock orb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -2019,6 +2421,14 @@ define void @atomic8_xor_seq_cst(ptr %a) {
 ; O3-NEXT:    lock xorb $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_xor_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection59:
+; HASWELL-O3-NEXT:    lock xorb $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -2045,12 +2455,11 @@ define void @atomic8_nand_seq_cst(ptr %a) {
 ; O0-NEXT:    orb $-43, %dl
 ; O0-NEXT:  .Lpcsection71:
 ; O0-NEXT:    lock cmpxchgb %dl, (%rcx)
-; O0-NEXT:    movb %al, %cl
 ; O0-NEXT:  .Lpcsection72:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movb %cl, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
+; O0-NEXT:    sete %cl
 ; O0-NEXT:  .Lpcsection73:
-; O0-NEXT:    testb $1, %al
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:  .Lpcsection74:
 ; O0-NEXT:    jne .LBB44_2
 ; O0-NEXT:    jmp .LBB44_1
@@ -2120,6 +2529,27 @@ define void @atomic8_nand_seq_cst(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_nand_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection60:
+; HASWELL-O3-NEXT:    movzbl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB44_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection61:
+; HASWELL-O3-NEXT:    notb %cl
+; HASWELL-O3-NEXT:  .Lpcsection62:
+; HASWELL-O3-NEXT:    orb $-43, %cl
+; HASWELL-O3-NEXT:  .Lpcsection63:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection64:
+; HASWELL-O3-NEXT:    jne .LBB44_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i8 42 seq_cst, align 1, !pcsections !0
@@ -2136,15 +2566,11 @@ define void @atomic8_cas_monotonic(ptr %a) {
 ; O0-NEXT:    movb $1, %cl
 ; O0-NEXT:  .Lpcsection75:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
+; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
 ; O0-NEXT:  .Lpcsection76:
-; O0-NEXT:    # kill: def $dl killed $al
+; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
 ; O0-NEXT:  .Lpcsection77:
-; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection78:
-; O0-NEXT:    # kill: def $dl killed $al
-; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection79:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2205,6 +2631,25 @@ define void @atomic8_cas_monotonic(ptr %a) {
 ; O3-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_cas_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $1, %cl
+; HASWELL-O3-NEXT:  .Lpcsection65:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection66:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection67:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection68:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection69:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection70:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i8 42, i8 1 monotonic monotonic, align 1, !pcsections !0
@@ -2221,17 +2666,13 @@ define void @atomic8_cas_acquire(ptr %a) {
 ; O0-NEXT:    movb $42, %al
 ; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:    movb $1, %cl
+; O0-NEXT:  .Lpcsection78:
+; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
+; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
+; O0-NEXT:  .Lpcsection79:
+; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
+; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
 ; O0-NEXT:  .Lpcsection80:
-; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection81:
-; O0-NEXT:    # kill: def $dl killed $al
-; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection82:
-; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection83:
-; O0-NEXT:    # kill: def $dl killed $al
-; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection84:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2292,6 +2733,25 @@ define void @atomic8_cas_acquire(ptr %a) {
 ; O3-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_cas_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $1, %cl
+; HASWELL-O3-NEXT:  .Lpcsection71:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection72:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection73:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection74:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection75:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection76:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i8 42, i8 1 acquire monotonic, align 1, !pcsections !0
@@ -2308,17 +2768,13 @@ define void @atomic8_cas_release(ptr %a) {
 ; O0-NEXT:    movb $42, %al
 ; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:    movb $1, %cl
-; O0-NEXT:  .Lpcsection85:
+; O0-NEXT:  .Lpcsection81:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection86:
-; O0-NEXT:    # kill: def $dl killed $al
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection87:
+; O0-NEXT:  .Lpcsection82:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection88:
-; O0-NEXT:    # kill: def $dl killed $al
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection89:
+; O0-NEXT:  .Lpcsection83:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2379,6 +2835,25 @@ define void @atomic8_cas_release(ptr %a) {
 ; O3-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_cas_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $1, %cl
+; HASWELL-O3-NEXT:  .Lpcsection77:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection78:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection79:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection80:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection81:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection82:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i8 42, i8 1 release monotonic, align 1, !pcsections !0
@@ -2395,17 +2870,13 @@ define void @atomic8_cas_acq_rel(ptr %a) {
 ; O0-NEXT:    movb $42, %al
 ; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:    movb $1, %cl
-; O0-NEXT:  .Lpcsection90:
+; O0-NEXT:  .Lpcsection84:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection91:
-; O0-NEXT:    # kill: def $dl killed $al
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection92:
+; O0-NEXT:  .Lpcsection85:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection93:
-; O0-NEXT:    # kill: def $dl killed $al
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection94:
+; O0-NEXT:  .Lpcsection86:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2466,6 +2937,25 @@ define void @atomic8_cas_acq_rel(ptr %a) {
 ; O3-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_cas_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $1, %cl
+; HASWELL-O3-NEXT:  .Lpcsection83:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection84:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection85:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection86:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection87:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection88:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i8 42, i8 1 acq_rel monotonic, align 1, !pcsections !0
@@ -2482,17 +2972,13 @@ define void @atomic8_cas_seq_cst(ptr %a) {
 ; O0-NEXT:    movb $42, %al
 ; O0-NEXT:    movb %al, {{[-0-9]+}}(%r{{[sb]}}p) # 1-byte Spill
 ; O0-NEXT:    movb $1, %cl
-; O0-NEXT:  .Lpcsection95:
+; O0-NEXT:  .Lpcsection87:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection96:
-; O0-NEXT:    # kill: def $dl killed $al
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection97:
+; O0-NEXT:  .Lpcsection88:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
-; O0-NEXT:  .Lpcsection98:
-; O0-NEXT:    # kill: def $dl killed $al
 ; O0-NEXT:    movb {{[-0-9]+}}(%r{{[sb]}}p), %al # 1-byte Reload
-; O0-NEXT:  .Lpcsection99:
+; O0-NEXT:  .Lpcsection89:
 ; O0-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2553,6 +3039,25 @@ define void @atomic8_cas_seq_cst(ptr %a) {
 ; O3-NEXT:    lock cmpxchgb %cl, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic8_cas_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movb $1, %cl
+; HASWELL-O3-NEXT:  .Lpcsection89:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection90:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection91:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection92:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection93:
+; HASWELL-O3-NEXT:    movb $42, %al
+; HASWELL-O3-NEXT:  .Lpcsection94:
+; HASWELL-O3-NEXT:    lock cmpxchgb %cl, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i8 42, i8 1 seq_cst monotonic, align 1, !pcsections !0
@@ -2566,7 +3071,7 @@ define i16 @atomic16_load_unordered(ptr %a) {
 ; O0-LABEL: atomic16_load_unordered:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection100:
+; O0-NEXT:  .Lpcsection90:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2594,6 +3099,14 @@ define i16 @atomic16_load_unordered(ptr %a) {
 ; O3-NEXT:    movzwl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_load_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection95:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i16, ptr %a unordered, align 2, !pcsections !0
@@ -2605,7 +3118,7 @@ define i16 @atomic16_load_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_load_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection101:
+; O0-NEXT:  .Lpcsection91:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2633,6 +3146,14 @@ define i16 @atomic16_load_monotonic(ptr %a) {
 ; O3-NEXT:    movzwl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_load_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection96:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i16, ptr %a monotonic, align 2, !pcsections !0
@@ -2644,7 +3165,7 @@ define i16 @atomic16_load_acquire(ptr %a) {
 ; O0-LABEL: atomic16_load_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection102:
+; O0-NEXT:  .Lpcsection92:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2672,6 +3193,14 @@ define i16 @atomic16_load_acquire(ptr %a) {
 ; O3-NEXT:    movzwl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_load_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection97:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i16, ptr %a acquire, align 2, !pcsections !0
@@ -2683,7 +3212,7 @@ define i16 @atomic16_load_seq_cst(ptr %a) {
 ; O0-LABEL: atomic16_load_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection103:
+; O0-NEXT:  .Lpcsection93:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2711,6 +3240,14 @@ define i16 @atomic16_load_seq_cst(ptr %a) {
 ; O3-NEXT:    movzwl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_load_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection98:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i16, ptr %a seq_cst, align 2, !pcsections !0
@@ -2722,7 +3259,7 @@ define void @atomic16_store_unordered(ptr %a) {
 ; O0-LABEL: atomic16_store_unordered:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection104:
+; O0-NEXT:  .Lpcsection94:
 ; O0-NEXT:    movw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2750,6 +3287,14 @@ define void @atomic16_store_unordered(ptr %a) {
 ; O3-NEXT:    movw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_store_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection99:
+; HASWELL-O3-NEXT:    movw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i16 42, ptr %a unordered, align 2, !pcsections !0
@@ -2761,7 +3306,7 @@ define void @atomic16_store_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_store_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection105:
+; O0-NEXT:  .Lpcsection95:
 ; O0-NEXT:    movw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2789,6 +3334,14 @@ define void @atomic16_store_monotonic(ptr %a) {
 ; O3-NEXT:    movw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_store_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection100:
+; HASWELL-O3-NEXT:    movw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i16 42, ptr %a monotonic, align 2, !pcsections !0
@@ -2800,7 +3353,7 @@ define void @atomic16_store_release(ptr %a) {
 ; O0-LABEL: atomic16_store_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection106:
+; O0-NEXT:  .Lpcsection96:
 ; O0-NEXT:    movw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2828,6 +3381,14 @@ define void @atomic16_store_release(ptr %a) {
 ; O3-NEXT:    movw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_store_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection101:
+; HASWELL-O3-NEXT:    movw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i16 42, ptr %a release, align 2, !pcsections !0
@@ -2840,7 +3401,7 @@ define void @atomic16_store_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movw $42, %ax
-; O0-NEXT:  .Lpcsection107:
+; O0-NEXT:  .Lpcsection97:
 ; O0-NEXT:    xchgw %ax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2871,6 +3432,15 @@ define void @atomic16_store_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgw %ax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_store_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection102:
+; HASWELL-O3-NEXT:    xchgw %ax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i16 42, ptr %a seq_cst, align 2, !pcsections !0
@@ -2883,7 +3453,7 @@ define void @atomic16_xchg_monotonic(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movw $42, %ax
-; O0-NEXT:  .Lpcsection108:
+; O0-NEXT:  .Lpcsection98:
 ; O0-NEXT:    xchgw %ax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2914,6 +3484,15 @@ define void @atomic16_xchg_monotonic(ptr %a) {
 ; O3-NEXT:    xchgw %ax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xchg_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection103:
+; HASWELL-O3-NEXT:    xchgw %ax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -2925,7 +3504,7 @@ define void @atomic16_add_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_add_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection109:
+; O0-NEXT:  .Lpcsection99:
 ; O0-NEXT:    lock addw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2953,6 +3532,14 @@ define void @atomic16_add_monotonic(ptr %a) {
 ; O3-NEXT:    lock addw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_add_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection104:
+; HASWELL-O3-NEXT:    lock addw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -2964,7 +3551,7 @@ define void @atomic16_sub_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_sub_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection110:
+; O0-NEXT:  .Lpcsection100:
 ; O0-NEXT:    lock subw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -2992,6 +3579,14 @@ define void @atomic16_sub_monotonic(ptr %a) {
 ; O3-NEXT:    lock subw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_sub_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection105:
+; HASWELL-O3-NEXT:    lock subw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -3003,7 +3598,7 @@ define void @atomic16_and_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_and_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection111:
+; O0-NEXT:  .Lpcsection101:
 ; O0-NEXT:    lock andw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3031,6 +3626,14 @@ define void @atomic16_and_monotonic(ptr %a) {
 ; O3-NEXT:    lock andw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_and_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection106:
+; HASWELL-O3-NEXT:    lock andw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -3042,7 +3645,7 @@ define void @atomic16_or_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_or_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection112:
+; O0-NEXT:  .Lpcsection102:
 ; O0-NEXT:    lock orw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3070,6 +3673,14 @@ define void @atomic16_or_monotonic(ptr %a) {
 ; O3-NEXT:    lock orw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_or_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection107:
+; HASWELL-O3-NEXT:    lock orw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -3081,7 +3692,7 @@ define void @atomic16_xor_monotonic(ptr %a) {
 ; O0-LABEL: atomic16_xor_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection113:
+; O0-NEXT:  .Lpcsection103:
 ; O0-NEXT:    lock xorw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3109,6 +3720,14 @@ define void @atomic16_xor_monotonic(ptr %a) {
 ; O3-NEXT:    lock xorw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xor_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection108:
+; HASWELL-O3-NEXT:    lock xorw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -3121,31 +3740,30 @@ define void @atomic16_nand_monotonic(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection114:
+; O0-NEXT:  .Lpcsection104:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:  .LBB64_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
-; O0-NEXT:  .Lpcsection115:
+; O0-NEXT:  .Lpcsection105:
 ; O0-NEXT:    # implicit-def: $edx
 ; O0-NEXT:    movw %ax, %dx
-; O0-NEXT:  .Lpcsection116:
+; O0-NEXT:  .Lpcsection106:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection117:
+; O0-NEXT:  .Lpcsection107:
 ; O0-NEXT:    orl $65493, %edx # imm = 0xFFD5
-; O0-NEXT:  .Lpcsection118:
+; O0-NEXT:  .Lpcsection108:
 ; O0-NEXT:    # kill: def $dx killed $dx killed $edx
-; O0-NEXT:  .Lpcsection119:
+; O0-NEXT:  .Lpcsection109:
 ; O0-NEXT:    lock cmpxchgw %dx, (%rcx)
-; O0-NEXT:    movw %ax, %cx
-; O0-NEXT:  .Lpcsection120:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movw %cx, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
-; O0-NEXT:  .Lpcsection121:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection122:
+; O0-NEXT:  .Lpcsection110:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection111:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
+; O0-NEXT:  .Lpcsection112:
 ; O0-NEXT:    jne .LBB64_2
 ; O0-NEXT:    jmp .LBB64_1
 ; O0-NEXT:  .LBB64_2: # %atomicrmw.end
@@ -3226,6 +3844,31 @@ define void @atomic16_nand_monotonic(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_nand_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection109:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB64_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection110:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection111:
+; HASWELL-O3-NEXT:    orl $65493, %ecx # imm = 0xFFD5
+; HASWELL-O3-NEXT:  .Lpcsection112:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax killed $eax
+; HASWELL-O3-NEXT:  .Lpcsection113:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection114:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax def $eax
+; HASWELL-O3-NEXT:  .Lpcsection115:
+; HASWELL-O3-NEXT:    jne .LBB64_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i16 42 monotonic, align 2, !pcsections !0
@@ -3238,7 +3881,7 @@ define void @atomic16_xchg_acquire(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movw $42, %ax
-; O0-NEXT:  .Lpcsection123:
+; O0-NEXT:  .Lpcsection113:
 ; O0-NEXT:    xchgw %ax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3269,6 +3912,15 @@ define void @atomic16_xchg_acquire(ptr %a) {
 ; O3-NEXT:    xchgw %ax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xchg_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection116:
+; HASWELL-O3-NEXT:    xchgw %ax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3280,7 +3932,7 @@ define void @atomic16_add_acquire(ptr %a) {
 ; O0-LABEL: atomic16_add_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection124:
+; O0-NEXT:  .Lpcsection114:
 ; O0-NEXT:    lock addw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3308,6 +3960,14 @@ define void @atomic16_add_acquire(ptr %a) {
 ; O3-NEXT:    lock addw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_add_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection117:
+; HASWELL-O3-NEXT:    lock addw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3319,7 +3979,7 @@ define void @atomic16_sub_acquire(ptr %a) {
 ; O0-LABEL: atomic16_sub_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection125:
+; O0-NEXT:  .Lpcsection115:
 ; O0-NEXT:    lock subw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3347,6 +4007,14 @@ define void @atomic16_sub_acquire(ptr %a) {
 ; O3-NEXT:    lock subw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_sub_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection118:
+; HASWELL-O3-NEXT:    lock subw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3358,7 +4026,7 @@ define void @atomic16_and_acquire(ptr %a) {
 ; O0-LABEL: atomic16_and_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection126:
+; O0-NEXT:  .Lpcsection116:
 ; O0-NEXT:    lock andw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3386,6 +4054,14 @@ define void @atomic16_and_acquire(ptr %a) {
 ; O3-NEXT:    lock andw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_and_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection119:
+; HASWELL-O3-NEXT:    lock andw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3397,7 +4073,7 @@ define void @atomic16_or_acquire(ptr %a) {
 ; O0-LABEL: atomic16_or_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection127:
+; O0-NEXT:  .Lpcsection117:
 ; O0-NEXT:    lock orw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3425,6 +4101,14 @@ define void @atomic16_or_acquire(ptr %a) {
 ; O3-NEXT:    lock orw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_or_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection120:
+; HASWELL-O3-NEXT:    lock orw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3436,7 +4120,7 @@ define void @atomic16_xor_acquire(ptr %a) {
 ; O0-LABEL: atomic16_xor_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection128:
+; O0-NEXT:  .Lpcsection118:
 ; O0-NEXT:    lock xorw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3464,6 +4148,14 @@ define void @atomic16_xor_acquire(ptr %a) {
 ; O3-NEXT:    lock xorw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xor_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection121:
+; HASWELL-O3-NEXT:    lock xorw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3476,31 +4168,30 @@ define void @atomic16_nand_acquire(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection129:
+; O0-NEXT:  .Lpcsection119:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:  .LBB71_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
-; O0-NEXT:  .Lpcsection130:
+; O0-NEXT:  .Lpcsection120:
 ; O0-NEXT:    # implicit-def: $edx
 ; O0-NEXT:    movw %ax, %dx
-; O0-NEXT:  .Lpcsection131:
+; O0-NEXT:  .Lpcsection121:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection132:
+; O0-NEXT:  .Lpcsection122:
 ; O0-NEXT:    orl $65493, %edx # imm = 0xFFD5
-; O0-NEXT:  .Lpcsection133:
+; O0-NEXT:  .Lpcsection123:
 ; O0-NEXT:    # kill: def $dx killed $dx killed $edx
-; O0-NEXT:  .Lpcsection134:
+; O0-NEXT:  .Lpcsection124:
 ; O0-NEXT:    lock cmpxchgw %dx, (%rcx)
-; O0-NEXT:    movw %ax, %cx
-; O0-NEXT:  .Lpcsection135:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movw %cx, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
-; O0-NEXT:  .Lpcsection136:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection137:
+; O0-NEXT:  .Lpcsection125:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection126:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
+; O0-NEXT:  .Lpcsection127:
 ; O0-NEXT:    jne .LBB71_2
 ; O0-NEXT:    jmp .LBB71_1
 ; O0-NEXT:  .LBB71_2: # %atomicrmw.end
@@ -3581,6 +4272,31 @@ define void @atomic16_nand_acquire(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_nand_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection122:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB71_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection123:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection124:
+; HASWELL-O3-NEXT:    orl $65493, %ecx # imm = 0xFFD5
+; HASWELL-O3-NEXT:  .Lpcsection125:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax killed $eax
+; HASWELL-O3-NEXT:  .Lpcsection126:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection127:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax def $eax
+; HASWELL-O3-NEXT:  .Lpcsection128:
+; HASWELL-O3-NEXT:    jne .LBB71_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i16 42 acquire, align 2, !pcsections !0
@@ -3593,7 +4309,7 @@ define void @atomic16_xchg_release(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movw $42, %ax
-; O0-NEXT:  .Lpcsection138:
+; O0-NEXT:  .Lpcsection128:
 ; O0-NEXT:    xchgw %ax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3624,6 +4340,15 @@ define void @atomic16_xchg_release(ptr %a) {
 ; O3-NEXT:    xchgw %ax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xchg_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection129:
+; HASWELL-O3-NEXT:    xchgw %ax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3635,7 +4360,7 @@ define void @atomic16_add_release(ptr %a) {
 ; O0-LABEL: atomic16_add_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection139:
+; O0-NEXT:  .Lpcsection129:
 ; O0-NEXT:    lock addw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3663,6 +4388,14 @@ define void @atomic16_add_release(ptr %a) {
 ; O3-NEXT:    lock addw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_add_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection130:
+; HASWELL-O3-NEXT:    lock addw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3674,7 +4407,7 @@ define void @atomic16_sub_release(ptr %a) {
 ; O0-LABEL: atomic16_sub_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection140:
+; O0-NEXT:  .Lpcsection130:
 ; O0-NEXT:    lock subw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3702,6 +4435,14 @@ define void @atomic16_sub_release(ptr %a) {
 ; O3-NEXT:    lock subw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_sub_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection131:
+; HASWELL-O3-NEXT:    lock subw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3713,7 +4454,7 @@ define void @atomic16_and_release(ptr %a) {
 ; O0-LABEL: atomic16_and_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection141:
+; O0-NEXT:  .Lpcsection131:
 ; O0-NEXT:    lock andw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3741,6 +4482,14 @@ define void @atomic16_and_release(ptr %a) {
 ; O3-NEXT:    lock andw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_and_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection132:
+; HASWELL-O3-NEXT:    lock andw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3752,7 +4501,7 @@ define void @atomic16_or_release(ptr %a) {
 ; O0-LABEL: atomic16_or_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection142:
+; O0-NEXT:  .Lpcsection132:
 ; O0-NEXT:    lock orw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3780,6 +4529,14 @@ define void @atomic16_or_release(ptr %a) {
 ; O3-NEXT:    lock orw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_or_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection133:
+; HASWELL-O3-NEXT:    lock orw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3791,7 +4548,7 @@ define void @atomic16_xor_release(ptr %a) {
 ; O0-LABEL: atomic16_xor_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection143:
+; O0-NEXT:  .Lpcsection133:
 ; O0-NEXT:    lock xorw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3819,6 +4576,14 @@ define void @atomic16_xor_release(ptr %a) {
 ; O3-NEXT:    lock xorw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xor_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection134:
+; HASWELL-O3-NEXT:    lock xorw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3831,31 +4596,30 @@ define void @atomic16_nand_release(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection144:
+; O0-NEXT:  .Lpcsection134:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:  .LBB78_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
-; O0-NEXT:  .Lpcsection145:
+; O0-NEXT:  .Lpcsection135:
 ; O0-NEXT:    # implicit-def: $edx
 ; O0-NEXT:    movw %ax, %dx
-; O0-NEXT:  .Lpcsection146:
+; O0-NEXT:  .Lpcsection136:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection147:
+; O0-NEXT:  .Lpcsection137:
 ; O0-NEXT:    orl $65493, %edx # imm = 0xFFD5
-; O0-NEXT:  .Lpcsection148:
+; O0-NEXT:  .Lpcsection138:
 ; O0-NEXT:    # kill: def $dx killed $dx killed $edx
-; O0-NEXT:  .Lpcsection149:
+; O0-NEXT:  .Lpcsection139:
 ; O0-NEXT:    lock cmpxchgw %dx, (%rcx)
-; O0-NEXT:    movw %ax, %cx
-; O0-NEXT:  .Lpcsection150:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movw %cx, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
-; O0-NEXT:  .Lpcsection151:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection152:
+; O0-NEXT:  .Lpcsection140:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection141:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
+; O0-NEXT:  .Lpcsection142:
 ; O0-NEXT:    jne .LBB78_2
 ; O0-NEXT:    jmp .LBB78_1
 ; O0-NEXT:  .LBB78_2: # %atomicrmw.end
@@ -3936,6 +4700,31 @@ define void @atomic16_nand_release(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_nand_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection135:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB78_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection136:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection137:
+; HASWELL-O3-NEXT:    orl $65493, %ecx # imm = 0xFFD5
+; HASWELL-O3-NEXT:  .Lpcsection138:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax killed $eax
+; HASWELL-O3-NEXT:  .Lpcsection139:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection140:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax def $eax
+; HASWELL-O3-NEXT:  .Lpcsection141:
+; HASWELL-O3-NEXT:    jne .LBB78_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i16 42 release, align 2, !pcsections !0
@@ -3948,7 +4737,7 @@ define void @atomic16_xchg_acq_rel(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movw $42, %ax
-; O0-NEXT:  .Lpcsection153:
+; O0-NEXT:  .Lpcsection143:
 ; O0-NEXT:    xchgw %ax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -3979,6 +4768,15 @@ define void @atomic16_xchg_acq_rel(ptr %a) {
 ; O3-NEXT:    xchgw %ax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xchg_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection142:
+; HASWELL-O3-NEXT:    xchgw %ax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -3990,7 +4788,7 @@ define void @atomic16_add_acq_rel(ptr %a) {
 ; O0-LABEL: atomic16_add_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection154:
+; O0-NEXT:  .Lpcsection144:
 ; O0-NEXT:    lock addw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4018,6 +4816,14 @@ define void @atomic16_add_acq_rel(ptr %a) {
 ; O3-NEXT:    lock addw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_add_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection143:
+; HASWELL-O3-NEXT:    lock addw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -4029,7 +4835,7 @@ define void @atomic16_sub_acq_rel(ptr %a) {
 ; O0-LABEL: atomic16_sub_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection155:
+; O0-NEXT:  .Lpcsection145:
 ; O0-NEXT:    lock subw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4057,6 +4863,14 @@ define void @atomic16_sub_acq_rel(ptr %a) {
 ; O3-NEXT:    lock subw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_sub_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection144:
+; HASWELL-O3-NEXT:    lock subw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -4068,7 +4882,7 @@ define void @atomic16_and_acq_rel(ptr %a) {
 ; O0-LABEL: atomic16_and_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection156:
+; O0-NEXT:  .Lpcsection146:
 ; O0-NEXT:    lock andw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4096,6 +4910,14 @@ define void @atomic16_and_acq_rel(ptr %a) {
 ; O3-NEXT:    lock andw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_and_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection145:
+; HASWELL-O3-NEXT:    lock andw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -4107,7 +4929,7 @@ define void @atomic16_or_acq_rel(ptr %a) {
 ; O0-LABEL: atomic16_or_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection157:
+; O0-NEXT:  .Lpcsection147:
 ; O0-NEXT:    lock orw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4135,6 +4957,14 @@ define void @atomic16_or_acq_rel(ptr %a) {
 ; O3-NEXT:    lock orw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_or_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection146:
+; HASWELL-O3-NEXT:    lock orw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -4146,7 +4976,7 @@ define void @atomic16_xor_acq_rel(ptr %a) {
 ; O0-LABEL: atomic16_xor_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection158:
+; O0-NEXT:  .Lpcsection148:
 ; O0-NEXT:    lock xorw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4174,6 +5004,14 @@ define void @atomic16_xor_acq_rel(ptr %a) {
 ; O3-NEXT:    lock xorw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xor_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection147:
+; HASWELL-O3-NEXT:    lock xorw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -4186,31 +5024,30 @@ define void @atomic16_nand_acq_rel(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection159:
+; O0-NEXT:  .Lpcsection149:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:  .LBB85_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
-; O0-NEXT:  .Lpcsection160:
+; O0-NEXT:  .Lpcsection150:
 ; O0-NEXT:    # implicit-def: $edx
 ; O0-NEXT:    movw %ax, %dx
-; O0-NEXT:  .Lpcsection161:
+; O0-NEXT:  .Lpcsection151:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection162:
+; O0-NEXT:  .Lpcsection152:
 ; O0-NEXT:    orl $65493, %edx # imm = 0xFFD5
-; O0-NEXT:  .Lpcsection163:
+; O0-NEXT:  .Lpcsection153:
 ; O0-NEXT:    # kill: def $dx killed $dx killed $edx
-; O0-NEXT:  .Lpcsection164:
+; O0-NEXT:  .Lpcsection154:
 ; O0-NEXT:    lock cmpxchgw %dx, (%rcx)
-; O0-NEXT:    movw %ax, %cx
-; O0-NEXT:  .Lpcsection165:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movw %cx, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
-; O0-NEXT:  .Lpcsection166:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection167:
+; O0-NEXT:  .Lpcsection155:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection156:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
+; O0-NEXT:  .Lpcsection157:
 ; O0-NEXT:    jne .LBB85_2
 ; O0-NEXT:    jmp .LBB85_1
 ; O0-NEXT:  .LBB85_2: # %atomicrmw.end
@@ -4291,6 +5128,31 @@ define void @atomic16_nand_acq_rel(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_nand_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection148:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB85_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection149:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection150:
+; HASWELL-O3-NEXT:    orl $65493, %ecx # imm = 0xFFD5
+; HASWELL-O3-NEXT:  .Lpcsection151:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax killed $eax
+; HASWELL-O3-NEXT:  .Lpcsection152:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection153:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax def $eax
+; HASWELL-O3-NEXT:  .Lpcsection154:
+; HASWELL-O3-NEXT:    jne .LBB85_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i16 42 acq_rel, align 2, !pcsections !0
@@ -4303,7 +5165,7 @@ define void @atomic16_xchg_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movw $42, %ax
-; O0-NEXT:  .Lpcsection168:
+; O0-NEXT:  .Lpcsection158:
 ; O0-NEXT:    xchgw %ax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4334,6 +5196,15 @@ define void @atomic16_xchg_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgw %ax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xchg_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection155:
+; HASWELL-O3-NEXT:    xchgw %ax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4345,7 +5216,7 @@ define void @atomic16_add_seq_cst(ptr %a) {
 ; O0-LABEL: atomic16_add_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection169:
+; O0-NEXT:  .Lpcsection159:
 ; O0-NEXT:    lock addw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4373,6 +5244,14 @@ define void @atomic16_add_seq_cst(ptr %a) {
 ; O3-NEXT:    lock addw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_add_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection156:
+; HASWELL-O3-NEXT:    lock addw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4384,7 +5263,7 @@ define void @atomic16_sub_seq_cst(ptr %a) {
 ; O0-LABEL: atomic16_sub_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection170:
+; O0-NEXT:  .Lpcsection160:
 ; O0-NEXT:    lock subw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4412,6 +5291,14 @@ define void @atomic16_sub_seq_cst(ptr %a) {
 ; O3-NEXT:    lock subw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_sub_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection157:
+; HASWELL-O3-NEXT:    lock subw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4423,7 +5310,7 @@ define void @atomic16_and_seq_cst(ptr %a) {
 ; O0-LABEL: atomic16_and_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection171:
+; O0-NEXT:  .Lpcsection161:
 ; O0-NEXT:    lock andw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4451,6 +5338,14 @@ define void @atomic16_and_seq_cst(ptr %a) {
 ; O3-NEXT:    lock andw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_and_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection158:
+; HASWELL-O3-NEXT:    lock andw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4462,7 +5357,7 @@ define void @atomic16_or_seq_cst(ptr %a) {
 ; O0-LABEL: atomic16_or_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection172:
+; O0-NEXT:  .Lpcsection162:
 ; O0-NEXT:    lock orw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4490,6 +5385,14 @@ define void @atomic16_or_seq_cst(ptr %a) {
 ; O3-NEXT:    lock orw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_or_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection159:
+; HASWELL-O3-NEXT:    lock orw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4501,7 +5404,7 @@ define void @atomic16_xor_seq_cst(ptr %a) {
 ; O0-LABEL: atomic16_xor_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection173:
+; O0-NEXT:  .Lpcsection163:
 ; O0-NEXT:    lock xorw $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4529,6 +5432,14 @@ define void @atomic16_xor_seq_cst(ptr %a) {
 ; O3-NEXT:    lock xorw $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_xor_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection160:
+; HASWELL-O3-NEXT:    lock xorw $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4541,31 +5452,30 @@ define void @atomic16_nand_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection174:
+; O0-NEXT:  .Lpcsection164:
 ; O0-NEXT:    movw (%rdi), %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:  .LBB92_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
-; O0-NEXT:  .Lpcsection175:
+; O0-NEXT:  .Lpcsection165:
 ; O0-NEXT:    # implicit-def: $edx
 ; O0-NEXT:    movw %ax, %dx
-; O0-NEXT:  .Lpcsection176:
+; O0-NEXT:  .Lpcsection166:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection177:
+; O0-NEXT:  .Lpcsection167:
 ; O0-NEXT:    orl $65493, %edx # imm = 0xFFD5
-; O0-NEXT:  .Lpcsection178:
+; O0-NEXT:  .Lpcsection168:
 ; O0-NEXT:    # kill: def $dx killed $dx killed $edx
-; O0-NEXT:  .Lpcsection179:
+; O0-NEXT:  .Lpcsection169:
 ; O0-NEXT:    lock cmpxchgw %dx, (%rcx)
-; O0-NEXT:    movw %ax, %cx
-; O0-NEXT:  .Lpcsection180:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movw %cx, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
-; O0-NEXT:  .Lpcsection181:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection182:
+; O0-NEXT:  .Lpcsection170:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection171:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
+; O0-NEXT:  .Lpcsection172:
 ; O0-NEXT:    jne .LBB92_2
 ; O0-NEXT:    jmp .LBB92_1
 ; O0-NEXT:  .LBB92_2: # %atomicrmw.end
@@ -4646,6 +5556,31 @@ define void @atomic16_nand_seq_cst(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_nand_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection161:
+; HASWELL-O3-NEXT:    movzwl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB92_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection162:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection163:
+; HASWELL-O3-NEXT:    orl $65493, %ecx # imm = 0xFFD5
+; HASWELL-O3-NEXT:  .Lpcsection164:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax killed $eax
+; HASWELL-O3-NEXT:  .Lpcsection165:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection166:
+; HASWELL-O3-NEXT:    # kill: def $ax killed $ax def $eax
+; HASWELL-O3-NEXT:  .Lpcsection167:
+; HASWELL-O3-NEXT:    jne .LBB92_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i16 42 seq_cst, align 2, !pcsections !0
@@ -4660,17 +5595,13 @@ define void @atomic16_cas_monotonic(ptr %a) {
 ; O0-NEXT:    movw $42, %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:    movw $1, %cx
-; O0-NEXT:  .Lpcsection183:
+; O0-NEXT:  .Lpcsection173:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection184:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection185:
+; O0-NEXT:  .Lpcsection174:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection186:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection187:
+; O0-NEXT:  .Lpcsection175:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4722,6 +5653,22 @@ define void @atomic16_cas_monotonic(ptr %a) {
 ; O3-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_cas_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $1, %cx
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection168:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection169:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection170:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i16 42, i16 1 monotonic monotonic, align 2, !pcsections !0
@@ -4738,17 +5685,13 @@ define void @atomic16_cas_acquire(ptr %a) {
 ; O0-NEXT:    movw $42, %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:    movw $1, %cx
-; O0-NEXT:  .Lpcsection188:
+; O0-NEXT:  .Lpcsection176:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection189:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection190:
+; O0-NEXT:  .Lpcsection177:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection191:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection192:
+; O0-NEXT:  .Lpcsection178:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4800,6 +5743,22 @@ define void @atomic16_cas_acquire(ptr %a) {
 ; O3-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_cas_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $1, %cx
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection171:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection172:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection173:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i16 42, i16 1 acquire monotonic, align 2, !pcsections !0
@@ -4816,17 +5775,13 @@ define void @atomic16_cas_release(ptr %a) {
 ; O0-NEXT:    movw $42, %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:    movw $1, %cx
-; O0-NEXT:  .Lpcsection193:
+; O0-NEXT:  .Lpcsection179:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection194:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection195:
+; O0-NEXT:  .Lpcsection180:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection196:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection197:
+; O0-NEXT:  .Lpcsection181:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4878,6 +5833,22 @@ define void @atomic16_cas_release(ptr %a) {
 ; O3-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_cas_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $1, %cx
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection174:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection175:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection176:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i16 42, i16 1 release monotonic, align 2, !pcsections !0
@@ -4894,17 +5865,13 @@ define void @atomic16_cas_acq_rel(ptr %a) {
 ; O0-NEXT:    movw $42, %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:    movw $1, %cx
-; O0-NEXT:  .Lpcsection198:
+; O0-NEXT:  .Lpcsection182:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection199:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection200:
+; O0-NEXT:  .Lpcsection183:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection201:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection202:
+; O0-NEXT:  .Lpcsection184:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -4956,6 +5923,22 @@ define void @atomic16_cas_acq_rel(ptr %a) {
 ; O3-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_cas_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $1, %cx
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection177:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection178:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection179:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i16 42, i16 1 acq_rel monotonic, align 2, !pcsections !0
@@ -4972,17 +5955,13 @@ define void @atomic16_cas_seq_cst(ptr %a) {
 ; O0-NEXT:    movw $42, %ax
 ; O0-NEXT:    movw %ax, {{[-0-9]+}}(%r{{[sb]}}p) # 2-byte Spill
 ; O0-NEXT:    movw $1, %cx
-; O0-NEXT:  .Lpcsection203:
+; O0-NEXT:  .Lpcsection185:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection204:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection205:
+; O0-NEXT:  .Lpcsection186:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
-; O0-NEXT:  .Lpcsection206:
-; O0-NEXT:    # kill: def $dx killed $ax
 ; O0-NEXT:    movw {{[-0-9]+}}(%r{{[sb]}}p), %ax # 2-byte Reload
-; O0-NEXT:  .Lpcsection207:
+; O0-NEXT:  .Lpcsection187:
 ; O0-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5034,6 +6013,22 @@ define void @atomic16_cas_seq_cst(ptr %a) {
 ; O3-NEXT:    lock cmpxchgw %cx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic16_cas_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movw $1, %cx
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection180:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection181:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movw $42, %ax
+; HASWELL-O3-NEXT:  .Lpcsection182:
+; HASWELL-O3-NEXT:    lock cmpxchgw %cx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i16 42, i16 1 seq_cst monotonic, align 2, !pcsections !0
@@ -5047,7 +6042,7 @@ define i32 @atomic32_load_unordered(ptr %a) {
 ; O0-LABEL: atomic32_load_unordered:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection208:
+; O0-NEXT:  .Lpcsection188:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5075,6 +6070,14 @@ define i32 @atomic32_load_unordered(ptr %a) {
 ; O3-NEXT:    movl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_load_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection183:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i32, ptr %a unordered, align 4, !pcsections !0
@@ -5086,7 +6089,7 @@ define i32 @atomic32_load_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_load_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection209:
+; O0-NEXT:  .Lpcsection189:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5114,6 +6117,14 @@ define i32 @atomic32_load_monotonic(ptr %a) {
 ; O3-NEXT:    movl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_load_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection184:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i32, ptr %a monotonic, align 4, !pcsections !0
@@ -5125,7 +6136,7 @@ define i32 @atomic32_load_acquire(ptr %a) {
 ; O0-LABEL: atomic32_load_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection210:
+; O0-NEXT:  .Lpcsection190:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5153,6 +6164,14 @@ define i32 @atomic32_load_acquire(ptr %a) {
 ; O3-NEXT:    movl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_load_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection185:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i32, ptr %a acquire, align 4, !pcsections !0
@@ -5164,7 +6183,7 @@ define i32 @atomic32_load_seq_cst(ptr %a) {
 ; O0-LABEL: atomic32_load_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection211:
+; O0-NEXT:  .Lpcsection191:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5192,6 +6211,14 @@ define i32 @atomic32_load_seq_cst(ptr %a) {
 ; O3-NEXT:    movl (%rdi), %eax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_load_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection186:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i32, ptr %a seq_cst, align 4, !pcsections !0
@@ -5203,7 +6230,7 @@ define void @atomic32_store_unordered(ptr %a) {
 ; O0-LABEL: atomic32_store_unordered:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection212:
+; O0-NEXT:  .Lpcsection192:
 ; O0-NEXT:    movl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5231,6 +6258,14 @@ define void @atomic32_store_unordered(ptr %a) {
 ; O3-NEXT:    movl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_store_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection187:
+; HASWELL-O3-NEXT:    movl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i32 42, ptr %a unordered, align 4, !pcsections !0
@@ -5242,7 +6277,7 @@ define void @atomic32_store_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_store_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection213:
+; O0-NEXT:  .Lpcsection193:
 ; O0-NEXT:    movl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5270,6 +6305,14 @@ define void @atomic32_store_monotonic(ptr %a) {
 ; O3-NEXT:    movl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_store_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection188:
+; HASWELL-O3-NEXT:    movl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i32 42, ptr %a monotonic, align 4, !pcsections !0
@@ -5281,7 +6324,7 @@ define void @atomic32_store_release(ptr %a) {
 ; O0-LABEL: atomic32_store_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection214:
+; O0-NEXT:  .Lpcsection194:
 ; O0-NEXT:    movl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5309,6 +6352,14 @@ define void @atomic32_store_release(ptr %a) {
 ; O3-NEXT:    movl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_store_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection189:
+; HASWELL-O3-NEXT:    movl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i32 42, ptr %a release, align 4, !pcsections !0
@@ -5321,7 +6372,7 @@ define void @atomic32_store_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection215:
+; O0-NEXT:  .Lpcsection195:
 ; O0-NEXT:    xchgl %eax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5352,6 +6403,15 @@ define void @atomic32_store_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgl %eax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_store_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection190:
+; HASWELL-O3-NEXT:    xchgl %eax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i32 42, ptr %a seq_cst, align 4, !pcsections !0
@@ -5364,7 +6424,7 @@ define void @atomic32_xchg_monotonic(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection216:
+; O0-NEXT:  .Lpcsection196:
 ; O0-NEXT:    xchgl %eax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5395,6 +6455,15 @@ define void @atomic32_xchg_monotonic(ptr %a) {
 ; O3-NEXT:    xchgl %eax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xchg_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection191:
+; HASWELL-O3-NEXT:    xchgl %eax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5406,7 +6475,7 @@ define void @atomic32_add_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_add_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection217:
+; O0-NEXT:  .Lpcsection197:
 ; O0-NEXT:    lock addl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5434,6 +6503,14 @@ define void @atomic32_add_monotonic(ptr %a) {
 ; O3-NEXT:    lock addl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_add_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection192:
+; HASWELL-O3-NEXT:    lock addl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5445,7 +6522,7 @@ define void @atomic32_sub_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_sub_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection218:
+; O0-NEXT:  .Lpcsection198:
 ; O0-NEXT:    lock subl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5473,6 +6550,14 @@ define void @atomic32_sub_monotonic(ptr %a) {
 ; O3-NEXT:    lock subl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_sub_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection193:
+; HASWELL-O3-NEXT:    lock subl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5484,7 +6569,7 @@ define void @atomic32_and_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_and_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection219:
+; O0-NEXT:  .Lpcsection199:
 ; O0-NEXT:    lock andl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5512,6 +6597,14 @@ define void @atomic32_and_monotonic(ptr %a) {
 ; O3-NEXT:    lock andl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_and_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection194:
+; HASWELL-O3-NEXT:    lock andl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5523,7 +6616,7 @@ define void @atomic32_or_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_or_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection220:
+; O0-NEXT:  .Lpcsection200:
 ; O0-NEXT:    lock orl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5551,6 +6644,14 @@ define void @atomic32_or_monotonic(ptr %a) {
 ; O3-NEXT:    lock orl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_or_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection195:
+; HASWELL-O3-NEXT:    lock orl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5562,7 +6663,7 @@ define void @atomic32_xor_monotonic(ptr %a) {
 ; O0-LABEL: atomic32_xor_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection221:
+; O0-NEXT:  .Lpcsection201:
 ; O0-NEXT:    lock xorl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5590,6 +6691,14 @@ define void @atomic32_xor_monotonic(ptr %a) {
 ; O3-NEXT:    lock xorl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xor_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection196:
+; HASWELL-O3-NEXT:    lock xorl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5602,7 +6711,7 @@ define void @atomic32_nand_monotonic(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection222:
+; O0-NEXT:  .Lpcsection202:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:  .LBB112_1: # %atomicrmw.start
@@ -5610,19 +6719,18 @@ define void @atomic32_nand_monotonic(ptr %a) {
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %edx
-; O0-NEXT:  .Lpcsection223:
+; O0-NEXT:  .Lpcsection203:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection224:
+; O0-NEXT:  .Lpcsection204:
 ; O0-NEXT:    orl $-43, %edx
-; O0-NEXT:  .Lpcsection225:
+; O0-NEXT:  .Lpcsection205:
 ; O0-NEXT:    lock cmpxchgl %edx, (%rcx)
-; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection226:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
-; O0-NEXT:  .Lpcsection227:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection228:
+; O0-NEXT:  .Lpcsection206:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection207:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
+; O0-NEXT:  .Lpcsection208:
 ; O0-NEXT:    jne .LBB112_2
 ; O0-NEXT:    jmp .LBB112_1
 ; O0-NEXT:  .LBB112_2: # %atomicrmw.end
@@ -5691,6 +6799,27 @@ define void @atomic32_nand_monotonic(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_nand_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection197:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB112_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection198:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection199:
+; HASWELL-O3-NEXT:    orl $-43, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection200:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection201:
+; HASWELL-O3-NEXT:    jne .LBB112_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i32 42 monotonic, align 4, !pcsections !0
@@ -5703,7 +6832,7 @@ define void @atomic32_xchg_acquire(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection229:
+; O0-NEXT:  .Lpcsection209:
 ; O0-NEXT:    xchgl %eax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5734,6 +6863,15 @@ define void @atomic32_xchg_acquire(ptr %a) {
 ; O3-NEXT:    xchgl %eax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xchg_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection202:
+; HASWELL-O3-NEXT:    xchgl %eax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -5745,7 +6883,7 @@ define void @atomic32_add_acquire(ptr %a) {
 ; O0-LABEL: atomic32_add_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection230:
+; O0-NEXT:  .Lpcsection210:
 ; O0-NEXT:    lock addl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5773,6 +6911,14 @@ define void @atomic32_add_acquire(ptr %a) {
 ; O3-NEXT:    lock addl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_add_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection203:
+; HASWELL-O3-NEXT:    lock addl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -5784,7 +6930,7 @@ define void @atomic32_sub_acquire(ptr %a) {
 ; O0-LABEL: atomic32_sub_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection231:
+; O0-NEXT:  .Lpcsection211:
 ; O0-NEXT:    lock subl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5812,6 +6958,14 @@ define void @atomic32_sub_acquire(ptr %a) {
 ; O3-NEXT:    lock subl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_sub_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection204:
+; HASWELL-O3-NEXT:    lock subl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -5823,7 +6977,7 @@ define void @atomic32_and_acquire(ptr %a) {
 ; O0-LABEL: atomic32_and_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection232:
+; O0-NEXT:  .Lpcsection212:
 ; O0-NEXT:    lock andl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5851,6 +7005,14 @@ define void @atomic32_and_acquire(ptr %a) {
 ; O3-NEXT:    lock andl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_and_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection205:
+; HASWELL-O3-NEXT:    lock andl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -5862,7 +7024,7 @@ define void @atomic32_or_acquire(ptr %a) {
 ; O0-LABEL: atomic32_or_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection233:
+; O0-NEXT:  .Lpcsection213:
 ; O0-NEXT:    lock orl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5890,6 +7052,14 @@ define void @atomic32_or_acquire(ptr %a) {
 ; O3-NEXT:    lock orl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_or_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection206:
+; HASWELL-O3-NEXT:    lock orl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -5901,7 +7071,7 @@ define void @atomic32_xor_acquire(ptr %a) {
 ; O0-LABEL: atomic32_xor_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection234:
+; O0-NEXT:  .Lpcsection214:
 ; O0-NEXT:    lock xorl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -5929,6 +7099,14 @@ define void @atomic32_xor_acquire(ptr %a) {
 ; O3-NEXT:    lock xorl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xor_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection207:
+; HASWELL-O3-NEXT:    lock xorl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -5941,7 +7119,7 @@ define void @atomic32_nand_acquire(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection235:
+; O0-NEXT:  .Lpcsection215:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:  .LBB119_1: # %atomicrmw.start
@@ -5949,19 +7127,18 @@ define void @atomic32_nand_acquire(ptr %a) {
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %edx
-; O0-NEXT:  .Lpcsection236:
+; O0-NEXT:  .Lpcsection216:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection237:
+; O0-NEXT:  .Lpcsection217:
 ; O0-NEXT:    orl $-43, %edx
-; O0-NEXT:  .Lpcsection238:
+; O0-NEXT:  .Lpcsection218:
 ; O0-NEXT:    lock cmpxchgl %edx, (%rcx)
-; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection239:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
-; O0-NEXT:  .Lpcsection240:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection241:
+; O0-NEXT:  .Lpcsection219:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection220:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
+; O0-NEXT:  .Lpcsection221:
 ; O0-NEXT:    jne .LBB119_2
 ; O0-NEXT:    jmp .LBB119_1
 ; O0-NEXT:  .LBB119_2: # %atomicrmw.end
@@ -6030,6 +7207,27 @@ define void @atomic32_nand_acquire(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_nand_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection208:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB119_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection209:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection210:
+; HASWELL-O3-NEXT:    orl $-43, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection211:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection212:
+; HASWELL-O3-NEXT:    jne .LBB119_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i32 42 acquire, align 4, !pcsections !0
@@ -6042,7 +7240,7 @@ define void @atomic32_xchg_release(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection242:
+; O0-NEXT:  .Lpcsection222:
 ; O0-NEXT:    xchgl %eax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6073,6 +7271,15 @@ define void @atomic32_xchg_release(ptr %a) {
 ; O3-NEXT:    xchgl %eax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xchg_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection213:
+; HASWELL-O3-NEXT:    xchgl %eax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6084,7 +7291,7 @@ define void @atomic32_add_release(ptr %a) {
 ; O0-LABEL: atomic32_add_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection243:
+; O0-NEXT:  .Lpcsection223:
 ; O0-NEXT:    lock addl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6112,6 +7319,14 @@ define void @atomic32_add_release(ptr %a) {
 ; O3-NEXT:    lock addl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_add_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection214:
+; HASWELL-O3-NEXT:    lock addl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6123,7 +7338,7 @@ define void @atomic32_sub_release(ptr %a) {
 ; O0-LABEL: atomic32_sub_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection244:
+; O0-NEXT:  .Lpcsection224:
 ; O0-NEXT:    lock subl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6151,6 +7366,14 @@ define void @atomic32_sub_release(ptr %a) {
 ; O3-NEXT:    lock subl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_sub_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection215:
+; HASWELL-O3-NEXT:    lock subl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6162,7 +7385,7 @@ define void @atomic32_and_release(ptr %a) {
 ; O0-LABEL: atomic32_and_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection245:
+; O0-NEXT:  .Lpcsection225:
 ; O0-NEXT:    lock andl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6190,6 +7413,14 @@ define void @atomic32_and_release(ptr %a) {
 ; O3-NEXT:    lock andl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_and_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection216:
+; HASWELL-O3-NEXT:    lock andl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6201,7 +7432,7 @@ define void @atomic32_or_release(ptr %a) {
 ; O0-LABEL: atomic32_or_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection246:
+; O0-NEXT:  .Lpcsection226:
 ; O0-NEXT:    lock orl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6229,6 +7460,14 @@ define void @atomic32_or_release(ptr %a) {
 ; O3-NEXT:    lock orl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_or_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection217:
+; HASWELL-O3-NEXT:    lock orl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6240,7 +7479,7 @@ define void @atomic32_xor_release(ptr %a) {
 ; O0-LABEL: atomic32_xor_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection247:
+; O0-NEXT:  .Lpcsection227:
 ; O0-NEXT:    lock xorl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6268,6 +7507,14 @@ define void @atomic32_xor_release(ptr %a) {
 ; O3-NEXT:    lock xorl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xor_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection218:
+; HASWELL-O3-NEXT:    lock xorl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6280,7 +7527,7 @@ define void @atomic32_nand_release(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection248:
+; O0-NEXT:  .Lpcsection228:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:  .LBB126_1: # %atomicrmw.start
@@ -6288,19 +7535,18 @@ define void @atomic32_nand_release(ptr %a) {
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %edx
-; O0-NEXT:  .Lpcsection249:
+; O0-NEXT:  .Lpcsection229:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection250:
+; O0-NEXT:  .Lpcsection230:
 ; O0-NEXT:    orl $-43, %edx
-; O0-NEXT:  .Lpcsection251:
+; O0-NEXT:  .Lpcsection231:
 ; O0-NEXT:    lock cmpxchgl %edx, (%rcx)
-; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection252:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
-; O0-NEXT:  .Lpcsection253:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection254:
+; O0-NEXT:  .Lpcsection232:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection233:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
+; O0-NEXT:  .Lpcsection234:
 ; O0-NEXT:    jne .LBB126_2
 ; O0-NEXT:    jmp .LBB126_1
 ; O0-NEXT:  .LBB126_2: # %atomicrmw.end
@@ -6369,6 +7615,27 @@ define void @atomic32_nand_release(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_nand_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection219:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB126_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection220:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection221:
+; HASWELL-O3-NEXT:    orl $-43, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection222:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection223:
+; HASWELL-O3-NEXT:    jne .LBB126_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i32 42 release, align 4, !pcsections !0
@@ -6381,7 +7648,7 @@ define void @atomic32_xchg_acq_rel(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection255:
+; O0-NEXT:  .Lpcsection235:
 ; O0-NEXT:    xchgl %eax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6412,6 +7679,15 @@ define void @atomic32_xchg_acq_rel(ptr %a) {
 ; O3-NEXT:    xchgl %eax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xchg_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection224:
+; HASWELL-O3-NEXT:    xchgl %eax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6423,7 +7699,7 @@ define void @atomic32_add_acq_rel(ptr %a) {
 ; O0-LABEL: atomic32_add_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection256:
+; O0-NEXT:  .Lpcsection236:
 ; O0-NEXT:    lock addl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6451,6 +7727,14 @@ define void @atomic32_add_acq_rel(ptr %a) {
 ; O3-NEXT:    lock addl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_add_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection225:
+; HASWELL-O3-NEXT:    lock addl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6462,7 +7746,7 @@ define void @atomic32_sub_acq_rel(ptr %a) {
 ; O0-LABEL: atomic32_sub_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection257:
+; O0-NEXT:  .Lpcsection237:
 ; O0-NEXT:    lock subl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6490,6 +7774,14 @@ define void @atomic32_sub_acq_rel(ptr %a) {
 ; O3-NEXT:    lock subl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_sub_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection226:
+; HASWELL-O3-NEXT:    lock subl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6501,7 +7793,7 @@ define void @atomic32_and_acq_rel(ptr %a) {
 ; O0-LABEL: atomic32_and_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection258:
+; O0-NEXT:  .Lpcsection238:
 ; O0-NEXT:    lock andl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6529,6 +7821,14 @@ define void @atomic32_and_acq_rel(ptr %a) {
 ; O3-NEXT:    lock andl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_and_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection227:
+; HASWELL-O3-NEXT:    lock andl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6540,7 +7840,7 @@ define void @atomic32_or_acq_rel(ptr %a) {
 ; O0-LABEL: atomic32_or_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection259:
+; O0-NEXT:  .Lpcsection239:
 ; O0-NEXT:    lock orl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6568,6 +7868,14 @@ define void @atomic32_or_acq_rel(ptr %a) {
 ; O3-NEXT:    lock orl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_or_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection228:
+; HASWELL-O3-NEXT:    lock orl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6579,7 +7887,7 @@ define void @atomic32_xor_acq_rel(ptr %a) {
 ; O0-LABEL: atomic32_xor_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection260:
+; O0-NEXT:  .Lpcsection240:
 ; O0-NEXT:    lock xorl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6607,6 +7915,14 @@ define void @atomic32_xor_acq_rel(ptr %a) {
 ; O3-NEXT:    lock xorl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xor_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection229:
+; HASWELL-O3-NEXT:    lock xorl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6619,7 +7935,7 @@ define void @atomic32_nand_acq_rel(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection261:
+; O0-NEXT:  .Lpcsection241:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:  .LBB133_1: # %atomicrmw.start
@@ -6627,19 +7943,18 @@ define void @atomic32_nand_acq_rel(ptr %a) {
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %edx
-; O0-NEXT:  .Lpcsection262:
+; O0-NEXT:  .Lpcsection242:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection263:
+; O0-NEXT:  .Lpcsection243:
 ; O0-NEXT:    orl $-43, %edx
-; O0-NEXT:  .Lpcsection264:
+; O0-NEXT:  .Lpcsection244:
 ; O0-NEXT:    lock cmpxchgl %edx, (%rcx)
-; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection265:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
-; O0-NEXT:  .Lpcsection266:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection267:
+; O0-NEXT:  .Lpcsection245:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection246:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
+; O0-NEXT:  .Lpcsection247:
 ; O0-NEXT:    jne .LBB133_2
 ; O0-NEXT:    jmp .LBB133_1
 ; O0-NEXT:  .LBB133_2: # %atomicrmw.end
@@ -6708,6 +8023,27 @@ define void @atomic32_nand_acq_rel(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_nand_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection230:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB133_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection231:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection232:
+; HASWELL-O3-NEXT:    orl $-43, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection233:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection234:
+; HASWELL-O3-NEXT:    jne .LBB133_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i32 42 acq_rel, align 4, !pcsections !0
@@ -6720,7 +8056,7 @@ define void @atomic32_xchg_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection268:
+; O0-NEXT:  .Lpcsection248:
 ; O0-NEXT:    xchgl %eax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6751,6 +8087,15 @@ define void @atomic32_xchg_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgl %eax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xchg_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection235:
+; HASWELL-O3-NEXT:    xchgl %eax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -6762,7 +8107,7 @@ define void @atomic32_add_seq_cst(ptr %a) {
 ; O0-LABEL: atomic32_add_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection269:
+; O0-NEXT:  .Lpcsection249:
 ; O0-NEXT:    lock addl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6790,6 +8135,14 @@ define void @atomic32_add_seq_cst(ptr %a) {
 ; O3-NEXT:    lock addl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_add_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection236:
+; HASWELL-O3-NEXT:    lock addl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -6801,7 +8154,7 @@ define void @atomic32_sub_seq_cst(ptr %a) {
 ; O0-LABEL: atomic32_sub_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection270:
+; O0-NEXT:  .Lpcsection250:
 ; O0-NEXT:    lock subl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6829,6 +8182,14 @@ define void @atomic32_sub_seq_cst(ptr %a) {
 ; O3-NEXT:    lock subl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_sub_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection237:
+; HASWELL-O3-NEXT:    lock subl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -6840,7 +8201,7 @@ define void @atomic32_and_seq_cst(ptr %a) {
 ; O0-LABEL: atomic32_and_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection271:
+; O0-NEXT:  .Lpcsection251:
 ; O0-NEXT:    lock andl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6868,6 +8229,14 @@ define void @atomic32_and_seq_cst(ptr %a) {
 ; O3-NEXT:    lock andl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_and_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection238:
+; HASWELL-O3-NEXT:    lock andl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -6879,7 +8248,7 @@ define void @atomic32_or_seq_cst(ptr %a) {
 ; O0-LABEL: atomic32_or_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection272:
+; O0-NEXT:  .Lpcsection252:
 ; O0-NEXT:    lock orl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6907,6 +8276,14 @@ define void @atomic32_or_seq_cst(ptr %a) {
 ; O3-NEXT:    lock orl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_or_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection239:
+; HASWELL-O3-NEXT:    lock orl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -6918,7 +8295,7 @@ define void @atomic32_xor_seq_cst(ptr %a) {
 ; O0-LABEL: atomic32_xor_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection273:
+; O0-NEXT:  .Lpcsection253:
 ; O0-NEXT:    lock xorl $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -6946,6 +8323,14 @@ define void @atomic32_xor_seq_cst(ptr %a) {
 ; O3-NEXT:    lock xorl $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_xor_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection240:
+; HASWELL-O3-NEXT:    lock xorl $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -6958,7 +8343,7 @@ define void @atomic32_nand_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection274:
+; O0-NEXT:  .Lpcsection254:
 ; O0-NEXT:    movl (%rdi), %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:  .LBB140_1: # %atomicrmw.start
@@ -6966,19 +8351,18 @@ define void @atomic32_nand_seq_cst(ptr %a) {
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %edx
-; O0-NEXT:  .Lpcsection275:
+; O0-NEXT:  .Lpcsection255:
 ; O0-NEXT:    notl %edx
-; O0-NEXT:  .Lpcsection276:
+; O0-NEXT:  .Lpcsection256:
 ; O0-NEXT:    orl $-43, %edx
-; O0-NEXT:  .Lpcsection277:
+; O0-NEXT:  .Lpcsection257:
 ; O0-NEXT:    lock cmpxchgl %edx, (%rcx)
-; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection278:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
-; O0-NEXT:  .Lpcsection279:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection280:
+; O0-NEXT:  .Lpcsection258:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection259:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
+; O0-NEXT:  .Lpcsection260:
 ; O0-NEXT:    jne .LBB140_2
 ; O0-NEXT:    jmp .LBB140_1
 ; O0-NEXT:  .LBB140_2: # %atomicrmw.end
@@ -7047,6 +8431,27 @@ define void @atomic32_nand_seq_cst(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_nand_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection241:
+; HASWELL-O3-NEXT:    movl (%rdi), %eax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB140_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection242:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection243:
+; HASWELL-O3-NEXT:    orl $-43, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection244:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection245:
+; HASWELL-O3-NEXT:    jne .LBB140_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i32 42 seq_cst, align 4, !pcsections !0
@@ -7061,17 +8466,13 @@ define void @atomic32_cas_monotonic(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection281:
+; O0-NEXT:  .Lpcsection261:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection282:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection283:
+; O0-NEXT:  .Lpcsection262:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection284:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection285:
+; O0-NEXT:  .Lpcsection263:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7132,6 +8533,25 @@ define void @atomic32_cas_monotonic(ptr %a) {
 ; O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_cas_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection246:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection247:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection248:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection249:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection250:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection251:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i32 42, i32 1 monotonic monotonic, align 4, !pcsections !0
@@ -7148,17 +8568,13 @@ define void @atomic32_cas_acquire(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection286:
+; O0-NEXT:  .Lpcsection264:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection287:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection288:
+; O0-NEXT:  .Lpcsection265:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection289:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection290:
+; O0-NEXT:  .Lpcsection266:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7219,6 +8635,25 @@ define void @atomic32_cas_acquire(ptr %a) {
 ; O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_cas_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection252:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection253:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection254:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection255:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection256:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection257:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i32 42, i32 1 acquire monotonic, align 4, !pcsections !0
@@ -7235,17 +8670,13 @@ define void @atomic32_cas_release(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection291:
+; O0-NEXT:  .Lpcsection267:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection292:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection293:
+; O0-NEXT:  .Lpcsection268:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection294:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection295:
+; O0-NEXT:  .Lpcsection269:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7306,6 +8737,25 @@ define void @atomic32_cas_release(ptr %a) {
 ; O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_cas_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection258:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection259:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection260:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection261:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection262:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection263:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i32 42, i32 1 release monotonic, align 4, !pcsections !0
@@ -7322,17 +8772,13 @@ define void @atomic32_cas_acq_rel(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection296:
+; O0-NEXT:  .Lpcsection270:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection297:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection298:
+; O0-NEXT:  .Lpcsection271:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection299:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection300:
+; O0-NEXT:  .Lpcsection272:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7393,6 +8839,25 @@ define void @atomic32_cas_acq_rel(ptr %a) {
 ; O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_cas_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection264:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection265:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection266:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection267:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection268:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection269:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i32 42, i32 1 acq_rel monotonic, align 4, !pcsections !0
@@ -7409,17 +8874,13 @@ define void @atomic32_cas_seq_cst(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movl %eax, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection301:
+; O0-NEXT:  .Lpcsection273:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection302:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection303:
+; O0-NEXT:  .Lpcsection274:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
-; O0-NEXT:  .Lpcsection304:
-; O0-NEXT:    # kill: def $edx killed $eax
 ; O0-NEXT:    movl {{[-0-9]+}}(%r{{[sb]}}p), %eax # 4-byte Reload
-; O0-NEXT:  .Lpcsection305:
+; O0-NEXT:  .Lpcsection275:
 ; O0-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7480,6 +8941,25 @@ define void @atomic32_cas_seq_cst(ptr %a) {
 ; O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic32_cas_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection270:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection271:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection272:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection273:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection274:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection275:
+; HASWELL-O3-NEXT:    lock cmpxchgl %ecx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i32 42, i32 1 seq_cst monotonic, align 4, !pcsections !0
@@ -7493,7 +8973,7 @@ define i64 @atomic64_load_unordered(ptr %a) {
 ; O0-LABEL: atomic64_load_unordered:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection306:
+; O0-NEXT:  .Lpcsection276:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7521,6 +9001,14 @@ define i64 @atomic64_load_unordered(ptr %a) {
 ; O3-NEXT:    movq (%rdi), %rax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_load_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection276:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i64, ptr %a unordered, align 8, !pcsections !0
@@ -7532,7 +9020,7 @@ define i64 @atomic64_load_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_load_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection307:
+; O0-NEXT:  .Lpcsection277:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7560,6 +9048,14 @@ define i64 @atomic64_load_monotonic(ptr %a) {
 ; O3-NEXT:    movq (%rdi), %rax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_load_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection277:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i64, ptr %a monotonic, align 8, !pcsections !0
@@ -7571,7 +9067,7 @@ define i64 @atomic64_load_acquire(ptr %a) {
 ; O0-LABEL: atomic64_load_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection308:
+; O0-NEXT:  .Lpcsection278:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7599,6 +9095,14 @@ define i64 @atomic64_load_acquire(ptr %a) {
 ; O3-NEXT:    movq (%rdi), %rax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_load_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection278:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i64, ptr %a acquire, align 8, !pcsections !0
@@ -7610,7 +9114,7 @@ define i64 @atomic64_load_seq_cst(ptr %a) {
 ; O0-LABEL: atomic64_load_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection309:
+; O0-NEXT:  .Lpcsection279:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7638,6 +9142,14 @@ define i64 @atomic64_load_seq_cst(ptr %a) {
 ; O3-NEXT:    movq (%rdi), %rax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_load_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection279:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i64, ptr %a seq_cst, align 8, !pcsections !0
@@ -7649,7 +9161,7 @@ define ptr @atomic64_load_seq_cst_ptr_ty(ptr %a) {
 ; O0-LABEL: atomic64_load_seq_cst_ptr_ty:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection310:
+; O0-NEXT:  .Lpcsection280:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7677,6 +9189,14 @@ define ptr @atomic64_load_seq_cst_ptr_ty(ptr %a) {
 ; O3-NEXT:    movq (%rdi), %rax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_load_seq_cst_ptr_ty:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection280:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic ptr, ptr %a seq_cst, align 8, !pcsections !0
@@ -7688,7 +9208,7 @@ define void @atomic64_store_unordered(ptr %a) {
 ; O0-LABEL: atomic64_store_unordered:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection311:
+; O0-NEXT:  .Lpcsection281:
 ; O0-NEXT:    movq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7716,6 +9236,14 @@ define void @atomic64_store_unordered(ptr %a) {
 ; O3-NEXT:    movq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_store_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection281:
+; HASWELL-O3-NEXT:    movq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i64 42, ptr %a unordered, align 8, !pcsections !0
@@ -7727,7 +9255,7 @@ define void @atomic64_store_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_store_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection312:
+; O0-NEXT:  .Lpcsection282:
 ; O0-NEXT:    movq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7755,6 +9283,14 @@ define void @atomic64_store_monotonic(ptr %a) {
 ; O3-NEXT:    movq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_store_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection282:
+; HASWELL-O3-NEXT:    movq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i64 42, ptr %a monotonic, align 8, !pcsections !0
@@ -7766,7 +9302,7 @@ define void @atomic64_store_release(ptr %a) {
 ; O0-LABEL: atomic64_store_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection313:
+; O0-NEXT:  .Lpcsection283:
 ; O0-NEXT:    movq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7794,6 +9330,14 @@ define void @atomic64_store_release(ptr %a) {
 ; O3-NEXT:    movq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_store_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection283:
+; HASWELL-O3-NEXT:    movq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i64 42, ptr %a release, align 8, !pcsections !0
@@ -7806,7 +9350,7 @@ define void @atomic64_store_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection314:
+; O0-NEXT:  .Lpcsection284:
 ; O0-NEXT:    xchgq %rax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7837,6 +9381,15 @@ define void @atomic64_store_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgq %rax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_store_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection284:
+; HASWELL-O3-NEXT:    xchgq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i64 42, ptr %a seq_cst, align 8, !pcsections !0
@@ -7848,7 +9401,7 @@ define void @atomic64_store_seq_cst_ptr_ty(ptr %a, ptr %v) {
 ; O0-LABEL: atomic64_store_seq_cst_ptr_ty:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection315:
+; O0-NEXT:  .Lpcsection285:
 ; O0-NEXT:    xchgq %rsi, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7876,6 +9429,14 @@ define void @atomic64_store_seq_cst_ptr_ty(ptr %a, ptr %v) {
 ; O3-NEXT:    xchgq %rsi, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_store_seq_cst_ptr_ty:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection285:
+; HASWELL-O3-NEXT:    xchgq %rsi, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic ptr %v, ptr %a seq_cst, align 8, !pcsections !0
@@ -7888,7 +9449,7 @@ define void @atomic64_xchg_monotonic(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection316:
+; O0-NEXT:  .Lpcsection286:
 ; O0-NEXT:    xchgq %rax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7919,6 +9480,15 @@ define void @atomic64_xchg_monotonic(ptr %a) {
 ; O3-NEXT:    xchgq %rax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xchg_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection286:
+; HASWELL-O3-NEXT:    xchgq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -7930,7 +9500,7 @@ define void @atomic64_add_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_add_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection317:
+; O0-NEXT:  .Lpcsection287:
 ; O0-NEXT:    lock addq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7958,6 +9528,14 @@ define void @atomic64_add_monotonic(ptr %a) {
 ; O3-NEXT:    lock addq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_add_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection287:
+; HASWELL-O3-NEXT:    lock addq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -7969,7 +9547,7 @@ define void @atomic64_sub_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_sub_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection318:
+; O0-NEXT:  .Lpcsection288:
 ; O0-NEXT:    lock subq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -7997,6 +9575,14 @@ define void @atomic64_sub_monotonic(ptr %a) {
 ; O3-NEXT:    lock subq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_sub_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection288:
+; HASWELL-O3-NEXT:    lock subq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -8008,7 +9594,7 @@ define void @atomic64_and_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_and_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection319:
+; O0-NEXT:  .Lpcsection289:
 ; O0-NEXT:    lock andq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8036,6 +9622,14 @@ define void @atomic64_and_monotonic(ptr %a) {
 ; O3-NEXT:    lock andq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_and_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection289:
+; HASWELL-O3-NEXT:    lock andq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -8047,7 +9641,7 @@ define void @atomic64_or_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_or_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection320:
+; O0-NEXT:  .Lpcsection290:
 ; O0-NEXT:    lock orq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8075,6 +9669,14 @@ define void @atomic64_or_monotonic(ptr %a) {
 ; O3-NEXT:    lock orq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_or_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection290:
+; HASWELL-O3-NEXT:    lock orq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -8086,7 +9688,7 @@ define void @atomic64_xor_monotonic(ptr %a) {
 ; O0-LABEL: atomic64_xor_monotonic:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection321:
+; O0-NEXT:  .Lpcsection291:
 ; O0-NEXT:    lock xorq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8114,6 +9716,14 @@ define void @atomic64_xor_monotonic(ptr %a) {
 ; O3-NEXT:    lock xorq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xor_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection291:
+; HASWELL-O3-NEXT:    lock xorq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -8126,7 +9736,7 @@ define void @atomic64_nand_monotonic(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection322:
+; O0-NEXT:  .Lpcsection292:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:  .LBB162_1: # %atomicrmw.start
@@ -8134,22 +9744,21 @@ define void @atomic64_nand_monotonic(ptr %a) {
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %esi
-; O0-NEXT:  .Lpcsection323:
+; O0-NEXT:  .Lpcsection293:
 ; O0-NEXT:    notl %esi
-; O0-NEXT:  .Lpcsection324:
+; O0-NEXT:  .Lpcsection294:
 ; O0-NEXT:    # implicit-def: $rdx
 ; O0-NEXT:    movl %esi, %edx
-; O0-NEXT:  .Lpcsection325:
+; O0-NEXT:  .Lpcsection295:
 ; O0-NEXT:    orq $-43, %rdx
-; O0-NEXT:  .Lpcsection326:
+; O0-NEXT:  .Lpcsection296:
 ; O0-NEXT:    lock cmpxchgq %rdx, (%rcx)
-; O0-NEXT:    movq %rax, %rcx
-; O0-NEXT:  .Lpcsection327:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection328:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection329:
+; O0-NEXT:  .Lpcsection297:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection298:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection299:
 ; O0-NEXT:    jne .LBB162_2
 ; O0-NEXT:    jmp .LBB162_1
 ; O0-NEXT:  .LBB162_2: # %atomicrmw.end
@@ -8218,6 +9827,27 @@ define void @atomic64_nand_monotonic(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_nand_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection292:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB162_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection293:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection294:
+; HASWELL-O3-NEXT:    orq $-43, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection295:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection296:
+; HASWELL-O3-NEXT:    jne .LBB162_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i64 42 monotonic, align 8, !pcsections !0
@@ -8230,7 +9860,7 @@ define void @atomic64_xchg_acquire(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection330:
+; O0-NEXT:  .Lpcsection300:
 ; O0-NEXT:    xchgq %rax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8261,6 +9891,15 @@ define void @atomic64_xchg_acquire(ptr %a) {
 ; O3-NEXT:    xchgq %rax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xchg_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection297:
+; HASWELL-O3-NEXT:    xchgq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8272,7 +9911,7 @@ define void @atomic64_add_acquire(ptr %a) {
 ; O0-LABEL: atomic64_add_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection331:
+; O0-NEXT:  .Lpcsection301:
 ; O0-NEXT:    lock addq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8300,6 +9939,14 @@ define void @atomic64_add_acquire(ptr %a) {
 ; O3-NEXT:    lock addq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_add_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection298:
+; HASWELL-O3-NEXT:    lock addq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8311,7 +9958,7 @@ define void @atomic64_sub_acquire(ptr %a) {
 ; O0-LABEL: atomic64_sub_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection332:
+; O0-NEXT:  .Lpcsection302:
 ; O0-NEXT:    lock subq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8339,6 +9986,14 @@ define void @atomic64_sub_acquire(ptr %a) {
 ; O3-NEXT:    lock subq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_sub_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection299:
+; HASWELL-O3-NEXT:    lock subq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8350,7 +10005,7 @@ define void @atomic64_and_acquire(ptr %a) {
 ; O0-LABEL: atomic64_and_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection333:
+; O0-NEXT:  .Lpcsection303:
 ; O0-NEXT:    lock andq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8378,6 +10033,14 @@ define void @atomic64_and_acquire(ptr %a) {
 ; O3-NEXT:    lock andq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_and_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection300:
+; HASWELL-O3-NEXT:    lock andq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8389,7 +10052,7 @@ define void @atomic64_or_acquire(ptr %a) {
 ; O0-LABEL: atomic64_or_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection334:
+; O0-NEXT:  .Lpcsection304:
 ; O0-NEXT:    lock orq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8417,6 +10080,14 @@ define void @atomic64_or_acquire(ptr %a) {
 ; O3-NEXT:    lock orq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_or_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection301:
+; HASWELL-O3-NEXT:    lock orq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8428,7 +10099,7 @@ define void @atomic64_xor_acquire(ptr %a) {
 ; O0-LABEL: atomic64_xor_acquire:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection335:
+; O0-NEXT:  .Lpcsection305:
 ; O0-NEXT:    lock xorq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8456,6 +10127,14 @@ define void @atomic64_xor_acquire(ptr %a) {
 ; O3-NEXT:    lock xorq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xor_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection302:
+; HASWELL-O3-NEXT:    lock xorq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8468,7 +10147,7 @@ define void @atomic64_nand_acquire(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection336:
+; O0-NEXT:  .Lpcsection306:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:  .LBB169_1: # %atomicrmw.start
@@ -8476,22 +10155,21 @@ define void @atomic64_nand_acquire(ptr %a) {
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %esi
-; O0-NEXT:  .Lpcsection337:
+; O0-NEXT:  .Lpcsection307:
 ; O0-NEXT:    notl %esi
-; O0-NEXT:  .Lpcsection338:
+; O0-NEXT:  .Lpcsection308:
 ; O0-NEXT:    # implicit-def: $rdx
 ; O0-NEXT:    movl %esi, %edx
-; O0-NEXT:  .Lpcsection339:
+; O0-NEXT:  .Lpcsection309:
 ; O0-NEXT:    orq $-43, %rdx
-; O0-NEXT:  .Lpcsection340:
+; O0-NEXT:  .Lpcsection310:
 ; O0-NEXT:    lock cmpxchgq %rdx, (%rcx)
-; O0-NEXT:    movq %rax, %rcx
-; O0-NEXT:  .Lpcsection341:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection342:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection343:
+; O0-NEXT:  .Lpcsection311:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection312:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection313:
 ; O0-NEXT:    jne .LBB169_2
 ; O0-NEXT:    jmp .LBB169_1
 ; O0-NEXT:  .LBB169_2: # %atomicrmw.end
@@ -8560,6 +10238,27 @@ define void @atomic64_nand_acquire(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_nand_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection303:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB169_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection304:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection305:
+; HASWELL-O3-NEXT:    orq $-43, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection306:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection307:
+; HASWELL-O3-NEXT:    jne .LBB169_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i64 42 acquire, align 8, !pcsections !0
@@ -8572,7 +10271,7 @@ define void @atomic64_xchg_release(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection344:
+; O0-NEXT:  .Lpcsection314:
 ; O0-NEXT:    xchgq %rax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8603,6 +10302,15 @@ define void @atomic64_xchg_release(ptr %a) {
 ; O3-NEXT:    xchgq %rax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xchg_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection308:
+; HASWELL-O3-NEXT:    xchgq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8614,7 +10322,7 @@ define void @atomic64_add_release(ptr %a) {
 ; O0-LABEL: atomic64_add_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection345:
+; O0-NEXT:  .Lpcsection315:
 ; O0-NEXT:    lock addq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8642,6 +10350,14 @@ define void @atomic64_add_release(ptr %a) {
 ; O3-NEXT:    lock addq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_add_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection309:
+; HASWELL-O3-NEXT:    lock addq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8653,7 +10369,7 @@ define void @atomic64_sub_release(ptr %a) {
 ; O0-LABEL: atomic64_sub_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection346:
+; O0-NEXT:  .Lpcsection316:
 ; O0-NEXT:    lock subq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8681,6 +10397,14 @@ define void @atomic64_sub_release(ptr %a) {
 ; O3-NEXT:    lock subq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_sub_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection310:
+; HASWELL-O3-NEXT:    lock subq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8692,7 +10416,7 @@ define void @atomic64_and_release(ptr %a) {
 ; O0-LABEL: atomic64_and_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection347:
+; O0-NEXT:  .Lpcsection317:
 ; O0-NEXT:    lock andq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8720,6 +10444,14 @@ define void @atomic64_and_release(ptr %a) {
 ; O3-NEXT:    lock andq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_and_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection311:
+; HASWELL-O3-NEXT:    lock andq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8731,7 +10463,7 @@ define void @atomic64_or_release(ptr %a) {
 ; O0-LABEL: atomic64_or_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection348:
+; O0-NEXT:  .Lpcsection318:
 ; O0-NEXT:    lock orq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8759,6 +10491,14 @@ define void @atomic64_or_release(ptr %a) {
 ; O3-NEXT:    lock orq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_or_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection312:
+; HASWELL-O3-NEXT:    lock orq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8770,7 +10510,7 @@ define void @atomic64_xor_release(ptr %a) {
 ; O0-LABEL: atomic64_xor_release:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection349:
+; O0-NEXT:  .Lpcsection319:
 ; O0-NEXT:    lock xorq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8798,6 +10538,14 @@ define void @atomic64_xor_release(ptr %a) {
 ; O3-NEXT:    lock xorq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xor_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection313:
+; HASWELL-O3-NEXT:    lock xorq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8810,7 +10558,7 @@ define void @atomic64_nand_release(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection350:
+; O0-NEXT:  .Lpcsection320:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:  .LBB176_1: # %atomicrmw.start
@@ -8818,22 +10566,21 @@ define void @atomic64_nand_release(ptr %a) {
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %esi
-; O0-NEXT:  .Lpcsection351:
+; O0-NEXT:  .Lpcsection321:
 ; O0-NEXT:    notl %esi
-; O0-NEXT:  .Lpcsection352:
+; O0-NEXT:  .Lpcsection322:
 ; O0-NEXT:    # implicit-def: $rdx
 ; O0-NEXT:    movl %esi, %edx
-; O0-NEXT:  .Lpcsection353:
+; O0-NEXT:  .Lpcsection323:
 ; O0-NEXT:    orq $-43, %rdx
-; O0-NEXT:  .Lpcsection354:
+; O0-NEXT:  .Lpcsection324:
 ; O0-NEXT:    lock cmpxchgq %rdx, (%rcx)
-; O0-NEXT:    movq %rax, %rcx
-; O0-NEXT:  .Lpcsection355:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection356:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection357:
+; O0-NEXT:  .Lpcsection325:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection326:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection327:
 ; O0-NEXT:    jne .LBB176_2
 ; O0-NEXT:    jmp .LBB176_1
 ; O0-NEXT:  .LBB176_2: # %atomicrmw.end
@@ -8902,6 +10649,27 @@ define void @atomic64_nand_release(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_nand_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection314:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB176_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection315:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection316:
+; HASWELL-O3-NEXT:    orq $-43, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection317:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection318:
+; HASWELL-O3-NEXT:    jne .LBB176_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i64 42 release, align 8, !pcsections !0
@@ -8914,7 +10682,7 @@ define void @atomic64_xchg_acq_rel(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection358:
+; O0-NEXT:  .Lpcsection328:
 ; O0-NEXT:    xchgq %rax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8945,6 +10713,15 @@ define void @atomic64_xchg_acq_rel(ptr %a) {
 ; O3-NEXT:    xchgq %rax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xchg_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection319:
+; HASWELL-O3-NEXT:    xchgq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -8956,7 +10733,7 @@ define void @atomic64_add_acq_rel(ptr %a) {
 ; O0-LABEL: atomic64_add_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection359:
+; O0-NEXT:  .Lpcsection329:
 ; O0-NEXT:    lock addq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -8984,6 +10761,14 @@ define void @atomic64_add_acq_rel(ptr %a) {
 ; O3-NEXT:    lock addq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_add_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection320:
+; HASWELL-O3-NEXT:    lock addq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -8995,7 +10780,7 @@ define void @atomic64_sub_acq_rel(ptr %a) {
 ; O0-LABEL: atomic64_sub_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection360:
+; O0-NEXT:  .Lpcsection330:
 ; O0-NEXT:    lock subq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9023,6 +10808,14 @@ define void @atomic64_sub_acq_rel(ptr %a) {
 ; O3-NEXT:    lock subq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_sub_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection321:
+; HASWELL-O3-NEXT:    lock subq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -9034,7 +10827,7 @@ define void @atomic64_and_acq_rel(ptr %a) {
 ; O0-LABEL: atomic64_and_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection361:
+; O0-NEXT:  .Lpcsection331:
 ; O0-NEXT:    lock andq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9062,6 +10855,14 @@ define void @atomic64_and_acq_rel(ptr %a) {
 ; O3-NEXT:    lock andq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_and_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection322:
+; HASWELL-O3-NEXT:    lock andq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -9073,7 +10874,7 @@ define void @atomic64_or_acq_rel(ptr %a) {
 ; O0-LABEL: atomic64_or_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection362:
+; O0-NEXT:  .Lpcsection332:
 ; O0-NEXT:    lock orq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9101,6 +10902,14 @@ define void @atomic64_or_acq_rel(ptr %a) {
 ; O3-NEXT:    lock orq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_or_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection323:
+; HASWELL-O3-NEXT:    lock orq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -9112,7 +10921,7 @@ define void @atomic64_xor_acq_rel(ptr %a) {
 ; O0-LABEL: atomic64_xor_acq_rel:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection363:
+; O0-NEXT:  .Lpcsection333:
 ; O0-NEXT:    lock xorq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9140,6 +10949,14 @@ define void @atomic64_xor_acq_rel(ptr %a) {
 ; O3-NEXT:    lock xorq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xor_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection324:
+; HASWELL-O3-NEXT:    lock xorq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -9152,7 +10969,7 @@ define void @atomic64_nand_acq_rel(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection364:
+; O0-NEXT:  .Lpcsection334:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:  .LBB183_1: # %atomicrmw.start
@@ -9160,22 +10977,21 @@ define void @atomic64_nand_acq_rel(ptr %a) {
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %esi
-; O0-NEXT:  .Lpcsection365:
+; O0-NEXT:  .Lpcsection335:
 ; O0-NEXT:    notl %esi
-; O0-NEXT:  .Lpcsection366:
+; O0-NEXT:  .Lpcsection336:
 ; O0-NEXT:    # implicit-def: $rdx
 ; O0-NEXT:    movl %esi, %edx
-; O0-NEXT:  .Lpcsection367:
+; O0-NEXT:  .Lpcsection337:
 ; O0-NEXT:    orq $-43, %rdx
-; O0-NEXT:  .Lpcsection368:
+; O0-NEXT:  .Lpcsection338:
 ; O0-NEXT:    lock cmpxchgq %rdx, (%rcx)
-; O0-NEXT:    movq %rax, %rcx
-; O0-NEXT:  .Lpcsection369:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection370:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection371:
+; O0-NEXT:  .Lpcsection339:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection340:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection341:
 ; O0-NEXT:    jne .LBB183_2
 ; O0-NEXT:    jmp .LBB183_1
 ; O0-NEXT:  .LBB183_2: # %atomicrmw.end
@@ -9244,6 +11060,27 @@ define void @atomic64_nand_acq_rel(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_nand_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection325:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB183_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection326:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection327:
+; HASWELL-O3-NEXT:    orq $-43, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection328:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection329:
+; HASWELL-O3-NEXT:    jne .LBB183_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i64 42 acq_rel, align 8, !pcsections !0
@@ -9256,7 +11093,7 @@ define void @atomic64_xchg_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
 ; O0-NEXT:    movl $42, %eax
-; O0-NEXT:  .Lpcsection372:
+; O0-NEXT:  .Lpcsection342:
 ; O0-NEXT:    xchgq %rax, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9287,6 +11124,15 @@ define void @atomic64_xchg_seq_cst(ptr %a) {
 ; O3-NEXT:    xchgq %rax, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xchg_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection330:
+; HASWELL-O3-NEXT:    xchgq %rax, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9298,7 +11144,7 @@ define void @atomic64_add_seq_cst(ptr %a) {
 ; O0-LABEL: atomic64_add_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection373:
+; O0-NEXT:  .Lpcsection343:
 ; O0-NEXT:    lock addq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9326,6 +11172,14 @@ define void @atomic64_add_seq_cst(ptr %a) {
 ; O3-NEXT:    lock addq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_add_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection331:
+; HASWELL-O3-NEXT:    lock addq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9337,7 +11191,7 @@ define void @atomic64_sub_seq_cst(ptr %a) {
 ; O0-LABEL: atomic64_sub_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection374:
+; O0-NEXT:  .Lpcsection344:
 ; O0-NEXT:    lock subq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9365,6 +11219,14 @@ define void @atomic64_sub_seq_cst(ptr %a) {
 ; O3-NEXT:    lock subq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_sub_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection332:
+; HASWELL-O3-NEXT:    lock subq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9376,7 +11238,7 @@ define void @atomic64_and_seq_cst(ptr %a) {
 ; O0-LABEL: atomic64_and_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection375:
+; O0-NEXT:  .Lpcsection345:
 ; O0-NEXT:    lock andq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9404,6 +11266,14 @@ define void @atomic64_and_seq_cst(ptr %a) {
 ; O3-NEXT:    lock andq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_and_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection333:
+; HASWELL-O3-NEXT:    lock andq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9415,7 +11285,7 @@ define void @atomic64_or_seq_cst(ptr %a) {
 ; O0-LABEL: atomic64_or_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection376:
+; O0-NEXT:  .Lpcsection346:
 ; O0-NEXT:    lock orq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9443,6 +11313,14 @@ define void @atomic64_or_seq_cst(ptr %a) {
 ; O3-NEXT:    lock orq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_or_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection334:
+; HASWELL-O3-NEXT:    lock orq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9454,7 +11332,7 @@ define void @atomic64_xor_seq_cst(ptr %a) {
 ; O0-LABEL: atomic64_xor_seq_cst:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection377:
+; O0-NEXT:  .Lpcsection347:
 ; O0-NEXT:    lock xorq $42, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9482,6 +11360,14 @@ define void @atomic64_xor_seq_cst(ptr %a) {
 ; O3-NEXT:    lock xorq $42, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_xor_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection335:
+; HASWELL-O3-NEXT:    lock xorq $42, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9494,7 +11380,7 @@ define void @atomic64_nand_seq_cst(ptr %a) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo, %rax
-; O0-NEXT:  .Lpcsection378:
+; O0-NEXT:  .Lpcsection348:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:  .LBB190_1: # %atomicrmw.start
@@ -9502,22 +11388,21 @@ define void @atomic64_nand_seq_cst(ptr %a) {
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movl %eax, %esi
-; O0-NEXT:  .Lpcsection379:
+; O0-NEXT:  .Lpcsection349:
 ; O0-NEXT:    notl %esi
-; O0-NEXT:  .Lpcsection380:
+; O0-NEXT:  .Lpcsection350:
 ; O0-NEXT:    # implicit-def: $rdx
 ; O0-NEXT:    movl %esi, %edx
-; O0-NEXT:  .Lpcsection381:
+; O0-NEXT:  .Lpcsection351:
 ; O0-NEXT:    orq $-43, %rdx
-; O0-NEXT:  .Lpcsection382:
+; O0-NEXT:  .Lpcsection352:
 ; O0-NEXT:    lock cmpxchgq %rdx, (%rcx)
-; O0-NEXT:    movq %rax, %rcx
-; O0-NEXT:  .Lpcsection383:
-; O0-NEXT:    sete %al
-; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection384:
-; O0-NEXT:    testb $1, %al
-; O0-NEXT:  .Lpcsection385:
+; O0-NEXT:  .Lpcsection353:
+; O0-NEXT:    sete %cl
+; O0-NEXT:  .Lpcsection354:
+; O0-NEXT:    testb $1, %cl
+; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection355:
 ; O0-NEXT:    jne .LBB190_2
 ; O0-NEXT:    jmp .LBB190_1
 ; O0-NEXT:  .LBB190_2: # %atomicrmw.end
@@ -9586,6 +11471,27 @@ define void @atomic64_nand_seq_cst(ptr %a) {
 ; O3-NEXT:  # %bb.2: # %atomicrmw.end
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_nand_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection336:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB190_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection337:
+; HASWELL-O3-NEXT:    notl %ecx
+; HASWELL-O3-NEXT:  .Lpcsection338:
+; HASWELL-O3-NEXT:    orq $-43, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection339:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection340:
+; HASWELL-O3-NEXT:    jne .LBB190_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i64 42 seq_cst, align 8, !pcsections !0
@@ -9600,17 +11506,13 @@ define void @atomic64_cas_monotonic(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection386:
+; O0-NEXT:  .Lpcsection356:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection387:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection388:
+; O0-NEXT:  .Lpcsection357:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection389:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection390:
+; O0-NEXT:  .Lpcsection358:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9671,6 +11573,25 @@ define void @atomic64_cas_monotonic(ptr %a) {
 ; O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_cas_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection341:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection342:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection343:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection344:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection345:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection346:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i64 42, i64 1 monotonic monotonic, align 8, !pcsections !0
@@ -9687,17 +11608,13 @@ define void @atomic64_cas_acquire(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection391:
+; O0-NEXT:  .Lpcsection359:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection392:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection393:
+; O0-NEXT:  .Lpcsection360:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection394:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection395:
+; O0-NEXT:  .Lpcsection361:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9758,6 +11675,25 @@ define void @atomic64_cas_acquire(ptr %a) {
 ; O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_cas_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection347:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection348:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection349:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection350:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection351:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection352:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i64 42, i64 1 acquire monotonic, align 8, !pcsections !0
@@ -9774,17 +11710,13 @@ define void @atomic64_cas_release(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection396:
+; O0-NEXT:  .Lpcsection362:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection397:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection398:
+; O0-NEXT:  .Lpcsection363:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection399:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection400:
+; O0-NEXT:  .Lpcsection364:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9845,6 +11777,25 @@ define void @atomic64_cas_release(ptr %a) {
 ; O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_cas_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection353:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection354:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection355:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection356:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection357:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection358:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i64 42, i64 1 release monotonic, align 8, !pcsections !0
@@ -9861,17 +11812,13 @@ define void @atomic64_cas_acq_rel(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection401:
+; O0-NEXT:  .Lpcsection365:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection402:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection403:
+; O0-NEXT:  .Lpcsection366:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection404:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection405:
+; O0-NEXT:  .Lpcsection367:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -9932,6 +11879,25 @@ define void @atomic64_cas_acq_rel(ptr %a) {
 ; O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_cas_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection359:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection360:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection361:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection362:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection363:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection364:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i64 42, i64 1 acq_rel monotonic, align 8, !pcsections !0
@@ -9948,17 +11914,13 @@ define void @atomic64_cas_seq_cst(ptr %a) {
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movl $1, %ecx
-; O0-NEXT:  .Lpcsection406:
+; O0-NEXT:  .Lpcsection368:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection407:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection408:
+; O0-NEXT:  .Lpcsection369:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
-; O0-NEXT:  .Lpcsection409:
-; O0-NEXT:    # kill: def $rdx killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; O0-NEXT:  .Lpcsection410:
+; O0-NEXT:  .Lpcsection370:
 ; O0-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O0-NEXT:    movq $3, foo
 ; O0-NEXT:    retq
@@ -10019,6 +11981,25 @@ define void @atomic64_cas_seq_cst(ptr %a) {
 ; O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
 ; O3-NEXT:    movq $3, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_cas_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:    movl $1, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection365:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection366:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection367:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection368:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection369:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection370:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rcx, (%rdi)
+; HASWELL-O3-NEXT:    movq $3, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i64 42, i64 1 seq_cst monotonic, align 8, !pcsections !0
@@ -10033,7 +12014,7 @@ define void @atomic64_cas_seq_cst_ptr_ty(ptr %a, ptr %v1, ptr %v2) {
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq %rsi, %rax
 ; O0-NEXT:    movq foo(%rip), %rcx
-; O0-NEXT:  .Lpcsection411:
+; O0-NEXT:  .Lpcsection371:
 ; O0-NEXT:    lock cmpxchgq %rdx, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -10064,6 +12045,15 @@ define void @atomic64_cas_seq_cst_ptr_ty(ptr %a, ptr %v1, ptr %v2) {
 ; O3-NEXT:    lock cmpxchgq %rdx, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic64_cas_seq_cst_ptr_ty:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq %rsi, %rax
+; HASWELL-O3-NEXT:    movq foo(%rip), %rcx
+; HASWELL-O3-NEXT:  .Lpcsection371:
+; HASWELL-O3-NEXT:    lock cmpxchgq %rdx, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, ptr %v1, ptr %v2 seq_cst seq_cst, align 8, !pcsections !0
@@ -10074,9 +12064,9 @@ entry:
 define i64 @atomic_use_cond(ptr %a) {
 ; O0-LABEL: atomic_use_cond:
 ; O0:       # %bb.0: # %entry
-; O0-NEXT:  .Lpcsection412:
+; O0-NEXT:  .Lpcsection372:
 ; O0-NEXT:    lock decq (%rdi)
-; O0-NEXT:  .Lpcsection413:
+; O0-NEXT:  .Lpcsection373:
 ; O0-NEXT:    sete %al
 ; O0-NEXT:    testb $1, %al
 ; O0-NEXT:    je .LBB197_2
@@ -10122,6 +12112,18 @@ define i64 @atomic_use_cond(ptr %a) {
 ; O3-NEXT:  .LBB197_2: # %else
 ; O3-NEXT:    movl $2, %eax
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic_use_cond:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:  .Lpcsection372:
+; HASWELL-O3-NEXT:    lock decq (%rdi)
+; HASWELL-O3-NEXT:    jne .LBB197_2
+; HASWELL-O3-NEXT:  # %bb.1: # %then
+; HASWELL-O3-NEXT:    movl $1, %eax
+; HASWELL-O3-NEXT:    retq
+; HASWELL-O3-NEXT:  .LBB197_2: # %else
+; HASWELL-O3-NEXT:    movl $2, %eax
+; HASWELL-O3-NEXT:    retq
 entry:
   %x = atomicrmw sub ptr %a, i64 1 seq_cst, align 8, !pcsections !0
   %y = icmp eq i64 %x, 1
@@ -10141,13 +12143,13 @@ define i128 @atomic128_load_unordered(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection414:
+; O0-NEXT:  .Lpcsection374:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ebx
 ; O0-NEXT:    movq %rbx, %rax
 ; O0-NEXT:    movq %rbx, %rdx
 ; O0-NEXT:    movq %rbx, %rcx
-; O0-NEXT:  .Lpcsection415:
+; O0-NEXT:  .Lpcsection375:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo(%rip)
 ; O0-NEXT:    popq %rbx
@@ -10216,6 +12218,18 @@ define i128 @atomic128_load_unordered(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_load_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection373:
+; HASWELL-O3-NEXT:    vmovdqa (%rdi), %xmm0
+; HASWELL-O3-NEXT:  .Lpcsection374:
+; HASWELL-O3-NEXT:    vmovq %xmm0, %rax
+; HASWELL-O3-NEXT:  .Lpcsection375:
+; HASWELL-O3-NEXT:    vpextrq $1, %xmm0, %rdx
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i128, ptr %a unordered, align 16, !pcsections !0
@@ -10230,13 +12244,13 @@ define i128 @atomic128_load_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection416:
+; O0-NEXT:  .Lpcsection376:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ebx
 ; O0-NEXT:    movq %rbx, %rax
 ; O0-NEXT:    movq %rbx, %rdx
 ; O0-NEXT:    movq %rbx, %rcx
-; O0-NEXT:  .Lpcsection417:
+; O0-NEXT:  .Lpcsection377:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo(%rip)
 ; O0-NEXT:    popq %rbx
@@ -10305,6 +12319,18 @@ define i128 @atomic128_load_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_load_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection376:
+; HASWELL-O3-NEXT:    vmovdqa (%rdi), %xmm0
+; HASWELL-O3-NEXT:  .Lpcsection377:
+; HASWELL-O3-NEXT:    vmovq %xmm0, %rax
+; HASWELL-O3-NEXT:  .Lpcsection378:
+; HASWELL-O3-NEXT:    vpextrq $1, %xmm0, %rdx
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i128, ptr %a monotonic, align 16, !pcsections !0
@@ -10319,13 +12345,13 @@ define i128 @atomic128_load_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection418:
+; O0-NEXT:  .Lpcsection378:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ebx
 ; O0-NEXT:    movq %rbx, %rax
 ; O0-NEXT:    movq %rbx, %rdx
 ; O0-NEXT:    movq %rbx, %rcx
-; O0-NEXT:  .Lpcsection419:
+; O0-NEXT:  .Lpcsection379:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo(%rip)
 ; O0-NEXT:    popq %rbx
@@ -10394,6 +12420,18 @@ define i128 @atomic128_load_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_load_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection379:
+; HASWELL-O3-NEXT:    vmovdqa (%rdi), %xmm0
+; HASWELL-O3-NEXT:  .Lpcsection380:
+; HASWELL-O3-NEXT:    vmovq %xmm0, %rax
+; HASWELL-O3-NEXT:  .Lpcsection381:
+; HASWELL-O3-NEXT:    vpextrq $1, %xmm0, %rdx
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i128, ptr %a acquire, align 16, !pcsections !0
@@ -10408,13 +12446,13 @@ define i128 @atomic128_load_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection420:
+; O0-NEXT:  .Lpcsection380:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ebx
 ; O0-NEXT:    movq %rbx, %rax
 ; O0-NEXT:    movq %rbx, %rdx
 ; O0-NEXT:    movq %rbx, %rcx
-; O0-NEXT:  .Lpcsection421:
+; O0-NEXT:  .Lpcsection381:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo(%rip)
 ; O0-NEXT:    popq %rbx
@@ -10483,6 +12521,18 @@ define i128 @atomic128_load_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_load_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection382:
+; HASWELL-O3-NEXT:    vmovdqa (%rdi), %xmm0
+; HASWELL-O3-NEXT:  .Lpcsection383:
+; HASWELL-O3-NEXT:    vmovq %xmm0, %rax
+; HASWELL-O3-NEXT:  .Lpcsection384:
+; HASWELL-O3-NEXT:    vpextrq $1, %xmm0, %rdx
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic i128, ptr %a seq_cst, align 16, !pcsections !0
@@ -10494,7 +12544,7 @@ define ptr @atomic128_load_seq_cst_ptr_ty(ptr %a) {
 ; O0-LABEL: atomic128_load_seq_cst_ptr_ty:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection422:
+; O0-NEXT:  .Lpcsection382:
 ; O0-NEXT:    movq (%rdi), %rax
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -10522,6 +12572,14 @@ define ptr @atomic128_load_seq_cst_ptr_ty(ptr %a) {
 ; O3-NEXT:    movq (%rdi), %rax
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_load_seq_cst_ptr_ty:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection385:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = load atomic ptr, ptr %a seq_cst, align 16, !pcsections !0
@@ -10537,30 +12595,30 @@ define void @atomic128_store_unordered(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection423:
+; O0-NEXT:  .Lpcsection383:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection424:
+; O0-NEXT:  .Lpcsection384:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection425:
+; O0-NEXT:  .Lpcsection385:
 ; O0-NEXT:    jmp .LBB203_1
 ; O0-NEXT:  .LBB203_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection426:
+; O0-NEXT:  .Lpcsection386:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection427:
+; O0-NEXT:  .Lpcsection387:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection428:
+; O0-NEXT:  .Lpcsection388:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection429:
+; O0-NEXT:  .Lpcsection389:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection430:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection390:
 ; O0-NEXT:    jne .LBB203_1
 ; O0-NEXT:    jmp .LBB203_2
 ; O0-NEXT:  .LBB203_2: # %atomicrmw.end
@@ -10649,6 +12707,16 @@ define void @atomic128_store_unordered(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_store_unordered:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection386:
+; HASWELL-O3-NEXT:    vmovss {{.*#+}} xmm0 = [42,0,0,0]
+; HASWELL-O3-NEXT:  .Lpcsection387:
+; HASWELL-O3-NEXT:    vmovaps %xmm0, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i128 42, ptr %a unordered, align 16, !pcsections !0
@@ -10664,30 +12732,30 @@ define void @atomic128_store_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection431:
+; O0-NEXT:  .Lpcsection391:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection432:
+; O0-NEXT:  .Lpcsection392:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection433:
+; O0-NEXT:  .Lpcsection393:
 ; O0-NEXT:    jmp .LBB204_1
 ; O0-NEXT:  .LBB204_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection434:
+; O0-NEXT:  .Lpcsection394:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection435:
+; O0-NEXT:  .Lpcsection395:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection436:
+; O0-NEXT:  .Lpcsection396:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection437:
+; O0-NEXT:  .Lpcsection397:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection438:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection398:
 ; O0-NEXT:    jne .LBB204_1
 ; O0-NEXT:    jmp .LBB204_2
 ; O0-NEXT:  .LBB204_2: # %atomicrmw.end
@@ -10776,6 +12844,16 @@ define void @atomic128_store_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_store_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection388:
+; HASWELL-O3-NEXT:    vmovss {{.*#+}} xmm0 = [42,0,0,0]
+; HASWELL-O3-NEXT:  .Lpcsection389:
+; HASWELL-O3-NEXT:    vmovaps %xmm0, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i128 42, ptr %a monotonic, align 16, !pcsections !0
@@ -10791,30 +12869,30 @@ define void @atomic128_store_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection439:
+; O0-NEXT:  .Lpcsection399:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection440:
+; O0-NEXT:  .Lpcsection400:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection441:
+; O0-NEXT:  .Lpcsection401:
 ; O0-NEXT:    jmp .LBB205_1
 ; O0-NEXT:  .LBB205_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection442:
+; O0-NEXT:  .Lpcsection402:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection443:
+; O0-NEXT:  .Lpcsection403:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection444:
+; O0-NEXT:  .Lpcsection404:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection445:
+; O0-NEXT:  .Lpcsection405:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection446:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection406:
 ; O0-NEXT:    jne .LBB205_1
 ; O0-NEXT:    jmp .LBB205_2
 ; O0-NEXT:  .LBB205_2: # %atomicrmw.end
@@ -10903,6 +12981,16 @@ define void @atomic128_store_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_store_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection390:
+; HASWELL-O3-NEXT:    vmovss {{.*#+}} xmm0 = [42,0,0,0]
+; HASWELL-O3-NEXT:  .Lpcsection391:
+; HASWELL-O3-NEXT:    vmovaps %xmm0, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i128 42, ptr %a release, align 16, !pcsections !0
@@ -10918,30 +13006,30 @@ define void @atomic128_store_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection447:
+; O0-NEXT:  .Lpcsection407:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection448:
+; O0-NEXT:  .Lpcsection408:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection449:
+; O0-NEXT:  .Lpcsection409:
 ; O0-NEXT:    jmp .LBB206_1
 ; O0-NEXT:  .LBB206_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection450:
+; O0-NEXT:  .Lpcsection410:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection451:
+; O0-NEXT:  .Lpcsection411:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection452:
+; O0-NEXT:  .Lpcsection412:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection453:
+; O0-NEXT:  .Lpcsection413:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection454:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection414:
 ; O0-NEXT:    jne .LBB206_1
 ; O0-NEXT:    jmp .LBB206_2
 ; O0-NEXT:  .LBB206_2: # %atomicrmw.end
@@ -11030,6 +13118,18 @@ define void @atomic128_store_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_store_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection392:
+; HASWELL-O3-NEXT:    vmovss {{.*#+}} xmm0 = [42,0,0,0]
+; HASWELL-O3-NEXT:  .Lpcsection393:
+; HASWELL-O3-NEXT:    vmovaps %xmm0, (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection394:
+; HASWELL-O3-NEXT:    lock orl $0, -{{[0-9]+}}(%rsp)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic i128 42, ptr %a seq_cst, align 16, !pcsections !0
@@ -11041,7 +13141,7 @@ define void @atomic128_store_seq_cst_ptr_ty(ptr %a, ptr %v) {
 ; O0-LABEL: atomic128_store_seq_cst_ptr_ty:
 ; O0:       # %bb.0: # %entry
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection455:
+; O0-NEXT:  .Lpcsection415:
 ; O0-NEXT:    xchgq %rsi, (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    retq
@@ -11069,6 +13169,14 @@ define void @atomic128_store_seq_cst_ptr_ty(ptr %a, ptr %v) {
 ; O3-NEXT:    xchgq %rsi, (%rdi)
 ; O3-NEXT:    movq $1, foo(%rip)
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_store_seq_cst_ptr_ty:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection395:
+; HASWELL-O3-NEXT:    xchgq %rsi, (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   store atomic ptr %v, ptr %a seq_cst, align 16, !pcsections !0
@@ -11084,30 +13192,30 @@ define void @atomic128_xchg_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection456:
+; O0-NEXT:  .Lpcsection416:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection457:
+; O0-NEXT:  .Lpcsection417:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection458:
+; O0-NEXT:  .Lpcsection418:
 ; O0-NEXT:    jmp .LBB208_1
 ; O0-NEXT:  .LBB208_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection459:
+; O0-NEXT:  .Lpcsection419:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection460:
+; O0-NEXT:  .Lpcsection420:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection461:
+; O0-NEXT:  .Lpcsection421:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection462:
+; O0-NEXT:  .Lpcsection422:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection463:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection423:
 ; O0-NEXT:    jne .LBB208_1
 ; O0-NEXT:    jmp .LBB208_2
 ; O0-NEXT:  .LBB208_2: # %atomicrmw.end
@@ -11196,6 +13304,33 @@ define void @atomic128_xchg_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xchg_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection396:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection397:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection398:
+; HASWELL-O3-NEXT:    movl $42, %ebx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB208_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:  .Lpcsection399:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection400:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection401:
+; HASWELL-O3-NEXT:    jne .LBB208_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11211,30 +13346,30 @@ define void @atomic128_add_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection464:
+; O0-NEXT:  .Lpcsection424:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection465:
+; O0-NEXT:  .Lpcsection425:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection466:
+; O0-NEXT:  .Lpcsection426:
 ; O0-NEXT:    jmp .LBB209_1
 ; O0-NEXT:  .LBB209_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection467:
+; O0-NEXT:  .Lpcsection427:
 ; O0-NEXT:    addq $42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection468:
+; O0-NEXT:  .Lpcsection428:
 ; O0-NEXT:    adcq $0, %rcx
-; O0-NEXT:  .Lpcsection469:
+; O0-NEXT:  .Lpcsection429:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection470:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection430:
 ; O0-NEXT:    jne .LBB209_1
 ; O0-NEXT:    jmp .LBB209_2
 ; O0-NEXT:  .LBB209_2: # %atomicrmw.end
@@ -11329,6 +13464,35 @@ define void @atomic128_add_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_add_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection402:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection403:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB209_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection404:
+; HASWELL-O3-NEXT:    addq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection405:
+; HASWELL-O3-NEXT:    adcq $0, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection406:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection407:
+; HASWELL-O3-NEXT:    jne .LBB209_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11344,30 +13508,30 @@ define void @atomic128_sub_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection471:
+; O0-NEXT:  .Lpcsection431:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection472:
+; O0-NEXT:  .Lpcsection432:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection473:
+; O0-NEXT:  .Lpcsection433:
 ; O0-NEXT:    jmp .LBB210_1
 ; O0-NEXT:  .LBB210_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection474:
+; O0-NEXT:  .Lpcsection434:
 ; O0-NEXT:    addq $-42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection475:
+; O0-NEXT:  .Lpcsection435:
 ; O0-NEXT:    adcq $-1, %rcx
-; O0-NEXT:  .Lpcsection476:
+; O0-NEXT:  .Lpcsection436:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection477:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection437:
 ; O0-NEXT:    jne .LBB210_1
 ; O0-NEXT:    jmp .LBB210_2
 ; O0-NEXT:  .LBB210_2: # %atomicrmw.end
@@ -11462,6 +13626,35 @@ define void @atomic128_sub_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_sub_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection408:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection409:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB210_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection410:
+; HASWELL-O3-NEXT:    addq $-42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection411:
+; HASWELL-O3-NEXT:    adcq $-1, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection412:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection413:
+; HASWELL-O3-NEXT:    jne .LBB210_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11477,32 +13670,32 @@ define void @atomic128_and_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection478:
+; O0-NEXT:  .Lpcsection438:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection479:
+; O0-NEXT:  .Lpcsection439:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection480:
+; O0-NEXT:  .Lpcsection440:
 ; O0-NEXT:    jmp .LBB211_1
 ; O0-NEXT:  .LBB211_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection481:
+; O0-NEXT:  .Lpcsection441:
 ; O0-NEXT:    andl $42, %ecx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection482:
+; O0-NEXT:  .Lpcsection442:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection483:
+; O0-NEXT:  .Lpcsection443:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection484:
+; O0-NEXT:  .Lpcsection444:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection485:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection445:
 ; O0-NEXT:    jne .LBB211_1
 ; O0-NEXT:    jmp .LBB211_2
 ; O0-NEXT:  .LBB211_2: # %atomicrmw.end
@@ -11594,6 +13787,34 @@ define void @atomic128_and_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_and_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection414:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection415:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB211_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection416:
+; HASWELL-O3-NEXT:    andl $42, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection417:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection418:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection419:
+; HASWELL-O3-NEXT:    jne .LBB211_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11609,28 +13830,28 @@ define void @atomic128_or_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection486:
+; O0-NEXT:  .Lpcsection446:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection487:
+; O0-NEXT:  .Lpcsection447:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection488:
+; O0-NEXT:  .Lpcsection448:
 ; O0-NEXT:    jmp .LBB212_1
 ; O0-NEXT:  .LBB212_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection489:
+; O0-NEXT:  .Lpcsection449:
 ; O0-NEXT:    orq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection490:
+; O0-NEXT:  .Lpcsection450:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection491:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection451:
 ; O0-NEXT:    jne .LBB212_1
 ; O0-NEXT:    jmp .LBB212_2
 ; O0-NEXT:  .LBB212_2: # %atomicrmw.end
@@ -11719,6 +13940,33 @@ define void @atomic128_or_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_or_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection420:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection421:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB212_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection422:
+; HASWELL-O3-NEXT:    orq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection423:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection424:
+; HASWELL-O3-NEXT:    jne .LBB212_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11734,28 +13982,28 @@ define void @atomic128_xor_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection492:
+; O0-NEXT:  .Lpcsection452:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection493:
+; O0-NEXT:  .Lpcsection453:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection494:
+; O0-NEXT:  .Lpcsection454:
 ; O0-NEXT:    jmp .LBB213_1
 ; O0-NEXT:  .LBB213_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection495:
+; O0-NEXT:  .Lpcsection455:
 ; O0-NEXT:    xorq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection496:
+; O0-NEXT:  .Lpcsection456:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection497:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection457:
 ; O0-NEXT:    jne .LBB213_1
 ; O0-NEXT:    jmp .LBB213_2
 ; O0-NEXT:  .LBB213_2: # %atomicrmw.end
@@ -11844,6 +14092,33 @@ define void @atomic128_xor_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xor_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection425:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection426:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB213_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection427:
+; HASWELL-O3-NEXT:    xorq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection428:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection429:
+; HASWELL-O3-NEXT:    jne .LBB213_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11859,34 +14134,34 @@ define void @atomic128_nand_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection498:
+; O0-NEXT:  .Lpcsection458:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection499:
+; O0-NEXT:  .Lpcsection459:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection500:
+; O0-NEXT:  .Lpcsection460:
 ; O0-NEXT:    jmp .LBB214_1
 ; O0-NEXT:  .LBB214_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection501:
+; O0-NEXT:  .Lpcsection461:
 ; O0-NEXT:    notl %ecx
-; O0-NEXT:  .Lpcsection502:
+; O0-NEXT:  .Lpcsection462:
 ; O0-NEXT:    # implicit-def: $rbx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection503:
+; O0-NEXT:  .Lpcsection463:
 ; O0-NEXT:    orq $-43, %rbx
-; O0-NEXT:  .Lpcsection504:
+; O0-NEXT:  .Lpcsection464:
 ; O0-NEXT:    movq $-1, %rcx
-; O0-NEXT:  .Lpcsection505:
+; O0-NEXT:  .Lpcsection465:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection506:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection466:
 ; O0-NEXT:    jne .LBB214_1
 ; O0-NEXT:    jmp .LBB214_2
 ; O0-NEXT:  .LBB214_2: # %atomicrmw.end
@@ -11984,6 +14259,36 @@ define void @atomic128_nand_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_nand_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection430:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection431:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection432:
+; HASWELL-O3-NEXT:    movq $-1, %rcx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB214_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection433:
+; HASWELL-O3-NEXT:    notl %ebx
+; HASWELL-O3-NEXT:  .Lpcsection434:
+; HASWELL-O3-NEXT:    orq $-43, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection435:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection436:
+; HASWELL-O3-NEXT:    jne .LBB214_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i128 42 monotonic, align 16, !pcsections !0
@@ -11999,30 +14304,30 @@ define void @atomic128_xchg_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection507:
+; O0-NEXT:  .Lpcsection467:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection508:
+; O0-NEXT:  .Lpcsection468:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection509:
+; O0-NEXT:  .Lpcsection469:
 ; O0-NEXT:    jmp .LBB215_1
 ; O0-NEXT:  .LBB215_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection510:
+; O0-NEXT:  .Lpcsection470:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection511:
+; O0-NEXT:  .Lpcsection471:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection512:
+; O0-NEXT:  .Lpcsection472:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection513:
+; O0-NEXT:  .Lpcsection473:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection514:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection474:
 ; O0-NEXT:    jne .LBB215_1
 ; O0-NEXT:    jmp .LBB215_2
 ; O0-NEXT:  .LBB215_2: # %atomicrmw.end
@@ -12111,6 +14416,33 @@ define void @atomic128_xchg_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xchg_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection437:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection438:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection439:
+; HASWELL-O3-NEXT:    movl $42, %ebx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB215_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:  .Lpcsection440:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection441:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection442:
+; HASWELL-O3-NEXT:    jne .LBB215_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12126,30 +14458,30 @@ define void @atomic128_add_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection515:
+; O0-NEXT:  .Lpcsection475:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection516:
+; O0-NEXT:  .Lpcsection476:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection517:
+; O0-NEXT:  .Lpcsection477:
 ; O0-NEXT:    jmp .LBB216_1
 ; O0-NEXT:  .LBB216_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection518:
+; O0-NEXT:  .Lpcsection478:
 ; O0-NEXT:    addq $42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection519:
+; O0-NEXT:  .Lpcsection479:
 ; O0-NEXT:    adcq $0, %rcx
-; O0-NEXT:  .Lpcsection520:
+; O0-NEXT:  .Lpcsection480:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection521:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection481:
 ; O0-NEXT:    jne .LBB216_1
 ; O0-NEXT:    jmp .LBB216_2
 ; O0-NEXT:  .LBB216_2: # %atomicrmw.end
@@ -12244,6 +14576,35 @@ define void @atomic128_add_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_add_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection443:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection444:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB216_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection445:
+; HASWELL-O3-NEXT:    addq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection446:
+; HASWELL-O3-NEXT:    adcq $0, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection447:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection448:
+; HASWELL-O3-NEXT:    jne .LBB216_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12259,30 +14620,30 @@ define void @atomic128_sub_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection522:
+; O0-NEXT:  .Lpcsection482:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection523:
+; O0-NEXT:  .Lpcsection483:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection524:
+; O0-NEXT:  .Lpcsection484:
 ; O0-NEXT:    jmp .LBB217_1
 ; O0-NEXT:  .LBB217_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection525:
+; O0-NEXT:  .Lpcsection485:
 ; O0-NEXT:    addq $-42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection526:
+; O0-NEXT:  .Lpcsection486:
 ; O0-NEXT:    adcq $-1, %rcx
-; O0-NEXT:  .Lpcsection527:
+; O0-NEXT:  .Lpcsection487:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection528:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection488:
 ; O0-NEXT:    jne .LBB217_1
 ; O0-NEXT:    jmp .LBB217_2
 ; O0-NEXT:  .LBB217_2: # %atomicrmw.end
@@ -12377,6 +14738,35 @@ define void @atomic128_sub_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_sub_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection449:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection450:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB217_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection451:
+; HASWELL-O3-NEXT:    addq $-42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection452:
+; HASWELL-O3-NEXT:    adcq $-1, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection453:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection454:
+; HASWELL-O3-NEXT:    jne .LBB217_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12392,32 +14782,32 @@ define void @atomic128_and_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection529:
+; O0-NEXT:  .Lpcsection489:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection530:
+; O0-NEXT:  .Lpcsection490:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection531:
+; O0-NEXT:  .Lpcsection491:
 ; O0-NEXT:    jmp .LBB218_1
 ; O0-NEXT:  .LBB218_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection532:
+; O0-NEXT:  .Lpcsection492:
 ; O0-NEXT:    andl $42, %ecx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection533:
+; O0-NEXT:  .Lpcsection493:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection534:
+; O0-NEXT:  .Lpcsection494:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection535:
+; O0-NEXT:  .Lpcsection495:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection536:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection496:
 ; O0-NEXT:    jne .LBB218_1
 ; O0-NEXT:    jmp .LBB218_2
 ; O0-NEXT:  .LBB218_2: # %atomicrmw.end
@@ -12509,6 +14899,34 @@ define void @atomic128_and_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_and_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection455:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection456:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB218_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection457:
+; HASWELL-O3-NEXT:    andl $42, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection458:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection459:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection460:
+; HASWELL-O3-NEXT:    jne .LBB218_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12524,28 +14942,28 @@ define void @atomic128_or_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection537:
+; O0-NEXT:  .Lpcsection497:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection538:
+; O0-NEXT:  .Lpcsection498:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection539:
+; O0-NEXT:  .Lpcsection499:
 ; O0-NEXT:    jmp .LBB219_1
 ; O0-NEXT:  .LBB219_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection540:
+; O0-NEXT:  .Lpcsection500:
 ; O0-NEXT:    orq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection541:
+; O0-NEXT:  .Lpcsection501:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection542:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection502:
 ; O0-NEXT:    jne .LBB219_1
 ; O0-NEXT:    jmp .LBB219_2
 ; O0-NEXT:  .LBB219_2: # %atomicrmw.end
@@ -12634,6 +15052,33 @@ define void @atomic128_or_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_or_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection461:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection462:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB219_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection463:
+; HASWELL-O3-NEXT:    orq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection464:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection465:
+; HASWELL-O3-NEXT:    jne .LBB219_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12649,28 +15094,28 @@ define void @atomic128_xor_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection543:
+; O0-NEXT:  .Lpcsection503:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection544:
+; O0-NEXT:  .Lpcsection504:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection545:
+; O0-NEXT:  .Lpcsection505:
 ; O0-NEXT:    jmp .LBB220_1
 ; O0-NEXT:  .LBB220_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection546:
+; O0-NEXT:  .Lpcsection506:
 ; O0-NEXT:    xorq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection547:
+; O0-NEXT:  .Lpcsection507:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection548:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection508:
 ; O0-NEXT:    jne .LBB220_1
 ; O0-NEXT:    jmp .LBB220_2
 ; O0-NEXT:  .LBB220_2: # %atomicrmw.end
@@ -12759,6 +15204,33 @@ define void @atomic128_xor_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xor_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection466:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection467:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB220_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection468:
+; HASWELL-O3-NEXT:    xorq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection469:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection470:
+; HASWELL-O3-NEXT:    jne .LBB220_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12774,34 +15246,34 @@ define void @atomic128_nand_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection549:
+; O0-NEXT:  .Lpcsection509:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection550:
+; O0-NEXT:  .Lpcsection510:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection551:
+; O0-NEXT:  .Lpcsection511:
 ; O0-NEXT:    jmp .LBB221_1
 ; O0-NEXT:  .LBB221_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection552:
+; O0-NEXT:  .Lpcsection512:
 ; O0-NEXT:    notl %ecx
-; O0-NEXT:  .Lpcsection553:
+; O0-NEXT:  .Lpcsection513:
 ; O0-NEXT:    # implicit-def: $rbx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection554:
+; O0-NEXT:  .Lpcsection514:
 ; O0-NEXT:    orq $-43, %rbx
-; O0-NEXT:  .Lpcsection555:
+; O0-NEXT:  .Lpcsection515:
 ; O0-NEXT:    movq $-1, %rcx
-; O0-NEXT:  .Lpcsection556:
+; O0-NEXT:  .Lpcsection516:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection557:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection517:
 ; O0-NEXT:    jne .LBB221_1
 ; O0-NEXT:    jmp .LBB221_2
 ; O0-NEXT:  .LBB221_2: # %atomicrmw.end
@@ -12899,6 +15371,36 @@ define void @atomic128_nand_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_nand_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection471:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection472:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection473:
+; HASWELL-O3-NEXT:    movq $-1, %rcx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB221_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection474:
+; HASWELL-O3-NEXT:    notl %ebx
+; HASWELL-O3-NEXT:  .Lpcsection475:
+; HASWELL-O3-NEXT:    orq $-43, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection476:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection477:
+; HASWELL-O3-NEXT:    jne .LBB221_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i128 42 acquire, align 16, !pcsections !0
@@ -12914,30 +15416,30 @@ define void @atomic128_xchg_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection558:
+; O0-NEXT:  .Lpcsection518:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection559:
+; O0-NEXT:  .Lpcsection519:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection560:
+; O0-NEXT:  .Lpcsection520:
 ; O0-NEXT:    jmp .LBB222_1
 ; O0-NEXT:  .LBB222_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection561:
+; O0-NEXT:  .Lpcsection521:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection562:
+; O0-NEXT:  .Lpcsection522:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection563:
+; O0-NEXT:  .Lpcsection523:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection564:
+; O0-NEXT:  .Lpcsection524:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection565:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection525:
 ; O0-NEXT:    jne .LBB222_1
 ; O0-NEXT:    jmp .LBB222_2
 ; O0-NEXT:  .LBB222_2: # %atomicrmw.end
@@ -13026,6 +15528,33 @@ define void @atomic128_xchg_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xchg_release:
+; HASWELL-O3:       # %bb.0:
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection478:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection479:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection480:
+; HASWELL-O3-NEXT:    movl $42, %ebx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB222_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:  .Lpcsection481:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection482:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection483:
+; HASWELL-O3-NEXT:    jne .LBB222_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i128 42 release, align 16, !pcsections !0
   store volatile i64 1, ptr @foo, align 8
@@ -13040,30 +15569,30 @@ define void @atomic128_add_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection566:
+; O0-NEXT:  .Lpcsection526:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection567:
+; O0-NEXT:  .Lpcsection527:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection568:
+; O0-NEXT:  .Lpcsection528:
 ; O0-NEXT:    jmp .LBB223_1
 ; O0-NEXT:  .LBB223_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection569:
+; O0-NEXT:  .Lpcsection529:
 ; O0-NEXT:    addq $42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection570:
+; O0-NEXT:  .Lpcsection530:
 ; O0-NEXT:    adcq $0, %rcx
-; O0-NEXT:  .Lpcsection571:
+; O0-NEXT:  .Lpcsection531:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection572:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection532:
 ; O0-NEXT:    jne .LBB223_1
 ; O0-NEXT:    jmp .LBB223_2
 ; O0-NEXT:  .LBB223_2: # %atomicrmw.end
@@ -13158,6 +15687,35 @@ define void @atomic128_add_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_add_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection484:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection485:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB223_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection486:
+; HASWELL-O3-NEXT:    addq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection487:
+; HASWELL-O3-NEXT:    adcq $0, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection488:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection489:
+; HASWELL-O3-NEXT:    jne .LBB223_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i128 42 release, align 16, !pcsections !0
@@ -13173,30 +15731,30 @@ define void @atomic128_sub_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection573:
+; O0-NEXT:  .Lpcsection533:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection574:
+; O0-NEXT:  .Lpcsection534:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection575:
+; O0-NEXT:  .Lpcsection535:
 ; O0-NEXT:    jmp .LBB224_1
 ; O0-NEXT:  .LBB224_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection576:
+; O0-NEXT:  .Lpcsection536:
 ; O0-NEXT:    addq $-42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection577:
+; O0-NEXT:  .Lpcsection537:
 ; O0-NEXT:    adcq $-1, %rcx
-; O0-NEXT:  .Lpcsection578:
+; O0-NEXT:  .Lpcsection538:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection579:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection539:
 ; O0-NEXT:    jne .LBB224_1
 ; O0-NEXT:    jmp .LBB224_2
 ; O0-NEXT:  .LBB224_2: # %atomicrmw.end
@@ -13291,6 +15849,35 @@ define void @atomic128_sub_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_sub_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection490:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection491:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB224_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection492:
+; HASWELL-O3-NEXT:    addq $-42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection493:
+; HASWELL-O3-NEXT:    adcq $-1, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection494:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection495:
+; HASWELL-O3-NEXT:    jne .LBB224_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i128 42 release, align 16, !pcsections !0
@@ -13306,32 +15893,32 @@ define void @atomic128_and_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection580:
+; O0-NEXT:  .Lpcsection540:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection581:
+; O0-NEXT:  .Lpcsection541:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection582:
+; O0-NEXT:  .Lpcsection542:
 ; O0-NEXT:    jmp .LBB225_1
 ; O0-NEXT:  .LBB225_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection583:
+; O0-NEXT:  .Lpcsection543:
 ; O0-NEXT:    andl $42, %ecx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection584:
+; O0-NEXT:  .Lpcsection544:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection585:
+; O0-NEXT:  .Lpcsection545:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection586:
+; O0-NEXT:  .Lpcsection546:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection587:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection547:
 ; O0-NEXT:    jne .LBB225_1
 ; O0-NEXT:    jmp .LBB225_2
 ; O0-NEXT:  .LBB225_2: # %atomicrmw.end
@@ -13423,6 +16010,34 @@ define void @atomic128_and_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_and_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection496:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection497:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB225_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection498:
+; HASWELL-O3-NEXT:    andl $42, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection499:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection500:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection501:
+; HASWELL-O3-NEXT:    jne .LBB225_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i128 42 release, align 16, !pcsections !0
@@ -13438,28 +16053,28 @@ define void @atomic128_or_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection588:
+; O0-NEXT:  .Lpcsection548:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection589:
+; O0-NEXT:  .Lpcsection549:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection590:
+; O0-NEXT:  .Lpcsection550:
 ; O0-NEXT:    jmp .LBB226_1
 ; O0-NEXT:  .LBB226_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection591:
+; O0-NEXT:  .Lpcsection551:
 ; O0-NEXT:    orq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection592:
+; O0-NEXT:  .Lpcsection552:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection593:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection553:
 ; O0-NEXT:    jne .LBB226_1
 ; O0-NEXT:    jmp .LBB226_2
 ; O0-NEXT:  .LBB226_2: # %atomicrmw.end
@@ -13548,6 +16163,33 @@ define void @atomic128_or_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_or_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection502:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection503:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB226_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection504:
+; HASWELL-O3-NEXT:    orq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection505:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection506:
+; HASWELL-O3-NEXT:    jne .LBB226_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i128 42 release, align 16, !pcsections !0
@@ -13563,28 +16205,28 @@ define void @atomic128_xor_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection594:
+; O0-NEXT:  .Lpcsection554:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection595:
+; O0-NEXT:  .Lpcsection555:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection596:
+; O0-NEXT:  .Lpcsection556:
 ; O0-NEXT:    jmp .LBB227_1
 ; O0-NEXT:  .LBB227_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection597:
+; O0-NEXT:  .Lpcsection557:
 ; O0-NEXT:    xorq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection598:
+; O0-NEXT:  .Lpcsection558:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection599:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection559:
 ; O0-NEXT:    jne .LBB227_1
 ; O0-NEXT:    jmp .LBB227_2
 ; O0-NEXT:  .LBB227_2: # %atomicrmw.end
@@ -13673,6 +16315,33 @@ define void @atomic128_xor_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xor_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection507:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection508:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB227_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection509:
+; HASWELL-O3-NEXT:    xorq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection510:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection511:
+; HASWELL-O3-NEXT:    jne .LBB227_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i128 42 release, align 16, !pcsections !0
@@ -13688,34 +16357,34 @@ define void @atomic128_nand_release(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection600:
+; O0-NEXT:  .Lpcsection560:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection601:
+; O0-NEXT:  .Lpcsection561:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection602:
+; O0-NEXT:  .Lpcsection562:
 ; O0-NEXT:    jmp .LBB228_1
 ; O0-NEXT:  .LBB228_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection603:
+; O0-NEXT:  .Lpcsection563:
 ; O0-NEXT:    notl %ecx
-; O0-NEXT:  .Lpcsection604:
+; O0-NEXT:  .Lpcsection564:
 ; O0-NEXT:    # implicit-def: $rbx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection605:
+; O0-NEXT:  .Lpcsection565:
 ; O0-NEXT:    orq $-43, %rbx
-; O0-NEXT:  .Lpcsection606:
+; O0-NEXT:  .Lpcsection566:
 ; O0-NEXT:    movq $-1, %rcx
-; O0-NEXT:  .Lpcsection607:
+; O0-NEXT:  .Lpcsection567:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection608:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection568:
 ; O0-NEXT:    jne .LBB228_1
 ; O0-NEXT:    jmp .LBB228_2
 ; O0-NEXT:  .LBB228_2: # %atomicrmw.end
@@ -13813,6 +16482,36 @@ define void @atomic128_nand_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_nand_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection512:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection513:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection514:
+; HASWELL-O3-NEXT:    movq $-1, %rcx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB228_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection515:
+; HASWELL-O3-NEXT:    notl %ebx
+; HASWELL-O3-NEXT:  .Lpcsection516:
+; HASWELL-O3-NEXT:    orq $-43, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection517:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection518:
+; HASWELL-O3-NEXT:    jne .LBB228_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i128 42 release, align 16, !pcsections !0
@@ -13828,30 +16527,30 @@ define void @atomic128_xchg_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection609:
+; O0-NEXT:  .Lpcsection569:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection610:
+; O0-NEXT:  .Lpcsection570:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection611:
+; O0-NEXT:  .Lpcsection571:
 ; O0-NEXT:    jmp .LBB229_1
 ; O0-NEXT:  .LBB229_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection612:
+; O0-NEXT:  .Lpcsection572:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection613:
+; O0-NEXT:  .Lpcsection573:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection614:
+; O0-NEXT:  .Lpcsection574:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection615:
+; O0-NEXT:  .Lpcsection575:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection616:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection576:
 ; O0-NEXT:    jne .LBB229_1
 ; O0-NEXT:    jmp .LBB229_2
 ; O0-NEXT:  .LBB229_2: # %atomicrmw.end
@@ -13940,6 +16639,33 @@ define void @atomic128_xchg_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xchg_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection519:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection520:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection521:
+; HASWELL-O3-NEXT:    movl $42, %ebx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB229_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:  .Lpcsection522:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection523:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection524:
+; HASWELL-O3-NEXT:    jne .LBB229_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -13955,30 +16681,30 @@ define void @atomic128_add_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection617:
+; O0-NEXT:  .Lpcsection577:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection618:
+; O0-NEXT:  .Lpcsection578:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection619:
+; O0-NEXT:  .Lpcsection579:
 ; O0-NEXT:    jmp .LBB230_1
 ; O0-NEXT:  .LBB230_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection620:
+; O0-NEXT:  .Lpcsection580:
 ; O0-NEXT:    addq $42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection621:
+; O0-NEXT:  .Lpcsection581:
 ; O0-NEXT:    adcq $0, %rcx
-; O0-NEXT:  .Lpcsection622:
+; O0-NEXT:  .Lpcsection582:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection623:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection583:
 ; O0-NEXT:    jne .LBB230_1
 ; O0-NEXT:    jmp .LBB230_2
 ; O0-NEXT:  .LBB230_2: # %atomicrmw.end
@@ -14073,6 +16799,35 @@ define void @atomic128_add_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_add_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection525:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection526:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB230_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection527:
+; HASWELL-O3-NEXT:    addq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection528:
+; HASWELL-O3-NEXT:    adcq $0, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection529:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection530:
+; HASWELL-O3-NEXT:    jne .LBB230_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -14088,30 +16843,30 @@ define void @atomic128_sub_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection624:
+; O0-NEXT:  .Lpcsection584:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection625:
+; O0-NEXT:  .Lpcsection585:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection626:
+; O0-NEXT:  .Lpcsection586:
 ; O0-NEXT:    jmp .LBB231_1
 ; O0-NEXT:  .LBB231_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection627:
+; O0-NEXT:  .Lpcsection587:
 ; O0-NEXT:    addq $-42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection628:
+; O0-NEXT:  .Lpcsection588:
 ; O0-NEXT:    adcq $-1, %rcx
-; O0-NEXT:  .Lpcsection629:
+; O0-NEXT:  .Lpcsection589:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection630:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection590:
 ; O0-NEXT:    jne .LBB231_1
 ; O0-NEXT:    jmp .LBB231_2
 ; O0-NEXT:  .LBB231_2: # %atomicrmw.end
@@ -14206,6 +16961,35 @@ define void @atomic128_sub_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_sub_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection531:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection532:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB231_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection533:
+; HASWELL-O3-NEXT:    addq $-42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection534:
+; HASWELL-O3-NEXT:    adcq $-1, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection535:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection536:
+; HASWELL-O3-NEXT:    jne .LBB231_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -14221,32 +17005,32 @@ define void @atomic128_and_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection631:
+; O0-NEXT:  .Lpcsection591:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection632:
+; O0-NEXT:  .Lpcsection592:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection633:
+; O0-NEXT:  .Lpcsection593:
 ; O0-NEXT:    jmp .LBB232_1
 ; O0-NEXT:  .LBB232_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection634:
+; O0-NEXT:  .Lpcsection594:
 ; O0-NEXT:    andl $42, %ecx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection635:
+; O0-NEXT:  .Lpcsection595:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection636:
+; O0-NEXT:  .Lpcsection596:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection637:
+; O0-NEXT:  .Lpcsection597:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection638:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection598:
 ; O0-NEXT:    jne .LBB232_1
 ; O0-NEXT:    jmp .LBB232_2
 ; O0-NEXT:  .LBB232_2: # %atomicrmw.end
@@ -14338,6 +17122,34 @@ define void @atomic128_and_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_and_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection537:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection538:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB232_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection539:
+; HASWELL-O3-NEXT:    andl $42, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection540:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection541:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection542:
+; HASWELL-O3-NEXT:    jne .LBB232_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -14353,28 +17165,28 @@ define void @atomic128_or_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection639:
+; O0-NEXT:  .Lpcsection599:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection640:
+; O0-NEXT:  .Lpcsection600:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection641:
+; O0-NEXT:  .Lpcsection601:
 ; O0-NEXT:    jmp .LBB233_1
 ; O0-NEXT:  .LBB233_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection642:
+; O0-NEXT:  .Lpcsection602:
 ; O0-NEXT:    orq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection643:
+; O0-NEXT:  .Lpcsection603:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection644:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection604:
 ; O0-NEXT:    jne .LBB233_1
 ; O0-NEXT:    jmp .LBB233_2
 ; O0-NEXT:  .LBB233_2: # %atomicrmw.end
@@ -14463,6 +17275,33 @@ define void @atomic128_or_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_or_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection543:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection544:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB233_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection545:
+; HASWELL-O3-NEXT:    orq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection546:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection547:
+; HASWELL-O3-NEXT:    jne .LBB233_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -14478,28 +17317,28 @@ define void @atomic128_xor_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection645:
+; O0-NEXT:  .Lpcsection605:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection646:
+; O0-NEXT:  .Lpcsection606:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection647:
+; O0-NEXT:  .Lpcsection607:
 ; O0-NEXT:    jmp .LBB234_1
 ; O0-NEXT:  .LBB234_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection648:
+; O0-NEXT:  .Lpcsection608:
 ; O0-NEXT:    xorq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection649:
+; O0-NEXT:  .Lpcsection609:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection650:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection610:
 ; O0-NEXT:    jne .LBB234_1
 ; O0-NEXT:    jmp .LBB234_2
 ; O0-NEXT:  .LBB234_2: # %atomicrmw.end
@@ -14588,6 +17427,33 @@ define void @atomic128_xor_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xor_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection548:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection549:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB234_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection550:
+; HASWELL-O3-NEXT:    xorq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection551:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection552:
+; HASWELL-O3-NEXT:    jne .LBB234_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -14603,34 +17469,34 @@ define void @atomic128_nand_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection651:
+; O0-NEXT:  .Lpcsection611:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection652:
+; O0-NEXT:  .Lpcsection612:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection653:
+; O0-NEXT:  .Lpcsection613:
 ; O0-NEXT:    jmp .LBB235_1
 ; O0-NEXT:  .LBB235_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection654:
+; O0-NEXT:  .Lpcsection614:
 ; O0-NEXT:    notl %ecx
-; O0-NEXT:  .Lpcsection655:
+; O0-NEXT:  .Lpcsection615:
 ; O0-NEXT:    # implicit-def: $rbx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection656:
+; O0-NEXT:  .Lpcsection616:
 ; O0-NEXT:    orq $-43, %rbx
-; O0-NEXT:  .Lpcsection657:
+; O0-NEXT:  .Lpcsection617:
 ; O0-NEXT:    movq $-1, %rcx
-; O0-NEXT:  .Lpcsection658:
+; O0-NEXT:  .Lpcsection618:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection659:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection619:
 ; O0-NEXT:    jne .LBB235_1
 ; O0-NEXT:    jmp .LBB235_2
 ; O0-NEXT:  .LBB235_2: # %atomicrmw.end
@@ -14728,6 +17594,36 @@ define void @atomic128_nand_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_nand_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection553:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection554:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection555:
+; HASWELL-O3-NEXT:    movq $-1, %rcx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB235_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection556:
+; HASWELL-O3-NEXT:    notl %ebx
+; HASWELL-O3-NEXT:  .Lpcsection557:
+; HASWELL-O3-NEXT:    orq $-43, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection558:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection559:
+; HASWELL-O3-NEXT:    jne .LBB235_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i128 42 acq_rel, align 16, !pcsections !0
@@ -14743,30 +17639,30 @@ define void @atomic128_xchg_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection660:
+; O0-NEXT:  .Lpcsection620:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection661:
+; O0-NEXT:  .Lpcsection621:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection662:
+; O0-NEXT:  .Lpcsection622:
 ; O0-NEXT:    jmp .LBB236_1
 ; O0-NEXT:  .LBB236_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
-; O0-NEXT:  .Lpcsection663:
+; O0-NEXT:  .Lpcsection623:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection664:
+; O0-NEXT:  .Lpcsection624:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection665:
+; O0-NEXT:  .Lpcsection625:
 ; O0-NEXT:    movl $42, %ebx
-; O0-NEXT:  .Lpcsection666:
+; O0-NEXT:  .Lpcsection626:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection667:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection627:
 ; O0-NEXT:    jne .LBB236_1
 ; O0-NEXT:    jmp .LBB236_2
 ; O0-NEXT:  .LBB236_2: # %atomicrmw.end
@@ -14855,6 +17751,33 @@ define void @atomic128_xchg_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xchg_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection560:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection561:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection562:
+; HASWELL-O3-NEXT:    movl $42, %ebx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB236_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:  .Lpcsection563:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection564:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection565:
+; HASWELL-O3-NEXT:    jne .LBB236_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xchg ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -14870,30 +17793,30 @@ define void @atomic128_add_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection668:
+; O0-NEXT:  .Lpcsection628:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection669:
+; O0-NEXT:  .Lpcsection629:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection670:
+; O0-NEXT:  .Lpcsection630:
 ; O0-NEXT:    jmp .LBB237_1
 ; O0-NEXT:  .LBB237_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection671:
+; O0-NEXT:  .Lpcsection631:
 ; O0-NEXT:    addq $42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection672:
+; O0-NEXT:  .Lpcsection632:
 ; O0-NEXT:    adcq $0, %rcx
-; O0-NEXT:  .Lpcsection673:
+; O0-NEXT:  .Lpcsection633:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection674:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection634:
 ; O0-NEXT:    jne .LBB237_1
 ; O0-NEXT:    jmp .LBB237_2
 ; O0-NEXT:  .LBB237_2: # %atomicrmw.end
@@ -14988,6 +17911,35 @@ define void @atomic128_add_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_add_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection566:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection567:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB237_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection568:
+; HASWELL-O3-NEXT:    addq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection569:
+; HASWELL-O3-NEXT:    adcq $0, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection570:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection571:
+; HASWELL-O3-NEXT:    jne .LBB237_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw add ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -15003,30 +17955,30 @@ define void @atomic128_sub_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection675:
+; O0-NEXT:  .Lpcsection635:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection676:
+; O0-NEXT:  .Lpcsection636:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection677:
+; O0-NEXT:  .Lpcsection637:
 ; O0-NEXT:    jmp .LBB238_1
 ; O0-NEXT:  .LBB238_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection678:
+; O0-NEXT:  .Lpcsection638:
 ; O0-NEXT:    addq $-42, %rbx
 ; O0-NEXT:    movq %rdx, %rcx
-; O0-NEXT:  .Lpcsection679:
+; O0-NEXT:  .Lpcsection639:
 ; O0-NEXT:    adcq $-1, %rcx
-; O0-NEXT:  .Lpcsection680:
+; O0-NEXT:  .Lpcsection640:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection681:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection641:
 ; O0-NEXT:    jne .LBB238_1
 ; O0-NEXT:    jmp .LBB238_2
 ; O0-NEXT:  .LBB238_2: # %atomicrmw.end
@@ -15121,6 +18073,35 @@ define void @atomic128_sub_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_sub_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection572:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection573:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB238_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection574:
+; HASWELL-O3-NEXT:    addq $-42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection575:
+; HASWELL-O3-NEXT:    adcq $-1, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection576:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection577:
+; HASWELL-O3-NEXT:    jne .LBB238_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw sub ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -15136,32 +18117,32 @@ define void @atomic128_and_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection682:
+; O0-NEXT:  .Lpcsection642:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection683:
+; O0-NEXT:  .Lpcsection643:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection684:
+; O0-NEXT:  .Lpcsection644:
 ; O0-NEXT:    jmp .LBB239_1
 ; O0-NEXT:  .LBB239_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection685:
+; O0-NEXT:  .Lpcsection645:
 ; O0-NEXT:    andl $42, %ecx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection686:
+; O0-NEXT:  .Lpcsection646:
 ; O0-NEXT:    xorl %ecx, %ecx
-; O0-NEXT:  .Lpcsection687:
+; O0-NEXT:  .Lpcsection647:
 ; O0-NEXT:    # kill: def $rcx killed $ecx
-; O0-NEXT:  .Lpcsection688:
+; O0-NEXT:  .Lpcsection648:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection689:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection649:
 ; O0-NEXT:    jne .LBB239_1
 ; O0-NEXT:    jmp .LBB239_2
 ; O0-NEXT:  .LBB239_2: # %atomicrmw.end
@@ -15253,6 +18234,34 @@ define void @atomic128_and_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_and_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection578:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection579:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB239_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection580:
+; HASWELL-O3-NEXT:    andl $42, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection581:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection582:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection583:
+; HASWELL-O3-NEXT:    jne .LBB239_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw and ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -15268,28 +18277,28 @@ define void @atomic128_or_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection690:
+; O0-NEXT:  .Lpcsection650:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection691:
+; O0-NEXT:  .Lpcsection651:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection692:
+; O0-NEXT:  .Lpcsection652:
 ; O0-NEXT:    jmp .LBB240_1
 ; O0-NEXT:  .LBB240_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection693:
+; O0-NEXT:  .Lpcsection653:
 ; O0-NEXT:    orq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection694:
+; O0-NEXT:  .Lpcsection654:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection695:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection655:
 ; O0-NEXT:    jne .LBB240_1
 ; O0-NEXT:    jmp .LBB240_2
 ; O0-NEXT:  .LBB240_2: # %atomicrmw.end
@@ -15378,6 +18387,33 @@ define void @atomic128_or_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_or_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection584:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection585:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB240_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection586:
+; HASWELL-O3-NEXT:    orq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection587:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection588:
+; HASWELL-O3-NEXT:    jne .LBB240_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw or ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -15393,28 +18429,28 @@ define void @atomic128_xor_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection696:
+; O0-NEXT:  .Lpcsection656:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection697:
+; O0-NEXT:  .Lpcsection657:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection698:
+; O0-NEXT:  .Lpcsection658:
 ; O0-NEXT:    jmp .LBB241_1
 ; O0-NEXT:  .LBB241_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movq %rax, %rbx
-; O0-NEXT:  .Lpcsection699:
+; O0-NEXT:  .Lpcsection659:
 ; O0-NEXT:    xorq $42, %rbx
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection700:
+; O0-NEXT:  .Lpcsection660:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection701:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection661:
 ; O0-NEXT:    jne .LBB241_1
 ; O0-NEXT:    jmp .LBB241_2
 ; O0-NEXT:  .LBB241_2: # %atomicrmw.end
@@ -15503,6 +18539,33 @@ define void @atomic128_xor_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_xor_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection589:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection590:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB241_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movq %rax, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection591:
+; HASWELL-O3-NEXT:    xorq $42, %rbx
+; HASWELL-O3-NEXT:    movq %rdx, %rcx
+; HASWELL-O3-NEXT:  .Lpcsection592:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection593:
+; HASWELL-O3-NEXT:    jne .LBB241_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw xor ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -15518,34 +18581,34 @@ define void @atomic128_nand_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection702:
+; O0-NEXT:  .Lpcsection662:
 ; O0-NEXT:    movq (%rdi), %rax
-; O0-NEXT:  .Lpcsection703:
+; O0-NEXT:  .Lpcsection663:
 ; O0-NEXT:    movq 8(%rdi), %rdx
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection704:
+; O0-NEXT:  .Lpcsection664:
 ; O0-NEXT:    jmp .LBB242_1
 ; O0-NEXT:  .LBB242_1: # %atomicrmw.start
 ; O0-NEXT:    # =>This Inner Loop Header: Depth=1
-; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdx # 8-byte Reload
+; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rsi # 8-byte Reload
 ; O0-NEXT:    movl %eax, %ecx
-; O0-NEXT:  .Lpcsection705:
+; O0-NEXT:  .Lpcsection665:
 ; O0-NEXT:    notl %ecx
-; O0-NEXT:  .Lpcsection706:
+; O0-NEXT:  .Lpcsection666:
 ; O0-NEXT:    # implicit-def: $rbx
 ; O0-NEXT:    movl %ecx, %ebx
-; O0-NEXT:  .Lpcsection707:
+; O0-NEXT:  .Lpcsection667:
 ; O0-NEXT:    orq $-43, %rbx
-; O0-NEXT:  .Lpcsection708:
+; O0-NEXT:  .Lpcsection668:
 ; O0-NEXT:    movq $-1, %rcx
-; O0-NEXT:  .Lpcsection709:
+; O0-NEXT:  .Lpcsection669:
 ; O0-NEXT:    lock cmpxchg16b (%rsi)
-; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection710:
+; O0-NEXT:    movq %rdx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
+; O0-NEXT:  .Lpcsection670:
 ; O0-NEXT:    jne .LBB242_1
 ; O0-NEXT:    jmp .LBB242_2
 ; O0-NEXT:  .LBB242_2: # %atomicrmw.end
@@ -15643,6 +18706,36 @@ define void @atomic128_nand_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_nand_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection594:
+; HASWELL-O3-NEXT:    movq (%rdi), %rax
+; HASWELL-O3-NEXT:  .Lpcsection595:
+; HASWELL-O3-NEXT:    movq 8(%rdi), %rdx
+; HASWELL-O3-NEXT:  .Lpcsection596:
+; HASWELL-O3-NEXT:    movq $-1, %rcx
+; HASWELL-O3-NEXT:    .p2align 4
+; HASWELL-O3-NEXT:  .LBB242_1: # %atomicrmw.start
+; HASWELL-O3-NEXT:    # =>This Inner Loop Header: Depth=1
+; HASWELL-O3-NEXT:    movl %eax, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection597:
+; HASWELL-O3-NEXT:    notl %ebx
+; HASWELL-O3-NEXT:  .Lpcsection598:
+; HASWELL-O3-NEXT:    orq $-43, %rbx
+; HASWELL-O3-NEXT:  .Lpcsection599:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection600:
+; HASWELL-O3-NEXT:    jne .LBB242_1
+; HASWELL-O3-NEXT:  # %bb.2: # %atomicrmw.end
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = atomicrmw nand ptr %a, i128 42 seq_cst, align 16, !pcsections !0
@@ -15657,34 +18750,30 @@ define void @atomic128_cas_monotonic(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection711:
+; O0-NEXT:  .Lpcsection671:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ecx
 ; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection712:
+; O0-NEXT:  .Lpcsection672:
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection713:
+; O0-NEXT:  .Lpcsection673:
 ; O0-NEXT:    movl $1, %ebx
 ; O0-NEXT:    movq %rbx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection714:
+; O0-NEXT:  .Lpcsection674:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection715:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection716:
+; O0-NEXT:  .Lpcsection675:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection717:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection718:
+; O0-NEXT:  .Lpcsection676:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    popq %rbx
@@ -15801,6 +18890,43 @@ define void @atomic128_cas_monotonic(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_cas_monotonic:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection601:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection602:
+; HASWELL-O3-NEXT:    movl $1, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection603:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection604:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection605:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection606:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection607:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection608:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection609:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection610:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection611:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection612:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection613:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i128 42, i128 1 monotonic monotonic, align 16, !pcsections !0
@@ -15817,34 +18943,30 @@ define void @atomic128_cas_acquire(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection719:
+; O0-NEXT:  .Lpcsection677:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ecx
 ; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection720:
+; O0-NEXT:  .Lpcsection678:
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection721:
+; O0-NEXT:  .Lpcsection679:
 ; O0-NEXT:    movl $1, %ebx
 ; O0-NEXT:    movq %rbx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection722:
+; O0-NEXT:  .Lpcsection680:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection723:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection724:
+; O0-NEXT:  .Lpcsection681:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection725:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection726:
+; O0-NEXT:  .Lpcsection682:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    popq %rbx
@@ -15961,6 +19083,43 @@ define void @atomic128_cas_acquire(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_cas_acquire:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection614:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection615:
+; HASWELL-O3-NEXT:    movl $1, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection616:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection617:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection618:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection619:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection620:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection621:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection622:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection623:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection624:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection625:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection626:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i128 42, i128 1 acquire monotonic, align 16, !pcsections !0
@@ -15977,34 +19136,30 @@ define void @atomic128_cas_release(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection727:
+; O0-NEXT:  .Lpcsection683:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ecx
 ; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection728:
+; O0-NEXT:  .Lpcsection684:
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection729:
+; O0-NEXT:  .Lpcsection685:
 ; O0-NEXT:    movl $1, %ebx
 ; O0-NEXT:    movq %rbx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection730:
+; O0-NEXT:  .Lpcsection686:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection731:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection732:
+; O0-NEXT:  .Lpcsection687:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection733:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection734:
+; O0-NEXT:  .Lpcsection688:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    popq %rbx
@@ -16121,6 +19276,43 @@ define void @atomic128_cas_release(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_cas_release:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection627:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection628:
+; HASWELL-O3-NEXT:    movl $1, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection629:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection630:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection631:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection632:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection633:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection634:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection635:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection636:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection637:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection638:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection639:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i128 42, i128 1 release monotonic, align 16, !pcsections !0
@@ -16137,34 +19329,30 @@ define void @atomic128_cas_acq_rel(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection735:
+; O0-NEXT:  .Lpcsection689:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ecx
 ; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection736:
+; O0-NEXT:  .Lpcsection690:
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection737:
+; O0-NEXT:  .Lpcsection691:
 ; O0-NEXT:    movl $1, %ebx
 ; O0-NEXT:    movq %rbx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection738:
+; O0-NEXT:  .Lpcsection692:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection739:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection740:
+; O0-NEXT:  .Lpcsection693:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection741:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection742:
+; O0-NEXT:  .Lpcsection694:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $1, foo
 ; O0-NEXT:    popq %rbx
@@ -16281,6 +19469,43 @@ define void @atomic128_cas_acq_rel(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_cas_acq_rel:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection640:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection641:
+; HASWELL-O3-NEXT:    movl $1, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection642:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection643:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection644:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection645:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection646:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection647:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection648:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection649:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection650:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection651:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection652:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:    movq $1, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i128 42, i128 1 acq_rel monotonic, align 16, !pcsections !0
@@ -16297,34 +19522,30 @@ define void @atomic128_cas_seq_cst(ptr %a) {
 ; O0-NEXT:    .cfi_def_cfa_offset 16
 ; O0-NEXT:    .cfi_offset %rbx, -16
 ; O0-NEXT:    movq foo(%rip), %rax
-; O0-NEXT:  .Lpcsection743:
+; O0-NEXT:  .Lpcsection695:
 ; O0-NEXT:    xorl %eax, %eax
 ; O0-NEXT:    movl %eax, %ecx
 ; O0-NEXT:    movq %rcx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection744:
+; O0-NEXT:  .Lpcsection696:
 ; O0-NEXT:    movl $42, %eax
 ; O0-NEXT:    movq %rax, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; O0-NEXT:  .Lpcsection745:
+; O0-NEXT:  .Lpcsection697:
 ; O0-NEXT:    movl $1, %ebx
 ; O0-NEXT:    movq %rbx, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection746:
+; O0-NEXT:  .Lpcsection698:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection747:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection748:
+; O0-NEXT:  .Lpcsection699:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rbx # 8-byte Reload
-; O0-NEXT:  .Lpcsection749:
-; O0-NEXT:    # kill: def $rsi killed $rax
 ; O0-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
 ; O0-NEXT:    movq %rcx, %rdx
-; O0-NEXT:  .Lpcsection750:
+; O0-NEXT:  .Lpcsection700:
 ; O0-NEXT:    lock cmpxchg16b (%rdi)
 ; O0-NEXT:    movq $3, foo
 ; O0-NEXT:    popq %rbx
@@ -16441,6 +19662,43 @@ define void @atomic128_cas_seq_cst(ptr %a) {
 ; O3-NEXT:    popq %rbx
 ; O3-NEXT:    .cfi_def_cfa_offset 8
 ; O3-NEXT:    retq
+;
+; HASWELL-O3-LABEL: atomic128_cas_seq_cst:
+; HASWELL-O3:       # %bb.0: # %entry
+; HASWELL-O3-NEXT:    pushq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 16
+; HASWELL-O3-NEXT:    .cfi_offset %rbx, -16
+; HASWELL-O3-NEXT:    movq foo(%rip), %rax
+; HASWELL-O3-NEXT:  .Lpcsection653:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection654:
+; HASWELL-O3-NEXT:    movl $1, %ebx
+; HASWELL-O3-NEXT:  .Lpcsection655:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection656:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection657:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection658:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection659:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection660:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection661:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:  .Lpcsection662:
+; HASWELL-O3-NEXT:    movl $42, %eax
+; HASWELL-O3-NEXT:  .Lpcsection663:
+; HASWELL-O3-NEXT:    xorl %edx, %edx
+; HASWELL-O3-NEXT:  .Lpcsection664:
+; HASWELL-O3-NEXT:    xorl %ecx, %ecx
+; HASWELL-O3-NEXT:  .Lpcsection665:
+; HASWELL-O3-NEXT:    lock cmpxchg16b (%rdi)
+; HASWELL-O3-NEXT:    movq $3, foo(%rip)
+; HASWELL-O3-NEXT:    popq %rbx
+; HASWELL-O3-NEXT:    .cfi_def_cfa_offset 8
+; HASWELL-O3-NEXT:    retq
 entry:
   load volatile i64, ptr @foo, align 8
   %x = cmpxchg ptr %a, i128 42, i128 1 seq_cst monotonic, align 16, !pcsections !0

@@ -14,10 +14,10 @@
 #define LLVM_CLANG_AST_TEMPLATENAME_H
 
 #include "clang/AST/DependenceFlags.h"
-#include "clang/AST/NestedNameSpecifier.h"
+#include "clang/AST/NestedNameSpecifierBase.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/OperatorKinds.h"
-#include "clang/Basic/UnsignedOrNone.h"
+#include "clang/Basic/OptionalUnsigned.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/PointerUnion.h"
@@ -298,10 +298,10 @@ public:
   /// set of function templates, returns NULL.
   TemplateDecl *getAsTemplateDecl(bool IgnoreDeduced = false) const;
 
-  /// Retrieves the underlying template declaration that
+  /// Retrieves the underlying template name that
   /// this template name refers to, along with the
   /// deduced default arguments, if any.
-  std::pair<TemplateDecl *, DefaultArguments>
+  std::pair<TemplateName, DefaultArguments>
   getTemplateDeclAndDefaultArgs() const;
 
   /// Retrieve the underlying, overloaded function template
@@ -339,6 +339,14 @@ public:
   /// Retrieve the underlying dependent template name
   /// structure, if any.
   DependentTemplateName *getAsDependentTemplateName() const;
+
+  // Retrieve the qualifier and template keyword stored in either a underlying
+  // DependentTemplateName or QualifiedTemplateName.
+  std::tuple<NestedNameSpecifier, bool> getQualifierAndTemplateKeyword() const;
+
+  NestedNameSpecifier getQualifier() const {
+    return std::get<0>(getQualifierAndTemplateKeyword());
+  }
 
   /// Retrieve the using shadow declaration through which the underlying
   /// template declaration is introduced, if any.
@@ -499,12 +507,17 @@ class QualifiedTemplateName : public llvm::FoldingSetNode {
 
   /// The nested name specifier that qualifies the template name.
   ///
-  /// The bit is used to indicate whether the "template" keyword was
-  /// present before the template name itself. Note that the
-  /// "template" keyword is always redundant in this case (otherwise,
-  /// the template name would be a dependent name and we would express
-  /// this name with DependentTemplateName).
-  llvm::PointerIntPair<NestedNameSpecifier *, 1> Qualifier;
+  /// NB(P2996): \c TemplateKeyword was formerly packed into the low bit of this
+  /// pointer via a PointerIntPair; it is stored out-of-line now that
+  /// NestedNameSpecifier no longer advertises a spare low bit (see
+  /// NestedNameSpecifierBase.h).
+  NestedNameSpecifier Qualifier;
+
+  /// Whether the "template" keyword was present before the template name
+  /// itself. Note that the "template" keyword is always redundant in this case
+  /// (otherwise, the template name would be a dependent name and we would
+  /// express this name with DependentTemplateName).
+  bool TemplateKeyword;
 
   /// The underlying template name, it is either
   ///  1) a Template -- a template declaration that this qualified name refers
@@ -513,20 +526,21 @@ class QualifiedTemplateName : public llvm::FoldingSetNode {
   ///     using-shadow declaration.
   TemplateName UnderlyingTemplate;
 
-  QualifiedTemplateName(NestedNameSpecifier *NNS, bool TemplateKeyword,
+  QualifiedTemplateName(NestedNameSpecifier NNS, bool TemplateKeyword,
                         TemplateName Template)
-      : Qualifier(NNS, TemplateKeyword ? 1 : 0), UnderlyingTemplate(Template) {
+      : Qualifier(NNS), TemplateKeyword(TemplateKeyword),
+        UnderlyingTemplate(Template) {
     assert(UnderlyingTemplate.getKind() == TemplateName::Template ||
            UnderlyingTemplate.getKind() == TemplateName::UsingTemplate);
   }
 
 public:
   /// Return the nested name specifier that qualifies this name.
-  NestedNameSpecifier *getQualifier() const { return Qualifier.getPointer(); }
+  NestedNameSpecifier getQualifier() const { return Qualifier; }
 
   /// Whether the template name was prefixed by the "template"
   /// keyword.
-  bool hasTemplateKeyword() const { return Qualifier.getInt(); }
+  bool hasTemplateKeyword() const { return TemplateKeyword; }
 
   /// Return the underlying template name.
   TemplateName getUnderlyingTemplate() const { return UnderlyingTemplate; }
@@ -535,9 +549,9 @@ public:
     Profile(ID, getQualifier(), hasTemplateKeyword(), UnderlyingTemplate);
   }
 
-  static void Profile(llvm::FoldingSetNodeID &ID, NestedNameSpecifier *NNS,
+  static void Profile(llvm::FoldingSetNodeID &ID, NestedNameSpecifier NNS,
                       bool TemplateKeyword, TemplateName TN) {
-    ID.AddPointer(NNS);
+    NNS.Profile(ID);
     ID.AddBoolean(TemplateKeyword);
     ID.AddPointer(TN.getAsVoidPointer());
   }
@@ -584,25 +598,30 @@ class DependentTemplateStorage {
   /// The nested name specifier that qualifies the template
   /// name.
   ///
-  /// The bit stored in this qualifier describes whether the \c Name field
-  /// was preceeded by a template keyword.
-  llvm::PointerIntPair<NestedNameSpecifier *, 1, bool> Qualifier;
+  /// NB(P2996): \c TemplateKeyword was formerly packed into the low bit of this
+  /// pointer via a PointerIntPair; stored out-of-line now that
+  /// NestedNameSpecifier no longer advertises a spare low bit (see
+  /// NestedNameSpecifierBase.h).
+  NestedNameSpecifier Qualifier;
+
+  /// Whether the \c Name field was preceeded by a template keyword.
+  bool TemplateKeyword;
 
   /// The dependent template name.
   IdentifierOrOverloadedOperator Name;
 
 public:
-  DependentTemplateStorage(NestedNameSpecifier *Qualifier,
+  DependentTemplateStorage(NestedNameSpecifier Qualifier,
                            IdentifierOrOverloadedOperator Name,
                            bool HasTemplateKeyword);
 
   /// Return the nested name specifier that qualifies this name.
-  NestedNameSpecifier *getQualifier() const { return Qualifier.getPointer(); }
+  NestedNameSpecifier getQualifier() const { return Qualifier; }
 
   IdentifierOrOverloadedOperator getName() const { return Name; }
 
   /// Was this template name was preceeded by the template keyword?
-  bool hasTemplateKeyword() const { return Qualifier.getInt(); }
+  bool hasTemplateKeyword() const { return TemplateKeyword; }
 
   TemplateNameDependence getDependence() const;
 
@@ -610,10 +629,10 @@ public:
     Profile(ID, getQualifier(), getName(), hasTemplateKeyword());
   }
 
-  static void Profile(llvm::FoldingSetNodeID &ID, NestedNameSpecifier *NNS,
+  static void Profile(llvm::FoldingSetNodeID &ID, NestedNameSpecifier NNS,
                       IdentifierOrOverloadedOperator Name,
                       bool HasTemplateKeyword) {
-    ID.AddPointer(NNS);
+    NNS.Profile(ID);
     ID.AddBoolean(HasTemplateKeyword);
     Name.Profile(ID);
   }

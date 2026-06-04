@@ -25,6 +25,7 @@
 #include <array>
 #include <print>
 #include <ranges>
+#include <span>
 #include <tuple>
 
 
@@ -168,12 +169,20 @@ void do_swap_representations(T& lhs, T& rhs) {
 void run_test() {
     std::vector<int> a = {1, 2, 3};
     std::vector<int> b = {3, 2, 1};
-    do_swap_representations(a, b);
+
+    // Note: 'std::vector' is not swapped directly here. Its representation
+    // contains an anonymous struct member, and member-access-splicing a member
+    // of an anonymous struct relative to that struct is ill-formed (Clang and
+    // GCC agree). Swap views of the elements instead, which exercises the same
+    // representation-swapping machinery on a type with named members.
+    std::span<int> sa{a};
+    std::span<int> sb{b};
+    do_swap_representations(sa, sb);
 
     // RUN: grep "universal-swap: a = \[3, 2, 1]" %t.stdout
     // RUN: grep "universal-swap: b = \[1, 2, 3]" %t.stdout
-    std::println("universal-swap: a = [{}, {}, {}]", a[0], a[1], a[2]);
-    std::println("universal-swap: b = [{}, {}, {}]", b[0], b[1], b[2]);
+    std::println("universal-swap: a = [{}, {}, {}]", sa[0], sa[1], sa[2]);
+    std::println("universal-swap: b = [{}, {}, {}]", sb[0], sb[1], sb[2]);
 }
 }  // namespace alisdair_universal_swap
 

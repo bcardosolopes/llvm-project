@@ -338,6 +338,11 @@ APValue::APValue(const APValue &RHS)
     setVector(((const Vec *)(const char *)&RHS.Data)->Elts,
               RHS.getVectorLength());
     break;
+  case Matrix:
+    MakeMatrix();
+    setMatrix(((const Mat *)(const char *)&RHS.Data)->Elts,
+              RHS.getMatrixNumRows(), RHS.getMatrixNumColumns());
+    break;
   case ComplexInt:
     MakeComplexInt();
     setComplexInt(RHS.getComplexIntReal(), RHS.getComplexIntImag());
@@ -429,6 +434,8 @@ void APValue::DestroyDataAndMakeUninit() {
     ((APFixedPoint *)(char *)&Data)->~APFixedPoint();
   else if (Kind == Vector)
     ((Vec *)(char *)&Data)->~Vec();
+  else if (Kind == Matrix)
+    ((Mat *)(char *)&Data)->~Mat();
   else if (Kind == ComplexInt)
     ((ComplexAPSInt *)(char *)&Data)->~ComplexAPSInt();
   else if (Kind == ComplexFloat)
@@ -462,6 +469,7 @@ bool APValue::needsCleanup() const {
   case Array:
   case Vector:
   case Reflection:
+  case Matrix:
     return true;
   case Int:
     return getInt().needsCleanup();
@@ -685,6 +693,12 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
       getVectorElt(I).Profile(ID);
     return;
 
+  case Matrix:
+    for (unsigned R = 0, N = getMatrixNumRows(); R != N; ++R)
+      for (unsigned C = 0, M = getMatrixNumColumns(); C != M; ++C)
+        getMatrixElt(R, C).Profile(ID);
+    return;
+
   case Int:
     profileIntValue(ID, getInt());
     return;
@@ -795,8 +809,7 @@ ReflectionKind APValue::getReflectionKind() const {
             if (auto *FD = dyn_cast<FieldDecl>(D))
               LVTy = FD->getType()->getCanonicalTypeUnqualified().getTypePtr();
             else if (auto *TD = dyn_cast<CXXRecordDecl>(D))
-              LVTy = TD->getTypeForDecl()
-                        ->getCanonicalTypeUnqualified().getTypePtr();
+              LVTy = TD->getASTContext().getCanonicalTagType(TD).getTypePtr();
           }
         }
 
@@ -847,7 +860,7 @@ static QualType ComputeLValueType(const APValue &V) {
 
         continue;
       } else if (auto *TD = dyn_cast<CXXRecordDecl>(D)) {
-        SQT.Ty = TD->getTypeForDecl();
+        SQT.Ty = TD->getASTContext().getCanonicalTagType(TD).getTypePtr();
         continue;
       }
 
@@ -1089,6 +1102,24 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     Out << '}';
     return;
   }
+  case APValue::Matrix: {
+    const auto *MT = Ty->castAs<ConstantMatrixType>();
+    QualType ElemTy = MT->getElementType();
+    Out << '{';
+    for (unsigned R = 0; R < getMatrixNumRows(); ++R) {
+      if (R != 0)
+        Out << ", ";
+      Out << '{';
+      for (unsigned C = 0; C < getMatrixNumColumns(); ++C) {
+        if (C != 0)
+          Out << ", ";
+        getMatrixElt(R, C).printPretty(Out, Policy, ElemTy, Ctx);
+      }
+      Out << '}';
+    }
+    Out << '}';
+    return;
+  }
   case APValue::ComplexInt:
     Out << getComplexIntReal() << "+" << getComplexIntImag() << "i";
     return;
@@ -1126,7 +1157,7 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
       if (!O.isZero()) {
         if (IsReference)
           Out << "*(";
-        if (S.isZero() || O % S) {
+        if (S.isZero() || !O.isMultipleOf(S)) {
           Out << "(char*)";
           S = CharUnits::One();
         }
@@ -1163,7 +1194,7 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     else if (isLValueOnePastTheEnd())
       Out << "*(&";
 
-    QualType ElemTy = Base.getType();
+    QualType ElemTy = Base.getType().getNonReferenceType();
     if (const ValueDecl *VD = Base.dyn_cast<const ValueDecl*>()) {
       Out << *VD;
     } else if (TypeInfoLValue TI = Base.dyn_cast<TypeInfoLValue>()) {
@@ -1244,8 +1275,8 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
   }
   case APValue::Struct: {
     Out << '{';
-    const RecordDecl *RD = Ty->castAs<RecordType>()->getDecl();
     bool First = true;
+    const auto *RD = Ty->castAsRecordDecl();
     if (unsigned N = getStructNumBases()) {
       const CXXRecordDecl *CD = cast<CXXRecordDecl>(RD);
       CXXRecordDecl::base_class_const_iterator BI = CD->bases_begin();
@@ -1524,6 +1555,7 @@ LinkageInfo LinkageComputer::getLVForValue(const APValue &V,
   case APValue::ComplexFloat:
   case APValue::Vector:
   case APValue::Reflection:
+  case APValue::Matrix:
     break;
 
   case APValue::AddrLabelDiff:
@@ -1610,11 +1642,6 @@ static QualType unwrapReflectedType(QualType QT) {
 
     if (const auto *LIT = dyn_cast<LocInfoType>(QT))
       QT = LIT->getType();
-    if (const auto *ET = dyn_cast<ElaboratedType>(QT)) {
-      QualType New = ET->getNamedType();
-      New.setLocalFastQualifiers(QT.getLocalFastQualifiers());
-      QT = New;
-    }
     if (const auto *STTPT = dyn_cast<SubstTemplateTypeParmType>(QT);
         STTPT && !STTPT->isDependentType())
       QT = STTPT->getReplacementType();

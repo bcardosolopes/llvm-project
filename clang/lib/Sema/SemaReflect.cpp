@@ -55,9 +55,9 @@ TemplateArgumentListInfo addLocToTemplateArgs(Sema &S,
 Expr *CreateRefToDecl(Sema &S, ValueDecl *D, SourceLocation ExprLoc) {
   CXXScopeSpec SS;
   if (const auto *RDC = dyn_cast<RecordDecl>(D->getDeclContext())) {
-    QualType QT(RDC->getTypeForDecl(), 0);
+    QualType QT = RDC->getASTContext().getCanonicalTagType(RDC);
     TypeSourceInfo *TSI = S.Context.CreateTypeSourceInfo(QT, 0);
-    SS.Extend(S.Context, TSI->getTypeLoc(), ExprLoc);
+    SS.Make(S.Context, TSI->getTypeLoc(), ExprLoc);
   }
 
   ExprValueKind ValueKind = VK_LValue;
@@ -225,8 +225,8 @@ public:
     if (auto *Cls = dyn_cast_or_null<CXXRecordDecl>(Target->getDeclContext())) {
       if (Cls != NamingCls &&
           !S.IsDerivedFrom(SourceLocation{},
-                           QualType(NamingCls->getTypeForDecl(), 0),
-                           QualType(Cls->getTypeForDecl(), 0)))
+                           NamingCls->getASTContext().getCanonicalTagType(NamingCls),
+                           Cls->getASTContext().getCanonicalTagType(Cls)))
         return false;
       else if (NamingCls->isAnonymousStructOrUnion())
         // Clang's access-checking machinery isn't equipped to deal with checks
@@ -367,7 +367,9 @@ public:
     // TODO(P2996): Calling 'substitute' should substitute without
     // instantiation. Should a lighter weight call be used?
     TemplateName TName(TD);
-    return S.CheckTemplateIdType(TName, InstantiateLoc, TAListInfo);
+    return S.CheckTemplateIdType(ElaboratedTypeKeyword::None, TName,
+                                 InstantiateLoc, TAListInfo, /*Scope=*/nullptr,
+                                 /*ForNestedNameSpecifier=*/false);
   }
 
   FunctionDecl *Substitute(FunctionTemplateDecl *TD,
@@ -398,7 +400,8 @@ public:
       populateTemplateArgumentListInfo(TAListInfo, TArgs, InstantiateLoc);
 
       DeclResult Result = S.CheckVarTemplateId(TD, InstantiateLoc,
-                                               InstantiateLoc, TAListInfo);
+                                               InstantiateLoc, TAListInfo,
+                                               /*SetWrittenArgs=*/false);
       if (Result.isInvalid())
         return nullptr;
       Spec = cast<VarTemplateSpecializationDecl>(Result.get());
@@ -474,7 +477,7 @@ public:
                                         Fn->getEndLoc());
     if (auto *DRE = dyn_cast<DeclRefExpr>(Fn))
       if (auto *Ctor = dyn_cast<CXXConstructorDecl>(DRE->getDecl())) {
-        QualType ClsTy(Ctor->getParent()->getTypeForDecl(), 0);
+        QualType ClsTy = Ctor->getParent()->getASTContext().getCanonicalTagType(Ctor->getParent());
         ExprResult Result = S.BuildCXXConstructExpr(
               Fn->getExprLoc(), ClsTy, Ctor, false, Args, false, false, false,
               false, CXXConstructionKind::Complete, Range);
@@ -548,7 +551,7 @@ public:
           }
           case TemplateArgument::Template: {
             ParsedTemplateTy P = ParsedTemplateTy::make(TArg.getAsTemplate());
-            ParsedTArgs.emplace_back(SS, P, SourceLocation());
+            ParsedTArgs.emplace_back(SourceLocation(), SS, P, SourceLocation());
             break;
           }
           case TemplateArgument::Declaration: {
@@ -581,7 +584,7 @@ public:
         MTP.push_back(
                 S.ActOnTemplateParameterList(0, SourceLocation{},
                                              SourceLocation{}, SourceLocation{},
-                                             std::nullopt, SourceLocation{},
+                                             {}, SourceLocation{},
                                              nullptr));
 
         NewDeclResult = S.ActOnClassTemplateSpecialization(
@@ -635,8 +638,7 @@ public:
     // Start the new definition.
     S.ActOnTagStartDefinition(&ClsScope, NewDecl);
     S.ActOnStartCXXMemberDeclarations(&ClsScope, NewDecl, SourceLocation{},
-                                      false, false, SourceLocation{},
-                                      SourceLocation{}, SourceLocation{});
+                                      false, false, SourceLocation{});
 
     // Derive member visibility.
     AccessSpecifier MemberAS = AS_public;
@@ -873,7 +875,7 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
            TNK == TNK_Concept_template);
 
     return BuildCXXReflectExpr(OpLoc, TemplateKWLoc, Template.get());
-  } else if (SS.isSet() && SS.getScopeRep()->isDependent()) {
+  } else if (SS.isSet() && SS.getScopeRep().isDependent()) {
     ExprResult Result = BuildDependentDeclRefExpr(SS, TemplateKWLoc, NameInfo,
                                                   TArgs);
     // This should only fail if 'SS' is invalid, but that should already have
@@ -956,7 +958,7 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc, TypeResult T) {
   ParsedTemplateArgument Arg = ActOnTemplateTypeArgument(T);
   assert(Arg.getKind() == ParsedTemplateArgument::Type);
 
-  return BuildCXXReflectExpr(OpLoc, Arg.getLocation(), T.get().get());
+  return BuildCXXReflectExpr(OpLoc, Arg.getNameLoc(), T.get().get());
 }
 
 ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
@@ -968,7 +970,7 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
                                      ParsedTemplateArgument Template) {
   assert(Template.getKind() == ParsedTemplateArgument::Template);
 
-  ExprResult Result = BuildCXXReflectExpr(OpLoc, Template.getLocation(),
+  ExprResult Result = BuildCXXReflectExpr(OpLoc, Template.getNameLoc(),
                                           Template.getAsTemplate().get());
   if (!Result.isInvalid() && Template.getEllipsisLoc().isValid())
     Result = ActOnPackExpansion(Result.get(), Template.getEllipsisLoc());
@@ -1148,7 +1150,7 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                      SourceLocation OperandLoc, QualType T) {
   if (auto *UT = dyn_cast<UsingType>(T)) {
     if (Context.getLangOpts().EntityProxyReflection)
-      return BuildCXXReflectExpr(OperatorLoc, OperandLoc, UT->getFoundDecl());
+      return BuildCXXReflectExpr(OperatorLoc, OperandLoc, UT->getDecl());
     else {
       Diag(OperandLoc, diag::err_reflect_using_declarator);
       return ExprError();
@@ -1365,7 +1367,7 @@ ExprResult Sema::BuildCXXMetafunctionExpr(
       RecordDecl *SourceLocDecl = lookupStdSourceLocationImpl(KwLoc);
       if (SourceLocDecl)
         Result = Context.getPointerType(
-                              Context.getRecordType(SourceLocDecl).withConst());
+                              Context.getCanonicalTagType(SourceLocDecl).withConst());
       return SourceLocDecl == nullptr;
     }
     case Metafunction::MFRK_spliceFromArg: {
@@ -1469,15 +1471,19 @@ QualType Sema::BuildReflectionSpliceType(SourceLocation TypenameKWLoc,
       for (const auto &TArg : Splice->getTemplateArgs()->arguments())
         TAListInfo.addArgument(TArg);
       ReflectedTy =
-          CheckTemplateIdType(Refl.getReflectedTemplate(),
-                              Splice->getBeginLoc(), TAListInfo);
+          CheckTemplateIdType(ElaboratedTypeKeyword::None,
+                              Refl.getReflectedTemplate(),
+                              Splice->getBeginLoc(), TAListInfo,
+                              /*Scope=*/nullptr,
+                              /*ForNestedNameSpecifier=*/false);
       if (ReflectedTy.isNull()) {
         return QualType();
       }
     } else {
       ReflectedTy =
           Context.getDeducedTemplateSpecializationType(
-              Refl.getReflectedTemplate(), QualType(), false);
+              DeducedKind::Undeduced, QualType(), ElaboratedTypeKeyword::None,
+              Refl.getReflectedTemplate());
     }
   } else if (!Refl.isReflectedType()) {
     if (Complain)
@@ -1500,8 +1506,9 @@ QualType Sema::BuildReflectionSpliceType(SourceLocation TypenameKWLoc,
               addLocToTemplateArgs(*this, TAList.asArray(),
                                    Splice->getBeginLoc()));
 
-      ReflectedTy = CheckTemplateIdType(TName, Splice->getBeginLoc(),
-                                        TAListInfo);
+      ReflectedTy = CheckTemplateIdType(
+          ElaboratedTypeKeyword::None, TName, Splice->getBeginLoc(), TAListInfo,
+          /*Scope=*/nullptr, /*ForNestedNameSpecifier=*/false);
       if (ReflectedTy.isNull())
         return QualType();
     }
@@ -1523,7 +1530,7 @@ QualType Sema::BuildReflectionSpliceTypeLoc(TypeLocBuilder &TLB,
 
   if (isa<TemplateSpecializationType>(SpliceTy)) {
     auto TL = TLB.push<TemplateSpecializationTypeLoc>(SpliceTy);
-    TL.setTemplateNameLoc(Loc);
+    TL.initializeLocal(Context, Loc);
     return SpliceTy;
   } else if (isa<DeducedTemplateSpecializationType>(SpliceTy)) {
     auto TL = TLB.push<DeducedTemplateSpecializationTypeLoc>(SpliceTy);
@@ -1670,8 +1677,8 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
       CXXScopeSpec ScopeSpec;
       if (auto *RD = dyn_cast<CXXRecordDecl>(TDecl->getDeclContext())) {
         TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(
-                QualType(RD->getTypeForDecl(), 0), Splice->getBeginLoc());
-        ScopeSpec.Extend(Context, TSI->getTypeLoc(), Splice->getBeginLoc());
+                RD->getASTContext().getCanonicalTagType(RD), Splice->getBeginLoc());
+        ScopeSpec.Make(Context, TSI->getTypeLoc(), Splice->getBeginLoc());
       }
 
       // TODO(P2996): Would be nice not to have to copy these here.
@@ -1855,8 +1862,10 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
     TemplateArgumentListInfo TAListInfo;
     for (const auto &TArg : Splice->getTemplateArgs()->arguments())
       TAListInfo.addArgument(TArg);
-    QualType QT = CheckTemplateIdType(Refl.getReflectedTemplate(),
-                                      SourceLocation(), TAListInfo);
+    QualType QT = CheckTemplateIdType(
+        ElaboratedTypeKeyword::None, Refl.getReflectedTemplate(),
+        SourceLocation(), TAListInfo, /*Scope=*/nullptr,
+        /*ForNestedNameSpecifier=*/false);
     if (QT.isNull())
       return nullptr;
     else if (auto *RD = QT->getAsTagDecl())

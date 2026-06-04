@@ -2,10 +2,10 @@
 // # RUN: mlir-opt %s -mlir-print-op-generic -split-input-file  | mlir-opt -mlir-print-op-generic | FileCheck %s --check-prefix=GENERIC
 
 // CHECK:   test.with_properties
-// CHECK-SAME: a = 32, b = "foo", c = "bar", flag = true, array = [1, 2, 3, 4]{{$}}
+// CHECK-SAME: a = 32, b = "foo", c = "bar", flag = true, array = [1, 2, 3, 4], array32 = [5, 6]{{$}}
 // GENERIC:   "test.with_properties"()
-// GENERIC-SAME: <{a = 32 : i64, array = array<i64: 1, 2, 3, 4>, b = "foo", c = "bar", flag = true}> : () -> ()
-test.with_properties a = 32, b = "foo", c = "bar", flag = true, array = [1, 2, 3, 4]
+// GENERIC-SAME: <{a = 32 : i64, array = array<i64: 1, 2, 3, 4>, array32 = array<i32: 5, 6>, b = "foo", c = "bar", flag = true}> : () -> ()
+test.with_properties a = 32, b = "foo", c = "bar", flag = true, array = [1, 2, 3, 4], array32 = [5, 6]
 
 // CHECK:   test.with_nice_properties
 // CHECK-SAME:    "foo bar" is -3{{$}}
@@ -97,3 +97,27 @@ test.with_optional_properties nested = some<none>
 // CHECK-SAME: ints = [1, 2] strings = ["a", "b"] nested = {{\[}}[1, 2], [3, 4]] opt = [-1, -2] explicitOptions = [none, 0] explicitUnits = [unit, unit_absent]
 // GENERIC: "test.with_array_properties"()
 test.with_array_properties ints = [1, 2] strings = ["a", "b"] nested = [[1, 2], [3, 4]] opt = [-1, -2] explicitOptions = [none, 0] explicitUnits = [unit, unit_absent] [] thats_has_default
+
+// Tests that DefaultValuedProp is elided from prop-dict when value equals default.
+// CHECK: test.op_with_property_predicates
+// CHECK-SAME: <{array = [], more_constrained = 1 : i64, non_empty_constrained = [1], non_empty_unconstrained = [1], scalar = 1 : i64, unconstrained = 0 : i64}>
+// CHECK-NOT: defaulted
+test.op_with_property_predicates <{
+  scalar = 1 : i64,
+  more_constrained = 1 : i64,
+  array = [],
+  non_empty_unconstrained = [1],
+  non_empty_constrained = [1],
+  unconstrained = 0 : i64}>
+
+// Tests that DefaultValuedProp is printed when value differs from default.
+// CHECK: test.op_with_property_predicates
+// CHECK-SAME: defaulted = 3
+test.op_with_property_predicates <{
+  scalar = 1 : i64,
+  defaulted = 3 : i64,
+  more_constrained = 1 : i64,
+  array = [],
+  non_empty_unconstrained = [1],
+  non_empty_constrained = [1],
+  unconstrained = 0 : i64}>

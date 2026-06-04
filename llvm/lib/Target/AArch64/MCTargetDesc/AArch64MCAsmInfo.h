@@ -26,7 +26,7 @@ class MCValue;
 class Triple;
 
 struct AArch64MCAsmInfoDarwin : public MCAsmInfoDarwin {
-  explicit AArch64MCAsmInfoDarwin(bool IsILP32);
+  explicit AArch64MCAsmInfoDarwin(bool IsILP32, const MCTargetOptions &Options);
   const MCExpr *
   getExprForPersonalitySymbol(const MCSymbol *Sym, unsigned Encoding,
                               MCStreamer &Streamer) const override;
@@ -37,7 +37,7 @@ struct AArch64MCAsmInfoDarwin : public MCAsmInfoDarwin {
 };
 
 struct AArch64MCAsmInfoELF : public MCAsmInfoELF {
-  explicit AArch64MCAsmInfoELF(const Triple &T);
+  explicit AArch64MCAsmInfoELF(const Triple &T, const MCTargetOptions &Options);
   void printSpecifierExpr(raw_ostream &OS,
                           const MCSpecifierExpr &Expr) const override;
   bool evaluateAsRelocatableImpl(const MCSpecifierExpr &Expr, MCValue &Res,
@@ -45,7 +45,7 @@ struct AArch64MCAsmInfoELF : public MCAsmInfoELF {
 };
 
 struct AArch64MCAsmInfoMicrosoftCOFF : public MCAsmInfoMicrosoft {
-  explicit AArch64MCAsmInfoMicrosoftCOFF();
+  explicit AArch64MCAsmInfoMicrosoftCOFF(const MCTargetOptions &Options);
   void printSpecifierExpr(raw_ostream &OS,
                           const MCSpecifierExpr &Expr) const override;
   bool evaluateAsRelocatableImpl(const MCSpecifierExpr &Expr, MCValue &Res,
@@ -53,7 +53,7 @@ struct AArch64MCAsmInfoMicrosoftCOFF : public MCAsmInfoMicrosoft {
 };
 
 struct AArch64MCAsmInfoGNUCOFF : public MCAsmInfoGNUCOFF {
-  explicit AArch64MCAsmInfoGNUCOFF();
+  explicit AArch64MCAsmInfoGNUCOFF(const MCTargetOptions &Options);
   void printSpecifierExpr(raw_ostream &OS,
                           const MCSpecifierExpr &Expr) const override;
   bool evaluateAsRelocatableImpl(const MCSpecifierExpr &Expr, MCValue &Res,
@@ -164,6 +164,7 @@ enum {
   // ELF relocation specifiers in data directives:
   S_PLT          = 0x400,
   S_GOTPCREL,
+  S_FUNCINIT,
 
   // Mach-O @ relocation specifiers:
   S_MACHO_GOT,
@@ -181,7 +182,9 @@ enum {
 
 /// Return the string representation of the ELF relocation specifier
 /// (e.g. ":got:", ":lo12:").
-StringRef getSpecifierName(const MCSpecifierExpr &Expr);
+StringRef getSpecifierName(Specifier S);
+
+Specifier parsePercentSpecifierName(StringRef);
 
 inline Specifier getSymbolLoc(Specifier S) {
   return static_cast<Specifier>(S & AArch64::S_SymLocBits);
@@ -199,15 +202,17 @@ class AArch64AuthMCExpr final : public MCSpecifierExpr {
   AArch64PACKey::ID Key;
 
   explicit AArch64AuthMCExpr(const MCExpr *Expr, uint16_t Discriminator,
-                             AArch64PACKey::ID Key, bool HasAddressDiversity)
-      : MCSpecifierExpr(Expr, HasAddressDiversity ? AArch64::S_AUTHADDR
-                                                  : AArch64::S_AUTH),
+                             AArch64PACKey::ID Key, bool HasAddressDiversity,
+                             SMLoc Loc)
+      : MCSpecifierExpr(
+            Expr, HasAddressDiversity ? AArch64::S_AUTHADDR : AArch64::S_AUTH,
+            Loc),
         Discriminator(Discriminator), Key(Key) {}
 
 public:
   static const AArch64AuthMCExpr *
   create(const MCExpr *Expr, uint16_t Discriminator, AArch64PACKey::ID Key,
-         bool HasAddressDiversity, MCContext &Ctx);
+         bool HasAddressDiversity, MCContext &Ctx, SMLoc Loc = SMLoc());
 
   AArch64PACKey::ID getKey() const { return Key; }
   uint16_t getDiscriminator() const { return Discriminator; }

@@ -18,6 +18,7 @@
 
 #include <meta>
 
+#include <algorithm>
 #include <array>
 #include <ranges>
 

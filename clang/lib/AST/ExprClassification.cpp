@@ -65,6 +65,7 @@ Cl Expr::ClassifyImpl(ASTContext &Ctx, SourceLocation *Loc) const {
   case Cl::CL_Void:
   case Cl::CL_AddressableVoid:
   case Cl::CL_DuplicateVectorComponents:
+  case Cl::CL_DuplicateMatrixComponents:
   case Cl::CL_MemberFunction:
   case Cl::CL_SubObjCPropertySetting:
   case Cl::CL_ClassTemporary:
@@ -293,6 +294,9 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
                                                          Cl::CL_PRValue;
   }
 
+  case Expr::MatrixSingleSubscriptExprClass:
+    return ClassifyInternal(Ctx, cast<MatrixSingleSubscriptExpr>(E)->getBase());
+
   // Subscripting matrix types behaves like member accesses.
   case Expr::MatrixSubscriptExprClass:
     return ClassifyInternal(Ctx, cast<MatrixSubscriptExpr>(E)->getBase());
@@ -402,6 +406,16 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
     if (cast<ExtVectorElementExpr>(E)->isArrow())
       return Cl::CL_LValue;
     return ClassifyInternal(Ctx, cast<ExtVectorElementExpr>(E)->getBase());
+
+  // Matrix element access is an lvalue unless there are duplicates
+  // in the shuffle expression.
+  case Expr::MatrixElementExprClass:
+    if (cast<MatrixElementExpr>(E)->containsDuplicateElements())
+      return Cl::CL_DuplicateMatrixComponents;
+    // NOTE: MatrixElementExpr is currently only used by HLSL which does not
+    // have pointers so there is no isArrow() necessary or way to test
+    // Cl::CL_LValue
+    return ClassifyInternal(Ctx, cast<MatrixElementExpr>(E)->getBase());
 
     // Simply look at the actual default argument.
   case Expr::CXXDefaultArgExprClass:
@@ -635,6 +649,13 @@ static Cl::Kinds ClassifyMemberExpr(ASTContext &Ctx, const MemberExpr *E) {
 static Cl::Kinds ClassifyBinaryOp(ASTContext &Ctx, const BinaryOperator *E) {
   assert(Ctx.getLangOpts().CPlusPlus &&
          "This is only relevant for C++.");
+
+  // For binary operators which are unknown due to type dependence, the
+  // convention is to classify them as a prvalue. This does not matter much, but
+  // it needs to agree with how they are created.
+  if (E->getType() == Ctx.DependentTy)
+    return Cl::CL_PRValue;
+
   // C++ [expr.ass]p1: All [...] return an lvalue referring to the left operand.
   // Except we override this for writes to ObjC properties.
   if (E->isAssignmentOp())
@@ -762,6 +783,8 @@ Expr::LValueClassification Expr::ClassifyLValue(ASTContext &Ctx) const {
   case Cl::CL_Void: return LV_InvalidExpression;
   case Cl::CL_AddressableVoid: return LV_IncompleteVoidType;
   case Cl::CL_DuplicateVectorComponents: return LV_DuplicateVectorComponents;
+  case Cl::CL_DuplicateMatrixComponents:
+    return LV_DuplicateMatrixComponents;
   case Cl::CL_MemberFunction: return LV_MemberFunction;
   case Cl::CL_SubObjCPropertySetting: return LV_SubObjCPropertySetting;
   case Cl::CL_ClassTemporary: return LV_ClassTemporary;
@@ -783,6 +806,8 @@ Expr::isModifiableLvalue(ASTContext &Ctx, SourceLocation *Loc) const {
   case Cl::CL_Void: return MLV_InvalidExpression;
   case Cl::CL_AddressableVoid: return MLV_IncompleteVoidType;
   case Cl::CL_DuplicateVectorComponents: return MLV_DuplicateVectorComponents;
+  case Cl::CL_DuplicateMatrixComponents:
+    return MLV_DuplicateMatrixComponents;
   case Cl::CL_MemberFunction: return MLV_MemberFunction;
   case Cl::CL_SubObjCPropertySetting: return MLV_SubObjCPropertySetting;
   case Cl::CL_ClassTemporary: return MLV_ClassTemporary;

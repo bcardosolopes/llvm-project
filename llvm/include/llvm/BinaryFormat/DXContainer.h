@@ -16,6 +16,7 @@
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/DXILABI.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/SwapByteOrder.h"
 #include "llvm/TargetParser/Triple.h"
@@ -44,7 +45,7 @@ namespace dxbc {
 LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
 inline Triple::EnvironmentType getShaderStage(uint32_t Kind) {
-  assert(Kind <= Triple::Amplification - Triple::Pixel &&
+  assert(Kind <= Triple::RootSignature - Triple::Pixel &&
          "Shader kind out of expected range.");
   return static_cast<Triple::EnvironmentType>(Triple::Pixel + Kind);
 }
@@ -157,22 +158,41 @@ enum class FeatureFlags : uint64_t {
 static_assert((uint64_t)FeatureFlags::NextUnusedBit <= 1ull << 63,
               "Shader flag bits exceed enum size.");
 
-#define ROOT_ELEMENT_FLAG(Num, Val) Val = Num,
-enum class RootElementFlag : uint32_t {
-#include "DXContainerConstants.def"
-};
-
-#define ROOT_DESCRIPTOR_FLAG(Num, Val) Val = Num,
-enum class RootDescriptorFlag : uint32_t {
-#include "DXContainerConstants.def"
-};
-
-#define DESCRIPTOR_RANGE_FLAG(Num, Val) Val = Num,
-enum class DescriptorRangeFlag : uint32_t {
+#define ROOT_SIGNATURE_FLAG(Num, Val) Val = Num,
+enum class RootFlags : uint32_t {
 #include "DXContainerConstants.def"
 
-  LLVM_MARK_AS_BITMASK_ENUM(DESCRIPTORS_STATIC_KEEPING_BUFFER_BOUNDS_CHECKS)
+  LLVM_MARK_AS_BITMASK_ENUM(SamplerHeapDirectlyIndexed)
 };
+
+LLVM_ABI ArrayRef<EnumEntry<RootFlags>> getRootFlags();
+
+#define ROOT_DESCRIPTOR_FLAG(Num, Enum, Flag) Enum = Num,
+enum class RootDescriptorFlags : uint32_t {
+#include "DXContainerConstants.def"
+
+  LLVM_MARK_AS_BITMASK_ENUM(DataStatic)
+};
+
+LLVM_ABI ArrayRef<EnumEntry<RootDescriptorFlags>> getRootDescriptorFlags();
+
+#define DESCRIPTOR_RANGE_FLAG(Num, Enum, Flag) Enum = Num,
+enum class DescriptorRangeFlags : uint32_t {
+#include "DXContainerConstants.def"
+
+  LLVM_MARK_AS_BITMASK_ENUM(DescriptorsStaticKeepingBufferBoundsChecks)
+};
+
+LLVM_ABI ArrayRef<EnumEntry<DescriptorRangeFlags>> getDescriptorRangeFlags();
+
+#define STATIC_SAMPLER_FLAG(Num, Enum, Flag) Enum = Num,
+enum class StaticSamplerFlags : uint32_t {
+#include "DXContainerConstants.def"
+
+  LLVM_MARK_AS_BITMASK_ENUM(NonNormalizedCoordinates)
+};
+
+LLVM_ABI ArrayRef<EnumEntry<StaticSamplerFlags>> getStaticSamplerFlags();
 
 #define ROOT_PARAMETER(Val, Enum) Enum = Val,
 enum class RootParameterType : uint32_t {
@@ -181,22 +201,9 @@ enum class RootParameterType : uint32_t {
 
 LLVM_ABI ArrayRef<EnumEntry<RootParameterType>> getRootParameterTypes();
 
-#define DESCRIPTOR_RANGE(Val, Enum) Enum = Val,
-enum class DescriptorRangeType : uint32_t {
-#include "DXContainerConstants.def"
-};
+LLVM_ABI_FOR_TEST bool isValidParameterType(uint32_t V);
 
-LLVM_ABI ArrayRef<EnumEntry<DescriptorRangeType>> getDescriptorRangeTypes();
-
-#define ROOT_PARAMETER(Val, Enum)                                              \
-  case Val:                                                                    \
-    return true;
-inline bool isValidParameterType(uint32_t V) {
-  switch (V) {
-#include "DXContainerConstants.def"
-  }
-  return false;
-}
+bool isValidRangeType(uint32_t V);
 
 #define SHADER_VISIBILITY(Val, Enum) Enum = Val,
 enum class ShaderVisibility : uint32_t {
@@ -205,37 +212,55 @@ enum class ShaderVisibility : uint32_t {
 
 LLVM_ABI ArrayRef<EnumEntry<ShaderVisibility>> getShaderVisibility();
 
-#define SHADER_VISIBILITY(Val, Enum)                                           \
-  case Val:                                                                    \
-    return true;
-inline bool isValidShaderVisibility(uint32_t V) {
-  switch (V) {
-#include "DXContainerConstants.def"
-  }
-  return false;
-}
+bool isValidShaderVisibility(uint32_t V);
 
-#define STATIC_SAMPLER_FILTER(Val, Enum) Enum = Val,
-enum class StaticSamplerFilter : uint32_t {
+#define FILTER(Val, Enum) Enum = Val,
+enum class SamplerFilter : uint32_t {
 #include "DXContainerConstants.def"
 };
+
+bool isValidSamplerFilter(uint32_t V);
+
+LLVM_ABI ArrayRef<EnumEntry<SamplerFilter>> getSamplerFilters();
 
 #define TEXTURE_ADDRESS_MODE(Val, Enum) Enum = Val,
 enum class TextureAddressMode : uint32_t {
 #include "DXContainerConstants.def"
 };
 
-#define COMPARISON_FUNCTION(Val, Enum) Enum = Val,
-enum class SamplersComparisonFunction : uint32_t {
+LLVM_ABI ArrayRef<EnumEntry<TextureAddressMode>> getTextureAddressModes();
+
+bool isValidAddress(uint32_t V);
+
+#define COMPARISON_FUNC(Val, Enum) Enum = Val,
+enum class ComparisonFunc : uint32_t {
 #include "DXContainerConstants.def"
 };
+
+LLVM_ABI ArrayRef<EnumEntry<ComparisonFunc>> getComparisonFuncs();
+
+bool isValidComparisonFunc(uint32_t V);
 
 #define STATIC_BORDER_COLOR(Val, Enum) Enum = Val,
-enum class SamplersBorderColor : uint32_t {
+enum class StaticBorderColor : uint32_t {
 #include "DXContainerConstants.def"
 };
 
+bool isValidBorderColor(uint32_t V);
+
+bool isValidRootDesciptorFlags(uint32_t V);
+
+bool isValidDescriptorRangeFlags(uint32_t V);
+
+bool isValidStaticSamplerFlags(uint32_t V);
+
+LLVM_ABI ArrayRef<EnumEntry<StaticBorderColor>> getStaticBorderColors();
+
 LLVM_ABI PartType parsePartType(StringRef S);
+
+bool isDebugProgramPart(PartType PT);
+
+const char *getProgramPartName(bool IsDebug);
 
 struct VertexPSVInfo {
   uint8_t OutputPositionPresent;
@@ -541,6 +566,8 @@ struct ResourceBindInfo : public v0::ResourceBindInfo {
 
 namespace v3 {
 struct RuntimeInfo : public v2::RuntimeInfo {
+  // Offset into the string table, which is stored separately in the PSV0 part.
+  // The entry name string itself is not stored in the RuntimeInfo record.
   uint32_t EntryNameOffset;
 
   void swapBytes() {
@@ -757,13 +784,73 @@ struct DescriptorRange {
   }
 };
 } // namespace v2
+
+namespace v3 {
+struct StaticSampler : public v1::StaticSampler {
+  uint32_t Flags;
+
+  StaticSampler() = default;
+  explicit StaticSampler(v1::StaticSampler &Base)
+      : v1::StaticSampler(Base), Flags(0U) {}
+
+  void swapBytes() {
+    v1::StaticSampler::swapBytes();
+    sys::swapByteOrder(Flags);
+  }
+};
+
+} // namespace v3
 } // namespace RTS0
 
 // D3D_ROOT_SIGNATURE_VERSION
 enum class RootSignatureVersion {
   V1_0 = 0x1,
   V1_1 = 0x2,
+  V1_2 = 0x3,
 };
+
+struct DebugNameHeader {
+  uint16_t Flags;
+  /// Debug file name length, without null terminator.
+  uint16_t NameLength;
+
+  void swapBytes() {
+    sys::swapByteOrder(Flags);
+    sys::swapByteOrder(NameLength);
+  }
+};
+
+static_assert(sizeof(DebugNameHeader) == 4, "DebugNameHeader size incorrect.");
+
+#define VERSION_INFO_FLAG(Num, Val, Str) Val = Num,
+enum class CompilerVersionFlags : uint32_t {
+#include "llvm/BinaryFormat/DXContainerConstants.def"
+
+  LLVM_MARK_AS_BITMASK_ENUM(Internal)
+};
+
+bool isValidCompilerVersionFlags(uint32_t V);
+
+struct CompilerVersionHeader {
+  uint16_t Major;
+  uint16_t Minor;
+  CompilerVersionFlags Flags;
+  /// The number outputted by `git rev-list --count HEAD` in the compiler repo.
+  uint32_t CommitCount;
+  /// Byte size of CommitSha and CustomVersionString, padding not included.
+  uint32_t ContentSizeInBytes;
+
+  void swapBytes() {
+    sys::swapByteOrder(Major);
+    sys::swapByteOrder(Minor);
+    sys::swapByteOrder(Flags);
+    sys::swapByteOrder(CommitCount);
+    sys::swapByteOrder(ContentSizeInBytes);
+  }
+};
+
+static_assert(sizeof(CompilerVersionHeader) == 16,
+              "CompilerVersionHeader size incorrect.");
 
 } // namespace dxbc
 } // namespace llvm

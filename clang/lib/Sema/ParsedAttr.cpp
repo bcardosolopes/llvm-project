@@ -311,7 +311,7 @@ bool ParsedAttr::checkAtMostNumArgs(Sema &S, unsigned Num) const {
 void clang::takeAndConcatenateAttrs(ParsedAttributes &First,
                                     ParsedAttributes &&Second) {
 
-  First.takeAllAtEndFrom(Second);
+  First.takeAllAppendingFrom(Second);
 
   if (!First.Range.getBegin().isValid())
     First.Range.setBegin(Second.Range.getBegin());
