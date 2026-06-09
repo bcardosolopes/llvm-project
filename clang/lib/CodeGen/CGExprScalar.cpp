@@ -526,6 +526,14 @@ public:
   Value *VisitParenExpr(ParenExpr *PE) {
     return Visit(PE->getSubExpr());
   }
+  // Reflections and token sequences carry no state at runtime; a reflect- or
+  // token-sequence-expression lowers to the empty (zero) value.
+  Value *VisitCXXReflectExpr(CXXReflectExpr *E) {
+    return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+  }
+  Value *VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+    return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+  }
   Value *VisitSubstNonTypeTemplateParmExpr(SubstNonTypeTemplateParmExpr *E) {
     return Visit(E->getReplacement());
   }

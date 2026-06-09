@@ -14908,13 +14908,21 @@ void Sema::addLifetimeBoundToImplicitThis(CXXMethodDecl *MD) {
 // Helper function to recursively check if an APValue contains consteval-only values
 // (reflection values, token sequences, or references to consteval variables)
 bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
-  // Non-null reflection value (null reflections are safe zero-initialized values)
-  if (V.isReflection())
-    return !V.isNullReflection();
+  // In the consteval-only operations model, reflections and token sequences are
+  // no longer consteval-only values: they may persist to runtime as stateless
+  // empty values. In the (default) consteval-only value model, they are
+  // consteval-only. Either way, pointers/references to consteval entities
+  // (checked below) remain consteval-only.
+  if (!getLangOpts().ConstevalOperations) {
+    // Non-null reflection value (null reflections are safe zero-initialized
+    // values).
+    if (V.isReflection())
+      return !V.isNullReflection();
 
-  // Token sequences are always consteval-only
-  if (V.isTokenSequence())
-    return true;
+    // Token sequences are always consteval-only.
+    if (V.isTokenSequence())
+      return true;
+  }
 
   // Check arrays
   if (V.isArray()) {
@@ -15003,9 +15011,11 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   // expression. This handles cases like `(f)` where `f` is consteval.
   E = E->IgnoreParenImpCasts();
 
-  // A CXXReflectExpr/CXXTokenSequenceExpr always produces a consteval-only
-  // value.
-  if (isa<CXXReflectExpr>(E) || isa<CXXTokenSequenceExpr>(E))
+  // In the consteval-only value model, a CXXReflectExpr/CXXTokenSequenceExpr
+  // always produces a consteval-only value. In the operations model it does
+  // not (reflections may persist to runtime).
+  if (!getLangOpts().ConstevalOperations &&
+      (isa<CXXReflectExpr>(E) || isa<CXXTokenSequenceExpr>(E)))
     return true;
 
   // A DeclRefExpr to an immediate function or consteval variable produces

@@ -3967,6 +3967,13 @@ defm entity_proxy_reflection : BoolFOption<"entity-proxy-reflection",
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Enable proposed reflection of entity proxies as described by P3XYZ">,
   NegFlag<SetFalse>>;
+defm consteval_operations : BoolFOption<"consteval-operations",
+  LangOpts<"ConstevalOperations">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Use the consteval-only operations model: reflections persist to "
+          "runtime and only their operations (e.g. ==) are consteval, instead "
+          "of the default consteval-only value model">,
+  NegFlag<SetFalse>>;
 
 defm sized_deallocation : BoolFOption<"sized-deallocation",
   LangOpts<"SizedDeallocation">, Default<cpp14.KeyPath>,

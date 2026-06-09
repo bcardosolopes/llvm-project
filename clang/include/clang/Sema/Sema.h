@@ -7911,6 +7911,11 @@ public:
   /// invocation.
   ExprResult CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl);
 
+  /// Wrap a builtin equality on reflections/token sequences (or token-sequence
+  /// concatenation) in a ConstantExpr so it is treated as an immediate
+  /// (consteval) operation: it must form a constant expression.
+  ExprResult CheckForImmediateReflectionOp(ExprResult E);
+
   void MarkExpressionAsImmediateEscalating(Expr *E);
 
   // Check that the SME attributes for PSTATE.ZA and PSTATE.SM are compatible.
@@ -15991,7 +15996,8 @@ public:
   /// RAII object for recording a consteval-only expression on its destruction.
   /// Useful for recording such an expression following the exit from an
   /// EnterExpressionEvaluationContext scope (e.g., when constructing a
-  /// CXXReflectExpr).
+  /// CXXReflectExpr). In the consteval-only operations model this records
+  /// nothing (reflections are not consteval-only values).
   class ConstevalOnlyRecorder {
     Sema &S;
     Expr *TheExpr;

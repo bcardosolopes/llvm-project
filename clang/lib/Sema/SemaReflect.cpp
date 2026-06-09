@@ -839,6 +839,11 @@ Sema::ConstevalOnlyRecorder::~ConstevalOnlyRecorder() {
   if (!TheExpr)
     return;
 
+  // In the consteval-only operations model reflections are not consteval-only
+  // values, so nothing is recorded.
+  if (S.getLangOpts().ConstevalOperations)
+    return;
+
   if (!S.isUnevaluatedContext() && !S.isImmediateFunctionContext() &&
       !S.isConstantEvaluatedContext() &&
       !S.isCheckingDefaultArgumentOrInitializer() &&

@@ -126,6 +126,9 @@ TargetInfo::TargetInfo(const llvm::Triple &T) : Triple(T) {
   LongDoubleAlign = 64;
   Float128Align = 128;
   Ibm128Align = 128;
+  // Default (consteval-only value model): meta::info never persists to runtime,
+  // so its representation is unobservable; use a wide handle. The consteval-only
+  // operations model shrinks this to a 1-byte empty value in adjust().
   MetaInfoWidth = 128;
   MetaInfoAlign = 128;
   LargeArrayMinWidth = 0;
@@ -424,6 +427,13 @@ void TargetInfo::adjust(DiagnosticsEngine &Diags, LangOptions &Opts,
                         const TargetInfo *Aux) {
   if (Opts.NoBitFieldTypeAlign)
     UseBitFieldTypeAlignment = false;
+
+  // In the consteval-only operations model, meta::info persists to runtime as a
+  // stateless 1-byte empty value.
+  if (Opts.ConstevalOperations) {
+    MetaInfoWidth = 8;
+    MetaInfoAlign = 8;
+  }
 
   switch (Opts.WCharSize) {
   default: llvm_unreachable("invalid wchar_t width");

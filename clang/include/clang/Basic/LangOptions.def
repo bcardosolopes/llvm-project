@@ -278,6 +278,7 @@ LANGOPT(ParameterReflection ,  1, 0, NotCompatible, "Augments C++26 Reflection w
 LANGOPT(ExpansionStatements ,  1, 0, NotCompatible, "Experimental C++26 Expansion Statements")
 LANGOPT(AnnotationAttributes,  1, 0, NotCompatible, "Experimental C++26 support for annotations")
 LANGOPT(EntityProxyReflection, 1, 0, NotCompatible, "Augments C++26 Reflection with entity proxy reflection")
+LANGOPT(ConstevalOperations , 1, 0, NotCompatible, "Use the consteval-only operations model (reflections persist to runtime; only their operations are consteval) instead of the consteval-only value model")
 
 LANGOPT(MSVCEnableStdcMacro , 1, 0, NotCompatible, "Define __STDC__ with '-fms-compatibility'")
 LANGOPT(SizedDeallocation , 1, 0, NotCompatible, "sized deallocation")

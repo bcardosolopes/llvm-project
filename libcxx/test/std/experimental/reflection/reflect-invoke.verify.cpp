@@ -9,7 +9,7 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20
-// ADDITIONAL_COMPILE_FLAGS: -freflection
+// ADDITIONAL_COMPILE_FLAGS: -freflection -fconsteval-operations
 // ADDITIONAL_COMPILE_FLAGS: -Wno-unneeded-internal-declaration -Wno-unused-variable -Wno-unused-value
 
 // <experimental/reflection>
@@ -39,8 +39,7 @@ int main() {
               // non-static member functions
               // ======================
  constexpr A expectedClass{};
- reflect_invoke(^^A::fn, {^^expectedClass});
- // expected-error@-1 {{expressions involving consteval-only values}}
+ reflect_invoke(^^A::fn, {^^expectedClass}); // ok: result is a runtime reflection
 
  reflect_invoke(^^A::void_fn, {^^expectedClass});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
@@ -67,7 +66,6 @@ int main() {
  // test that implementation workaround with getting constexpr method from pointer couldn't be abused
  constexpr int (A::*constexpr_pointer)() const = &A::fn;
  reflect_invoke(^^constexpr_pointer, {^^expectedClass}); // ok
- // expected-error@-1 {{consteval-only values}}
 
  int (A::*pointer)() const = &A::fn;
  reflect_invoke(^^pointer, {^^expectedClass});

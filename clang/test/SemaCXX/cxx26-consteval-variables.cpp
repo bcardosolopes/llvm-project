@@ -1,4 +1,12 @@
-// RUN: %clang_cc1 -std=c++26 -freflection -fexpansion-statements -verify -verify-ignore-unexpected=note %s
+// This test runs under both consteval-only models. Most behavior is identical
+// (the "expected" prefix); the few lines that differ use the "value" prefix
+// (default, consteval-only value model) or the "ops" prefix
+// (-fconsteval-operations, consteval-only operations model).
+//
+// RUN: %clang_cc1 -std=c++26 -freflection -verify=expected,value \
+// RUN:   -verify-ignore-unexpected=note %s
+// RUN: %clang_cc1 -std=c++26 -freflection -fconsteval-operations \
+// RUN:   -verify=expected,ops -verify-ignore-unexpected=note %s
 
 // Test for P3603R0: Allowing consteval variables
 
@@ -179,9 +187,9 @@ namespace N4 {
     consteval int size_of2(info ) { return 0; }
 
     void test() {
-        int v1 = size_of1(r2); // expected-error {{constant-evaluated}}
+        int v1 = size_of1(r2); // value-error {{constant-evaluated}}
         int v2 = size_of2(r2);
-        int v3 = size_of1(^^int); // expected-error {{constant-evaluated}}
+        int v3 = size_of1(^^int); // value-error {{constant-evaluated}}
         int v4 = size_of2(^^int);
     }
 
@@ -249,9 +257,9 @@ namespace N7 {
         template <class> constexpr auto ne2() const -> bool { return this->r != ^^int; }
     };
 
-              auto p1 = &S::eq<int>; // ok
+              auto p1 = &S::eq<int>; // ops-error {{immediate}}
     constexpr auto p2 = &S::eq<int>; // ok
-              auto p3 = &S::ne<int>; // ok
+              auto p3 = &S::ne<int>; // ops-error {{immediate}}
     constexpr auto p4 = &S::ne<int>; // ok
               auto p5 = &S::id<int>; // ok
     constexpr auto p6 = &S::id<int>; // ok
@@ -269,13 +277,13 @@ namespace N8 {
     info var; // ok
     info other; // ok
     auto normal_func() -> void {
-        var = other;        // ok
-        (void)(var == other); // ok
-        var = ^^int; // expected-error {{constant}}
+        var = other;          // ok: assignment carries no state
+        (void)(var == other); // ops-error {{constant}}
+        var = ^^int;          // value-error {{constant}}
         (void)(var == ^^int); // expected-error {{constant}}
     }
     constexpr auto constexpr_func() -> bool {
-        var = ^^int; // expected-error {{constant}}
+        var = ^^int;          // value-error {{constant}}
         (void)(var == ^^int); // expected-error {{constant}}
         return true;
     }
@@ -366,6 +374,6 @@ namespace N11 {
     constexpr info const* p = &obj + 1;
     constexpr info const* q = &arr[1];
 
-    info bad1 = p[-1]; // expected-error {{consteval-only value}}
-    info bad2 = q[-1]; // expected-error {{consteval-only value}}
+    info bad1 = p[-1]; // value-error {{consteval-only value}}
+    info bad2 = q[-1]; // value-error {{consteval-only value}}
 }

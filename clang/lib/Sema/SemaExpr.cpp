@@ -15925,6 +15925,24 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
         Context, LHS.get(), RHS.get(), Opc, ResultTy, VK, OK, OpLoc,
         CurFPFeatureOverrides());
 
+    // In the consteval-only operations model, equality on reflections/token
+    // sequences and token-sequence concatenation are meaningful only at compile
+    // time, so they behave as immediate (consteval) operations: they must form
+    // a constant expression, escalating the enclosing context or being
+    // diagnosed otherwise. (Assignment and other operations carry no state and
+    // need no such treatment.) In the value model, these are ordinary
+    // operations and reflections that reach runtime are caught elsewhere.
+    if (getLangOpts().ConstevalOperations && Result.isUsable() &&
+        !Result.get()->isValueDependent()) {
+      QualType OpndTy = LHS.get()->getType();
+      bool IsImmediateReflectionOp =
+          (OpndTy->isReflectionType() && BinaryOperator::isEqualityOp(Opc)) ||
+          (OpndTy->isTokenSequenceType() &&
+           (BinaryOperator::isEqualityOp(Opc) || Opc == BO_Add));
+      if (IsImmediateReflectionOp)
+        return CheckForImmediateReflectionOp(Result);
+    }
+
     return Result;
   }
 
@@ -18555,6 +18573,54 @@ ExprResult Sema::CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl) {
   return Res;
 }
 
+ExprResult Sema::CheckForImmediateReflectionOp(ExprResult E) {
+  if (isUnevaluatedContext() || !E.isUsable() ||
+      isAlwaysConstantEvaluatedContext() ||
+      isCheckingDefaultArgumentOrInitializer() ||
+      RebuildingImmediateInvocation || isImmediateFunctionContext())
+    return E;
+
+  // This mirrors CheckForImmediateInvocation, but there is no callee
+  // FunctionDecl: the immediate operation is a builtin operator on reflections
+  // or token sequences.
+  APValue Cached;
+  auto CheckConstantExpressionAndKeepResult = [&]() {
+    llvm::SmallVector<PartialDiagnosticAt, 8> Notes;
+    Expr::EvalResult Eval;
+    Eval.Diag = &Notes;
+    auto CEK = ExprEvalContexts.back().InImmediateEscalatingFunctionContext
+                   ? ConstantExprKind::EscalatoryImmediateInvocation
+                   : ConstantExprKind::ImmediateInvocation;
+    bool Res = E.get()->EvaluateAsConstantExpr(Eval, getASTContext(), CEK);
+    if (Res && Notes.empty()) {
+      Cached = std::move(Eval.Val);
+      return true;
+    }
+    return false;
+  };
+
+  if (!E.get()->isValueDependent() &&
+      ExprEvalContexts.back().InImmediateEscalatingFunctionContext &&
+      !CheckConstantExpressionAndKeepResult()) {
+    MarkExpressionAsImmediateEscalating(E.get());
+    return E;
+  }
+
+  if (Cleanup.exprNeedsCleanups())
+    E = ExprWithCleanups::Create(getASTContext(), E.get(),
+                                 Cleanup.cleanupsHaveSideEffects(), {});
+
+  ConstantExpr *Res = ConstantExpr::Create(
+      getASTContext(), E.get(),
+      ConstantExpr::getStorageKind(E.get()->getType().getTypePtr(),
+                                   getASTContext()),
+      /*IsImmediateInvocation=*/true);
+  if (Cached.hasValue())
+    Res->MoveIntoResult(Cached, getASTContext());
+  ExprEvalContexts.back().ImmediateInvocationCandidates.emplace_back(Res, 0);
+  return Res;
+}
+
 static void EvaluateAndDiagnoseImmediateInvocation(
     Sema &SemaRef, Sema::ImmediateInvocationCandidate Candidate) {
   llvm::SmallVector<PartialDiagnosticAt, 8> Notes;
@@ -18575,6 +18641,26 @@ static void EvaluateAndDiagnoseImmediateInvocation(
       FD = Call->getConstructor();
     else if (auto *Cast = dyn_cast<CastExpr>(InnerExpr))
       FD = dyn_cast_or_null<FunctionDecl>(Cast->getConversionFunction());
+
+    // A callee-less immediate operation: equality on reflections/token
+    // sequences, or token-sequence concatenation.
+    if (!FD) {
+      auto *BO = cast<BinaryOperator>(InnerExpr);
+      unsigned DiagSelect = BO->getLHS()->getType()->isReflectionType() ? 0
+                            : BO->isEqualityOp()                        ? 1
+                                                                       : 2;
+      SemaRef.Diag(CE->getBeginLoc(), diag::err_reflection_op_not_constant)
+          << DiagSelect;
+      if (auto Context =
+              SemaRef.InnermostDeclarationWithDelayedImmediateInvocations()) {
+        SemaRef.Diag(Context->Loc, diag::note_invalid_consteval_initializer)
+            << Context->Decl;
+        SemaRef.Diag(Context->Decl->getBeginLoc(), diag::note_declared_at);
+      }
+      for (auto &Note : Notes)
+        SemaRef.Diag(Note.first, Note.second);
+      return;
+    }
 
     assert(FD && FD->isImmediateFunction() &&
            "could not find an immediate function in this expression");
@@ -19362,12 +19448,20 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
 
         if (FirstInstantiation || TSK != TSK_ImplicitInstantiation ||
             Func->isConstexpr()) {
+          // An immediate-escalating function (e.g. a lambda call operator) must
+          // have its definition instantiated eagerly, so that escalation to an
+          // immediate function is resolved before any call to it is finalized.
+          // Otherwise a call formed in an enclosing template (e.g. std::invoke)
+          // would be treated as a call to a non-immediate function and then
+          // rejected as "used before it is defined" once the escalation lands.
+          bool MustInstantiateForEscalation =
+              getLangOpts().CPlusPlus20 && Func->isImmediateEscalating();
           if (isa<CXXRecordDecl>(Func->getDeclContext()) &&
               cast<CXXRecordDecl>(Func->getDeclContext())->isLocalClass() &&
-              CodeSynthesisContexts.size())
+              CodeSynthesisContexts.size() && !MustInstantiateForEscalation)
             PendingLocalImplicitInstantiations.push_back(
                 std::make_pair(Func, PointOfInstantiation));
-          else if (Func->isConstexpr())
+          else if (Func->isConstexpr() || MustInstantiateForEscalation)
             // Do not defer instantiations of constexpr functions, to avoid the
             // expression evaluator needing to call back into Sema if it sees a
             // call to such a function.

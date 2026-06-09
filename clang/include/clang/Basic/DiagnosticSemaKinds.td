@@ -3246,6 +3246,10 @@ def err_expr_consteval_var : Error<
   "expressions involving consteval-only values are only allowed in constant-evaluated "
   "contexts">;
 
+def err_reflection_op_not_constant : Error<
+  "%select{comparison of reflections|comparison of token sequences|"
+  "concatenation of token sequences}0 must be a constant expression">;
+
 def err_reflect_general_expression : Error<
   "reflection operand must be a named entity">;
 def err_reflect_overload_set : Error<

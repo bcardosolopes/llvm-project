@@ -2600,13 +2600,10 @@ ConstantEmitter::tryEmitPrivate(const APValue &Value, QualType DestType,
     return llvm::ConstantStruct::get(STy, Complex);
   }
   case APValue::Reflection:
-  case APValue::TokenSequence: {
-    // FIXME: This emits an unused garbage value, but there's not much
-    // meaningful we can emit here. This seems okay, as the value only
-    // seems to be used in debug builds...But perhaps we can do better?
-    return llvm::ConstantInt::get(CGM.getLLVMContext(),
-                                  llvm::APInt(/*numBits=*/1, /*val=*/1));
-  }
+  case APValue::TokenSequence:
+    // Reflections and token sequences carry no state at runtime; they lower to
+    // a 1-byte empty value.
+    return llvm::Constant::getNullValue(CGM.getTypes().ConvertType(DestType));
   case APValue::Float: {
     const llvm::APFloat &Init = Value.getFloat();
     if (&Init.getSemantics() == &llvm::APFloat::IEEEhalf() &&

@@ -7747,6 +7747,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                     options::OPT_fno_reflection);
   Args.addOptInFlag(CmdArgs, options::OPT_fentity_proxy_reflection,
                     options::OPT_fno_entity_proxy_reflection);
+  // -fconsteval-operations selects the consteval-only operations model; off by
+  // default (the consteval-only value model).
+  Args.addOptInFlag(CmdArgs, options::OPT_fconsteval_operations,
+                    options::OPT_fno_consteval_operations);
 
   // -fsized-deallocation is on by default in C++14 onwards and otherwise off
   // by default.

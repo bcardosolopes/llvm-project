@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++26 -freflection -fexpansion-statements -verify -verify-ignore-unexpected=note %s
+// RUN: %clang_cc1 -std=c++26 -freflection -fconsteval-operations -verify -verify-ignore-unexpected=note %s
 
 using size_t = decltype(sizeof(0));
 
@@ -43,7 +43,7 @@ public:
 
 namespace N1 {
     token_sequence a;
-    token_sequence b = ^^{ }; // expected-error {{constant}}
+    token_sequence b = ^^{ }; // ok: token sequences persist to runtime
 
     constexpr token_sequence tok = ^^{ constexpr int x = 42; };
     static_assert(x == 42); // expected-error {{use of undeclared}}

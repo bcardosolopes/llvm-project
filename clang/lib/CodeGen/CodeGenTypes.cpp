@@ -517,7 +517,11 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
 
     case BuiltinType::MetaInfo:
     case BuiltinType::TokenSequence:
-      ResultType = llvm::IntegerType::get(getLLVMContext(), 128);
+      // Model meta::info/token_sequence as an opaque integer whose width tracks
+      // the AST type size (128 bits in the value model; 1 byte in the
+      // consteval-only operations model, where it persists to runtime empty).
+      ResultType =
+          llvm::IntegerType::get(getLLVMContext(), Context.getTypeSize(T));
       break;
 
     case BuiltinType::UInt128:
