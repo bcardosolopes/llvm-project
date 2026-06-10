@@ -7311,14 +7311,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fapinotes-modules");
   Args.AddLastArg(CmdArgs, options::OPT_fapinotes_swift_version);
 
-  if (Args.hasFlag(options::OPT_freflection_latest,
-                   options::OPT_fno_reflection_latest, false)) {
-    CmdArgs.push_back("-freflection");
-    CmdArgs.push_back("-fparameter-reflection");
-    CmdArgs.push_back("-fannotation-attributes");
-    CmdArgs.push_back("-fexpansion-statements");
-  }
-
   if (Args.hasFlag(options::OPT_fswift_version_independent_apinotes,
                    options::OPT_fno_swift_version_independent_apinotes, false))
     CmdArgs.push_back("-fswift-version-independent-apinotes");
@@ -7748,23 +7740,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.addOptOutFlag(CmdArgs, options::OPT_fassume_unique_vtables,
                      options::OPT_fno_assume_unique_vtables);
 
-  // -freflection is off by default, as it is experimental.
+  // -freflection is off by default, as it is experimental. It also implies
+  // parameter reflection, expansion statements, and annotation attributes
+  // (handled in CompilerInvocation).
   Args.addOptInFlag(CmdArgs, options::OPT_freflection,
                     options::OPT_fno_reflection);
-  // -fparameter-reflection is likewise off by default.
-  Args.addOptInFlag(CmdArgs, options::OPT_fparameter_reflection,
-                    options::OPT_fno_parameter_reflection);
-  // -fexpansion-statements is likewise off by default.
-  Args.addOptInFlag(CmdArgs, options::OPT_fexpansion_statements,
-                    options::OPT_fno_expansion_statements);
-  // -fannotation-attributes is likewise off by default.
-  Args.addOptInFlag(CmdArgs, options::OPT_fannotation_attributes,
-                    options::OPT_fno_annotation_attributes);
   Args.addOptInFlag(CmdArgs, options::OPT_fentity_proxy_reflection,
                     options::OPT_fno_entity_proxy_reflection);
-  // -freflection-latest is likewise off by default.
-  Args.addOptInFlag(CmdArgs, options::OPT_freflection_latest,
-                    options::OPT_fno_reflection_latest);
 
   // -fsized-deallocation is on by default in C++14 onwards and otherwise off
   // by default.

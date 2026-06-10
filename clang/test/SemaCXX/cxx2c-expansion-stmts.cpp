@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++26 -freflection -fexpansion-statements -Wno-unused-value -verify
+// RUN: %clang_cc1 %s -std=c++26 -freflection -Wno-unused-value -verify
 
 
                           // ================

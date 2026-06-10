@@ -2,10 +2,10 @@
 //
 // RUN: mkdir %t
 // RUN: %{cxx} %{compile_flags} -std=c++26 \
-// RUN:     -freflection-latest \
+// RUN:     -freflection \
 // RUN:     --precompile example-module.cppm -o %t/example-module.pcm
 // RUN: %{cxx} %{compile_flags} %{link_flags} -std=c++26 \
-// RUN:     -freflection-latest \
+// RUN:     -freflection \
 // RUN:     -fmodule-file=Example=%t/example-module.pcm %t/example-module.pcm \
 // RUN:     module-imports.sh.cpp -o %t/module-imports.sh.cpp.tsk
 // RUN: %t/module-imports.sh.cpp.tsk > %t/stdout.txt

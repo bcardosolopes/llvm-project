@@ -3958,32 +3958,14 @@ defm application_extension : BoolFOption<"application-extension",
 defm reflection : BoolFOption<"reflection",
   LangOpts<"Reflection">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable proposed C++26 reflection as described by P2996">,
-  NegFlag<SetFalse>>;
-defm parameter_reflection : BoolFOption<"parameter-reflection",
-  LangOpts<"ParameterReflection">, DefaultFalse,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable proposed parameter reflection as described by P3096">,
-  NegFlag<SetFalse>>;
-defm expansion_statements : BoolFOption<"expansion-statements",
-  LangOpts<"ExpansionStatements">, DefaultFalse,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable proposed expansion statements as described by P1306">,
-  NegFlag<SetFalse>>;
-defm annotation_attributes : BoolFOption<"annotation-attributes",
-  LangOpts<"AnnotationAttributes">, DefaultFalse,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable proposed annotation attributes as described by P3394">,
+          "Enable proposed C++26 reflection as described by P2996. This also "
+          "enables parameter reflection (P3096), expansion statements (P1306), "
+          "and annotation attributes (P3394)">,
   NegFlag<SetFalse>>;
 defm entity_proxy_reflection : BoolFOption<"entity-proxy-reflection",
   LangOpts<"EntityProxyReflection">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Enable proposed reflection of entity proxies as described by P3XYZ">,
-  NegFlag<SetFalse>>;
-defm reflection_latest : BoolFOption<"reflection-latest",
-  LangOpts<"ReflectionLatest">, DefaultFalse,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable all reflection features supported by Clang/P2996">,
   NegFlag<SetFalse>>;
 
 defm sized_deallocation : BoolFOption<"sized-deallocation",
