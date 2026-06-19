@@ -78,10 +78,6 @@ def metafn_function_returns_void : Note<
 def metafn_offset_virtual_base_of_abstract : Note<
   "cannot query the layout of a virtual base class of an abstract class">;
 
-// Accessibility.
-def metafn_access_query_class_being_defined : Note<
-  "cannot query the access of a member of class %0 currently being defined">;
-
 // Extraction.
 def metafn_cannot_extract : Note<
   "cannot extract a %select{value|reference|pointer to member}0 from a "
