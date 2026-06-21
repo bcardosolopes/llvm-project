@@ -8034,7 +8034,10 @@ class APValueToBufferConverter {
     case APValue::FixedPoint:
       // FIXME: We should support these.
 
+    case APValue::LValue:
+    case APValue::Matrix:
     case APValue::Reflection:
+    case APValue::TokenSequence:
     case APValue::Union:
     case APValue::MemberPointer:
     case APValue::AddrLabelDiff: {

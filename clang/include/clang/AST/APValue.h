@@ -391,7 +391,8 @@ public:
   /// Creates a matrix APValue with given dimensions. The elements
   /// are read from \p E and assumed to be in row-major order.
   explicit APValue(const APValue *E, unsigned NumRows, unsigned NumCols)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeMatrix();
     setMatrix(E, NumRows, NumCols);
   }

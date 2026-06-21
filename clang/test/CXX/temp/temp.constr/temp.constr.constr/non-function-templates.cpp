@@ -12,8 +12,9 @@ template<typename T, typename U>
   requires (sizeof(T) != sizeof(U) // expected-note{{because 'sizeof(int) != sizeof(char[4])' (4 != 4) evaluated to false}}
             && sizeof(T) >= 4) // expected-note{{because 'sizeof(char) >= 4' (1 >= 4) evaluated to false}}
 constexpr int SizeDiff = sizeof(T) > sizeof(U) ? sizeof(T) - sizeof(U) : sizeof(U) - sizeof(T);
+// expected-warning@-1 {{implicit conversion from '__size_t' (aka 'unsigned long') to 'const int' changes value from 18446744073709551613 to -3}}
 
-static_assert(SizeDiff<int, char> == 3);
+static_assert(SizeDiff<int, char> == 3); // expected-note {{in instantiation of variable template specialization 'SizeDiff<int, char>' requested here}}
 static_assert(SizeDiff<int, char[4]> == 0); // expected-error{{constraints not satisfied for variable template 'SizeDiff' [with T = int, U = char[4]]}}
 static_assert(SizeDiff<char, int> == 3); // expected-error{{constraints not satisfied for variable template 'SizeDiff' [with T = char, U = int]}}
 

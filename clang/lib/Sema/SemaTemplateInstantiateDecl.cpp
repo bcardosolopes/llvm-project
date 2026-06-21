@@ -6112,7 +6112,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
       ExpressionEvaluationContext::PotentiallyEvaluated;
   if (getLangOpts().CPlusPlus23 && Function->isConsteval())
     Ctx = ExpressionEvaluationContext::ImmediateFunctionContext;
-  EnterExpressionEvaluationContext EvalContext(*this, Ctx);
+  EnterExpressionEvaluationContextForFunction EvalContext(*this, Ctx, Function);
 
   currentEvaluationContext().InImmediateEscalatingFunctionContext =
       Function->isImmediateEscalating();

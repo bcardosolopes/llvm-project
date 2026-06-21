@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 %s -std=c++26 -freflection -fsyntax-only -verify
+// expected-no-diagnostics
 
 struct A{};
 namespace B{};
@@ -23,10 +24,10 @@ consteval void test()
     (void)(^^const void);
     (void)(^^decltype(nullptr));
 
-    (void)(^^::); // expected-error {{unknown or unimplemented reflectable entity}}
+    (void)(^^::);
     constexpr auto x = 1;
-    (void)(^^x); // expected-error {{unknown or unimplemented reflectable entity}}
-    (void)(^^A); // expected-error {{unknown or unimplemented reflectable entity}}
-    (void)(^^B); // expected-error {{unknown or unimplemented reflectable entity}}
-    (void)(^^f); // expected-error {{unknown or unimplemented reflectable entity}}
+    (void)(^^x);
+    (void)(^^A);
+    (void)(^^B);
+    (void)(^^f);
 }
