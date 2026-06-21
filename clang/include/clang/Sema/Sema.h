@@ -1363,6 +1363,10 @@ public:
     typedef void LateTemplateParserCleanupCB(void *P);
     typedef void TokenInjectionCB(
         void *P, SmallVectorImpl<Expr::EvalStatus::TokenInjection> &);
+    // Parse or discard late-parsed portions of injected members whose
+    // processing was deferred until their (being-defined) class was complete.
+    typedef void DeferredInjectedDefsCB(void *P, const Decl *ForClass,
+                                        bool ShouldParse);
 
     void setParser(void *P) { OpaqueParser = P; }
 
@@ -1374,6 +1378,10 @@ public:
 
     void setTokenInjectionCallback(TokenInjectionCB *CB) {
       TokenInjectionCallback = CB;
+    }
+
+    void setDeferredInjectedDefsCallback(DeferredInjectedDefsCB *CB) {
+      DeferredInjectedDefsCallback = CB;
     }
 
     bool hasLateTemplateParser() const { return LateTemplateParser; }
@@ -1400,10 +1408,22 @@ public:
       TokenInjectionCallback(OpaqueParser, Injections);
     }
 
+    bool canProcessDeferredInjectedDefs() const {
+      return DeferredInjectedDefsCallback && OpaqueParser;
+    }
+
+    void processDeferredInjectedDefs(const Decl *ForClass,
+                                     bool ShouldParse) const {
+      assert(DeferredInjectedDefsCallback && OpaqueParser &&
+             "deferred injected defs requested without a parser bridge");
+      DeferredInjectedDefsCallback(OpaqueParser, ForClass, ShouldParse);
+    }
+
   private:
     LateTemplateParserCB *LateTemplateParser = nullptr;
     LateTemplateParserCleanupCB *LateTemplateParserCleanup = nullptr;
     TokenInjectionCB *TokenInjectionCallback = nullptr;
+    DeferredInjectedDefsCB *DeferredInjectedDefsCallback = nullptr;
     void *OpaqueParser = nullptr;
   };
 
@@ -1415,6 +1435,10 @@ public:
   }
   void SetTokenInjectionCallback(SemaParserBridge::TokenInjectionCB *CB) {
     ParserBridge.setTokenInjectionCallback(CB);
+  }
+  void SetDeferredInjectedDefsCallback(
+      SemaParserBridge::DeferredInjectedDefsCB *CB) {
+    ParserBridge.setDeferredInjectedDefsCallback(CB);
   }
   bool HasLateTemplateParser() const {
     return ParserBridge.hasLateTemplateParser();
@@ -1429,6 +1453,13 @@ public:
   void ProcessTokenInjectionsFromParserBridge(
       SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
     ParserBridge.processTokenInjections(Injections);
+  }
+  /// Parse late-parsed portions of members that were injected into \p ForClass
+  /// while it was still being defined (deferred until it became complete).
+  void ProcessDeferredInjectedDefsFromParserBridge(const Decl *ForClass,
+                                                   bool ShouldParse) {
+    if (ParserBridge.canProcessDeferredInjectedDefs())
+      ParserBridge.processDeferredInjectedDefs(ForClass, ShouldParse);
   }
 
   /// Callback to the parser to parse a type expressed as a string.

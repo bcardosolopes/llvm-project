@@ -96,6 +96,72 @@ static_assert(Derived::base_count == 2);    // Base1, Base2
 static_assert(Derived::total_fields == 4);  // x, y (Base1) + z (Base2) + w
 
 
+                  // =====================================
+                  // inject a self-returning member into a class *template*
+                  // =====================================
+
+// Injecting a member function whose signature references the enclosing type is
+// the tricky case during instantiation: the type is still incomplete at the
+// point of injection. The injected body must be deferred until the
+// specialization is complete. Here 'minus' returns the (incomplete) Scaled<B>
+// and is injected only when the class lacks a usable 'minus' already.
+
+template <bool HasMinus>
+struct Scaled {
+  int n;
+  constexpr auto plus(int d) const -> Scaled { return Scaled{n + d}; }
+  constexpr auto minus(int d) const -> Scaled requires HasMinus {
+    return Scaled{n - d};
+  }
+
+  consteval {
+    bool has_plus = false, has_minus = false;
+    for (auto m : members_of(^^Scaled, access_context::current())) {
+      if (!has_identifier(m))
+        continue;
+      if (identifier_of(m) == "plus") has_plus = true;
+      else if (identifier_of(m) == "minus") has_minus = true;
+    }
+    if (has_plus && !has_minus)
+      queue_injection(^^{
+        constexpr auto minus(int d) const -> Scaled { return plus(-d); }
+      });
+  }
+};
+
+static_assert(Scaled<true>{5}.minus(2).n == 3);   // uses the declared 'minus'
+static_assert(Scaled<false>{5}.minus(2).n == 3);  // uses the injected 'minus'
+
+
+                  // =====================================
+                  // defer all late-parsed injected pieces in templates
+                  // =====================================
+
+template <bool B>
+struct CompleteSensitive {
+  consteval {
+    queue_injection(^^{
+      static constexpr auto default_arg(decltype(sizeof(0)) n =
+                                            sizeof(CompleteSensitive))
+          -> decltype(sizeof(0)) {
+        return n;
+      }
+      static constexpr auto noexcept_value()
+          noexcept(sizeof(CompleteSensitive) > 0) -> bool {
+        return true;
+      }
+      decltype(sizeof(0)) bytes = sizeof(CompleteSensitive);
+    });
+  }
+};
+
+static_assert(CompleteSensitive<false>::default_arg() ==
+              sizeof(CompleteSensitive<false>));
+static_assert(noexcept(CompleteSensitive<false>::noexcept_value()));
+static_assert(CompleteSensitive<false>{}.bytes ==
+              sizeof(CompleteSensitive<false>));
+
+
 int main() {
   Iterator it{42};
   assert(it.value == 42);

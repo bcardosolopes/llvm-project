@@ -3932,6 +3932,15 @@ bool Sema::InstantiateClassImpl(
               SourceLocation(), SourceLocation(), ParsedAttributesView());
   CheckCompletedCXXClass(nullptr, Instantiation);
 
+  // The class is now complete. Parse any late-parsed portions of members that
+  // were injected (via queue_injection in a consteval block) while the class
+  // was still being defined. Declarations were added immediately so they were
+  // visible to later members/introspection; default arguments, member
+  // initializers, and bodies wait until completion because they may refer to
+  // the class type.
+  ProcessDeferredInjectedDefsFromParserBridge(Instantiation,
+                                              !Instantiation->isInvalidDecl());
+
   // Default arguments are parsed, if not instantiated. We can go instantiate
   // default arg exprs for default constructors if necessary now. Unless we're
   // parsing a class, in which case wait until that's finished.

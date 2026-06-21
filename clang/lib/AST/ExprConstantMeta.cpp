@@ -1791,15 +1791,20 @@ bool get_ith_base_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     Decl *typeDecl = findTypeDecl(QT);
 
     if (auto cxxRecordDecl = dyn_cast_or_null<CXXRecordDecl>(typeDecl)) {
-      Meta.EnsureInstantiated(typeDecl, Range);
       // A class that is currently being defined is incomplete, but its bases
       // are already known (the base-clause precedes the member-specification),
-      // so base introspection is allowed mid-definition. A type incomplete for
+      // so base introspection is allowed mid-definition. Don't (re-)instantiate
+      // it in that case: it's already being instantiated, and instantiating its
+      // member definitions requires the complete type. A type incomplete for
       // any other reason cannot be introspected.
-      if (RV.getReflectedType()->isIncompleteType() &&
-          !cxxRecordDecl->isBeingDefined())
-        return Diagnoser(Range.getBegin(), diag::metafn_cannot_introspect_type)
-            << 0 << 0 << Range;
+      bool BeingDefined = cxxRecordDecl->isBeingDefined();
+      if (!BeingDefined) {
+        Meta.EnsureInstantiated(typeDecl, Range);
+        if (RV.getReflectedType()->isIncompleteType())
+          return Diagnoser(Range.getBegin(),
+                           diag::metafn_cannot_introspect_type)
+              << 0 << 0 << Range;
+      }
 
       auto numBases = cxxRecordDecl->getNumBases();
       if (idx >= numBases)
@@ -1929,29 +1934,35 @@ bool get_begin_member_decl_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     if (!typeDecl)
       return true;
 
-    if (!Meta.EnsureInstantiated(typeDecl, Range))
-      return true;
-
     // A class that is currently being defined (e.g. when 'members_of' is called
     // from a consteval block within the class's member-specification) is
     // incomplete, but we still allow introspecting the members declared so far
     // so that members can be injected conditioned on the members already
-    // present. A type that is incomplete for any other reason is ill-formed.
+    // present.
     bool BeingDefined = false;
-    if (QT->isIncompleteType()) {
-      auto *TD = dyn_cast<TagDecl>(typeDecl);
-      if (!TD || !TD->isBeingDefined())
-        return true;
+    if (auto *TD = dyn_cast<TagDecl>(typeDecl); TD && TD->isBeingDefined())
       BeingDefined = true;
-    }
 
-    // Don't force-declare implicit special members while the class is still
-    // being defined: whether they exist / are deleted depends on the complete
-    // member-specification, which isn't available yet. Only the explicitly
-    // declared members so far are introspectable in that case.
-    if (!BeingDefined)
+    if (!BeingDefined) {
+      // Only complete the type when it is *not* already mid-definition.
+      // Instantiating a class-template specialization (and its member
+      // definitions) requires the complete type; doing so for a specialization
+      // that is currently being instantiated would re-enter instantiation and
+      // try to instantiate members whose signatures reference the still
+      // incomplete type. A type that is incomplete for any other reason is
+      // ill-formed here.
+      if (!Meta.EnsureInstantiated(typeDecl, Range))
+        return true;
+
+      if (QT->isIncompleteType())
+        return true;
+
+      // Don't force-declare implicit special members while the class is still
+      // being defined: whether they exist / are deleted depends on the complete
+      // member-specification, which isn't available yet.
       if (auto *CXXRD = dyn_cast<CXXRecordDecl>(typeDecl))
         Meta.EnsureDeclarationOfImplicitMembers(CXXRD);
+    }
 
     DeclContext *declContext = dyn_cast<DeclContext>(typeDecl);
     assert(declContext && "no DeclContext?");

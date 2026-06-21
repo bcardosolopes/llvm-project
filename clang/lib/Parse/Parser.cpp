@@ -88,6 +88,7 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
 
   Actions.SetParserBridge(this);
   Actions.SetTokenInjectionCallback(&Parser::TokenInjectionCallback);
+  Actions.SetDeferredInjectedDefsCallback(&Parser::DeferredInjectedDefsCallback);
 }
 
 DiagnosticBuilder Parser::Diag(SourceLocation Loc, unsigned DiagID) {

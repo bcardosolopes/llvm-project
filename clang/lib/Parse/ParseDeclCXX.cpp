@@ -36,6 +36,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/TimeProfiler.h"
+#include <memory>
 #include <optional>
 
 using namespace clang;
@@ -1170,6 +1171,41 @@ void Parser::TokenInjectionCallback(void *P,
   static_cast<Parser *>(P)->ProcessTokenInjections(Injections);
 }
 
+void Parser::DeferredInjectedDefsCallback(void *P, const Decl *ForClass,
+                                          bool ShouldParse) {
+  static_cast<Parser *>(P)->ProcessDeferredInjectedDecls(ForClass,
+                                                         ShouldParse);
+}
+
+void Parser::ProcessDeferredInjectedDecls(const Decl *ForClass,
+                                          bool ShouldParse) {
+  SmallVector<std::unique_ptr<ParsingClass>, 2> WorkList;
+
+  for (unsigned I = 0; I != DeferredInjectedClasses.size();) {
+    if (DeferredInjectedClasses[I]->TagOrTemplate != ForClass) {
+      ++I;
+      continue;
+    }
+
+    WorkList.push_back(std::move(DeferredInjectedClasses[I]));
+    DeferredInjectedClasses.erase(DeferredInjectedClasses.begin() + I);
+  }
+
+  if (!ShouldParse)
+    return;
+
+  for (auto &PC : WorkList) {
+    // The class is now complete, so late-parsed member pieces that reference it
+    // (e.g. default arguments, noexcept-expressions, member initializers, and
+    // bodies) can be parsed in the same order used at ordinary class close.
+    ParseScope ClassScope(this, Scope::ClassScope | Scope::DeclScope);
+    getCurScope()->setEntity(cast<DeclContext>(const_cast<Decl *>(ForClass)));
+    ParseLexedMethodDeclarations(*PC);
+    ParseLexedMemberInitializers(*PC);
+    ParseLexedMethodDefs(*PC);
+  }
+}
+
 static void collectInjectedLocalDeclsForLookup(
     Stmt *S, SmallVectorImpl<NamedDecl *> &Decls) {
   auto AddDecl = [&](NamedDecl *ND) {
@@ -1349,14 +1385,25 @@ void Parser::ProcessTokenInjections(
         ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
       }
       if (!HasActiveClassParsing) {
-        // Process late-parsed members: method declarations, member
-        // initializers, and method definitions. This must happen before
-        // PopParsingClass destroys the LateParsedDeclarations. When injecting
-        // into an actively-parsed class, leave those declarations on the
-        // existing class stack so they see the complete member-specification.
-        ParseLexedMethodDeclarations(getCurrentClass());
-        ParseLexedMemberInitializers(getCurrentClass());
-        ParseLexedMethodDefs(getCurrentClass());
+        // If we are injecting into a class that is still being defined (a class
+        // template specialization currently being instantiated), late-parsed
+        // pieces of its members may reference the still-incomplete class (e.g.
+        // default arguments, noexcept-expressions, member initializers, or
+        // member-function bodies returning the class type). Defer those pieces
+        // until the class becomes complete; the declarations added above are
+        // already visible.
+        auto *RD = dyn_cast<CXXRecordDecl>(Actions.CurContext);
+        if (RD && RD->isBeingDefined()) {
+          auto Deferred = std::make_unique<ParsingClass>(
+              cast<Decl>(RD), /*TopLevelClass=*/true, /*IsInterface=*/false);
+          Deferred->LateParsedDeclarations =
+              std::move(getCurrentClass().LateParsedDeclarations);
+          DeferredInjectedClasses.push_back(std::move(Deferred));
+        } else {
+          ParseLexedMethodDeclarations(getCurrentClass());
+          ParseLexedMemberInitializers(getCurrentClass());
+          ParseLexedMethodDefs(getCurrentClass());
+        }
         Actions.FieldCollector->FinishClass();
       }
     } else {
@@ -4585,9 +4632,12 @@ Sema::ParsingClassState Parser::PushParsingClass(Decl *ClassDecl,
   return Actions.PushParsingClass();
 }
 
+Parser::ParsingClass::~ParsingClass() {
+  for (LateParsedDeclaration *LateD : LateParsedDeclarations)
+    delete LateD;
+}
+
 void Parser::DeallocateParsedClasses(Parser::ParsingClass *Class) {
-  for (unsigned I = 0, N = Class->LateParsedDeclarations.size(); I != N; ++I)
-    delete Class->LateParsedDeclarations[I];
   delete Class;
 }
 
