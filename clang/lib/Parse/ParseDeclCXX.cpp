@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Reflection.h"
@@ -1411,7 +1412,13 @@ void Parser::ProcessTokenInjections(
       while (Tok.isNot(tok::eof)) {
         ParsedAttributes DeclAttrs(AttrFactory);
         ParsedAttributes DeclSpecAttrs(AttrFactory);
-        ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+        DeclGroupPtrTy ADecl =
+            ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+        // ParseAST's top-level loop is what normally hands declarations to the
+        // ASTConsumer; injected declarations never pass through it, so they
+        // must be handed over here or they are parsed and then never emitted.
+        if (ADecl)
+          Actions.getASTConsumer().HandleTopLevelDecl(ADecl.get());
       }
     }
 

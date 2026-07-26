@@ -3192,6 +3192,12 @@ bool Type::isLiteralType(const ASTContext &Ctx) const {
 }
 
 bool Type::isStructuralType() const {
+  // A token sequence is a scalar type, but it has no mangling, so two
+  // specializations chosen by distinct token sequences would share a mangled
+  // name and collide at link time. Exclude it before the scalar case; this
+  // also propagates to any class type holding one, via StructuralIfLiteral.
+  if (isTokenSequenceType())
+    return false;
   // C++20 [temp.param]p6:
   //   A structural type is one of the following:
   //   -- a scalar type; or
