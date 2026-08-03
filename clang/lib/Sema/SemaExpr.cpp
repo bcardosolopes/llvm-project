@@ -19448,17 +19448,21 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
 
         if (FirstInstantiation || TSK != TSK_ImplicitInstantiation ||
             Func->isConstexpr()) {
-          // An immediate-escalating function (e.g. a lambda call operator) must
-          // have its definition instantiated eagerly, so that escalation to an
+          // An immediate-escalating function (e.g. a lambda call operator)
+          // wants its definition instantiated eagerly, so that escalation to an
           // immediate function is resolved before any call to it is finalized.
           // Otherwise a call formed in an enclosing template (e.g. std::invoke)
           // would be treated as a call to a non-immediate function and then
           // rejected as "used before it is defined" once the escalation lands.
+          //
+          // A member of a local class is exempt: instantiating those eagerly
+          // from inside a code synthesis context breaks return type deduction
+          // for recursive lambdas, which depends on the deferral below.
           bool MustInstantiateForEscalation =
               getLangOpts().CPlusPlus20 && Func->isImmediateEscalating();
           if (isa<CXXRecordDecl>(Func->getDeclContext()) &&
               cast<CXXRecordDecl>(Func->getDeclContext())->isLocalClass() &&
-              CodeSynthesisContexts.size() && !MustInstantiateForEscalation)
+              CodeSynthesisContexts.size())
             PendingLocalImplicitInstantiations.push_back(
                 std::make_pair(Func, PointOfInstantiation));
           else if (Func->isConstexpr() || MustInstantiateForEscalation)

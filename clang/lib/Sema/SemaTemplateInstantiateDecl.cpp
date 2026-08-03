@@ -6240,8 +6240,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
       // template pattern), its template parameters are at depth 0. We should
       // not walk up to the enclosing class template specialization to add
       // its template arguments, as that would create a depth collision.
-      if (!Primary->getInstantiatedFromMemberTemplate() &&
-          isa<ClassTemplateSpecializationDecl>(Function->getDeclContext()))
+      if (isInjectedIntoSpecialization(Function->getDeclContext(), Primary))
         DC = Function->getASTContext().getTranslationUnitDecl();
     }
     MultiLevelTemplateArgumentList TemplateArgs = getTemplateInstantiationArgs(
@@ -6587,6 +6586,11 @@ void Sema::InstantiateVariableInitializer(
         parentEvaluationContext().InLifetimeExtendingContext;
     currentEvaluationContext().RebuildDefaultArgOrDefaultInit =
         parentEvaluationContext().RebuildDefaultArgOrDefaultInit;
+    // The substitution below happens in this nested context, so it needs the
+    // same DeclForInitializer as the enclosing one: DiagIfReachable uses it to
+    // suppress runtime diagnostics for initializers that are required to be
+    // constant expressions anyway.
+    currentEvaluationContext().DeclForInitializer = Var;
 
     // Instantiate the initializer.
     ExprResult Init =

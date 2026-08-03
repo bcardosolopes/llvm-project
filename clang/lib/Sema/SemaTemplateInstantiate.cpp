@@ -233,8 +233,7 @@ HandleVarTemplateSpec(const VarTemplateSpecializationDecl *VarTemplSpec,
     // If this variable template was injected into a class template
     // specialization, its template parameters are at depth 0 and we
     // should not add the enclosing class template's arguments.
-    if (!Tmpl->getInstantiatedFromMemberTemplate() &&
-        isa<ClassTemplateSpecializationDecl>(VarTemplSpec->getDeclContext()))
+    if (Sema::isInjectedIntoSpecialization(VarTemplSpec->getDeclContext(), Tmpl))
       return Response::Done();
   }
   return Response::DontClearRelativeToPrimaryNextDecl(VarTemplSpec);
@@ -349,8 +348,7 @@ Response HandleFunction(Sema &SemaRef, const FunctionDecl *Function,
     // parameter depth is handled by the CTAD machinery.
     if (FunctionTemplateDecl *FTD = Function->getPrimaryTemplate()) {
       if (!isa<CXXDeductionGuideDecl>(Function) &&
-          !FTD->getInstantiatedFromMemberTemplate() &&
-          isa<ClassTemplateSpecializationDecl>(Function->getDeclContext()))
+          Sema::isInjectedIntoSpecialization(Function->getDeclContext(), FTD))
         return Response::Done();
     }
 
@@ -444,7 +442,7 @@ Response HandleFunctionTemplateDecl(Sema &SemaRef,
           /*Final=*/false);
     }
   } else if (!isa<CXXDeductionGuideDecl>(FTD->getTemplatedDecl()) &&
-             !FTD->getInstantiatedFromMemberTemplate()) {
+             Sema::isInjectedIntoSpecialization(FTD->getDeclContext(), FTD)) {
     // This function template was injected into a class template
     // specialization. Its template parameters are at depth 0 and we should
     // not add the enclosing class template's arguments.
@@ -542,6 +540,32 @@ Response HandleGenericDeclContext(const Decl *CurDecl) {
 }
 } // namespace TemplateInstArgsHelpers
 } // namespace
+
+bool Sema::isInjectedIntoSpecialization(
+    const DeclContext *DC, const RedeclarableTemplateDecl *Pattern) {
+  const auto *Spec = dyn_cast_or_null<ClassTemplateSpecializationDecl>(DC);
+  if (!Spec || !Pattern)
+    return false;
+
+  // A member instantiated from the class template pattern keeps a link back to
+  // it; an injected one never had a counterpart in the pattern.
+  if (Pattern->getInstantiatedFromMemberTemplate())
+    return false;
+
+  // That link is not set yet while an out-of-line definition is being matched
+  // against its in-class declaration, so consult the pattern directly: an
+  // injected member is precisely one that the pattern never declared.
+  DeclarationName Name = Pattern->getDeclName();
+  if (!Name)
+    return false;
+
+  ClassTemplateDecl *CTD = Spec->getSpecializedTemplate();
+  if (!CTD)
+    return false;
+
+  const CXXRecordDecl *PatternRD = CTD->getTemplatedDecl();
+  return PatternRD && PatternRD->lookup(Name).empty();
+}
 
 MultiLevelTemplateArgumentList Sema::getTemplateInstantiationArgs(
     const NamedDecl *ND, const DeclContext *DC, bool Final,

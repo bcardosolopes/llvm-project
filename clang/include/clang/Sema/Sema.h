@@ -13792,6 +13792,20 @@ public:
       bool SkipForSpecialization = false,
       bool ForDefaultArgumentSubstitution = false);
 
+  /// Determine whether a member template living in \p DC was injected into a
+  /// class template specialization (e.g. by a consteval block) rather than
+  /// instantiated from the corresponding member of the class template pattern.
+  ///
+  /// Such a member is parsed directly into the specialization, so its template
+  /// parameters start at depth 0 and the enclosing specialization's arguments
+  /// must not be added as an outer level.
+  ///
+  /// \param Pattern the template to test for an instantiated-from-member link;
+  ///        may be null, in which case this returns false.
+  static bool
+  isInjectedIntoSpecialization(const DeclContext *DC,
+                               const RedeclarableTemplateDecl *Pattern);
+
   /// RAII object to handle the state changes required to synthesize
   /// a function body.
   class SynthesizedFunctionScope {
