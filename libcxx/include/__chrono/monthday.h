@@ -29,6 +29,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 namespace chrono {
 
 class month_day {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   chrono::month __m_;
   chrono::day __d_;
@@ -93,6 +94,7 @@ operator/(const day& __lhs, const month& __rhs) noexcept {
 }
 
 class month_day_last {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   chrono::month __m_;
 

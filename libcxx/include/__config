@@ -250,6 +250,27 @@ typedef __char32_t char32_t;
 #    define _LIBCPP_EXPLICIT_SINCE_CXX23
 #  endif
 
+// P4340 ext (reflect-constant.md): defaulted reflect_constant customization
+// points, allowing library types with private members to be used as constant
+// template parameters. Expands to nothing unless reflection is enabled and
+// the customization point is recognized by the language (C++29).
+// decltype(^^::) is std::meta::info; spelling it this way avoids requiring
+// <meta> to have been included.
+#  if __has_feature(reflection) && _LIBCPP_STD_VER >= 29
+#    define _LIBCPP_REFLECT_CONSTANT_DEFAULT                                                                           \
+      consteval auto reflect_constant() const -> decltype(^^::) = default;
+// For use at the top of a 'class' (private-access) definition: opens a
+// public section for the customization point and returns to private.
+#    define _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC                                                                    \
+    public:                                                                                                           \
+      consteval auto reflect_constant() const -> decltype(^^::) = default;                                            \
+                                                                                                                       \
+    private:
+#  else
+#    define _LIBCPP_REFLECT_CONSTANT_DEFAULT
+#    define _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+#  endif
+
 #  if _LIBCPP_STD_VER >= 14
 #    define _LIBCPP_CONSTEXPR_SINCE_CXX14 constexpr
 #  else

@@ -305,6 +305,8 @@ operator/(const complex<_Tp>& __x, const complex<_Tp>& __y);
 template <class _Tp>
 class complex {
 public:
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
+
   typedef _Tp value_type;
 
 private:
@@ -417,6 +419,7 @@ _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR __complex_t<_Tp> __make_complex(_Tp __re
 
 template <>
 class complex<float> {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   float __re_;
   float __im_;
 
@@ -514,6 +517,7 @@ public:
 
 template <>
 class complex<double> {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   double __re_;
   double __im_;
 
@@ -614,6 +618,7 @@ public:
 
 template <>
 class complex<long double> {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   long double __re_;
   long double __im_;
 

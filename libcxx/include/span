@@ -230,6 +230,8 @@ concept __span_compatible_sentinel_for = sized_sentinel_for<_Sentinel, _It> && !
 template <typename _Tp, size_t _Extent>
 class span {
 public:
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
+
   //  constants and types
   using element_type    = _Tp;
   using value_type      = remove_cv_t<_Tp>;
@@ -412,6 +414,8 @@ private:
 template <typename _Tp>
 class span<_Tp, dynamic_extent> {
 public:
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
+
   //  constants and types
   using element_type    = _Tp;
   using value_type      = remove_cv_t<_Tp>;

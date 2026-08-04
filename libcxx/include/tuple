@@ -362,6 +362,8 @@ class __tuple_leaf {
   _Hp __value_;
 
 public:
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
+
   _LIBCPP_CONSTEXPR_SINCE_CXX14 __tuple_leaf& operator=(const __tuple_leaf&) = delete;
 
   _LIBCPP_HIDE_FROM_ABI constexpr __tuple_leaf() noexcept(is_nothrow_default_constructible<_Hp>::value) : __value_() {
@@ -438,6 +440,8 @@ public:
 template <size_t _Ip, class _Hp>
 class __tuple_leaf<_Ip, _Hp, true> : private __remove_cv_t<_Hp> {
 public:
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
+
   _LIBCPP_CONSTEXPR_SINCE_CXX14 __tuple_leaf& operator=(const __tuple_leaf&) = delete;
 
   _LIBCPP_HIDE_FROM_ABI constexpr __tuple_leaf() noexcept(is_nothrow_default_constructible<_Hp>::value) {}
@@ -590,6 +594,8 @@ class _LIBCPP_NO_SPECIALIZATIONS tuple {
 public:
   using __trivially_relocatable _LIBCPP_NODEBUG =
       __conditional_t<_And<__libcpp_is_trivially_relocatable<_Tp>...>::value, tuple, void>;
+
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
   // [tuple.cnstr]
 

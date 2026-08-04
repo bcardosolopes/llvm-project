@@ -2392,9 +2392,14 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
     StringRef Ident;
     if (Base.is<TypeInfoLValue>())
       InvalidBaseKind = 0;
-    else if (isa_and_nonnull<StringLiteral>(BaseE))
-      InvalidBaseKind = 1;
-    else if (isa_and_nonnull<MaterializeTemporaryExpr>(BaseE) ||
+    else if (isa_and_nonnull<StringLiteral>(BaseE)) {
+      // P4340 ext: under reflection in C++29, a pointer/reference to a
+      // string literal is permitted as a template argument; Sema rebases it
+      // onto the interned FixedArray specialization, which has a defined
+      // identity.
+      if (!Info.getLangOpts().Reflection || !Info.getLangOpts().CPlusPlus29)
+        InvalidBaseKind = 1;
+    } else if (isa_and_nonnull<MaterializeTemporaryExpr>(BaseE) ||
              isa_and_nonnull<LifetimeExtendedTemporaryDecl>(BaseVD))
       InvalidBaseKind = 2;
     else if (auto *PE = dyn_cast_or_null<PredefinedExpr>(BaseE)) {

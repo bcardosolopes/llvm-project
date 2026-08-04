@@ -36,6 +36,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Tp>
 class reference_wrapper : public __weak_result_type<_Tp> {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 public:
   // types
   typedef _Tp type;

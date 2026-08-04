@@ -164,6 +164,7 @@ template <class _ToDuration, class _Rep, class _Period, enable_if_t<__is_duratio
 
 template <class _Rep, class _Period>
 class duration {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   static_assert(!__is_duration_v<_Rep>, "A duration representation can not be a duration");
   static_assert(__is_ratio_v<_Period>, "Second template parameter of duration must be a std::ratio");
   static_assert(_Period::num > 0, "duration period must be positive");

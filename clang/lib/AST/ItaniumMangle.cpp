@@ -6565,10 +6565,19 @@ void CXXNameMangler::mangleTemplateArg(TemplateArgument A, bool NeedExactType) {
     // Template parameter objects are modeled by reproducing a source form
     // produced as if by aggregate initialization.
     if (A.getParamTypeForDecl()->isRecordType()) {
-      auto *TPO = cast<TemplateParamObjectDecl>(D);
-      mangleValueInTemplateArg(TPO->getType().getUnqualifiedType(),
-                               TPO->getValue(), /*TopLevel=*/true,
-                               NeedExactType);
+      if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(D)) {
+        mangleValueInTemplateArg(TPO->getType().getUnqualifiedType(),
+                                 TPO->getValue(), /*TopLevel=*/true,
+                                 NeedExactType);
+        break;
+      }
+      // P4340 ext: an argument normalized through a reflect_constant
+      // customization point designates a specific variable; its identity is
+      // the argument, so mangle it as a reference to that entity:
+      //   <expr-primary> ::= L <mangled-name> E
+      Out << 'L';
+      mangle(D);
+      Out << 'E';
       break;
     }
 

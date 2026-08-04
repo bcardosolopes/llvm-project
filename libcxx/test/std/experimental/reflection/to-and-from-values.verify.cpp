@@ -23,6 +23,9 @@
                              // ==================
 
 namespace disallowed_results {
+// P4340 ext (reflect-constant.md): in C++29, pointers into string literals
+// are permitted (interned via __define_static::FixedArray with a defined
+// identity). This test runs below C++29, where they remain ill-formed.
 constexpr auto v1 = std::meta::reflect_constant((const char *)"fails");
   // expected-error@-1 {{must be initialized by a constant expression}} \
   // expected-note@-1 {{provided value cannot be represented}}

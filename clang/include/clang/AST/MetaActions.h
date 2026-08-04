@@ -102,6 +102,16 @@ public:
   // Ensures that any implicit members of 'RD' have been declared.
   virtual void EnsureDeclarationOfImplicitMembers(CXXRecordDecl *RD) = 0;
 
+  // P4340 ext: if 'T' is a class type with a user-provided reflect_constant
+  // customization point, evaluates it on 'V' and returns the designated
+  // variable via 'ResultVD' (checking the conditions on the returned object
+  // and idempotence). If 'T' has no user-provided customization point,
+  // returns 'false' with 'ResultVD' null after normalizing the subobjects of
+  // 'V' in place. Returns 'true' on (diagnosed) error.
+  virtual bool NormalizeReflectConstant(QualType T, APValue &V,
+                                        VarDecl *&ResultVD,
+                                        SourceLocation Loc) = 0;
+
   // Ensures instantiation of the exception specification of 'FD'.
   virtual void EnsureInstantiationOfExceptionSpec(SourceLocation Loc,
                                                   FunctionDecl *FD) = 0;

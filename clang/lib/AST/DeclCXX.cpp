@@ -103,6 +103,7 @@ CXXRecordDecl::DefinitionData::DefinitionData(CXXRecordDecl *D)
       HasConstexprDefaultConstructor(false),
       DefaultedDestructorIsConstexpr(true),
       HasNonLiteralTypeFieldsOrBases(false), StructuralIfLiteral(true),
+      HasReflectConstant(false), HasDeletedReflectConstant(false),
       UserProvidedDefaultConstructor(false), DeclaredSpecialMembers(0),
       ImplicitCopyConstructorCanHaveConstParamForVBase(true),
       ImplicitCopyConstructorCanHaveConstParamForNonVBase(true),
@@ -555,7 +556,13 @@ void CXXRecordDecl::addedClassSubobject(CXXRecordDecl *Subobj) {
   //   A structural type is [...] a literal class type [for which] the types
   //   of all base classes and non-static data members are structural types or
   //   (possibly multi-dimensional) array thereof
-  if (!Subobj->data().StructuralIfLiteral)
+  // P4340 ext: a subobject type with a non-deleted reflect_constant
+  // customization point counts as structural; one with a deleted
+  // customization point never does (the opt-out is infectious).
+  if (Subobj->data().HasReflectConstant) {
+    if (Subobj->data().HasDeletedReflectConstant)
+      data().StructuralIfLiteral = false;
+  } else if (!Subobj->data().StructuralIfLiteral)
     data().StructuralIfLiteral = false;
 }
 

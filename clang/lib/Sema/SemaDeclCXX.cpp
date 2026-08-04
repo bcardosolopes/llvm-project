@@ -6912,6 +6912,14 @@ Sema::getDefaultedFunctionKind(const FunctionDecl *FD) {
       return CXXSpecialMemberKind::Destructor;
   }
 
+  // P4340 ext: a member named reflect_constant with a matching shape is the
+  // constant-template-parameter customization point.
+  if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
+      FD->getDeclName().isIdentifier() &&
+      FD->getName() == "reflect_constant" && isa<CXXMethodDecl>(FD) &&
+      !isa<CXXConstructorDecl>(FD))
+    return DefaultedFunctionKind::createReflectConstant();
+
   switch (FD->getDeclName().getCXXOverloadedOperator()) {
   case OO_EqualEqual:
     return DefaultedComparisonKind::Equal;
@@ -7402,6 +7410,25 @@ void Sema::CheckCompletedCXXClass(Scope *S, CXXRecordDecl *Record) {
 
       if (!isa<CXXDestructorDecl>(M))
         CompleteMemberFunction(M);
+
+      // P4340 ext: recognize and validate a reflect_constant customization
+      // point (user-provided, defaulted, or deleted).
+      if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
+          M->getDeclName().isIdentifier() &&
+          M->getName() == "reflect_constant" && !M->isImplicit()) {
+        if (CheckReflectConstantCustomization(M))
+          M->setInvalidDecl();
+      }
+    } else if (auto *FTD = dyn_cast<FunctionTemplateDecl>(D)) {
+      // P4340 ext: a member function template spelled reflect_constant is
+      // never a valid customization point; diagnose the shape here since the
+      // CXXMethodDecl branch above only sees non-template members.
+      if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
+          FTD->getDeclName().isIdentifier() &&
+          FTD->getName() == "reflect_constant")
+        if (auto *M = dyn_cast<CXXMethodDecl>(FTD->getTemplatedDecl()))
+          if (CheckReflectConstantCustomization(M))
+            M->setInvalidDecl();
     } else if (auto *F = dyn_cast<FriendDecl>(D)) {
       CheckForDefaultedFunction(
           dyn_cast_or_null<FunctionDecl>(F->getFriendDecl()));
@@ -7890,12 +7917,92 @@ void Sema::CheckExplicitlyDefaultedFunction(Scope *S, FunctionDecl *FD) {
     }
   }
 
+  if (DefKind.isReflectConstant()) {
+    // Shape checking (and recording on the class) already happened when the
+    // member was declared; a defaulted customization needs no body.
+    return;
+  }
+
   if (DefKind.isSpecialMember()
           ? CheckExplicitlyDefaultedSpecialMember(cast<CXXMethodDecl>(FD),
                                                   DefKind.asSpecialMember(),
                                                   FD->getDefaultLoc())
           : CheckExplicitlyDefaultedComparison(S, FD, DefKind.asComparison()))
     FD->setInvalidDecl();
+}
+
+bool Sema::CheckReflectConstantCustomization(CXXMethodDecl *MD) {
+  CXXRecordDecl *RD = MD->getParent();
+  SourceLocation Loc = MD->getLocation();
+
+  // Defer checking for dependent classes; this runs again on the pattern's
+  // instantiation.
+  if (RD->isDependentType())
+    return false;
+
+  auto DiagShape = [&](unsigned Select) {
+    Diag(Loc, diag::err_reflect_constant_bad_shape)
+        << Select << Context.getCanonicalTagType(RD).withConst();
+    return true;
+  };
+
+  if (MD->getDescribedFunctionTemplate())
+    return DiagShape(1);
+  if (!MD->isConsteval())
+    return DiagShape(0);
+  if (MD->getNumExplicitParams() != 0)
+    return DiagShape(2);
+
+  // Implicit object parameter: must be const-qualified, not &&-qualified.
+  // Explicit object parameter: must be C, C const&, or C const.
+  if (MD->isExplicitObjectMemberFunction()) {
+    QualType ParmTy = MD->getParamDecl(0)->getType();
+    QualType ValTy = ParmTy.getNonReferenceType();
+    if (ParmTy->isRValueReferenceType() ||
+        (ParmTy->isLValueReferenceType() && !ValTy.isConstQualified()) ||
+        !Context.hasSameType(ValTy.getUnqualifiedType(),
+                             Context.getCanonicalTagType(RD)))
+      return DiagShape(6);
+  } else {
+    if (!MD->isConst())
+      return DiagShape(3);
+    if (MD->getRefQualifier() == RQ_RValue)
+      return DiagShape(4);
+  }
+
+  // Must return exactly std::meta::info.
+  if (!Context.hasSameType(MD->getReturnType(), Context.MetaInfoTy))
+    return DiagShape(5);
+
+  if (MD->getAccess() != AS_public)
+    return DiagShape(7);
+
+  // A defaulted customization follows the comparison-defaulting model: if any
+  // subobject is not structural, it is defaulted as deleted (which also makes
+  // the class non-structural, infectiously).
+  //
+  // Defaulting exempts the access of DIRECT subobjects only: a private member
+  // or base is fine here, but its TYPE must be structural on its own (C++26
+  // structural, or via its own reflect_constant customization point).
+  // Defaulting does not reach through to bless indirect subobjects.
+  bool Deleted = MD->isDeleted();
+  if (!Deleted && MD->isDefaulted()) {
+    auto SubobjNotStructural = [&](QualType T) {
+      return !Context.getBaseElementType(T)->isStructuralType();
+    };
+    for (const FieldDecl *FD : RD->fields())
+      if (!FD->getType()->isReferenceType() &&
+          SubobjNotStructural(FD->getType()))
+        Deleted = true;
+    for (const CXXBaseSpecifier &BS : RD->bases())
+      if (SubobjNotStructural(BS.getType()))
+        Deleted = true;
+    if (Deleted)
+      MD->setDeletedAsWritten();
+  }
+
+  RD->setHasReflectConstant(Deleted);
+  return false;
 }
 
 bool Sema::CheckExplicitlyDefaultedSpecialMember(CXXMethodDecl *MD,
@@ -18923,6 +19030,10 @@ void Sema::SetDeclDefaulted(Decl *Dcl, SourceLocation DefaultLoc) {
       FD->setInvalidDecl();
     else
       DefineDefaultedComparison(DefaultLoc, FD, DefKind.asComparison());
+  } else if (DefKind.isReflectConstant()) {
+    // P4340 ext: an out-of-line defaulted reflect_constant customization
+    // point. The shape was validated at class completion; a defaulted
+    // customization has no body to define.
   } else {
     auto *MD = cast<CXXMethodDecl>(FD);
 

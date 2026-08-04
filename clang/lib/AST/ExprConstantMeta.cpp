@@ -717,6 +717,22 @@ static bool reflect_invoke(APValue &Result, ASTContext &C, MetaActions &Meta,
                            SourceRange Range, ArrayRef<Expr *> Args,
                            Decl *ContainingDecl);
 
+             // =================================
+             // P3491 string literal manipulation
+             // =================================
+
+static bool is_string_literal(APValue &Result, ASTContext &C,
+                              MetaActions &Meta, EvalFn Evaluator,
+                              DiagFn Diagnoser, bool AllowInjection,
+                              QualType ResultTy, SourceRange Range,
+                              ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
+static bool string_literal_from(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
 // -----------------------------------------------------------------------------
 // Metafunction table
 //
@@ -851,6 +867,10 @@ static constexpr Metafunction Metafunctions[] = {
   // Other bespoke functions (not proposed at this time)
   { Metafunction::MFRK_bool, 1, 1, is_access_specified },
   { Metafunction::MFRK_metaInfo, 5, 5, reflect_invoke },
+
+  // P3491 string literal manipulation
+  { Metafunction::MFRK_bool, 1, 1, is_string_literal },
+  { Metafunction::MFRK_charPtr, 1, 1, string_literal_from },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -5051,10 +5071,27 @@ bool reflect_result(APValue &Result, ASTContext &C, MetaActions &Meta,
 
   QualType ReflTy = ArgTy.getReflectedType();
   if (!IsLValue && ReflTy->isRecordType()) {
+    // P4340 ext: a class type with a user-provided reflect_constant
+    // customization point yields a reflection of the object returned by the
+    // customization; other class types normalize customized subobjects and
+    // then intern a template parameter object as before.
+    VarDecl *CustomVD = nullptr;
+    if (Meta.NormalizeReflectConstant(ReflTy, Arg, CustomVD,
+                                      Range.getBegin()))
+      return true;
+    if (CustomVD)
+      return SetAndSucceed(Result, makeReflection(CustomVD));
+
     auto *TPO = C.getTemplateParamObjectDecl(ReflTy, Arg);
     Arg = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
                   false);
     ReflTy = QualType{};
+  } else if (!IsLValue && ReflTy->isPointerType()) {
+    // P4340 ext: a bare pointer into a string literal is normalized the same
+    // way it would be as a subobject (interned via FixedArray).
+    VarDecl *Unused = nullptr;
+    if (Meta.NormalizeReflectConstant(ReflTy, Arg, Unused, Range.getBegin()))
+      return true;
   }
 
   return SetAndSucceed(Result, Arg.Lift(ReflTy));
@@ -6501,6 +6538,47 @@ bool reflect_invoke(APValue &Result, ASTContext &C, MetaActions &Meta,
                   const_cast<ValueDecl *>(LVBase.get<const ValueDecl *>())));
 
   return SetAndSucceed(Result, EvalResult.Val.Lift(CallExpr->getType()));
+}
+
+bool is_string_literal(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isPointerType());
+  assert(ResultTy == C.BoolTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  APValue::LValueBase Base = RV.getLValueBase();
+  const Expr *BaseE = Base.dyn_cast<const Expr *>();
+  return SetAndSucceed(
+      Result, makeBool(C, isa_and_nonnull<StringLiteral>(BaseE)));
+}
+
+bool string_literal_from(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser,
+                         bool AllowInjection, QualType ResultTy,
+                         SourceRange Range, ArrayRef<Expr *> Args,
+                         Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isPointerType());
+  assert(ResultTy->isPointerType());
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  APValue::LValueBase Base = RV.getLValueBase();
+  const Expr *BaseE = Base.dyn_cast<const Expr *>();
+
+  if (isa_and_nonnull<StringLiteral>(BaseE))
+    return SetAndSucceed(
+        Result, APValue(Base, CharUnits::Zero(), APValue::NoLValuePath(),
+                        /*IsNullPtr=*/false));
+  return SetAndSucceed(Result,
+                       APValue((const ValueDecl *)nullptr, CharUnits::Zero(),
+                               APValue::NoLValuePath(), /*IsNullPtr=*/true));
 }
 
 }  // end namespace clang

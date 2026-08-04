@@ -1389,6 +1389,14 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
 
   // Drill down into the reason why the class is non-structural.
   while (const CXXRecordDecl *RD = T->getAsCXXRecordDecl()) {
+    // P4340 ext: a deleted reflect_constant customization point makes the
+    // type non-structural regardless of its subobjects.
+    if (RD->hasDeletedReflectConstant()) {
+      Diag(RD->getLocation(), diag::note_not_structural_deleted_reflect)
+          << T;
+      return true;
+    }
+
     // All members are required to be public and non-mutable, and can't be of
     // rvalue reference type. Check these conditions first to prefer a "local"
     // reason over a more distant one.
@@ -7318,6 +7326,53 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
     }
   }
 
+  // P4340 ext: a class type with a user-provided reflect_constant
+  // customization point converts by identity, not by value. Evaluate the
+  // customization on the argument; the converted template argument then
+  // designates the returned object directly (a Declaration-kind argument
+  // referring to the returned variable), giving identity-based uniquing and
+  // reference-style mangling.
+  if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
+      ParamType->isRecordType() &&
+      !DeductionArg->isValueDependent() && !ArgPE) {
+    if (CXXRecordDecl *ParamRD = ParamType->getAsCXXRecordDecl();
+        ParamRD && ParamRD->hasDefinition() && ParamRD->hasReflectConstant()) {
+      // If the argument already has type C, invoke the customization on it
+      // directly: per the design, the parameter is initialized "not by
+      // copying x", so no copy constructor is required at top level.
+      // Otherwise, perform the ordinary initialization of a C const object
+      // first so that conversions apply.
+      ExprResult Init = DeductionArg;
+      if (!Context.hasSameUnqualifiedType(DeductionArg->getType(),
+                                          ParamType)) {
+        InitializationKind Kind = InitializationKind::CreateForInit(
+            StartLoc, /*DirectInit=*/false, DeductionArg);
+        Expr *Inits[1] = {DeductionArg};
+        InitializedEntity Entity =
+            InitializedEntity::InitializeTemplateParameter(ParamType, Param);
+        InitializationSequence InitSeq(*this, Entity, Kind, Inits);
+        Init = InitSeq.Perform(*this, Entity, Kind, Inits);
+        if (Init.isInvalid())
+          return ExprError();
+      }
+
+      VarDecl *ArgVD = nullptr;
+      if (EvaluateReflectConstantCustomization(Init.get(), ParamType,
+                                               StartLoc, ArgVD))
+        return ExprError();
+
+      if (ArgVD) {
+        SugaredConverted = TemplateArgument(ArgVD, ParamType);
+        CanonicalConverted =
+            TemplateArgument(cast<ValueDecl>(ArgVD->getCanonicalDecl()),
+                             ParamType.getCanonicalType());
+        return Arg;
+      }
+      // A defaulted customization falls through to the ordinary value-based
+      // path below.
+    }
+  }
+
   // The initialization of the parameter from the argument is
   // a constant-evaluated context.
   EnterExpressionEvaluationContext ConstantEvaluated(
@@ -7389,8 +7444,24 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
       //   the value of the constant expression shall not refer to
       assert(ParamType->isPointerOrReferenceType() ||
              ParamType->isNullPtrType());
+
+      // P4340 ext: a pointer/reference to a string literal is normalized by
+      // rebasing onto the interned FixedArray specialization holding the
+      // same characters, which has a defined cross-TU identity. This repeals
+      // the [temp.arg.nontype] string literal ban.
+      if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 && Base &&
+          isa_and_nonnull<StringLiteral>(Base.dyn_cast<const Expr *>())) {
+        bool Interned = false;
+        if (InternStringLiteralValue(Value, Interned, StartLoc))
+          return ExprError();
+        if (Interned) {
+          Base = Value.getLValueBase();
+          VD = const_cast<ValueDecl *>(Base.dyn_cast<const ValueDecl *>());
+        }
+      }
+
       // -- a temporary object
-      // -- a string literal
+      // -- a string literal [P4340 ext: unless interned above]
       // -- the result of a typeid expression, or
       // -- a predefined __func__ variable
       if (Base &&
@@ -7441,6 +7512,16 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
       CanonicalConverted =
           Context.getCanonicalTemplateArgument(SugaredConverted);
     } else {
+      // P4340 ext: before interning a template parameter object from a class
+      // value, normalize every subobject of customized type through its
+      // reflect_constant customization point, so that value-equal-after-
+      // normalization arguments unify.
+      if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
+          ParamType->isRecordType() &&
+          (Value.isStruct() || Value.isUnion() || Value.isArray()))
+        if (NormalizeReflectConstantValue(ParamType, Value, StartLoc))
+          return ExprError();
+
       SugaredConverted = TemplateArgument(Context, ParamType, Value);
       CanonicalConverted =
           TemplateArgument(Context, ParamType.getCanonicalType(), Value);
@@ -8012,7 +8093,12 @@ ExprResult Sema::BuildExpressionFromDeclTemplateArgument(
     if (RefExpr.isInvalid())
       return ExprError();
   } else if (ParamType->isRecordType()) {
-    assert(isa<TemplateParamObjectDecl>(VD) &&
+    // P4340 ext: for a class type with a reflect_constant customization
+    // point, the argument declaration is the object returned by the
+    // customization, not a template parameter object.
+    assert((isa<TemplateParamObjectDecl>(VD) ||
+            (isa<VarDecl>(VD) &&
+             ParamType->getAsCXXRecordDecl()->hasReflectConstant())) &&
            "arg for class template param not a template parameter object");
     // No conversions apply in this case.
     return RefExpr;

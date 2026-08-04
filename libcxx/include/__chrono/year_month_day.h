@@ -38,6 +38,7 @@ namespace chrono {
 class year_month_day_last;
 
 class year_month_day {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   chrono::year __y_;
   chrono::month __m_;
@@ -197,6 +198,7 @@ _LIBCPP_HIDE_FROM_ABI inline constexpr year_month_day& year_month_day::operator-
 }
 
 class year_month_day_last {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   chrono::year __y_;
   chrono::month_day_last __mdl_;

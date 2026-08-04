@@ -355,6 +355,34 @@ public:
     S.ForceDeclarationOfImplicitMembers(RD);
   }
 
+  bool NormalizeReflectConstant(QualType T, APValue &V, VarDecl *&ResultVD,
+                                SourceLocation Loc) override {
+    ResultVD = nullptr;
+    CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+    if (!RD || !RD->hasDefinition() || !RD->hasReflectConstant() ||
+        RD->hasDeletedReflectConstant()) {
+      // Not customized at the top level (or deleted; the caller diagnoses the
+      // structural-type violation): normalize subobjects only.
+      return S.NormalizeReflectConstantValue(T, V, Loc);
+    }
+
+    CXXMethodDecl *CP = S.LookupReflectConstantCustomization(RD);
+    if (!CP || CP->isDefaulted())
+      return S.NormalizeReflectConstantValue(T, V, Loc);
+
+    Expr *OVE =
+        new (S.Context) OpaqueValueExpr(Loc, T.getUnqualifiedType(),
+                                        VK_PRValue);
+    Expr *CE = ConstantExpr::Create(S.Context, OVE, V);
+    CE->setValueKind(VK_PRValue);
+    ExprResult Materialized = S.TemporaryMaterializationConversion(CE);
+    if (Materialized.isInvalid())
+      return true;
+
+    return S.EvaluateReflectConstantCustomization(
+        Materialized.get(), T.getUnqualifiedType(), Loc, ResultVD);
+  }
+
   void EnsureInstantiationOfExceptionSpec(SourceLocation Loc,
                                           FunctionDecl *FD) override {
     const FunctionProtoType *Proto = FD->getType()->castAs<FunctionProtoType>();
@@ -1859,8 +1887,14 @@ ExprResult Sema::BuildCXXMetafunctionExpr(
     case Metafunction::MFRK_metaInfo:
       Result = Context.MetaInfoTy;
       return false;
+    case Metafunction::MFRK_tokenSequence:
+      Result = Context.TokenSequenceTy;
+      return false;
     case Metafunction::MFRK_sizeT:
       Result = Context.getSizeType();
+      return false;
+    case Metafunction::MFRK_charPtr:
+      Result = Context.getPointerType(Context.CharTy.withConst());
       return false;
     case Metafunction::MFRK_sourceLoc: {
       RecordDecl *SourceLocDecl = lookupStdSourceLocationImpl(KwLoc);
@@ -2306,6 +2340,380 @@ DeclResult Sema::BuildReflectionSpliceNamespace(SpliceSpecifier *Splice) {
   }
 
   return ER.Val.getReflectedNamespace();
+}
+
+CXXMethodDecl *Sema::LookupReflectConstantCustomization(CXXRecordDecl *RD) {
+  if (!RD || !RD->hasDefinition() || !RD->hasReflectConstant())
+    return nullptr;
+
+  // The customization is not inherited, so look only at direct members.
+  DeclarationName Name(&Context.Idents.get("reflect_constant"));
+  for (NamedDecl *ND : RD->lookup(Name))
+    if (auto *MD = dyn_cast<CXXMethodDecl>(ND->getUnderlyingDecl()))
+      if (MD->getParent() == RD->getDefinition())
+        return MD;
+  return nullptr;
+}
+
+bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
+                                                QualType ParamType,
+                                                SourceLocation Loc,
+                                                VarDecl *&ResultVD) {
+  ResultVD = nullptr;
+  CXXRecordDecl *RD = ParamType->getAsCXXRecordDecl();
+  assert(RD && RD->hasReflectConstant() && "not a customized class type");
+
+  QualType ExpectedTy = Context.getCanonicalTagType(RD).withConst();
+
+  if (RD->hasDeletedReflectConstant()) {
+    Diag(Loc, diag::err_reflect_constant_deleted)
+        << Context.getCanonicalTagType(RD);
+    return true;
+  }
+
+  CXXMethodDecl *CP = LookupReflectConstantCustomization(RD);
+  assert(CP && "customized class type without a customization point");
+
+  // A defaulted customization keeps the value-based template parameter
+  // object machinery; the caller handles that case.
+  if (CP->isDefaulted()) {
+    ResultVD = nullptr;
+    return false;
+  }
+
+  // Evaluate ArgExpr.reflect_constant() as a constant expression, then
+  // re-evaluate on the result until it is idempotent-checked (exactly one
+  // extra round).
+  auto EvaluateCallOn = [&](Expr *Obj, APValue &Out) -> bool {
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+
+    DeclarationName Name(&Context.Idents.get("reflect_constant"));
+    LookupResult LR(*this, DeclarationNameInfo(Name, Loc), LookupMemberName);
+    LR.addDecl(CP);
+    LR.resolveKind();
+
+    ExprResult Ref = BuildMemberReferenceExpr(
+        Obj, Obj->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+        SourceLocation(), nullptr, LR, nullptr, nullptr);
+    if (Ref.isInvalid())
+      return true;
+    ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc);
+    if (Call.isInvalid())
+      return true;
+
+    // Evaluation failure is a hard error (consteval evaluation failures are
+    // not SFINAE-able); the conditions on the returned object are checked by
+    // the caller and are substitution failures.
+    SmallVector<PartialDiagnosticAt, 4> Notes;
+    Expr::EvalResult ER;
+    ER.Diag = &Notes;
+    if (!Call.get()->EvaluateAsConstantExpr(ER, Context)) {
+      Diag(Loc, diag::err_reflection_op_not_constant) << /*generic*/ 0;
+      for (PartialDiagnosticAt &Note : Notes)
+        Diag(Note.first, Note.second);
+      return true;
+    }
+    Out = MaybeUnproxy(Context, ER.Val);
+    return false;
+  };
+
+  // Extract the designated variable from the returned reflection, checking
+  // the conditions from the design (returns true on error, with Select set
+  // for err_reflect_constant_bad_result).
+  auto ExtractVar = [&](const APValue &Refl, VarDecl *&VD,
+                        unsigned &Select, QualType &FoundTy) -> bool {
+    VD = nullptr;
+    FoundTy = QualType();
+    if (!Refl.isReflection()) {
+      Select = 0;
+      return true;
+    }
+    switch (Refl.getReflectionKind()) {
+    case ReflectionKind::Declaration:
+      VD = dyn_cast<VarDecl>(Refl.getReflectedDecl());
+      break;
+    case ReflectionKind::Object: {
+      APValue Obj = Refl.getReflectedObject();
+      if (Obj.isLValue() && Obj.hasLValuePath() &&
+          Obj.getLValuePath().empty() && !Obj.isLValueOnePastTheEnd())
+        VD = const_cast<VarDecl *>(dyn_cast_or_null<VarDecl>(
+            Obj.getLValueBase().dyn_cast<const ValueDecl *>()));
+      break;
+    }
+    default:
+      break;
+    }
+    if (!VD) {
+      Select = 0;
+      return true;
+    }
+    if (!VD->hasGlobalStorage()) {
+      Select = 1;
+      return true;
+    }
+    // The returned variable may be a not-yet-instantiated specialization
+    // (e.g. a variable template specialization named only inside the
+    // customization body); instantiate its definition before judging
+    // constant usability.
+    if (!VD->isUsableInConstantExpressions(Context) &&
+        isa<VarTemplateSpecializationDecl>(VD))
+      InstantiateVariableDefinition(Loc, VD, /*Recursive=*/false,
+                                    /*DefinitionRequired=*/true);
+    if (!VD->isUsableInConstantExpressions(Context)) {
+      Select = 2;
+      return true;
+    }
+    if (!VD->hasLinkage()) {
+      Select = 3;
+      return true;
+    }
+    FoundTy = VD->getType();
+    if (!Context.hasSameType(FoundTy.getCanonicalType(),
+                             ExpectedTy.getCanonicalType())) {
+      Select = 4;
+      return true;
+    }
+    return false;
+  };
+
+  APValue First;
+  if (EvaluateCallOn(ArgExpr, First))
+    return true;
+
+  VarDecl *VD = nullptr;
+  unsigned Select = 0;
+  QualType FoundTy;
+  if (ExtractVar(First, VD, Select, FoundTy)) {
+    Diag(Loc, diag::err_reflect_constant_bad_result)
+        << Context.getCanonicalTagType(RD) << ExpectedTy << FoundTy << Select;
+    return true;
+  }
+
+  // Idempotence check: calling the customization on its own result must
+  // return a reflection of the same object.
+  ExprResult VDRef = BuildDeclRefExpr(VD, VD->getType().getNonReferenceType(),
+                                      VK_LValue, Loc);
+  if (VDRef.isInvalid())
+    return true;
+  APValue Second;
+  if (EvaluateCallOn(VDRef.get(), Second))
+    return true;
+
+  VarDecl *VD2 = nullptr;
+  if (ExtractVar(Second, VD2, Select, FoundTy) ||
+      VD2->getCanonicalDecl() != VD->getCanonicalDecl()) {
+    Diag(Loc, diag::err_reflect_constant_not_idempotent)
+        << Context.getCanonicalTagType(RD);
+    return true;
+  }
+
+  ResultVD = VD;
+  return false;
+}
+
+bool Sema::InternStringLiteralValue(APValue &V, bool &Changed,
+                                    SourceLocation Loc) {
+  Changed = false;
+  if (!V.isLValue())
+    return false;
+
+  const auto *SL =
+      dyn_cast_or_null<StringLiteral>(V.getLValueBase().dyn_cast<const Expr *>());
+  if (!SL || !SL->isOrdinary())
+    return false;
+
+  // Locate std::meta::__define_static::FixedArray. Interning requires the
+  // library machinery to be available.
+  auto FindFixedArray = [&]() -> VarTemplateDecl * {
+    NamespaceDecl *StdMeta = lookupStdMetaNamespace();
+    if (!StdMeta)
+      return nullptr;
+    DeclarationName DSName(&Context.Idents.get("__define_static"));
+    NamespaceDecl *DS = nullptr;
+    for (NamedDecl *ND : StdMeta->lookup(DSName))
+      DS = dyn_cast<NamespaceDecl>(ND);
+    if (!DS)
+      return nullptr;
+    DeclarationName FAName(&Context.Idents.get("FixedArray"));
+    for (NamedDecl *ND : DS->lookup(FAName))
+      if (auto *VTD = dyn_cast<VarTemplateDecl>(ND->getUnderlyingDecl()))
+        return VTD;
+    return nullptr;
+  };
+
+  VarTemplateDecl *FixedArray = FindFixedArray();
+  if (!FixedArray) {
+    Diag(Loc, diag::err_implied_std_meta_member_not_found)
+        << "__define_static::FixedArray";
+    return true;
+  }
+
+  // Build the template arguments <char, C0, C1, ..., '\0'>.
+  StringRef Str = SL->getString();
+  SmallVector<TemplateArgument, 16> TArgs;
+  TArgs.push_back(TemplateArgument(Context.CharTy));
+  auto PushChar = [&](char C) {
+    llvm::APSInt Val(
+        llvm::APInt(Context.getIntWidth(Context.CharTy), C,
+                    Context.CharTy->isSignedIntegerType()),
+        !Context.CharTy->isSignedIntegerType());
+    TArgs.push_back(TemplateArgument(Context, Val, Context.CharTy));
+  };
+  for (char C : Str)
+    PushChar(C);
+  PushChar('\0');
+
+  // Intern (or find) the FixedArray<char, ...> specialization.
+  void *InsertPos;
+  VarDecl *Spec = FixedArray->findSpecialization(TArgs, InsertPos);
+  if (!Spec) {
+    TemplateArgumentListInfo TAListInfo;
+    {
+      EnterExpressionEvaluationContext Ctx(
+          *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+      for (const TemplateArgument &TA : TArgs)
+        TAListInfo.addArgument(getTrivialTemplateArgumentLoc(
+            TA, TA.getNonTypeTemplateArgumentType(), Loc));
+      TAListInfo.setLAngleLoc(Loc);
+      TAListInfo.setRAngleLoc(Loc);
+    }
+    DeclResult Result = CheckVarTemplateId(FixedArray, Loc, Loc, TAListInfo,
+                                           /*SetWrittenArgs=*/false);
+    if (Result.isInvalid())
+      return true;
+    Spec = cast<VarTemplateSpecializationDecl>(Result.get());
+    if (!Spec->getTemplateSpecializationKind())
+      Spec->setTemplateSpecializationKind(TSK_ImplicitInstantiation);
+  }
+  if (!Spec->isUsableInConstantExpressions(Context))
+    InstantiateVariableDefinition(Loc, Spec, /*Recursive=*/false,
+                                  /*DefinitionRequired=*/true);
+
+  // Rebase the lvalue onto the interned array, preserving the offset and
+  // (array-index) path.
+  SmallVector<APValue::LValuePathEntry, 2> Path;
+  if (V.hasLValuePath())
+    Path.append(V.getLValuePath().begin(), V.getLValuePath().end());
+  V = APValue(APValue::LValueBase(Spec), V.getLValueOffset(), Path,
+              V.isLValueOnePastTheEnd(), V.isNullPointer());
+  Changed = true;
+  return false;
+}
+
+bool Sema::NormalizeReflectConstantValue(QualType T, APValue &V,
+                                         SourceLocation Loc) {
+  // P4340 is a C++29 extension: below C++29 no customization points are
+  // recognized and string literals are not interned, so there is nothing to
+  // normalize.
+  if (!getLangOpts().CPlusPlus29)
+    return false;
+
+  T = Context.getBaseElementType(T);
+
+  // char const* subobjects that point into string literals: rebase onto the
+  // interned FixedArray so the pointer has a stable cross-TU identity.
+  if (const auto *PT = T->getAs<PointerType>();
+      PT && Context.hasSameUnqualifiedType(PT->getPointeeType(),
+                                           Context.CharTy)) {
+    bool Changed = false;
+    return InternStringLiteralValue(V, Changed, Loc);
+  }
+
+  // Arrays: normalize every initialized element (the filler too, if any).
+  if (V.isArray()) {
+    for (unsigned I = 0, N = V.getArrayInitializedElts(); I != N; ++I)
+      if (NormalizeReflectConstantValue(T, V.getArrayInitializedElt(I), Loc))
+        return true;
+    if (V.hasArrayFiller() &&
+        NormalizeReflectConstantValue(T, V.getArrayFiller(), Loc))
+      return true;
+    return false;
+  }
+
+  CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return false;
+
+  // A customized type: run the value through the customization point and
+  // replace it with the returned object's value. This requires building a
+  // temporary expression holding V.
+  if (RD->hasReflectConstant()) {
+    CXXMethodDecl *CP = LookupReflectConstantCustomization(RD);
+    if (CP && !CP->isDefaulted() && !CP->isDeleted()) {
+      // The value must be copyable in constant expressions to be transplanted
+      // into an enclosing object.
+      CXXConstructorDecl *Copy = LookupCopyingConstructor(RD, Qualifiers::Const);
+      if (!Copy || Copy->isDeleted() || !Copy->isConstexpr()) {
+        Diag(Loc, diag::err_reflect_constant_subobject_not_copyable)
+            << Context.getCanonicalTagType(RD);
+        return true;
+      }
+
+      Expr *OVE = new (Context)
+          OpaqueValueExpr(Loc, T.getUnqualifiedType(), VK_PRValue);
+      Expr *CE = ConstantExpr::Create(Context, OVE, V);
+      CE->setValueKind(VK_PRValue);
+      ExprResult Materialized = TemporaryMaterializationConversion(CE);
+      if (Materialized.isInvalid())
+        return true;
+
+      VarDecl *VD = nullptr;
+      if (EvaluateReflectConstantCustomization(
+              Materialized.get(), T.getUnqualifiedType(), Loc, VD))
+        return true;
+      assert(VD && "non-defaulted customization must produce an object");
+
+      // Replace V with the value of the returned object.
+      if (APValue *Val = VD->evaluateValue()) {
+        V = *Val;
+        return false;
+      }
+      Diag(Loc, diag::err_reflect_constant_bad_result)
+          << Context.getCanonicalTagType(RD)
+          << Context.getCanonicalTagType(RD).withConst() << QualType() << 2;
+      return true;
+    }
+    // Defaulted (or deleted, diagnosed elsewhere): fall through to
+    // member-wise normalization.
+  }
+
+  // Plain structural class (or defaulted customization): recurse into bases
+  // and members.
+  if (V.isStruct()) {
+    unsigned BaseIdx = 0;
+    for (const CXXBaseSpecifier &BS : RD->bases()) {
+      if (BaseIdx >= V.getStructNumBases())
+        break;
+      if (NormalizeReflectConstantValue(BS.getType(),
+                                        V.getStructBase(BaseIdx), Loc))
+        return true;
+      ++BaseIdx;
+    }
+    unsigned FieldIdx = 0;
+    for (FieldDecl *FD : RD->fields()) {
+      if (FieldIdx >= V.getStructNumFields())
+        break;
+      // Reference members do not participate in normalization.
+      if (!FD->getType()->isReferenceType())
+        if (NormalizeReflectConstantValue(FD->getType(),
+                                          V.getStructField(FieldIdx), Loc))
+          return true;
+      ++FieldIdx;
+    }
+    return false;
+  }
+
+  // Unions: normalize the active member, if any.
+  if (V.isUnion()) {
+    if (const FieldDecl *FD = V.getUnionField())
+      if (!FD->getType()->isReferenceType())
+        return NormalizeReflectConstantValue(FD->getType(), V.getUnionValue(),
+                                             Loc);
+    return false;
+  }
+
+  return false;
 }
 
 Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,

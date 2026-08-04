@@ -682,6 +682,8 @@ union __union<_DestructibleTrait, _Index> {};
       template <size_t _Index, class _Tp, class... _Types>                                                             \
       union __union<destructible_trait, _Index, _Tp, _Types...> {                                                      \
       public:                                                                                                          \
+        _LIBCPP_REFLECT_CONSTANT_DEFAULT                                                                               \
+                                                                                                                       \
         _LIBCPP_HIDE_FROM_ABI explicit constexpr __union(__valueless_t) noexcept : __dummy{} {}                        \
                                                                                                                        \
         template <class... _Args>                                                                                      \
@@ -717,6 +719,8 @@ _LIBCPP_VARIANT_UNION(_Trait::_Unavailable, _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTE
 template <_Trait _DestructibleTrait, class... _Types>
 class __base {
 public:
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
+
   using __index_t _LIBCPP_NODEBUG = __variant_index_t<sizeof...(_Types)>;
 
   _LIBCPP_HIDE_FROM_ABI explicit constexpr __base(__valueless_t __tag) noexcept
@@ -1166,6 +1170,8 @@ class _LIBCPP_DECLSPEC_EMPTY_BASES _LIBCPP_NO_SPECIALIZATIONS variant
 public:
   using __trivially_relocatable _LIBCPP_NODEBUG =
       conditional_t<_And<__libcpp_is_trivially_relocatable<_Types>...>::value, variant, void>;
+
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
   template <bool _Dummy                                                                               = true,
             enable_if_t<__dependent_type<is_default_constructible<__first_type>, _Dummy>::value, int> = 0>

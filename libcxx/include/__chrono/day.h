@@ -27,6 +27,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 namespace chrono {
 
 class day {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   unsigned char __d_;
 

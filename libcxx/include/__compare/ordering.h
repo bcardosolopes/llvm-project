@@ -52,6 +52,7 @@ struct _CmpUnspecifiedParam {
 };
 
 class partial_ordering {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   _LIBCPP_HIDE_FROM_ABI explicit constexpr partial_ordering(_PartialOrdResult __v) noexcept : __value_(__v) {}
 
 public:
@@ -120,6 +121,7 @@ inline constexpr partial_ordering partial_ordering::greater(_PartialOrdResult::_
 inline constexpr partial_ordering partial_ordering::unordered(_PartialOrdResult::__unordered);
 
 class weak_ordering {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   using _ValueT _LIBCPP_NODEBUG = signed char;
 
   _LIBCPP_HIDE_FROM_ABI explicit constexpr weak_ordering(_OrdResult __v) noexcept : __value_(_ValueT(__v)) {}
@@ -190,6 +192,7 @@ inline constexpr weak_ordering weak_ordering::equivalent(_OrdResult::__equiv);
 inline constexpr weak_ordering weak_ordering::greater(_OrdResult::__greater);
 
 class strong_ordering {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   using _ValueT _LIBCPP_NODEBUG = signed char;
 
   _LIBCPP_HIDE_FROM_ABI explicit constexpr strong_ordering(_OrdResult __v) noexcept : __value_(_ValueT(__v)) {}

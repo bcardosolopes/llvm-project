@@ -1482,8 +1482,31 @@ public:
   bool isLiteral() const;
 
   /// Determine whether this is a structural type.
+  ///
+  /// P4340 ext: a class with a non-deleted reflect_constant customization
+  /// point is structural regardless of the C++26 subobject rules (unless it
+  /// has mutable members, which addedMember folds into StructuralIfLiteral
+  /// only for the default path; the customization path re-checks). A class
+  /// with a deleted customization point is never structural.
   bool isStructural() const {
+    if (data().HasReflectConstant)
+      return !data().HasDeletedReflectConstant && !hasMutableFields();
     return isLiteral() && data().StructuralIfLiteral;
+  }
+
+  /// P4340 ext: whether this class declares a reflect_constant customization
+  /// point (user-provided, defaulted, or deleted).
+  bool hasReflectConstant() const { return data().HasReflectConstant; }
+
+  /// P4340 ext: whether the declared reflect_constant customization point is
+  /// deleted.
+  bool hasDeletedReflectConstant() const {
+    return data().HasDeletedReflectConstant;
+  }
+
+  void setHasReflectConstant(bool Deleted) {
+    data().HasReflectConstant = true;
+    data().HasDeletedReflectConstant = Deleted;
   }
 
   /// Notify the class that this destructor is now selected.

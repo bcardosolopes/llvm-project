@@ -220,6 +220,15 @@ FIELD(HasNonLiteralTypeFieldsOrBases, 1, NO_MERGE)
 /// True if this class is a structural type, assuming it is a literal type.
 FIELD(StructuralIfLiteral, 1, NO_MERGE)
 
+/// P4340 ext: whether this class declares a reflect_constant customization
+/// point (user-provided, defaulted, or deleted).
+FIELD(HasReflectConstant, 1, NO_MERGE)
+
+/// P4340 ext: whether the declared reflect_constant customization point is
+/// deleted (an explicit opt-out from being used as a constant template
+/// parameter).
+FIELD(HasDeletedReflectConstant, 1, NO_MERGE)
+
 /// Whether we have a C++11 user-provided default constructor (not
 /// explicitly deleted or defaulted).
 FIELD(UserProvidedDefaultConstructor, 1, NO_MERGE)

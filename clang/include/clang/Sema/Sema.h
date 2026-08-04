@@ -6307,6 +6307,48 @@ public:
 
   bool CheckExplicitlyDefaultedComparison(Scope *S, FunctionDecl *MD,
                                           DefaultedComparisonKind DCK);
+
+  /// P4340 ext: validate the shape of a reflect_constant customization point
+  /// (user-provided, defaulted, or deleted) and record it on the class.
+  /// \return \c true on error.
+  bool CheckReflectConstantCustomization(CXXMethodDecl *MD);
+
+  /// P4340 ext: find the reflect_constant customization point declared by
+  /// \p RD, if any (does not consider base classes; the customization is
+  /// deliberately not inherited).
+  CXXMethodDecl *LookupReflectConstantCustomization(CXXRecordDecl *RD);
+
+  /// P4340 ext: evaluate ArgExpr.reflect_constant() for a template argument
+  /// of customized class type \p ParamType, validate the conditions on the
+  /// returned object (static storage duration, usable in constant
+  /// expressions, linkage, type C const), and run the idempotence check.
+  ///
+  /// On success, \p ResultVD is the variable whose object the converted
+  /// template argument designates.
+  ///
+  /// \return \c true on error (diagnosed).
+  bool EvaluateReflectConstantCustomization(Expr *ArgExpr, QualType ParamType,
+                                            SourceLocation Loc,
+                                            VarDecl *&ResultVD);
+
+  /// P4340 ext: recursively normalize the value \p V of type \p T by running
+  /// every subobject of customized class type through its reflect_constant
+  /// customization point and replacing the subobject's value with the value
+  /// of the returned object. Used both when interning a template parameter
+  /// object and by std::meta::reflect_constant.
+  ///
+  /// \return \c true on error (diagnosed).
+  bool NormalizeReflectConstantValue(QualType T, APValue &V,
+                                     SourceLocation Loc);
+
+  /// P4340 ext: if \p V is an lvalue whose base is a string literal, rebase
+  /// it (preserving the offset) onto the interned
+  /// std::meta::__define_static::FixedArray<char, ...> specialization holding
+  /// the same characters, giving the pointer a stable cross-TU identity.
+  /// Requires <experimental/meta> to have been included; diagnoses otherwise.
+  ///
+  /// \return \c true on error (diagnosed). Sets \p Changed if V was rebased.
+  bool InternStringLiteralValue(APValue &V, bool &Changed, SourceLocation Loc);
   void DeclareImplicitEqualityComparison(CXXRecordDecl *RD,
                                          FunctionDecl *Spaceship);
   void DefineDefaultedComparison(SourceLocation Loc, FunctionDecl *FD,
@@ -6571,17 +6613,27 @@ public:
     LLVM_PREFERRED_TYPE(CXXSpecialMemberKind)
     unsigned SpecialMember : 8;
     unsigned Comparison : 8;
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned ReflectConstant : 1;
 
   public:
     DefaultedFunctionKind()
         : SpecialMember(llvm::to_underlying(CXXSpecialMemberKind::Invalid)),
-          Comparison(llvm::to_underlying(DefaultedComparisonKind::None)) {}
+          Comparison(llvm::to_underlying(DefaultedComparisonKind::None)),
+          ReflectConstant(false) {}
     DefaultedFunctionKind(CXXSpecialMemberKind CSM)
         : SpecialMember(llvm::to_underlying(CSM)),
-          Comparison(llvm::to_underlying(DefaultedComparisonKind::None)) {}
+          Comparison(llvm::to_underlying(DefaultedComparisonKind::None)),
+          ReflectConstant(false) {}
     DefaultedFunctionKind(DefaultedComparisonKind Comp)
         : SpecialMember(llvm::to_underlying(CXXSpecialMemberKind::Invalid)),
-          Comparison(llvm::to_underlying(Comp)) {}
+          Comparison(llvm::to_underlying(Comp)), ReflectConstant(false) {}
+
+    static DefaultedFunctionKind createReflectConstant() {
+      DefaultedFunctionKind DFK;
+      DFK.ReflectConstant = true;
+      return DFK;
+    }
 
     bool isSpecialMember() const {
       return static_cast<CXXSpecialMemberKind>(SpecialMember) !=
@@ -6591,9 +6643,10 @@ public:
       return static_cast<DefaultedComparisonKind>(Comparison) !=
              DefaultedComparisonKind::None;
     }
+    bool isReflectConstant() const { return ReflectConstant; }
 
     explicit operator bool() const {
-      return isSpecialMember() || isComparison();
+      return isSpecialMember() || isComparison() || isReflectConstant();
     }
 
     CXXSpecialMemberKind asSpecialMember() const {

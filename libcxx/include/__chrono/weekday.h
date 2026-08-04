@@ -32,6 +32,7 @@ class weekday_indexed;
 class weekday_last;
 
 class weekday {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   unsigned char __wd_;
   _LIBCPP_HIDE_FROM_ABI static constexpr unsigned char __weekday_from_days(int __days) noexcept;
@@ -118,6 +119,7 @@ _LIBCPP_HIDE_FROM_ABI inline constexpr weekday& weekday::operator-=(const days& 
 }
 
 class weekday_indexed {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   chrono::weekday __wd_;
   unsigned char __idx_;
@@ -139,6 +141,7 @@ operator==(const weekday_indexed& __lhs, const weekday_indexed& __rhs) noexcept 
 }
 
 class weekday_last {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 private:
   chrono::weekday __wd_;
 

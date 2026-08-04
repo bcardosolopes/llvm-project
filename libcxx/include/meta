@@ -556,6 +556,10 @@ enum : unsigned {
   // Other bespoke functions (not proposed at this time)
   __metafn_is_access_specified,
   __metafn_reflect_invoke,
+
+  // P3491 string literal manipulation
+  __metafn_is_string_literal,
+  __metafn_string_literal_from,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -2392,6 +2396,21 @@ consteval auto define_static_array(R &&elems)
   {
     return span<const ValTy>();
   }
+}
+
+// Returns true if p points into a string literal.
+consteval auto is_string_literal(const char* p) -> bool {
+  return __metafunction(meta::detail::__metafn_is_string_literal, p);
+}
+
+// If p points into a string literal, a pointer to its first character.
+// Otherwise, nullptr.
+consteval auto string_literal_from(const char* p) -> const char* {
+  char const* r = __metafunction(meta::detail::__metafn_string_literal_from, p);
+  // Rebase the result on p's provenance so that the result compares equal to
+  // other pointers derived from p (the metafunction's result carries the
+  // string literal itself as its lvalue base, with no lvalue path).
+  return r ? p - (p - r) : nullptr;
 }
 
 // Returns a static string having the provided contents.

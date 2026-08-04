@@ -29,6 +29,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 namespace chrono {
 
 class year_month {
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
   chrono::year __y_;
   chrono::month __m_;
 
