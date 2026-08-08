@@ -3617,6 +3617,7 @@ ExprResult Sema::BuildDeclarationNameExpr(
     break;
 
   case Decl::UnnamedGlobalConstant:
+  case Decl::PersistentAlloc:
     valueKind = VK_LValue;
     break;
 
@@ -15305,7 +15306,7 @@ QualType Sema::CheckAddressOfOperand(ExprResult &OrigOp, SourceLocation OpLoc) {
       }
     } else if (!isa<FunctionDecl, TemplateParamObjectDecl,
                     NonTypeTemplateParmDecl, BindingDecl, MSGuidDecl,
-                    UnnamedGlobalConstantDecl>(dcl))
+                    UnnamedGlobalConstantDecl, PersistentAllocDecl>(dcl))
       llvm_unreachable("Unknown/unexpected decl type");
   }
 

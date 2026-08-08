@@ -3944,6 +3944,11 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     Builder.CreateDereferenceableAssumption(PtrValue, SizeValue);
     return RValue::get(nullptr);
   }
+  case Builtin::BI__builtin_mark_immutable_if_constexpr:
+    // P4341 ext: meaningful only during the hypothetical constant destruction
+    // of a constexpr variable; a no-op at runtime. The argument is
+    // unevaluated for effects here (it is always a plain pointer).
+    return RValue::get(nullptr);
   case Builtin::BI__assume:
   case Builtin::BI__builtin_assume: {
     if (E->getArg(0)->HasSideEffects(getContext()))

@@ -7252,6 +7252,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::HLSLBuffer:
   case Decl::HLSLRootSignature:
   case Decl::UnnamedGlobalConstant:
+  case Decl::PersistentAlloc:
   case Decl::TemplateParamObject:
   case Decl::IndirectField:
   case Decl::ObjCIvar:

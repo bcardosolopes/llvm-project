@@ -1190,6 +1190,12 @@ def IsWithinLifetime : LangBuiltin<"CXX_LANG"> {
   let Prototype = "bool(void*)";
 }
 
+def MarkImmutableIfConstexpr : LangBuiltin<"CXX_LANG"> {
+  let Spellings = ["__builtin_mark_immutable_if_constexpr"];
+  let Attributes = [NoThrow, CustomTypeChecking, Constexpr];
+  let Prototype = "void(void*)";
+}
+
 def ClearPadding : Builtin {
   let Spellings = ["__builtin_clear_padding"];
   let Attributes = [NoThrow, CustomTypeChecking];

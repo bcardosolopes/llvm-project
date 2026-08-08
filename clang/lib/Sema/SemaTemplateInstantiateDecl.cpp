@@ -1348,6 +1348,11 @@ Decl *TemplateDeclInstantiator::VisitUnnamedGlobalConstantDecl(
   llvm_unreachable("UnnamedGlobalConstantDecl cannot be instantiated");
 }
 
+Decl *TemplateDeclInstantiator::VisitPersistentAllocDecl(
+    PersistentAllocDecl *D) {
+  llvm_unreachable("PersistentAllocDecl cannot be instantiated");
+}
+
 Decl *TemplateDeclInstantiator::VisitTemplateParamObjectDecl(
     TemplateParamObjectDecl *D) {
   llvm_unreachable("template parameter objects cannot be instantiated");

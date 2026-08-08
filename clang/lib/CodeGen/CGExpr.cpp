@@ -3804,6 +3804,12 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     return MakeAddrLValue(CGM.GetAddrOfMSGuidDecl(GD), T,
                           AlignmentSource::Decl);
 
+  // P4341 ext: DeclRefExprs naming persisted constexpr allocations arise
+  // from reconstituted non-type template arguments.
+  if (const auto *PAD = dyn_cast<PersistentAllocDecl>(ND))
+    return MakeAddrLValue(CGM.GetAddrOfPersistentAllocDecl(PAD), T,
+                          AlignmentSource::Decl);
+
   if (const auto *TPO = dyn_cast<TemplateParamObjectDecl>(ND)) {
     ConstantAddress ATPO = CGM.GetAddrOfTemplateParamObject(TPO);
     auto AS = getLangASFromTargetAS(ATPO.getAddressSpace());

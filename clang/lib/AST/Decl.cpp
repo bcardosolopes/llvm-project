@@ -1539,6 +1539,15 @@ LinkageInfo LinkageComputer::computeLVForDecl(const NamedDecl *D,
       LV.merge(getLVForValue(TPO->getValue(), computation));
       return LV;
     }
+
+    case Decl::PersistentAlloc: {
+      // P4341 ext: a persisted constexpr allocation has the linkage of the
+      // constexpr variable whose initialization created it.
+      auto *PAD = cast<PersistentAllocDecl>(D);
+      if (const VarDecl *Owner = PAD->getOwningVar())
+        return getLVForDecl(Owner, computation);
+      return LinkageInfo::none();
+    }
   }
 
   // Handle linkage for namespace-scope names.

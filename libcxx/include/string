@@ -615,6 +615,7 @@ basic_string<char32_t> operator""s( const char32_t *str, size_t len );          
 #  include <__memory/allocator_traits.h>
 #  include <__memory/compressed_pair.h>
 #  include <__memory/construct_at.h>
+#  include <__memory/mark_immutable_if_constexpr.h>
 #  include <__memory/noexcept_move_assign_container.h>
 #  include <__memory/pointer_traits.h>
 #  include <__memory/swap_allocator.h>
@@ -1152,7 +1153,15 @@ public:
   // TODO(boomanaiden154): Once we mark this in destructors as dead on return,
   // we can use a normal call to __reset_internal_buffer and remove the extra
   // __rep constructor.
-  inline _LIBCPP_CONSTEXPR_SINCE_CXX20 ~basic_string() { __reset_internal_buffer(__rep(__uninitialized_tag())); }
+  inline _LIBCPP_CONSTEXPR_SINCE_CXX20 ~basic_string() {
+    // P4341 ext (non-transient constexpr allocation): a string's long buffer
+    // is always immutable after the initialization of an enclosing constexpr
+    // variable completes. No-op at runtime and in short mode (the pointer
+    // then designates the SSO buffer, not the start of an allocation).
+    if (__is_long())
+      std::mark_immutable_if_constexpr(std::__to_address(__get_long_pointer()));
+    __reset_internal_buffer(__rep(__uninitialized_tag()));
+  }
 
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 operator __self_view() const _NOEXCEPT {
     return __self_view(typename __self_view::__assume_valid(), data(), size());

@@ -419,6 +419,7 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::MSProperty:
   case Decl::MSGuid:
   case Decl::UnnamedGlobalConstant:
+  case Decl::PersistentAlloc:
   case Decl::TemplateParamObject:
   case Decl::ObjCIvar:
   case Decl::ObjCAtDefsField:

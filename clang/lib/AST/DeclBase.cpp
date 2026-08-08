@@ -1009,6 +1009,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case Decomposition:
     case MSGuid:
     case UnnamedGlobalConstant:
+    case PersistentAlloc:
     case TemplateParamObject:
 
     case UsingDirective:

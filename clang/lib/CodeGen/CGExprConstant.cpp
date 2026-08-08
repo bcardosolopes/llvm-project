@@ -2314,6 +2314,10 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
     if (const auto *TPO = dyn_cast<TemplateParamObjectDecl>(D))
       return CGM.GetAddrOfTemplateParamObject(TPO);
 
+    // P4341 ext: persisted constexpr allocations are emitted as globals.
+    if (const auto *PAD = dyn_cast<PersistentAllocDecl>(D))
+      return CGM.GetAddrOfPersistentAllocDecl(PAD);
+
     return nullptr;
   }
 

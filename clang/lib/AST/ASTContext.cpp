@@ -13955,6 +13955,43 @@ ASTContext::getTemplateParamObjectDecl(QualType T, const APValue &V) const {
   return New;
 }
 
+PersistentAllocDecl *
+ASTContext::getPersistentAllocDecl(const VarDecl *OwningVar,
+                                   unsigned AllocIndex, QualType Ty,
+                                   bool IsImmutable, APValue Value) const {
+  const VarDecl *Key = cast<VarDecl>(OwningVar->getCanonicalDecl());
+  PersistentAllocDecl *&Slot = PersistentAllocDecls[{Key, AllocIndex}];
+  if (!Slot) {
+    Slot = PersistentAllocDecl::Create(*this, Ty, Key, AllocIndex,
+                                       IsImmutable, std::move(Value));
+    VarsWithPersistentAllocs.insert(Key);
+  }
+  return Slot;
+}
+
+bool ASTContext::hasPersistentAllocs(const VarDecl *VD) const {
+  return VarsWithPersistentAllocs.count(
+      cast<VarDecl>(VD->getCanonicalDecl()));
+}
+
+PersistentAllocDecl *
+ASTContext::registerPersistentAllocDecl(PersistentAllocDecl *D) const {
+  const VarDecl *Key = cast<VarDecl>(D->getOwningVar()->getCanonicalDecl());
+  PersistentAllocDecl *&Slot = PersistentAllocDecls[{Key, D->getAllocIndex()}];
+  VarsWithPersistentAllocs.insert(Key);
+  if (Slot && Slot != D)
+    return Slot;
+  Slot = D;
+  return nullptr;
+}
+
+PersistentAllocDecl *
+ASTContext::findPersistentAllocDecl(const VarDecl *OwningVar,
+                                    unsigned AllocIndex) const {
+  const VarDecl *Key = cast<VarDecl>(OwningVar->getCanonicalDecl());
+  return PersistentAllocDecls.lookup({Key, AllocIndex});
+}
+
 bool ASTContext::AtomicUsesUnsupportedLibcall(const AtomicExpr *E) const {
   const llvm::Triple &T = getTargetInfo().getTriple();
   if (!T.isOSDarwin())

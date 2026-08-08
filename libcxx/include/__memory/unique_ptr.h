@@ -15,6 +15,7 @@
 #include <__compare/compare_three_way_result.h>
 #include <__compare/three_way_comparable.h>
 #include <__config>
+#include <__memory/mark_immutable_if_constexpr.h>
 #include <__cstddef/nullptr_t.h>
 #include <__cstddef/size_t.h>
 #include <__functional/hash.h>
@@ -42,6 +43,7 @@
 #include <__type_traits/is_swappable.h>
 #include <__type_traits/is_trivially_relocatable.h>
 #include <__type_traits/is_void.h>
+#include <__type_traits/is_const.h>
 #include <__type_traits/remove_extent.h>
 #include <__type_traits/type_identity.h>
 #include <__utility/declval.h>
@@ -257,7 +259,14 @@ public:
   unique_ptr& operator=(unique_ptr const&) = delete;
 #endif
 
-  _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
+  _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 ~unique_ptr() {
+    // P4341 ext (non-transient constexpr allocation): a unique_ptr's
+    // allocation is immutable from the end of initialization onward only when
+    // the element type is const. No-op at runtime and for null pointers.
+    if constexpr (is_const<__remove_extent_t<_Tp> >::value)
+      std::mark_immutable_if_constexpr(std::__to_address(__ptr_));
+    reset();
+  }
 
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(nullptr_t) _NOEXCEPT {
     reset();
@@ -573,7 +582,14 @@ public:
 #endif
 
 public:
-  _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
+  _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 ~unique_ptr() {
+    // P4341 ext (non-transient constexpr allocation): a unique_ptr's
+    // allocation is immutable from the end of initialization onward only when
+    // the element type is const. No-op at runtime and for null pointers.
+    if constexpr (is_const<__remove_extent_t<_Tp> >::value)
+      std::mark_immutable_if_constexpr(std::__to_address(__ptr_));
+    reset();
+  }
 
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(nullptr_t) _NOEXCEPT {
     reset();

@@ -4343,6 +4343,57 @@ ConstantAddress CodeGenModule::GetAddrOfUnnamedGlobalConstantDecl(
   return ConstantAddress(GV, GV->getValueType(), Alignment);
 }
 
+ConstantAddress CodeGenModule::GetAddrOfPersistentAllocDecl(
+    const PersistentAllocDecl *PAD) {
+  // Identity is (owning variable, allocation index); derive a stable name
+  // from the owner's mangled name so all TUs that evaluate the owner agree.
+  const VarDecl *Owner = PAD->getOwningVar();
+  SmallString<128> Name;
+  {
+    llvm::raw_svector_ostream OS(Name);
+    OS << getMangledName(GlobalDecl(Owner)) << ".__nta_"
+       << PAD->getAllocIndex();
+  }
+  CharUnits Alignment = getNaturalTypeAlignment(PAD->getType());
+
+  if (llvm::GlobalVariable *GV = getModule().getNamedGlobal(Name))
+    return ConstantAddress(GV, GV->getValueType(), Alignment);
+
+  ConstantEmitter Emitter(*this);
+  llvm::Constant *Init = Emitter.emitForInitializer(
+      PAD->getValue(), PAD->getType().getAddressSpace(), PAD->getType());
+  if (!Init) {
+    ErrorUnsupported(PAD, "persistent constexpr allocation");
+    return ConstantAddress::invalid();
+  }
+
+  // The allocation is placed in read-only storage only if it was marked
+  // immutable and contains no mutable members anywhere; otherwise writable.
+  bool ReadOnly = PAD->isImmutable();
+  if (ReadOnly) {
+    if (const CXXRecordDecl *RD =
+            getContext().getBaseElementType(PAD->getType())
+                ->getAsCXXRecordDecl())
+      if (RD->hasDefinition() && RD->hasMutableFields())
+        ReadOnly = false;
+  }
+
+  // Match the owner's linkage: internal-linkage owners get TU-local
+  // allocations; external owners get linkonce_odr so multiple TUs unify.
+  llvm::GlobalValue::LinkageTypes Linkage =
+      isExternallyVisible(Owner->getLinkageAndVisibility().getLinkage())
+          ? llvm::GlobalValue::LinkOnceODRLinkage
+          : llvm::GlobalValue::InternalLinkage;
+  auto *GV = new llvm::GlobalVariable(getModule(), Init->getType(), ReadOnly,
+                                      Linkage, Init, Name);
+  GV->setAlignment(Alignment.getAsAlign());
+  if (supportsCOMDAT() && Linkage == llvm::GlobalValue::LinkOnceODRLinkage)
+    GV->setComdat(TheModule.getOrInsertComdat(GV->getName()));
+  Emitter.finalize(GV);
+
+  return ConstantAddress(GV, GV->getValueType(), Alignment);
+}
+
 ConstantAddress CodeGenModule::GetAddrOfTemplateParamObject(
     const TemplateParamObjectDecl *TPO) {
   StringRef Name = getMangledName(TPO);

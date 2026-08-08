@@ -135,6 +135,7 @@ void CodeGenFunction::EmitDecl(const Decl &D, bool EvaluateConditionDecl) {
   case Decl::Import:
   case Decl::MSGuid:    // __declspec(uuid("..."))
   case Decl::UnnamedGlobalConstant:
+  case Decl::PersistentAlloc:
   case Decl::TemplateParamObject:
   case Decl::OMPThreadPrivate:
   case Decl::OMPGroupPrivate:

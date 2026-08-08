@@ -4581,6 +4581,72 @@ public:
   static bool classofKind(Kind K) { return K == Decl::UnnamedGlobalConstant; }
 };
 
+/// P4341 ext: an artificial decl representing a constexpr allocation that
+/// persisted beyond the initialization of a constexpr variable (non-transient
+/// constexpr allocation).
+///
+/// Identity is (owning variable, allocation index): constant evaluation is
+/// deterministic, so the Nth surviving allocation of V's initializer denotes
+/// the same object in every translation unit that evaluates V.
+class PersistentAllocDecl : public ValueDecl {
+  /// The variable whose initialization created this allocation.
+  const VarDecl *OwningVar;
+
+  /// The index of this allocation among V's surviving allocations, in
+  /// allocation order.
+  unsigned AllocIndex;
+
+  /// Whether std::mark_immutable_if_constexpr was called on this allocation
+  /// during the hypothetical destruction of the owning variable. Immutable
+  /// allocations are readable in later constant expressions and may be
+  /// placed in read-only storage; mutable ones are neither.
+  bool IsImmutable;
+
+  /// The persisted contents: the value of the allocation at the end of the
+  /// owning variable's initialization.
+  APValue Value;
+
+  void anchor() override;
+
+  PersistentAllocDecl(const ASTContext &C, DeclContext *DC, QualType T,
+                      const VarDecl *OwningVar, unsigned AllocIndex,
+                      bool IsImmutable, APValue Val);
+
+  friend class ASTContext;
+  friend class ASTReader;
+  friend class ASTDeclReader;
+
+public:
+  static PersistentAllocDecl *Create(const ASTContext &C, QualType T,
+                                     const VarDecl *OwningVar,
+                                     unsigned AllocIndex, bool IsImmutable,
+                                     APValue Val);
+  static PersistentAllocDecl *CreateDeserialized(ASTContext &C,
+                                                 GlobalDeclID ID);
+
+  void printName(llvm::raw_ostream &OS,
+                 const PrintingPolicy &Policy) const override;
+
+  const VarDecl *getOwningVar() const { return OwningVar; }
+  unsigned getAllocIndex() const { return AllocIndex; }
+  bool isImmutable() const { return IsImmutable; }
+  const APValue &getValue() const { return Value; }
+  APValue &getMutableValue() { return Value; }
+
+  /// Identity is (owning variable, allocation index). Multiple decl objects
+  /// for the same identity can exist when a PCH/module and the current TU
+  /// each evaluate the owning variable's initializer (deserialization is
+  /// lazy, so either may come first); the ASTContext registry decides which
+  /// object is canonical.
+  PersistentAllocDecl *getCanonicalDecl() override;
+  const PersistentAllocDecl *getCanonicalDecl() const {
+    return const_cast<PersistentAllocDecl *>(this)->getCanonicalDecl();
+  }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Decl::PersistentAlloc; }
+};
+
 /// Represents a C++26 consteval block declaration.
 class ConstevalBlockDecl : public Decl {
   Expr *EvaluatingExpr;

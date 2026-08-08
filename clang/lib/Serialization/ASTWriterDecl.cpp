@@ -111,6 +111,7 @@ namespace clang {
     void VisitMSPropertyDecl(MSPropertyDecl *D);
     void VisitMSGuidDecl(MSGuidDecl *D);
     void VisitUnnamedGlobalConstantDecl(UnnamedGlobalConstantDecl *D);
+    void VisitPersistentAllocDecl(PersistentAllocDecl *D);
     void VisitTemplateParamObjectDecl(TemplateParamObjectDecl *D);
     void VisitIndirectFieldDecl(IndirectFieldDecl *D);
     void VisitVarDecl(VarDecl *D);
@@ -1251,6 +1252,15 @@ void ASTDeclWriter::VisitUnnamedGlobalConstantDecl(
   VisitValueDecl(D);
   Record.AddAPValue(D->getValue());
   Code = serialization::DECL_UNNAMED_GLOBAL_CONSTANT;
+}
+
+void ASTDeclWriter::VisitPersistentAllocDecl(PersistentAllocDecl *D) {
+  VisitValueDecl(D);
+  Record.AddDeclRef(D->getOwningVar());
+  Record.writeUInt32(D->getAllocIndex());
+  Record.push_back(D->isImmutable());
+  Record.AddAPValue(D->getValue());
+  Code = serialization::DECL_PERSISTENT_ALLOC;
 }
 
 void ASTDeclWriter::VisitTemplateParamObjectDecl(TemplateParamObjectDecl *D) {

@@ -369,6 +369,7 @@ public:
   void VisitMSPropertyDecl(MSPropertyDecl *FD);
   void VisitMSGuidDecl(MSGuidDecl *D);
   void VisitUnnamedGlobalConstantDecl(UnnamedGlobalConstantDecl *D);
+  void VisitPersistentAllocDecl(PersistentAllocDecl *D);
   void VisitTemplateParamObjectDecl(TemplateParamObjectDecl *D);
   void VisitIndirectFieldDecl(IndirectFieldDecl *FD);
   RedeclarableResult VisitVarDeclImpl(VarDecl *D);
@@ -1584,6 +1585,22 @@ void ASTDeclReader::VisitUnnamedGlobalConstantDecl(
   if (UnnamedGlobalConstantDecl *Existing =
           Reader.getContext().UnnamedGlobalConstantDecls.GetOrInsertNode(D))
     Reader.getContext().setPrimaryMergedDecl(D, Existing->getCanonicalDecl());
+}
+
+void ASTDeclReader::VisitPersistentAllocDecl(PersistentAllocDecl *D) {
+  VisitValueDecl(D);
+  D->OwningVar = readDeclAs<VarDecl>();
+  D->AllocIndex = Record.readUInt32();
+  D->IsImmutable = Record.readBool();
+  D->Value = Record.readAPValue();
+
+  // Register in the ASTContext identity map so later evaluations of the
+  // owning variable's initializer in this TU find this decl rather than
+  // minting a duplicate; merge if an equivalent decl already exists.
+  if (D->OwningVar)
+    if (PersistentAllocDecl *Existing =
+            Reader.getContext().registerPersistentAllocDecl(D))
+      Reader.getContext().setPrimaryMergedDecl(D, Existing->getCanonicalDecl());
 }
 
 void ASTDeclReader::VisitTemplateParamObjectDecl(TemplateParamObjectDecl *D) {
@@ -4229,6 +4246,9 @@ Decl *ASTReader::ReadDeclRecord(GlobalDeclID ID) {
     break;
   case DECL_UNNAMED_GLOBAL_CONSTANT:
     D = UnnamedGlobalConstantDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_PERSISTENT_ALLOC:
+    D = PersistentAllocDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_TEMPLATE_PARAM_OBJECT:
     D = TemplateParamObjectDecl::CreateDeserialized(Context, ID);

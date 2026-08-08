@@ -831,7 +831,7 @@ void CXXNameMangler::mangle(GlobalDecl GD) {
   if (isa<FunctionDecl>(GD.getDecl()))
     mangleFunctionEncoding(GD);
   else if (isa<VarDecl, FieldDecl, MSGuidDecl, TemplateParamObjectDecl,
-               BindingDecl>(GD.getDecl()))
+               PersistentAllocDecl, BindingDecl>(GD.getDecl()))
     mangleName(GD);
   else if (const IndirectFieldDecl *IFD =
                dyn_cast<IndirectFieldDecl>(GD.getDecl()))
@@ -1527,6 +1527,23 @@ void CXXNameMangler::mangleUnqualifiedName(
       Out << "TA";
       mangleValueInTemplateArg(TPO->getType().getUnqualifiedType(),
                                TPO->getValue(), /*TopLevel=*/true);
+      break;
+    }
+
+    if (auto *PAD = dyn_cast<PersistentAllocDecl>(ND)) {
+      // P4341 ext: a persisted constexpr allocation. Identity is (owning
+      // variable, allocation index); mangle as a source-name derived from
+      // the owner's mangling, matching the symbol CodeGen emits
+      // (<owner>.__nta_<index>). Vendor extension; no standard ABI encoding
+      // exists yet.
+      SmallString<128> Buf;
+      {
+        llvm::raw_svector_ostream OS(Buf);
+        OS << "__nta_";
+        Context.mangleName(GlobalDecl(PAD->getOwningVar()), OS);
+        OS << '_' << PAD->getAllocIndex();
+      }
+      Out << Buf.size() << Buf;
       break;
     }
 

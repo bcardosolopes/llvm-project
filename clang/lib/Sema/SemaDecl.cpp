@@ -15330,6 +15330,20 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
         << var;
 
 
+  // P4341 ext (non-transient allocation): evaluating the initializer of a
+  // constexpr class-type variable may need to run the hypothetical
+  // destruction of the variable, which requires the destructor (and
+  // everything it calls) to be defined. Mark it referenced up front;
+  // FinalizeVarWithDestructor will do this again later, harmlessly.
+  if (getLangOpts().CPlusPlus29 && var->isConstexpr() &&
+      !type->isDependentType() && Init && !Init->isValueDependent()) {
+    if (CXXRecordDecl *RD = baseType->getAsCXXRecordDecl();
+        RD && RD->hasDefinition() && !RD->hasIrrelevantDestructor() &&
+        !RD->isDependentContext())
+      if (CXXDestructorDecl *Dtor = LookupDestructor(RD->getDefinitionOrSelf()))
+        MarkFunctionReferenced(var->getLocation(), Dtor);
+  }
+
   // Check whether the initializer is sufficiently constant.
   if ((getLangOpts().CPlusPlus || (getLangOpts().C23 && var->isConstexpr())) &&
       !type->isDependentType() && Init && !Init->isValueDependent() &&

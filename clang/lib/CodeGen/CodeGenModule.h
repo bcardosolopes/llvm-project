@@ -1177,6 +1177,11 @@ public:
   ConstantAddress
   GetAddrOfTemplateParamObject(const TemplateParamObjectDecl *TPO);
 
+  /// P4341 ext: get the address of a persisted constexpr allocation.
+  /// Immutable allocations are emitted as constant globals; mutable ones as
+  /// writable globals.
+  ConstantAddress GetAddrOfPersistentAllocDecl(const PersistentAllocDecl *PAD);
+
   /// Get the address of the thunk for the given global decl.
   llvm::Constant *GetAddrOfThunk(StringRef Name, llvm::Type *FnTy,
                                  GlobalDecl GD);

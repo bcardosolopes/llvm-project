@@ -3926,6 +3926,58 @@ APValue &MSGuidDecl::getAsAPValue() const {
   return APVal;
 }
 
+void PersistentAllocDecl::anchor() {}
+
+PersistentAllocDecl::PersistentAllocDecl(const ASTContext &C, DeclContext *DC,
+                                         QualType T, const VarDecl *OwningVar,
+                                         unsigned AllocIndex, bool IsImmutable,
+                                         APValue Val)
+    : ValueDecl(Decl::PersistentAlloc, DC, SourceLocation(),
+                DeclarationName(), T),
+      OwningVar(OwningVar), AllocIndex(AllocIndex), IsImmutable(IsImmutable),
+      Value(std::move(Val)) {
+  setImplicit();
+  if (Value.needsCleanup())
+    C.addDestruction(&Value);
+}
+
+PersistentAllocDecl *PersistentAllocDecl::Create(const ASTContext &C,
+                                                 QualType T,
+                                                 const VarDecl *OwningVar,
+                                                 unsigned AllocIndex,
+                                                 bool IsImmutable,
+                                                 APValue Val) {
+  DeclContext *DC = C.getTranslationUnitDecl();
+  return new (C, DC) PersistentAllocDecl(C, DC, T, OwningVar, AllocIndex,
+                                         IsImmutable, std::move(Val));
+}
+
+PersistentAllocDecl *PersistentAllocDecl::CreateDeserialized(ASTContext &C,
+                                                             GlobalDeclID ID) {
+  auto *D = new (C, ID)
+      PersistentAllocDecl(C, nullptr, QualType(), nullptr, 0, false,
+                          APValue());
+  return D;
+}
+
+PersistentAllocDecl *PersistentAllocDecl::getCanonicalDecl() {
+  if (!OwningVar)
+    return this;
+  if (PersistentAllocDecl *Registered =
+          getASTContext().findPersistentAllocDecl(OwningVar, AllocIndex))
+    return Registered;
+  return this;
+}
+
+void PersistentAllocDecl::printName(llvm::raw_ostream &OS,
+                                    const PrintingPolicy &Policy) const {
+  OS << "persistent allocation #" << AllocIndex << " of ";
+  if (OwningVar)
+    OwningVar->printQualifiedName(OS, Policy);
+  else
+    OS << "<unknown>";
+}
+
 void UnnamedGlobalConstantDecl::anchor() {}
 
 UnnamedGlobalConstantDecl::UnnamedGlobalConstantDecl(const ASTContext &C,

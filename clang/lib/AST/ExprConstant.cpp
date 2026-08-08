@@ -772,6 +772,9 @@ namespace {
     /// or a CallExpr (the latter is for direct calls to operator new inside
     /// std::allocator<T>::allocate).
     const Expr *AllocExpr = nullptr;
+    /// P4341 ext: the complete type of the allocation (for array new and
+    /// std::allocator allocations, the array type). Used when persisting.
+    QualType AllocType;
 
     enum Kind {
       New,
@@ -875,6 +878,32 @@ namespace {
 
     /// The number of heap allocations performed so far in this evaluation.
     unsigned NumHeapAllocs = 0;
+
+    /// P4341 ext (non-transient allocation): when nonnull, we are evaluating
+    /// the hypothetical destruction of a constexpr variable whose
+    /// initialization left these allocations alive. Reads from an allocation
+    /// in this set are subject to the reachable-as-mutable check unless the
+    /// allocation has been marked immutable; writes are permitted (the
+    /// destruction is evaluated against a discarded copy). Allocations
+    /// marked via std::mark_immutable_if_constexpr are recorded in
+    /// ImmutableAllocs.
+    struct HypotheticalDestructionState {
+      /// The allocations that survived initialization, keyed by index.
+      /// (The DynAllocs themselves live in HeapAllocs, seeded from the
+      /// initializer's survivors.)
+      llvm::SmallPtrSet<const void *, 8> SurvivingAllocs;
+
+      /// Allocations marked immutable so far during this destruction.
+      llvm::SmallPtrSet<const void *, 8> ImmutableAllocs;
+
+      /// Allocations already determined to be reachable-as-mutable from the
+      /// variable at the point they were reached (cache; reachability is
+      /// checked lazily at each read per the design).
+      const VarDecl *OwningVar = nullptr;
+    };
+    std::optional<HypotheticalDestructionState> HypDtor;
+
+    bool isHypotheticalDestruction() const { return HypDtor.has_value(); }
 
     /// When a do-expression body terminates via `return`/`break`/`continue`
     /// (i.e., outer-scope control flow), VisitDoExpr stashes the resulting
@@ -2029,6 +2058,7 @@ APValue *EvalInfo::createHeapAlloc(const Expr *E, QualType T, LValue &LV) {
                                    std::forward_as_tuple(DA), std::tuple<>());
   assert(Result.second && "reused a heap alloc index?");
   Result.first->second.AllocExpr = E;
+  Result.first->second.AllocType = T;
   return &Result.first->second.Value;
 }
 
@@ -2141,7 +2171,9 @@ static bool IsGlobalLValue(APValue::LValueBase B) {
     // ... the address of a function,
     // ... the address of a GUID [MS extension],
     // ... the address of an unnamed global constant
-    return isa<FunctionDecl, MSGuidDecl, UnnamedGlobalConstantDecl>(D);
+    // ... [P4341 ext] the address of an object in a persistent allocation
+    return isa<FunctionDecl, MSGuidDecl, UnnamedGlobalConstantDecl,
+               PersistentAllocDecl>(D);
   }
 
   if (B.is<TypeInfoLValue>() || B.is<DynamicAllocLValue>())
@@ -4777,6 +4809,136 @@ static bool AreElementsOfSameArray(QualType ObjType,
   return CommonLength >= A.Entries.size() - IsArray;
 }
 
+/// P4341 ext: walk the APValue \p V (an object of type \p T stored in the
+/// variable undergoing hypothetical destruction or in one of its surviving
+/// allocations), looking for a pointer/reference to \p Target through which
+/// Target is mutable. \p T may be null when unknown (e.g. array fillers).
+static bool valueReferencesAllocAsMutable(EvalInfo &Info, const APValue &V,
+                                          QualType T,
+                                          DynamicAllocLValue Target) {
+  auto PointeeIsMutable = [&](QualType Pointee) {
+    if (Pointee.isNull())
+      return true; // conservatively mutable if we can't see the type
+    if (!Pointee.isConstQualified())
+      return true;
+    if (const CXXRecordDecl *RD = Pointee->getAsCXXRecordDecl())
+      if (RD->hasDefinition() && RD->hasMutableFields())
+        return true;
+    return false;
+  };
+
+  switch (V.getKind()) {
+  case APValue::LValue: {
+    DynamicAllocLValue DA = V.getLValueBase().dyn_cast<DynamicAllocLValue>();
+    if (!DA || DA.getOpaqueValue() != Target.getOpaqueValue())
+      return false;
+    // The static type of the pointer/reference member is what determines
+    // mutability. Use the pointee type recorded on the member if available;
+    // otherwise fall back to the allocation's type.
+    QualType Pointee;
+    if (!T.isNull()) {
+      if (const auto *PT = T->getAs<PointerType>())
+        Pointee = PT->getPointeeType();
+      else if (const auto *RT = T->getAs<ReferenceType>())
+        Pointee = RT->getPointeeType();
+    }
+    if (Pointee.isNull())
+      Pointee = V.getLValueBase().getDynamicAllocType();
+    return PointeeIsMutable(Pointee);
+  }
+  case APValue::Struct: {
+    const CXXRecordDecl *RD =
+        T.isNull() ? nullptr : T->getAsCXXRecordDecl();
+    unsigned BaseIdx = 0, FieldIdx = 0;
+    if (RD && RD->hasDefinition()) {
+      for (const CXXBaseSpecifier &BS : RD->getDefinition()->bases()) {
+        if (BaseIdx >= V.getStructNumBases())
+          break;
+        if (valueReferencesAllocAsMutable(Info, V.getStructBase(BaseIdx),
+                                          BS.getType(), Target))
+          return true;
+        ++BaseIdx;
+      }
+      for (const FieldDecl *FD : RD->getDefinition()->fields()) {
+        if (FieldIdx >= V.getStructNumFields())
+          break;
+        if (valueReferencesAllocAsMutable(
+                Info, V.getStructField(FieldIdx), FD->getType(), Target))
+          return true;
+        ++FieldIdx;
+      }
+      return false;
+    }
+    // Unknown layout: walk everything without types.
+    for (unsigned I = 0, N = V.getStructNumBases(); I != N; ++I)
+      if (valueReferencesAllocAsMutable(Info, V.getStructBase(I), QualType(),
+                                        Target))
+        return true;
+    for (unsigned I = 0, N = V.getStructNumFields(); I != N; ++I)
+      if (valueReferencesAllocAsMutable(Info, V.getStructField(I), QualType(),
+                                        Target))
+        return true;
+    return false;
+  }
+  case APValue::Union:
+    if (const FieldDecl *FD = V.getUnionField())
+      return valueReferencesAllocAsMutable(Info, V.getUnionValue(),
+                                           FD->getType(), Target);
+    return false;
+  case APValue::Array: {
+    QualType ElemTy;
+    if (!T.isNull())
+      ElemTy = Info.Ctx.getAsArrayType(T)
+                   ? Info.Ctx.getAsArrayType(T)->getElementType()
+                   : QualType();
+    for (unsigned I = 0, N = V.getArrayInitializedElts(); I != N; ++I)
+      if (valueReferencesAllocAsMutable(Info, V.getArrayInitializedElt(I),
+                                        ElemTy, Target))
+        return true;
+    if (V.hasArrayFiller())
+      return valueReferencesAllocAsMutable(Info, V.getArrayFiller(), ElemTy,
+                                           Target);
+    return false;
+  }
+  default:
+    return false;
+  }
+}
+
+/// P4341 ext: determine whether the allocation \p Target is reachable as
+/// mutable from the constexpr variable undergoing hypothetical destruction.
+///
+/// Per the design (following P1974R1's definition, but checked dynamically
+/// at each read during the synthesized destruction): Target is reachable as
+/// mutable if a pointer or reference to Target (or to an object or subobject
+/// stored in it), stored in V or in any of V's surviving allocations, is to
+/// a non-const-qualified type or to a type containing mutable members. The
+/// walk consults the *current* evaluation state, so a destructor that has
+/// already erased or overwritten the mutable path no longer makes Target
+/// mutable-reachable.
+static bool isAllocReachableAsMutable(EvalInfo &Info,
+                                      DynamicAllocLValue Target) {
+  const VarDecl *VD = Info.HypDtor->OwningVar;
+  // The value of V itself (being destroyed) lives in EvaluatingDeclValue.
+  if (Info.EvaluatingDeclValue &&
+      valueReferencesAllocAsMutable(Info, *Info.EvaluatingDeclValue,
+                                    VD ? VD->getType() : QualType(), Target))
+    return true;
+
+  // Pointers stored in other surviving allocations. Recover the allocated
+  // type from the allocating expression where possible so that member
+  // pointer types are seen; otherwise the walk is conservatively typeless.
+  for (const auto &[DA, Alloc] : Info.HeapAllocs) {
+    DynamicAllocLValue Key = DA;
+    if (!Info.HypDtor->SurvivingAllocs.count(Key.getOpaqueValue()))
+      continue;
+    if (valueReferencesAllocAsMutable(Info, Alloc.Value, Alloc.AllocType,
+                                      Target))
+      return true;
+  }
+  return false;
+}
+
 /// Find the complete object to which an LValue refers.
 static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
                                          AccessKinds AK, const LValue &LVal,
@@ -4866,6 +5028,26 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
       }
       return CompleteObject(LVal.Base, const_cast<APValue *>(&TPO->getValue()),
                             TPO->getType());
+    }
+
+    // P4341 ext: persistent allocations. Reads are permitted only from
+    // allocations marked immutable; writes are never constant (marked
+    // allocations are immutable by assertion, unmarked ones are runtime-
+    // mutable so their contents are not constant).
+    if (auto *PAD = dyn_cast<PersistentAllocDecl>(D)) {
+      if (isModification(AK)) {
+        Info.FFDiag(E, PAD->isImmutable()
+                           ? diag::note_constexpr_persistent_alloc_modify
+                           : diag::note_constexpr_modify_global);
+        return CompleteObject();
+      }
+      if (isRead(AK) && !PAD->isImmutable()) {
+        Info.FFDiag(E, diag::note_constexpr_persistent_alloc_unmarked_read);
+        return CompleteObject();
+      }
+      return CompleteObject(LVal.Base,
+                            const_cast<APValue *>(&PAD->getValue()),
+                            PAD->getType());
     }
 
     // In C++98, const, non-volatile integers initialized with ICEs are ICEs.
@@ -4980,6 +5162,20 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
     std::optional<DynAlloc *> Alloc = Info.lookupDynamicAlloc(DA);
     if (!Alloc) {
       Info.FFDiag(E, diag::note_constexpr_access_deleted_object) << AK;
+      return CompleteObject();
+    }
+    // P4341 ext: during the hypothetical destruction of a constexpr
+    // variable, an object in a surviving allocation may not be read unless
+    // the allocation has been marked immutable or is not reachable as
+    // mutable from the variable. (Writes are unrestricted: the destruction
+    // is evaluated against a discarded copy.)
+    if (Info.isHypotheticalDestruction() && isRead(AK) &&
+        Info.HypDtor->SurvivingAllocs.count(DA.getOpaqueValue()) &&
+        !Info.HypDtor->ImmutableAllocs.count(DA.getOpaqueValue()) &&
+        isAllocReachableAsMutable(Info, DA)) {
+      Info.FFDiag(E, diag::note_constexpr_nta_mutable_read)
+          << Info.HypDtor->OwningVar;
+      NoteLValueLocation(Info, LVal.Base);
       return CompleteObject();
     }
     return CompleteObject(LVal.Base, &(*Alloc)->Value,
@@ -21664,6 +21860,28 @@ public:
     case Builtin::BI__builtin_operator_delete:
       return HandleOperatorDeleteCall(Info, E);
 
+    case Builtin::BI__builtin_mark_immutable_if_constexpr: {
+      // P4341 ext: during the hypothetical destruction of a constexpr
+      // variable, mark the pointed-to allocation immutable. In any other
+      // context (including runtime lowering and ordinary constant
+      // evaluation), and for any pointer that is not the start of a
+      // surviving allocation, this is a no-op.
+      LValue Ptr;
+      if (!EvaluatePointer(E->getArg(0), Ptr, Info))
+        return false;
+      if (!Info.isHypotheticalDestruction())
+        return true;
+      DynamicAllocLValue DA = Ptr.Base.dyn_cast<DynamicAllocLValue>();
+      if (!DA || !Ptr.Offset.isZero() ||
+          (Ptr.Designator.Entries.size() >
+           (Ptr.Base.getDynamicAllocType()->isArrayType() ? 1u : 0u)))
+        return true;
+      if (!Info.HypDtor->SurvivingAllocs.count(DA.getOpaqueValue()))
+        return true;
+      Info.HypDtor->ImmutableAllocs.insert(DA.getOpaqueValue());
+      return true;
+    }
+
     default:
       return false;
     }
@@ -22881,6 +23099,148 @@ bool Expr::EvaluateAsLValue(EvalResult &Result, const ASTContext &Ctx,
   return true;
 }
 
+/// P4341 ext: rewrite every DynamicAllocLValue base in \p V to refer to the
+/// corresponding PersistentAllocDecl in \p Map. Also rewrites the values
+/// stored in the persisted allocations themselves (which may point to each
+/// other).
+static void RebaseDynamicAllocs(
+    APValue &V,
+    const llvm::DenseMap<const void *, PersistentAllocDecl *> &Map) {
+  switch (V.getKind()) {
+  case APValue::LValue: {
+    DynamicAllocLValue DA = V.getLValueBase().dyn_cast<DynamicAllocLValue>();
+    if (!DA)
+      return;
+    auto It = Map.find(DA.getOpaqueValue());
+    if (It == Map.end())
+      return;
+    APValue::LValueBase NewBase(It->second, V.getLValueBase().getCallIndex(),
+                                V.getLValueBase().getVersion());
+    if (V.hasLValuePath()) {
+      SmallVector<APValue::LValuePathEntry, 8> Path(V.getLValuePath().begin(),
+                                                    V.getLValuePath().end());
+      V = APValue(NewBase, V.getLValueOffset(), Path,
+                  V.isLValueOnePastTheEnd(), V.isNullPointer());
+    } else {
+      V = APValue(NewBase, V.getLValueOffset(), APValue::NoLValuePath(),
+                  V.isNullPointer());
+    }
+    return;
+  }
+  case APValue::Struct:
+    for (unsigned I = 0, N = V.getStructNumBases(); I != N; ++I)
+      RebaseDynamicAllocs(V.getStructBase(I), Map);
+    for (unsigned I = 0, N = V.getStructNumFields(); I != N; ++I)
+      RebaseDynamicAllocs(V.getStructField(I), Map);
+    return;
+  case APValue::Union:
+    if (V.getUnionField())
+      RebaseDynamicAllocs(V.getUnionValue(), Map);
+    return;
+  case APValue::Array:
+    for (unsigned I = 0, N = V.getArrayInitializedElts(); I != N; ++I)
+      RebaseDynamicAllocs(V.getArrayInitializedElt(I), Map);
+    if (V.hasArrayFiller())
+      RebaseDynamicAllocs(V.getArrayFiller(), Map);
+    return;
+  default:
+    return;
+  }
+}
+
+/// P4341 ext: attempt to persist the allocations that survived the
+/// initialization of \p VD.
+///
+/// Evaluates the hypothetical destruction of \p VD against a discarded copy
+/// of the evaluation state, seeded with the surviving allocations. Succeeds
+/// if that destruction is a constant expression that deallocates every
+/// surviving allocation, subject to the reachable-as-mutable read check
+/// (waived per-allocation by std::mark_immutable_if_constexpr).
+///
+/// On success, fills \p Persisted with (allocation index, immutable flag,
+/// end-of-initialization value, allocated type) for each surviving
+/// allocation, in allocation order.
+struct PersistedAllocInfo {
+  unsigned Index;
+  bool Immutable;
+  APValue Value;
+  QualType Type;
+  const Expr *AllocExpr;
+};
+static bool EvaluatePersistence(EvalInfo &InitInfo, const VarDecl *VD,
+                                const APValue &InitValue,
+                                SmallVectorImpl<PersistedAllocInfo> &Persisted,
+                                SmallVectorImpl<PartialDiagnosticAt> *Notes) {
+  ASTContext &Ctx = InitInfo.Ctx;
+
+  // Gather the survivors from the initializer's evaluation state.
+  SmallVector<std::pair<DynamicAllocLValue, const DynAlloc *>, 8> Survivors;
+  for (const auto &[DA, Alloc] : InitInfo.HeapAllocs)
+    Survivors.push_back({DA, &Alloc});
+  if (Survivors.empty())
+    return true;
+
+  // The destruction is evaluated in a fresh EvalInfo (a discarded copy):
+  // its writes affect nothing, and the persisted image is the
+  // end-of-initialization state captured below.
+  Expr::EvalStatus DtorStatus;
+  DtorStatus.Diag = Notes;
+  EvalInfo Info(Ctx, DtorStatus, EvaluationMode::ConstantExpression);
+  Info.InConstantContext = true;
+
+  APValue DestroyedValue = InitValue;
+  Info.setEvaluatingDecl(const_cast<VarDecl *>(VD), DestroyedValue,
+                         EvalInfo::EvaluatingDeclKind::Dtor);
+
+  // Seed the destruction's heap with copies of the surviving allocations,
+  // preserving their indices so that pointers stored in the initializer's
+  // value resolve correctly.
+  Info.NumHeapAllocs = InitInfo.NumHeapAllocs;
+  Info.HypDtor.emplace();
+  Info.HypDtor->OwningVar = VD;
+  for (auto &[DA, Alloc] : Survivors) {
+    auto It = Info.HeapAllocs.emplace(std::piecewise_construct,
+                                      std::forward_as_tuple(DA),
+                                      std::tuple<>());
+    It.first->second.Value = Alloc->Value;
+    It.first->second.AllocExpr = Alloc->AllocExpr;
+    Info.HypDtor->SurvivingAllocs.insert(DA.getOpaqueValue());
+  }
+
+  // Run the destructor.
+  if (!HandleDestruction(Info, VD->getLocation(), const_cast<VarDecl *>(VD),
+                         DestroyedValue, VD->getType()) ||
+      DtorStatus.HasSideEffects) {
+    // HandleDestruction has already explained why in Notes; the caller adds
+    // the leading "not a constant expression" diagnostic.
+    return false;
+  }
+  if (!Info.discardCleanups())
+    llvm_unreachable("Unhandled cleanup; missing full expression marker?");
+
+  // Every surviving allocation must have been deallocated.
+  for (auto &[DA, Alloc] : Survivors) {
+    if (Info.HeapAllocs.count(DA)) {
+      Info.FFDiag(Alloc->AllocExpr->getExprLoc(),
+                  diag::note_constexpr_nta_not_deallocated)
+          << VD;
+      return false;
+    }
+  }
+
+  // Success: record the persisted allocations with the immutable bits the
+  // destruction established. The persisted contents are the
+  // end-of-initialization values (from InitInfo, not the destroyed copies).
+  for (auto &[DA, Alloc] : Survivors) {
+    QualType AllocTy = Alloc->AllocType;
+    Persisted.push_back(
+        {DA.getIndex(),
+         Info.HypDtor->ImmutableAllocs.contains(DA.getOpaqueValue()),
+         Alloc->Value, AllocTy, Alloc->AllocExpr});
+  }
+  return true;
+}
+
 static bool EvaluateDestruction(const ASTContext &Ctx, APValue::LValueBase Base,
                                 APValue DestroyedValue, QualType Type,
                                 SourceLocation Loc, Expr::EvalStatus &EStatus,
@@ -23053,6 +23413,51 @@ bool Expr::EvaluateAsInitializer(APValue &Value, const ASTContext &Ctx,
       llvm_unreachable("Unhandled cleanup; missing full expression marker?");
   }
 
+  // P4341 ext (non-transient allocation): if allocations survived the
+  // initialization of a constexpr variable, attempt to persist them by
+  // evaluating the hypothetical destruction of the variable. On success,
+  // rebase all pointers to the survivors onto PersistentAllocDecls; the
+  // variable's value (and the persisted allocations) then refer to ordinary
+  // static-storage-duration entities and pass the permitted-results checks
+  // below.
+  // Per the design (following P0784R5): persistence is only attempted when
+  // the variable is an object with a nontrivial constexpr destructor — a
+  // trivial destructor deallocates nothing, so surviving allocations are
+  // plain leaks and get the classic diagnostics below.
+  auto HasNontrivialConstexprDtor = [&] {
+    const CXXRecordDecl *RD =
+        Ctx.getBaseElementType(VD->getType())->getAsCXXRecordDecl();
+    if (!RD || !RD->hasDefinition() || RD->hasTrivialDestructor())
+      return false;
+    const CXXDestructorDecl *Dtor = RD->getDestructor();
+    return Dtor && Dtor->isConstexpr();
+  };
+  if (!Info.HeapAllocs.empty() && IsConstantInitialization &&
+      VD->isConstexpr() && Ctx.getLangOpts().CPlusPlus29 &&
+      HasNontrivialConstexprDtor()) {
+    SmallVector<PersistedAllocInfo, 8> Persisted;
+    if (!EvaluatePersistence(Info, VD, Value, Persisted, &Notes))
+      return false;
+
+    // Create the PersistentAllocDecls and rewrite all references, including
+    // cross-references among the persisted values themselves.
+    llvm::DenseMap<const void *, PersistentAllocDecl *> Rebase;
+    for (PersistedAllocInfo &PA : Persisted) {
+      QualType Ty = PA.Type;
+      if (Ty.isNull())
+        Ty = Ctx.IntTy; // fallback; should not happen for CXXNewExpr allocs
+      PersistentAllocDecl *PAD = Ctx.getPersistentAllocDecl(
+          VD, PA.Index, Ty, PA.Immutable, PA.Value);
+      Rebase[DynamicAllocLValue(PA.Index).getOpaqueValue()] = PAD;
+    }
+    for (auto &Entry : Rebase)
+      RebaseDynamicAllocs(Entry.second->getMutableValue(), Rebase);
+    RebaseDynamicAllocs(Value, Rebase);
+
+    // The allocations are no longer leaks.
+    Info.HeapAllocs.clear();
+  }
+
   return CheckConstantExpression(Info, DeclLoc, DeclTy, Value,
                                  ConstantExprKind::Normal) &&
          CheckMemoryLeaks(Info);
@@ -23060,6 +23465,16 @@ bool Expr::EvaluateAsInitializer(APValue &Value, const ASTContext &Ctx,
 
 bool VarDecl::evaluateDestruction(
     SmallVectorImpl<PartialDiagnosticAt> &Notes) const {
+  // P4341 ext: if this variable's initialization persisted allocations, its
+  // destruction was already validated (against the pre-persistence heap) by
+  // EvaluatePersistence, and no destructor runs at runtime: the persisted
+  // allocations are static storage and their hypothetical deallocation is
+  // not performed.
+  if (getASTContext().hasPersistentAllocs(this)) {
+    ensureEvaluatedStmt()->HasConstantDestruction = true;
+    return true;
+  }
+
   Expr::EvalStatus EStatus;
   EStatus.Diag = &Notes;
 

@@ -1545,6 +1545,9 @@ enum DeclCode {
   /// A UnnamedGlobalConstantDecl record.
   DECL_UNNAMED_GLOBAL_CONSTANT,
 
+  /// A PersistentAllocDecl record.
+  DECL_PERSISTENT_ALLOC,
+
   /// A HLSLBufferDecl record.
   DECL_HLSL_BUFFER,
 

@@ -389,6 +389,23 @@ def note_constexpr_delete_base_nonvirt_dtor : Note<
 def note_constexpr_memory_leak : Note<
   "allocation performed here was not deallocated"
   "%plural{0:|: (along with %0 other memory leak%s0)}0">;
+def note_constexpr_nta_not_deallocated : Note<
+  "allocation performed here would not be deallocated by the destruction "
+  "of %0, so it cannot persist">;
+def note_constexpr_nta_mutable_read : Note<
+  "read of object in an allocation that is reachable as mutable from %0 "
+  "during its constant destruction; if the allocation is never mutated "
+  "after initialization, it can be marked with "
+  "'std::mark_immutable_if_constexpr'">;
+def note_constexpr_nta_dtor_failed : Note<
+  "%0 cannot retain its allocations because its destruction is not a "
+  "constant expression">;
+def note_constexpr_persistent_alloc_unmarked_read : Note<
+  "read of object in a persistent allocation that was not marked immutable "
+  "with 'std::mark_immutable_if_constexpr'">;
+def note_constexpr_persistent_alloc_modify : Note<
+  "modification of an object in a persistent allocation that was marked "
+  "immutable">;
 def note_constexpr_unsupported_layout : Note<
   "type %0 has unexpected layout">;
 def note_constexpr_unsupported_flexible_array : Note<

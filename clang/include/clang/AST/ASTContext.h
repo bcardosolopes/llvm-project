@@ -134,6 +134,7 @@ class ObjCProtocolDecl;
 class ObjCTypeParamDecl;
 class OMPTraitInfo;
 class ParentMapContext;
+class PersistentAllocDecl;
 struct ParsedTargetAttr;
 class Preprocessor;
 class ProfileList;
@@ -374,6 +375,16 @@ class ASTContext : public RefCountedBase<ASTContext> {
 
   /// Mapping from APValues to the corresponding TemplateParamObjects.
   mutable llvm::FoldingSet<TemplateParamObjectDecl> TemplateParamObjectDecls;
+
+  /// P4341 ext: mapping from (owning variable, allocation index) to the
+  /// PersistentAllocDecl representing a persisted constexpr allocation.
+  mutable llvm::DenseMap<std::pair<const VarDecl *, unsigned>,
+                         PersistentAllocDecl *>
+      PersistentAllocDecls;
+
+  /// P4341 ext: the set of variables whose initialization persisted at least
+  /// one allocation.
+  mutable llvm::DenseSet<const VarDecl *> VarsWithPersistentAllocs;
 
   /// A cache mapping a string value to a StringLiteral object with the same
   /// value.
@@ -3656,6 +3667,27 @@ public:
   /// value.
   TemplateParamObjectDecl *getTemplateParamObjectDecl(QualType T,
                                                       const APValue &V) const;
+
+  /// P4341 ext: get or create the PersistentAllocDecl for allocation
+  /// \p AllocIndex of \p OwningVar. When creating, \p Ty, \p IsImmutable and
+  /// \p Value describe the persisted allocation.
+  PersistentAllocDecl *
+  getPersistentAllocDecl(const VarDecl *OwningVar, unsigned AllocIndex,
+                         QualType Ty, bool IsImmutable,
+                         APValue Value) const;
+
+  /// P4341 ext: look up an already-created PersistentAllocDecl, or null.
+  PersistentAllocDecl *findPersistentAllocDecl(const VarDecl *OwningVar,
+                                               unsigned AllocIndex) const;
+
+  /// P4341 ext: whether \p VD's initialization persisted any allocations.
+  bool hasPersistentAllocs(const VarDecl *VD) const;
+
+  /// P4341 ext: register a deserialized PersistentAllocDecl in the identity
+  /// map. Returns the previously-registered equivalent decl if one exists
+  /// (the caller should merge \p D into it), or null if \p D is now the
+  /// registered decl.
+  PersistentAllocDecl *registerPersistentAllocDecl(PersistentAllocDecl *D) const;
 
   /// Parses the target attributes passed in, and returns only the ones that are
   /// valid feature names.

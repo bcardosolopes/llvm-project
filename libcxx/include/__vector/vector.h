@@ -20,6 +20,7 @@
 #include <__algorithm/rotate.h>
 #include <__assert>
 #include <__config>
+#include <__memory/mark_immutable_if_constexpr.h>
 #include <__debug_utils/sanitizers.h>
 #include <__format/enable_insertable.h>
 #include <__fwd/vector.h>
@@ -244,6 +245,11 @@ private:
 
     _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI void operator()() {
       if (__vec_.__begin_ != nullptr) {
+        // P4341 ext (non-transient constexpr allocation): a vector's buffer
+        // is always immutable after the initialization of an enclosing
+        // constexpr variable completes (deep-const semantics). No-op at
+        // runtime.
+        std::mark_immutable_if_constexpr(std::__to_address(__vec_.__begin_));
         __vec_.clear();
         __vec_.__annotate_delete();
         __alloc_traits::deallocate(__vec_.__alloc_, __vec_.__begin_, __vec_.capacity());

@@ -848,6 +848,7 @@ void CIRGenFunction::emitDecl(const Decl &d, bool evaluateConditionDecl) {
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
   case Decl::UnnamedGlobalConstant:
+  case Decl::PersistentAlloc:
     // None of these decls require codegen support.
     return;
 
