@@ -7345,13 +7345,15 @@ public:
     AllowStandaloneOpenMPDirectives = 0x2,
     /// This context is at the top level of a GNU statement expression.
     InStmtExpr = 0x4,
+    /// This context is at the top level of a do-expression body.
+    InDoExpr = 0x8,
 
     /// The context of a regular substatement.
     SubStmt = 0,
     /// The context of a compound-statement.
     Compound = AllowDeclarationsInC | AllowStandaloneOpenMPDirectives,
 
-    LLVM_MARK_AS_BITMASK_ENUM(InStmtExpr)
+    LLVM_MARK_AS_BITMASK_ENUM(InDoExpr)
   };
 
   /// Act on an expression statement that might be the last statement in a
@@ -7467,7 +7469,8 @@ public:
   ///
   StmtResult ParseDefaultStatement(ParsedStmtContext StmtCtx);
 
-  StmtResult ParseCompoundStatement(bool isStmtExpr = false);
+  StmtResult ParseCompoundStatement(bool isStmtExpr = false,
+                                    bool isDoExpr = false);
 
   /// ParseCompoundStatement - Parse a "{}" block.
   ///
@@ -7493,7 +7496,8 @@ public:
   /// [GNU]   '__label__' identifier-list ';'
   /// \endverbatim
   ///
-  StmtResult ParseCompoundStatement(bool isStmtExpr, unsigned ScopeFlags);
+  StmtResult ParseCompoundStatement(bool isStmtExpr, bool isDoExpr,
+                                    unsigned ScopeFlags);
 
   /// Parse any pragmas at the start of the compound expression. We handle these
   /// separately since some pragmas (FP_CONTRACT) must appear before any C
@@ -7510,7 +7514,8 @@ public:
   /// followed by a label and invoke the ActOnCompoundStmt action.  This expects
   /// the '{' to be the current token, and consume the '}' at the end of the
   /// block.  It does not manipulate the scope stack.
-  StmtResult ParseCompoundStatementBody(bool isStmtExpr = false);
+  StmtResult ParseCompoundStatementBody(bool isStmtExpr = false,
+                                        bool isDoExpr = false);
 
   /// ParseParenExprOrCondition:
   /// \verbatim
@@ -7572,6 +7577,15 @@ public:
   /// \endverbatim
   /// Note: this lets the caller parse the end ';'.
   StmtResult ParseDoStatement(LabelDecl *PrecedingLabel);
+
+  /// ParseDoExpression - Parse a do-expression:
+  /// `do (init-statement-seq[opt]) -> Type { ... }`. Both the init statements
+  /// and trailing return type are optional.
+  ExprResult ParseDoExpression();
+
+  /// ParseDoReturnStatement - Parse a `do_return [expr] ;` statement, which
+  /// yields the value of the enclosing do-expression.
+  StmtResult ParseDoReturnStatement();
 
   /// ParseForStatement
   /// \verbatim

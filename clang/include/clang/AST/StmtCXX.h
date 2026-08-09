@@ -524,6 +524,43 @@ public:
   }
 };
 
+/// Represents a 'do_return' statement: the value-yielding statement of a
+/// do-expression. Lexically nested inside a do-expression body.
+class DoReturnStmt : public Stmt {
+  SourceLocation DoReturnLoc;
+  Stmt *Operand;
+
+  friend class ASTStmtReader;
+
+public:
+  DoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand)
+      : Stmt(DoReturnStmtClass), DoReturnLoc(DoReturnLoc), Operand(Operand) {}
+
+  explicit DoReturnStmt(EmptyShell Empty)
+      : Stmt(DoReturnStmtClass, Empty), Operand(nullptr) {}
+
+  SourceLocation getKeywordLoc() const { return DoReturnLoc; }
+  void setKeywordLoc(SourceLocation L) { DoReturnLoc = L; }
+
+  /// The yielded expression. May be null for `do_return;`.
+  Expr *getOperand() const { return static_cast<Expr *>(Operand); }
+  void setOperand(Expr *E) { Operand = E; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return DoReturnLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return Operand ? Operand->getEndLoc() : DoReturnLoc;
+  }
+
+  child_range children() { return child_range(&Operand, &Operand + 1); }
+  const_child_range children() const {
+    return const_child_range(&Operand, &Operand + 1);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == DoReturnStmtClass;
+  }
+};
+
 /// CXXExpansionStmt - Base class for a C++ expansion statement (P1306).
 ///
 class CXXExpansionStmt : public Stmt {

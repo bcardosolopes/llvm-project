@@ -7788,6 +7788,74 @@ public:
   ExprResult ActOnStmtExprResult(ExprResult E);
   void ActOnStmtExprError();
 
+  /// Per-do-expression Sema state, pushed when entering a do-expression body
+  /// and popped when leaving it. Used to find the enclosing do-expression for
+  /// `do_return` lookup and to drive type deduction across multiple
+  /// `do_return` operands.
+  struct DoExprStackEntry {
+    SourceLocation DoLoc;
+    QualType ExplicitType;            ///< Set if user wrote `do -> Type`.
+    TypeSourceInfo *ExplicitTypeInfo = nullptr; ///< Source info for the type.
+    QualType DeducedType;             ///< First non-dependent yielded type.
+    unsigned TemplateDepth = 0;        ///< Template depth of this expression.
+    bool HasDependentDoReturn = false; ///< True iff some yielded type is deferred.
+    bool TypeIsExplicit;              ///< True iff ExplicitType was given.
+    bool DeductionFailed = false;     ///< Tracks irrecoverable deduction error.
+    /// Function-scope depth at which the do-expression body began. Used to
+    /// reject `do_return` that crosses a lambda/function-scope boundary.
+    unsigned FunctionScopeDepth;
+    /// True if we pushed a synthetic FunctionScopeInfo for this do-expression
+    /// (e.g. when evaluating one at namespace scope, where there's no
+    /// enclosing function and PushCompoundScope would otherwise assert).
+    bool PushedSyntheticFunctionScope = false;
+    /// Saved declaration context when the synthetic function scope also needs a
+    /// function-like DeclContext for declarations in a namespace-scope
+    /// do-expression body.
+    DeclContext *SavedContext = nullptr;
+  };
+
+  /// Stack of currently-open do-expressions.
+  llvm::SmallVector<DoExprStackEntry, 4> DoExprStack;
+
+  bool isInSyntheticDoExprFunctionScope() const {
+    return !DoExprStack.empty() &&
+           DoExprStack.back().PushedSyntheticFunctionScope &&
+           FunctionScopes.size() == DoExprStack.back().FunctionScopeDepth;
+  }
+
+  /// Action invoked when parsing/transformation begins a do-expression.
+  /// `ExplicitType` is empty if no `-> Type` was written.
+  void ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
+                        unsigned TemplateDepth = ~0U);
+  void ActOnDoExprExplicitType(TypeSourceInfo *ExplicitType);
+  /// Action invoked for each `[name = init]` init-capture of a do-expression.
+  /// Builds and registers a `decltype((init))` variable (the value category of
+  /// the initializer is preserved) and returns it so the parser can wrap it in
+  /// a DeclStmt. Captures are registered on \p S in order, so a later capture
+  /// can name an earlier one.
+  DeclResult ActOnDoExprInitCapture(Scope *S, IdentifierInfo *Id,
+                                    SourceLocation IdLoc, SourceLocation EqLoc,
+                                    Expr *Init);
+  StmtResult ActOnDoExprInitStmt(SourceLocation LParenLoc,
+                                 SourceLocation RParenLoc,
+                                 ArrayRef<Stmt *> InitStmts,
+                                 ArrayRef<MaterializeTemporaryExpr *>
+                                     LifetimeExtendTemps);
+  void ActOnDoExprInitStmt(Stmt *InitStmt,
+                           ArrayRef<MaterializeTemporaryExpr *>
+                               LifetimeExtendTemps);
+  void ActOnDoExprError();
+  ExprResult ActOnDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
+                         Stmt *InitStmt, Stmt *Body, SourceLocation RBraceLoc,
+                         TypeSourceInfo *ExplicitType);
+  ExprResult BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
+                         Stmt *InitStmt, Stmt *Body, SourceLocation RBraceLoc,
+                         TypeSourceInfo *ExplicitType, unsigned TemplateDepth);
+
+  StmtResult ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
+                               Scope *CurScope);
+  StmtResult BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand);
+
   // __builtin_offsetof(type, identifier(.identifier|[expr])*)
   struct OffsetOfComponent {
     SourceLocation LocStart, LocEnd;

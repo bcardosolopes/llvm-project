@@ -1261,9 +1261,33 @@ public:
   public:
     using ForcedBlkExprs = llvm::DenseMap<const Stmt *, const CFGBlock *>;
 
+    /// Which branch of an `if consteval` is live, when known. Used when the CFG
+    /// is built for a context whose constant-evaluatedness is fixed (e.g. a
+    /// do-expression body): outside such a context both branches are modeled.
+    enum ConstevalConditionKind {
+      /// The context may or may not be constant-evaluated; model both branches
+      /// (the default, matching general -Wreturn-type analysis).
+      CCK_Unknown,
+      /// The context is always constant-evaluated; the `consteval` branch is
+      /// live (and the `!consteval` branch is dead).
+      CCK_AlwaysConstant,
+      /// The context is never constant-evaluated; the `!consteval` branch is
+      /// live (and the `consteval` branch is dead).
+      CCK_NeverConstant,
+    };
+
     ForcedBlkExprs **forcedBlkExprs = nullptr;
     CFGCallback *Observer = nullptr;
     bool PruneTriviallyFalseEdges = true;
+    /// When true, the statement being analyzed is a do-expression body rather
+    /// than a function body: `break`/`continue` transfer to an enclosing loop
+    /// outside the body (modeled as edges to the exit block), `do_return`
+    /// transfers to the do-expression's end (also the exit block), and a nested
+    /// do-expression is treated as an opaque value-producing expression.
+    bool DoExpressionBody = false;
+    /// Which `if consteval` branch is live; only consulted, and only meaningful,
+    /// when \c DoExpressionBody is set.
+    ConstevalConditionKind ConstevalCondition = CCK_Unknown;
     bool AddEHEdges = false;
     bool AddInitializers = false;
     bool AddImplicitDtors = false;

@@ -1581,6 +1581,19 @@ private:
   };
   SmallVector<BreakContinue, 8> BreakContinueStack;
 
+  /// Per-do-expression CodeGen state. When emitting a do-expression body,
+  /// `do_return` writes its operand into `Slot` and branches to `EndBlock`.
+  /// When `Slot` is invalid (void result), the operand is emitted for side
+  /// effects only. When `IsReference` is true, the do-expression yields a
+  /// glvalue: `Slot` holds a pointer to the referent, and `do_return` stores
+  /// the address of its operand instead of constructing into the slot.
+  struct DoExprEmitInfo {
+    Address Slot;
+    JumpDest EndBlock;
+    bool IsReference;
+  };
+  SmallVector<DoExprEmitInfo, 4> DoExprStack;
+
   /// Handles cancellation exit points in OpenMP-related constructs.
   class OpenMPCancelExitStack {
     /// Tracks cancellation exit point and join point for cancel-related exit
@@ -3664,6 +3677,9 @@ public:
   void EmitDoStmt(const DoStmt &S, ArrayRef<const Attr *> Attrs = {});
   void EmitForStmt(const ForStmt &S, ArrayRef<const Attr *> Attrs = {});
   void EmitReturnStmt(const ReturnStmt &S);
+  void EmitDoReturnStmt(const DoReturnStmt &S);
+  Address EmitDoExpr(const DoExpr &E, AggValueSlot AVS);
+  LValue EmitDoExprLValue(const DoExpr *E);
   void EmitDeclStmt(const DeclStmt &S);
   void EmitBreakStmt(const BreakStmt &S);
   void EmitContinueStmt(const ContinueStmt &S);

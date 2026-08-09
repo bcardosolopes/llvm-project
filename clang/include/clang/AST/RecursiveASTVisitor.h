@@ -3092,6 +3092,11 @@ DEF_TRAVERSE_STMT(PredefinedExpr, {})
 DEF_TRAVERSE_STMT(ShuffleVectorExpr, {})
 DEF_TRAVERSE_STMT(ConvertVectorExpr, {})
 DEF_TRAVERSE_STMT(StmtExpr, {})
+DEF_TRAVERSE_STMT(DoExpr, {
+  if (S->hasExplicitType())
+    TRY_TO(TraverseTypeLoc(S->getExplicitType()->getTypeLoc()));
+})
+DEF_TRAVERSE_STMT(DoReturnStmt, {})
 DEF_TRAVERSE_STMT(SourceLocExpr, {})
 DEF_TRAVERSE_STMT(EmbedExpr, {
   for (IntegerLiteral *IL : S->underlying_data_elements()) {

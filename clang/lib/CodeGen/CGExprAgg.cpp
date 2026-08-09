@@ -159,6 +159,7 @@ public:
   void VisitCastExpr(CastExpr *E);
   void VisitCallExpr(const CallExpr *E);
   void VisitStmtExpr(const StmtExpr *E);
+  void VisitDoExpr(const DoExpr *E);
   void VisitBinaryOperator(const BinaryOperator *BO);
   void VisitPointerToDataMemberBinaryOperator(const BinaryOperator *BO);
   void VisitBinAssign(const BinaryOperator *E);
@@ -1109,6 +1110,19 @@ void AggExprEmitter::VisitBinComma(const BinaryOperator *E) {
 void AggExprEmitter::VisitStmtExpr(const StmtExpr *E) {
   CodeGenFunction::StmtExprEvaluation eval(CGF);
   CGF.EmitCompoundStmt(*E->getSubStmt(), true, Dest);
+}
+
+void AggExprEmitter::VisitDoExpr(const DoExpr *E) {
+  CodeGenFunction::StmtExprEvaluation eval(CGF);
+  // A glvalue do-expression yields a reference: EmitDoExpr returns a slot
+  // holding a `T*`, so go through the lvalue path and copy the referent into
+  // the destination slot.
+  if (E->isGLValue()) {
+    LValue LV = CGF.EmitDoExprLValue(E);
+    EmitFinalDestCopy(E->getType(), LV);
+    return;
+  }
+  CGF.EmitDoExpr(*E, Dest);
 }
 
 enum CompareKind {

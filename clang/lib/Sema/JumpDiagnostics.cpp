@@ -309,8 +309,9 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
   // propagate out into the enclosing scope.  Otherwise we have to worry
   // about block literals, which have the lifetime of their enclosing statement.
   unsigned independentParentScope = origParentScope;
-  unsigned &ParentScope = ((isa<Expr>(S) && !isa<StmtExpr>(S))
-                            ? origParentScope : independentParentScope);
+  unsigned &ParentScope =
+      ((isa<Expr>(S) && !isa<StmtExpr>(S)) ? origParentScope
+                                           : independentParentScope);
 
   unsigned StmtsToSkip = 0u;
 
@@ -486,6 +487,20 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
                                diag::note_enters_statement_expression,
                                /*OutDiag=*/0, SE->getBeginLoc()));
     BuildScopeInformation(SE->getSubStmt(), NewParentScope);
+    return;
+  }
+
+  case Stmt::DoExprClass: {
+    // Jumping into a do-expression with goto, or using a switch outside the
+    // do-expression with a case/default label inside it, is not permitted.
+    // Jumping out is permitted; the normal cleanup machinery handles it.
+    auto *DE = cast<DoExpr>(S);
+    unsigned NewParentScope = Scopes.size();
+    Scopes.push_back(GotoScope(ParentScope, diag::note_enters_do_expression,
+                               /*OutDiag=*/0, DE->getBeginLoc()));
+    if (DE->hasInitStmt())
+      BuildScopeInformation(DE->getInitStmt(), NewParentScope);
+    BuildScopeInformation(DE->getBody(), NewParentScope);
     return;
   }
 

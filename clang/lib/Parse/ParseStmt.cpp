@@ -345,6 +345,10 @@ Retry:
     break;
   case tok::kw__Defer: // C defer TS: defer-statement
     return ParseDeferStatement(TrailingElseLoc);
+  case tok::kw_do_return:            // do-expressions: do_return statement
+    Res = ParseDoReturnStatement();
+    SemiError = "do_return";
+    break;
 
   case tok::kw_asm: {
     for (const ParsedAttr &AL : CXX11Attrs)
@@ -582,6 +586,14 @@ StmtResult Parser::ParseExprStatement(ParsedStmtContext StmtCtx) {
     return ParseCaseStatement(StmtCtx, /*MissingCase=*/true, Expr);
   }
 
+  // In a do-expression, if we see an expression followed by '}' (no semicolon),
+  // treat it as an implicit do_return.
+  if ((StmtCtx & ParsedStmtContext::InDoExpr) != ParsedStmtContext() &&
+      Tok.is(tok::r_brace)) {
+    return Actions.ActOnDoReturnStmt(OldToken.getLocation(), Expr.get(),
+                                     getCurScope());
+  }
+
   Token *CurTok = nullptr;
   // If the semicolon is missing at the end of REPL input, we want to print
   // the result. Note we shouldn't eat the token since the callback needs it.
@@ -606,7 +618,7 @@ StmtResult Parser::ParseSEHTryBlock() {
     return StmtError(Diag(Tok, diag::err_expected) << tok::l_brace);
 
   StmtResult TryBlock(ParseCompoundStatement(
-      /*isStmtExpr=*/false,
+      /*isStmtExpr=*/false, /*isDoExpr=*/false,
       Scope::DeclScope | Scope::CompoundStmtScope | Scope::SEHTryScope));
   if (TryBlock.isInvalid())
     return TryBlock;
@@ -987,12 +999,12 @@ StmtResult Parser::ParseDefaultStatement(ParsedStmtContext StmtCtx) {
                                   SubStmt.get(), getCurScope());
 }
 
-StmtResult Parser::ParseCompoundStatement(bool isStmtExpr) {
-  return ParseCompoundStatement(isStmtExpr,
+StmtResult Parser::ParseCompoundStatement(bool isStmtExpr, bool isDoExpr) {
+  return ParseCompoundStatement(isStmtExpr, isDoExpr,
                                 Scope::DeclScope | Scope::CompoundStmtScope);
 }
 
-StmtResult Parser::ParseCompoundStatement(bool isStmtExpr,
+StmtResult Parser::ParseCompoundStatement(bool isStmtExpr, bool isDoExpr,
                                           unsigned ScopeFlags) {
   assert(Tok.is(tok::l_brace) && "Not a compound stmt!");
 
@@ -1003,7 +1015,7 @@ StmtResult Parser::ParseCompoundStatement(bool isStmtExpr,
   // Parse the statements in the body.
   StmtResult R;
   StackHandler.runWithSufficientStackSpace(Tok.getLocation(), [&, this]() {
-    R = ParseCompoundStatementBody(isStmtExpr);
+    R = ParseCompoundStatementBody(isStmtExpr, isDoExpr);
   });
   return R;
 }
@@ -1131,7 +1143,7 @@ StmtResult Parser::handleExprStmt(ExprResult E, ParsedStmtContext StmtCtx) {
   return Actions.ActOnExprStmt(E, /*DiscardedValue=*/!IsStmtExprResult);
 }
 
-StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
+StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr, bool isDoExpr) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
                                 "in compound statement ('{}')");
@@ -1185,7 +1197,8 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
 
   ParsedStmtContext SubStmtCtx =
       ParsedStmtContext::Compound |
-      (isStmtExpr ? ParsedStmtContext::InStmtExpr : ParsedStmtContext());
+      (isStmtExpr ? ParsedStmtContext::InStmtExpr : ParsedStmtContext()) |
+      (isDoExpr ? ParsedStmtContext::InDoExpr : ParsedStmtContext());
 
   // Save outer pending injected stmts so a nested compound being parsed
   // through this loop can't drain stmts that belong to the enclosing scope.
@@ -2616,7 +2629,7 @@ StmtResult Parser::ParseCXXTryBlockCommon(SourceLocation TryLoc, bool FnTry) {
     return StmtError(Diag(Tok, diag::err_expected) << tok::l_brace);
 
   StmtResult TryBlock(ParseCompoundStatement(
-      /*isStmtExpr=*/false,
+      /*isStmtExpr=*/false, /*isDoExpr=*/false,
       Scope::DeclScope | Scope::TryScope | Scope::CompoundStmtScope |
           (FnTry ? Scope::FnTryCatchScope : Scope::NoScope)));
   if (TryBlock.isInvalid())
@@ -2773,4 +2786,161 @@ void Parser::ParseMicrosoftIfExistsStatement(StmtVector &Stmts) {
       Stmts.push_back(R.get());
   }
   Braces.consumeClose();
+}
+
+ExprResult Parser::ParseDoExpression() {
+  assert(Tok.is(tok::kw_do) && "Not a do-expression!");
+  SourceLocation DoLoc = ConsumeToken(); // eat 'do'
+
+  // Push a do-expression context before parsing either the optional
+  // parenthesized init statements or the body. At namespace scope this creates
+  // the synthetic function context that makes those declarations local to the
+  // do-expression.
+  Actions.ActOnStartDoExpr(DoLoc, QualType());
+  ParseScope DoExprScope(this, Scope::DeclScope);
+
+  // Optional init-captures: `[ name = init, ... ]`. Each `name = init` becomes
+  // a `decltype((init))` local declaration, registered in order so a later
+  // capture can name an earlier one.
+  StmtResult InitStmt;
+  if (Tok.is(tok::l_square)) {
+    BalancedDelimiterTracker T(*this, tok::l_square);
+    if (T.consumeOpen()) {
+      Actions.ActOnDoExprError();
+      return ExprError();
+    }
+
+    EnterExpressionEvaluationContext EvalContext(
+        Actions, Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
+        /*LambdaContextDecl=*/nullptr,
+        Sema::ExpressionEvaluationContextRecord::EK_Other,
+        /*ShouldEnter=*/true);
+    Actions.currentEvaluationContext().InLifetimeExtendingContext = true;
+
+    SmallVector<Stmt *, 4> InitStmts;
+    while (Tok.isNot(tok::r_square)) {
+      if (Tok.is(tok::eof)) {
+        Diag(Tok, diag::err_expected) << tok::r_square;
+        Actions.ActOnDoExprError();
+        return ExprError();
+      }
+
+      if (Tok.isNot(tok::identifier)) {
+        Diag(Tok, diag::err_expected) << tok::identifier;
+        SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
+        Actions.ActOnDoExprError();
+        return ExprError();
+      }
+      IdentifierInfo *Id = Tok.getIdentifierInfo();
+      SourceLocation IdLoc = ConsumeToken();
+
+      if (!TryConsumeToken(tok::equal)) {
+        Diag(Tok, diag::err_expected) << tok::equal;
+        SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
+        Actions.ActOnDoExprError();
+        return ExprError();
+      }
+      SourceLocation EqLoc = PrevTokLocation;
+
+      ExprResult Init = ParseAssignmentExpression();
+      if (Init.isInvalid()) {
+        SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
+        Actions.ActOnDoExprError();
+        return ExprError();
+      }
+
+      DeclResult Capture = Actions.ActOnDoExprInitCapture(
+          getCurScope(), Id, IdLoc, EqLoc, Init.get());
+      if (Capture.isInvalid()) {
+        SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
+        Actions.ActOnDoExprError();
+        return ExprError();
+      }
+
+      StmtResult DeclStmt = Actions.ActOnDeclStmt(
+          Actions.ConvertDeclToDeclGroup(Capture.get()), IdLoc,
+          PrevTokLocation);
+      if (DeclStmt.isUsable())
+        InitStmts.push_back(DeclStmt.get());
+
+      if (!TryConsumeToken(tok::comma))
+        break;
+    }
+
+    if (Tok.isNot(tok::r_square)) {
+      Diag(Tok, diag::err_expected) << tok::r_square;
+      SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
+      Actions.ActOnDoExprError();
+      return ExprError();
+    }
+
+    SourceLocation LSquareLoc = T.getOpenLocation();
+    SourceLocation RSquareLoc = Tok.getLocation();
+    T.consumeClose();
+    auto LifetimeExtendTemps =
+        Actions.currentEvaluationContext().ForRangeLifetimeExtendTemps;
+    if (!InitStmts.empty())
+      InitStmt = Actions.ActOnDoExprInitStmt(LSquareLoc, RSquareLoc, InitStmts,
+                                             LifetimeExtendTemps);
+  }
+
+  TypeSourceInfo *ExplicitTSI = nullptr;
+  QualType ExplicitType;
+  if (Tok.is(tok::arrow)) {
+    SourceRange Range;
+    TypeResult TR =
+        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
+    if (TR.isInvalid()) {
+      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+      Actions.ActOnDoExprError();
+      return ExprError();
+    }
+    ExplicitType = Actions.GetTypeFromParser(TR.get(), &ExplicitTSI);
+    Actions.ActOnDoExprExplicitType(ExplicitTSI);
+  }
+
+  if (Tok.isNot(tok::l_brace)) {
+    Diag(Tok, diag::err_expected) << tok::l_brace;
+    Actions.ActOnDoExprError();
+    return ExprError();
+  }
+
+  SourceLocation LBraceLoc = Tok.getLocation();
+
+  // Parse the body as a compound statement. We deliberately do NOT introduce
+  // a function/break/continue scope: `return`, `break`, `continue` inside the
+  // body operate on the enclosing function/loop, exactly as if the body were
+  // inlined at the use site.
+  StmtResult Body = ParseCompoundStatement(/*isStmtExpr=*/false,
+                                           /*isDoExpr=*/true);
+
+  if (Body.isInvalid()) {
+    Actions.ActOnDoExprError();
+    return ExprError();
+  }
+
+  SourceLocation RBraceLoc = PrevTokLocation;
+
+  return Actions.ActOnDoExpr(DoLoc, LBraceLoc,
+                             InitStmt.isUsable() ? InitStmt.get() : nullptr,
+                             Body.get(), RBraceLoc, ExplicitTSI);
+}
+
+StmtResult Parser::ParseDoReturnStatement() {
+  assert(Tok.is(tok::kw_do_return) && "Not a do_return statement!");
+  SourceLocation DoReturnLoc = ConsumeToken();
+
+  ExprResult R;
+  if (Tok.isNot(tok::semi)) {
+    if (Tok.is(tok::l_brace) && getLangOpts().CPlusPlus) {
+      R = ParseInitializer();
+    } else {
+      R = ParseExpression();
+    }
+    if (R.isInvalid()) {
+      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+      return StmtError();
+    }
+  }
+  return Actions.ActOnDoReturnStmt(DoReturnLoc, R.get(), getCurScope());
 }

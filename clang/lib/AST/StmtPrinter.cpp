@@ -1900,6 +1900,41 @@ void StmtPrinter::VisitStmtExpr(StmtExpr *E) {
   OS << ")";
 }
 
+void StmtPrinter::VisitDoExpr(DoExpr *E) {
+  OS << "do";
+  if (E->hasInitStmt()) {
+    OS << " [";
+    if (auto *CS = dyn_cast<CompoundStmt>(E->getInitStmt())) {
+      bool First = true;
+      for (Stmt *S : CS->body()) {
+        auto *DS = dyn_cast<DeclStmt>(S);
+        if (!DS)
+          continue;
+        for (Decl *D : DS->decls()) {
+          auto *VD = dyn_cast<VarDecl>(D);
+          if (!VD)
+            continue;
+          if (!First)
+            OS << ", ";
+          First = false;
+          OS << VD->getName();
+          if (Expr *Init = VD->getInit()) {
+            OS << " = ";
+            PrintExpr(Init);
+          }
+        }
+      }
+    }
+    OS << "]";
+  }
+  if (E->hasExplicitType()) {
+    OS << " -> ";
+    E->getExplicitType()->getType().print(OS, Policy);
+  }
+  OS << " ";
+  PrintRawCompoundStmt(E->getBody());
+}
+
 void StmtPrinter::VisitChooseExpr(ChooseExpr *Node) {
   OS << "__builtin_choose_expr(";
   PrintExpr(Node->getCond());
@@ -2782,6 +2817,16 @@ void StmtPrinter::VisitCoreturnStmt(CoreturnStmt *S) {
     Visit(S->getOperand());
   }
   OS << ";";
+}
+
+void StmtPrinter::VisitDoReturnStmt(DoReturnStmt *S) {
+  Indent() << "do_return";
+  if (S->getOperand()) {
+    OS << " ";
+    PrintExpr(S->getOperand());
+  }
+  OS << ";";
+  if (Policy.IncludeNewlines) OS << NL;
 }
 
 void StmtPrinter::VisitCoawaitExpr(CoawaitExpr *S) {

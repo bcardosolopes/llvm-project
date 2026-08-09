@@ -4672,6 +4672,79 @@ public:
   }
 };
 
+/// DoExpr - A do-expression:
+/// `do (init-statement-seq[opt]) -> Type { ... }`.
+///
+/// The init statements and trailing return type are optional. A do-expression
+/// evaluates its optional init statements followed by a compound statement
+/// body and yields a value via `do_return` statements within the body. Unlike a
+/// GNU statement-expression (`({ ... })`), the body does not introduce a
+/// function scope; `return`, `break`, `continue`, and `goto` operate on the
+/// enclosing function/loop.
+///
+/// A DoExpr is always a prvalue.
+class DoExpr : public Expr {
+  enum { INIT, BODY, END_EXPR };
+  Stmt *SubStmts[END_EXPR];
+  TypeSourceInfo *ExplicitType;
+  SourceLocation DoLoc;
+  SourceLocation LBraceLoc;
+  SourceLocation RBraceLoc;
+  unsigned TemplateDepth;
+
+public:
+  DoExpr(Stmt *InitStmt, CompoundStmt *Body, QualType T, ExprValueKind VK,
+         TypeSourceInfo *ExplicitType, SourceLocation DoLoc,
+         SourceLocation LBraceLoc, SourceLocation RBraceLoc,
+         unsigned TemplateDepth)
+      : Expr(DoExprClass, T, VK, OK_Ordinary), SubStmts{InitStmt, Body},
+        ExplicitType(ExplicitType), DoLoc(DoLoc), LBraceLoc(LBraceLoc),
+        RBraceLoc(RBraceLoc), TemplateDepth(TemplateDepth) {
+    setDependence(computeDependence(this, TemplateDepth));
+  }
+
+  explicit DoExpr(EmptyShell Empty) : Expr(DoExprClass, Empty) {}
+
+  Stmt *getInitStmt() { return SubStmts[INIT]; }
+  const Stmt *getInitStmt() const { return SubStmts[INIT]; }
+  void setInitStmt(Stmt *S) { SubStmts[INIT] = S; }
+  bool hasInitStmt() const { return SubStmts[INIT] != nullptr; }
+
+  CompoundStmt *getBody() { return cast<CompoundStmt>(SubStmts[BODY]); }
+  const CompoundStmt *getBody() const {
+    return cast<CompoundStmt>(SubStmts[BODY]);
+  }
+  void setBody(CompoundStmt *S) { SubStmts[BODY] = S; }
+
+  TypeSourceInfo *getExplicitType() const { return ExplicitType; }
+  void setExplicitType(TypeSourceInfo *TSI) { ExplicitType = TSI; }
+  bool hasExplicitType() const { return ExplicitType != nullptr; }
+
+  SourceLocation getDoLoc() const { return DoLoc; }
+  void setDoLoc(SourceLocation L) { DoLoc = L; }
+  SourceLocation getLBraceLoc() const { return LBraceLoc; }
+  void setLBraceLoc(SourceLocation L) { LBraceLoc = L; }
+  SourceLocation getRBraceLoc() const { return RBraceLoc; }
+  void setRBraceLoc(SourceLocation L) { RBraceLoc = L; }
+
+  unsigned getTemplateDepth() const { return TemplateDepth; }
+  void setTemplateDepth(unsigned D) { TemplateDepth = D; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return DoLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RBraceLoc; }
+
+  child_range children() {
+    return child_range(&SubStmts[0], &SubStmts[0] + END_EXPR);
+  }
+  const_child_range children() const {
+    return const_child_range(&SubStmts[0], &SubStmts[0] + END_EXPR);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == DoExprClass;
+  }
+};
+
 /// ShuffleVectorExpr - clang-specific builtin-in function
 /// __builtin_shufflevector.
 /// This AST node represents a operator that does a constant

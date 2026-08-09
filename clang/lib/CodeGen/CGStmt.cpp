@@ -161,6 +161,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
   case Stmt::ForStmtClass:     EmitForStmt(cast<ForStmt>(*S), Attrs);     break;
 
   case Stmt::ReturnStmtClass:  EmitReturnStmt(cast<ReturnStmt>(*S));      break;
+  case Stmt::DoReturnStmtClass:
+    EmitDoReturnStmt(cast<DoReturnStmt>(*S));
+    break;
 
   case Stmt::SwitchStmtClass:  EmitSwitchStmt(cast<SwitchStmt>(*S));      break;
   case Stmt::GCCAsmStmtClass:  // Intentional fall-through.
@@ -1783,6 +1786,123 @@ void CodeGenFunction::EmitContinueStmt(const ContinueStmt &S) {
 
   ApplyAtomGroup Grp(getDebugInfo());
   EmitBranchThroughCleanup(GetDestForLoopControlStmt(S)->ContinueBlock);
+}
+
+void CodeGenFunction::EmitDoReturnStmt(const DoReturnStmt &S) {
+  assert(!DoExprStack.empty() && "do_return stmt not in a do-expression!");
+
+  if (HaveInsertPoint())
+    EmitStopPoint(&S);
+
+  const DoExprEmitInfo &Info = DoExprStack.back();
+  if (const Expr *Operand = S.getOperand()) {
+    if (Info.IsReference) {
+      // Reference result: emit the operand as a glvalue and store its
+      // address into the pointer slot. A `MaterializeTemporaryExpr`
+      // inserted by Sema for a prvalue operand is itself a glvalue (the
+      // materialized temporary), so EmitLValue handles both cases. We do
+      // *not* attempt lifetime extension across the do-expression: a
+      // prvalue-operand binding dangles, exactly like the equivalent IIFE
+      // would, and Sema's standard return-binding lifetime checks fire
+      // accordingly.
+      LValue OpLV = EmitLValue(Operand);
+      Builder.CreateStore(OpLV.getPointer(*this), Info.Slot);
+    } else if (Info.Slot.isValid()) {
+      EmitAnyExprToMem(Operand, Info.Slot, Qualifiers(), /*IsInit=*/true);
+    } else {
+      // Void-typed do-expression: evaluate for side effects only.
+      EmitIgnoredExpr(Operand);
+    }
+  }
+  EmitBranchThroughCleanup(Info.EndBlock);
+}
+
+Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
+  QualType Ty = E.getType();
+  bool IsVoid = Ty->isVoidType();
+  bool IsReference = E.isGLValue();
+
+  Address Slot = Address::invalid();
+  if (IsReference) {
+    // Allocate a pointer slot; do_return stores the referent's address into
+    // it, and EmitDoExprLValue loads it back as the result lvalue.
+    QualType PtrTy = getContext().getPointerType(Ty);
+    Slot = CreateMemTemp(PtrTy, "doexpr.refresult");
+  } else if (!IsVoid) {
+    if (AVS.isIgnored() || hasAggregateEvaluationKind(Ty)) {
+      // Use the provided aggregate slot if any, otherwise allocate one.
+      if (!AVS.isIgnored() && AVS.getAddress().isValid())
+        Slot = AVS.getAddress();
+      else
+        Slot = CreateMemTemp(Ty, "doexpr.result");
+    } else {
+      Slot = CreateMemTemp(Ty, "doexpr.result");
+    }
+  }
+
+  // Init declarations live until the enclosing full-expression, so emit them
+  // in the surrounding cleanup scope rather than in the do-body lexical scope.
+  size_t OldLifetimeExtendedSize = LifetimeExtendedCleanupStack.size();
+  if (const Stmt *Init = E.getInitStmt()) {
+    if (const auto *CS = dyn_cast<CompoundStmt>(Init))
+      EmitCompoundStmtWithoutScope(*CS, /*GetLast=*/false);
+    else
+      EmitStmt(Init);
+  }
+  for (size_t I = OldLifetimeExtendedSize,
+              End = LifetimeExtendedCleanupStack.size();
+       I != End;) {
+    LifetimeExtendedCleanupHeader &Header =
+        reinterpret_cast<LifetimeExtendedCleanupHeader &>(
+            LifetimeExtendedCleanupStack[I]);
+    I += sizeof(Header);
+
+    EHStack.pushCopyOfCleanup(Header.getKind(),
+                              &LifetimeExtendedCleanupStack[I],
+                              Header.getSize());
+    I += Header.getSize();
+
+    if (Header.isConditional()) {
+      RawAddress ActiveFlag =
+          reinterpret_cast<RawAddress &>(LifetimeExtendedCleanupStack[I]);
+      initFullExprCleanupWithFlag(ActiveFlag);
+      I += sizeof(ActiveFlag);
+    }
+  }
+  LifetimeExtendedCleanupStack.resize(OldLifetimeExtendedSize);
+
+  JumpDest EndBlock = getJumpDestInCurrentScope("doexpr.end");
+  DoExprStack.push_back({Slot, EndBlock, IsReference});
+
+  // Emit the body inside its own lexical scope so locals declared in the body
+  // get proper destruction on `do_return`.
+  {
+    LexicalScope BodyScope(*this, E.getBody()->getSourceRange());
+    EmitCompoundStmtWithoutScope(*E.getBody(), /*GetLast=*/false);
+
+    // If control flowed off the end of the body without a do_return, this
+    // is UB at runtime (Sema rejects do-expressions with no do_return for
+    // non-void result types). Insert an unreachable so the verifier is
+    // happy.
+    if (HaveInsertPoint() && !IsVoid) {
+      Builder.CreateUnreachable();
+      Builder.ClearInsertionPoint();
+    }
+  }
+
+  DoExprStack.pop_back();
+
+  // Emit the join block.
+  EmitBlock(EndBlock.getBlock());
+  return Slot;
+}
+
+LValue CodeGenFunction::EmitDoExprLValue(const DoExpr *E) {
+  CodeGenFunction::StmtExprEvaluation eval(*this);
+  Address PtrSlot = EmitDoExpr(*E, AggValueSlot::ignored());
+  // PtrSlot holds a `T*`. Load it and turn it into an LValue of T.
+  llvm::Value *Ptr = Builder.CreateLoad(PtrSlot);
+  return MakeNaturalAlignAddrLValue(Ptr, E->getType());
 }
 
 /// EmitCaseStmtRange - If case statement range is not too big then

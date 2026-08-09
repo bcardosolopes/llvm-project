@@ -1194,6 +1194,21 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     return Res;
   }
 
+  case tok::kw_do: {  // primary-expression: do-expression (only in expr ctx)
+    if (!getLangOpts().DoExpressions) {
+      // P2806 ext: 'do' in expression position can only begin a
+      // do-expression, so point at the language mode instead of emitting the
+      // generic "expected expression".
+      if (getLangOpts().CPlusPlus) {
+        Diag(Tok, diag::err_do_expr_requires_cxx29);
+        return ExprError();
+      }
+      goto ExpectedExpression;
+    }
+    Res = ParseDoExpression();
+    break;
+  }
+
   case tok::kw___extension__:{//unary-expression:'__extension__' cast-expr [GNU]
     // __extension__ silences extension warnings in the subexpression.
     if (NotPrimaryExpression)

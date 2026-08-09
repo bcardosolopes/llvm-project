@@ -186,7 +186,7 @@ static bool isValidCoroutineContext(Sema &S, SourceLocation Loc,
   // improved to inform the user that default arguments specifically are not
   // allowed.
   auto *FD = dyn_cast<FunctionDecl>(S.CurContext);
-  if (!FD) {
+  if (!FD || S.isInSyntheticDoExprFunctionScope()) {
     S.Diag(Loc, isa<ObjCMethodDecl>(S.CurContext)
                     ? diag::err_coroutine_objc_method
                     : diag::err_coroutine_outside_function) << Keyword;

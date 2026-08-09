@@ -455,6 +455,13 @@ void ASTStmtWriter::VisitCoreturnStmt(CoreturnStmt *S) {
   Code = serialization::STMT_CORETURN;
 }
 
+void ASTStmtWriter::VisitDoReturnStmt(DoReturnStmt *S) {
+  VisitStmt(S);
+  Record.AddSourceLocation(S->getKeywordLoc());
+  Record.AddStmt(S->getOperand());
+  Code = serialization::STMT_DO_RETURN;
+}
+
 void ASTStmtWriter::VisitCoroutineSuspendExpr(CoroutineSuspendExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getKeywordLoc());
@@ -1628,6 +1635,20 @@ void ASTStmtWriter::VisitStmtExpr(StmtExpr *E) {
   Record.AddSourceLocation(E->getRParenLoc());
   Record.push_back(E->getTemplateDepth());
   Code = serialization::EXPR_STMT;
+}
+
+void ASTStmtWriter::VisitDoExpr(DoExpr *E) {
+  VisitExpr(E);
+  Record.AddStmt(E->getInitStmt());
+  Record.AddStmt(E->getBody());
+  Record.AddSourceLocation(E->getDoLoc());
+  Record.AddSourceLocation(E->getLBraceLoc());
+  Record.AddSourceLocation(E->getRBraceLoc());
+  Record.push_back(E->hasExplicitType());
+  if (E->hasExplicitType())
+    Record.AddTypeSourceInfo(E->getExplicitType());
+  Record.push_back(E->getTemplateDepth());
+  Code = serialization::EXPR_DO;
 }
 
 void ASTStmtWriter::VisitChooseExpr(ChooseExpr *E) {

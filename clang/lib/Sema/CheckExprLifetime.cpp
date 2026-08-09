@@ -9,6 +9,7 @@
 #include "CheckExprLifetime.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/AST/Type.h"
 #include "clang/Analysis/Analyses/LifetimeSafety/LifetimeAnnotations.h"
 #include "clang/Basic/DiagnosticSema.h"
@@ -536,6 +537,24 @@ static void visitFunctionCallArguments(IndirectLocalPath &Path, Expr *Call,
 
 /// Visit the locals that would be reachable through a reference bound to the
 /// glvalue expression \c Init.
+/// Collect the operands of the `do_return` statements that belong to a given
+/// do-expression body. Operands inside nested do-expressions, lambdas, or
+/// blocks are excluded, since those constructs manage their own results.
+static void collectDoReturnOperands(const Stmt *S,
+                                    llvm::SmallVectorImpl<Expr *> &Out) {
+  if (!S)
+    return;
+  if (const auto *DR = dyn_cast<DoReturnStmt>(S)) {
+    if (Expr *Op = DR->getOperand())
+      Out.push_back(Op);
+    return;
+  }
+  if (isa<DoExpr, LambdaExpr, BlockExpr>(S))
+    return;
+  for (const Stmt *Child : S->children())
+    collectDoReturnOperands(Child, Out);
+}
+
 static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
                                                   Expr *Init, ReferenceKind RK,
                                                   LocalVisitor Visit) {
@@ -662,6 +681,22 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
       if (!CLE->isFileScope())
         Visit(Path, Local(CLE), RK);
     }
+    break;
+  }
+
+  case Stmt::DoExprClass: {
+    // A do-expression yielding a reference (glvalue) returns whatever its
+    // `do_return` operands designate. Walk into each operand so the analysis
+    // can see references into the do-expression's init-captures, whose lifetime
+    // extends to the end of the enclosing full-expression. When the
+    // do-expression's result is instead consumed by value within the
+    // full-expression, the reference-binding walk never reaches this point, so
+    // no diagnostic is produced.
+    auto *DE = cast<DoExpr>(Init);
+    llvm::SmallVector<Expr *, 4> Operands;
+    collectDoReturnOperands(DE->getBody(), Operands);
+    for (Expr *Op : Operands)
+      visitLocalsRetainedByReferenceBinding(Path, Op, RK, Visit);
     break;
   }
 
@@ -1170,7 +1205,25 @@ checkExprLifetimeImpl(Sema &SemaRef, const InitializedEntity *InitEntity,
       llvm_unreachable("already handled this");
 
     case LK_Extended: {
-      if (!MTE) {
+      // A do-expression init-capture lives only until the end of the enclosing
+      // full-expression, so binding its referent to an entity that outlives the
+      // full-expression dangles. The do-expression boundary blocks lifetime
+      // extension (like a function return), so treat such a path as NoExtend.
+      bool IsDoExprCapture = false;
+      if (auto *DRE = dyn_cast<DeclRefExpr>(L))
+        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
+          IsDoExprCapture = VD->isDoExprInitCapture();
+
+      // Two init-captures of a do-expression are co-extensive (both live until
+      // the end of the enclosing full-expression), so binding one to another
+      // never dangles. Only treat the referent as short-lived when the entity
+      // it is bound to actually outlives the full-expression.
+      if (IsDoExprCapture && ExtendingEntity)
+        if (auto *EVD = dyn_cast_or_null<VarDecl>(ExtendingEntity->getDecl()))
+          if (EVD->isDoExprInitCapture())
+            IsDoExprCapture = false;
+
+      if (!MTE && !IsDoExprCapture) {
         // The initialized entity has lifetime beyond the full-expression,
         // and the local entity does too, so don't warn.
         //
@@ -1179,7 +1232,8 @@ checkExprLifetimeImpl(Sema &SemaRef, const InitializedEntity *InitEntity,
         return false;
       }
 
-      switch (shouldLifetimeExtendThroughPath(Path)) {
+      switch (IsDoExprCapture ? PathLifetimeKind::NoExtend
+                              : shouldLifetimeExtendThroughPath(Path)) {
       case PathLifetimeKind::Extend:
         // Update the storage duration of the materialized temporary.
         // FIXME: Rebuild the expression instead of mutating it.
@@ -1343,9 +1397,18 @@ checkExprLifetimeImpl(Sema &SemaRef, const InitializedEntity *InitEntity,
         // expression.
         if (LK == LK_StmtExprResult)
           return false;
-        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
+        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
           if (VD->getType().getAddressSpace() == LangAS::opencl_local)
             return false;
+          // A do-expression init-capture lives until the end of the enclosing
+          // full-expression, so a `do_return` of a reference into it does not by
+          // itself dangle the way returning a function-local does. Whether it
+          // dangles depends on how the do-expression's result is consumed, which
+          // is checked at the binding site (see the DoExprClass handling in
+          // visitLocalsRetainedByReferenceBinding). Defer to that here.
+          if (VD->isDoExprInitCapture())
+            return false;
+        }
         SemaRef.Diag(DiagLoc, diag::warn_ret_stack_addr_ref)
             << InitEntity->getType()->isReferenceType() << DRE->getDecl()
             << isa<ParmVarDecl>(DRE->getDecl()) << (LK == LK_MustTail)

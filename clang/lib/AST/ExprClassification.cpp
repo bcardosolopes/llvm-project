@@ -176,6 +176,13 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::CompoundLiteralExprClass:
     return !E->isLValue() ? ClassifyTemporary(E->getType()) : Cl::CL_LValue;
 
+  case Expr::DoExprClass:
+    // A do-expression's value category depends on its declared type:
+    // prvalue for non-reference types, lvalue for `T&`, xvalue for `T&&`.
+    // The Expr base already stores the right ValueKind; classify from there
+    // instead of treating it as always-prvalue.
+    return ClassifyExprValueKind(Lang, E, E->getValueKind());
+
     // Expressions that are prvalues.
   case Expr::CXXBoolLiteralExprClass:
   case Expr::CXXPseudoDestructorExprClass:

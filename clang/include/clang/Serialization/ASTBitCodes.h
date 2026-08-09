@@ -2098,6 +2098,10 @@ enum StmtCode {
   EXPR_INIT_LIST_EXPANSION_SELECT,
   EXPR_EXPANSION_INIT_LIST,
 
+  // do-expressions
+  EXPR_DO,
+  STMT_DO_RETURN,
+
   // FixedPointLiteral
   EXPR_FIXEDPOINT_LITERAL,
 

@@ -2921,6 +2921,17 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     R1 = getSourceRange();
     return true;
   }
+
+  case DoExprClass: {
+    // Discarded-value do-expression: only warn if the result type is
+    // non-void (since `do_return value;` paths produce an unused value).
+    if (getType()->isVoidType())
+      return false;
+    WarnE = this;
+    Loc = cast<DoExpr>(this)->getDoLoc();
+    R1 = getSourceRange();
+    return true;
+  }
   case CXXFunctionalCastExprClass:
   case CStyleCastExprClass: {
     // Ignore an explicit cast to void, except in C++98 if the operand is a
@@ -3832,6 +3843,17 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     // StmtExprs have a side-effect if any substatement does.
     SideEffectFinder Finder(Ctx, IncludePossibleEffects);
     Finder.Visit(cast<StmtExpr>(this)->getSubStmt());
+    return Finder.hasSideEffects();
+  }
+
+  case DoExprClass: {
+    // Do-expressions have a side-effect if any init statement or body
+    // substatement does.
+    const auto *DE = cast<DoExpr>(this);
+    SideEffectFinder Finder(Ctx, IncludePossibleEffects);
+    if (DE->hasInitStmt())
+      Finder.Visit(DE->getInitStmt());
+    Finder.Visit(DE->getBody());
     return Finder.hasSideEffects();
   }
 

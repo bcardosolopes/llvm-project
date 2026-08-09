@@ -47,7 +47,7 @@ class MultiKeywordSelector;
 class SourceLocation;
 
 /// Constants for TokenKinds.def
-enum TokenKey : unsigned {
+enum TokenKey : uint64_t {
   KEYC99 = 0x1,
   KEYCXX = 0x2,
   KEYCXX11 = 0x4,
@@ -80,7 +80,8 @@ enum TokenKey : unsigned {
   KEYDEFERTS = 0x20000000,
   KEYNOHLSL = 0x40000000,
   KEYREFLECT = 0x80000000,
-  KEYMAX = KEYREFLECT, // The maximum key
+  KEYDOEXPR = 0x100000000,
+  KEYMAX = KEYDOEXPR, // The maximum key
   KEYALLCXX = KEYCXX | KEYCXX11 | KEYCXX20,
   KEYALL = (KEYMAX | (KEYMAX - 1)) & ~KEYNOMS18 & ~KEYNOOPENCL & ~KEYNOZOS &
            ~KEYNOHLSL // KEYNOMS18, KEYNOOPENCL, KEYNOZOS, KEYNOHLSL excluded.
@@ -98,7 +99,7 @@ enum KeywordStatus {
 
 /// Translates flags as specified in TokenKinds.def into keyword status
 /// in the given language standard.
-KeywordStatus getKeywordStatus(const LangOptions &LangOpts, unsigned Flags);
+KeywordStatus getKeywordStatus(const LangOptions &LangOpts, uint64_t Flags);
 
 enum class ReservedIdentifierStatus {
   NotReserved = 0,

@@ -489,6 +489,12 @@ void ASTStmtReader::VisitCoreturnStmt(CoreturnStmt *S) {
   S->IsImplicit = Record.readInt() != 0;
 }
 
+void ASTStmtReader::VisitDoReturnStmt(DoReturnStmt *S) {
+  VisitStmt(S);
+  S->setKeywordLoc(readSourceLocation());
+  S->setOperand(Record.readSubExpr());
+}
+
 void ASTStmtReader::VisitCoawaitExpr(CoawaitExpr *E) {
   VisitExpr(E);
   E->KeywordLoc = readSourceLocation();
@@ -1644,6 +1650,18 @@ void ASTStmtReader::VisitStmtExpr(StmtExpr *E) {
   E->setRParenLoc(readSourceLocation());
   E->setSubStmt(cast_or_null<CompoundStmt>(Record.readSubStmt()));
   E->StmtExprBits.TemplateDepth = Record.readInt();
+}
+
+void ASTStmtReader::VisitDoExpr(DoExpr *E) {
+  VisitExpr(E);
+  E->setInitStmt(Record.readSubStmt());
+  E->setBody(cast_or_null<CompoundStmt>(Record.readSubStmt()));
+  E->setDoLoc(readSourceLocation());
+  E->setLBraceLoc(readSourceLocation());
+  E->setRBraceLoc(readSourceLocation());
+  bool HasExplicitType = Record.readInt() != 0;
+  E->setExplicitType(HasExplicitType ? Record.readTypeSourceInfo() : nullptr);
+  E->setTemplateDepth(Record.readInt());
 }
 
 void ASTStmtReader::VisitChooseExpr(ChooseExpr *E) {
@@ -4732,6 +4750,14 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_CORETURN:
       S = new (Context) CoreturnStmt(Empty);
+      break;
+
+    case STMT_DO_RETURN:
+      S = new (Context) DoReturnStmt(Empty);
+      break;
+
+    case EXPR_DO:
+      S = new (Context) DoExpr(Empty);
       break;
 
     case EXPR_COAWAIT:

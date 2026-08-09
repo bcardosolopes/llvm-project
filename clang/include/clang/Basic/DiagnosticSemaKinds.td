@@ -7087,6 +7087,8 @@ def note_enters_compound_literal_scope : Note<
 def note_enters_statement_expression : Note<
   "jump enters a statement expression">;
 def note_enters_defer_stmt : Note<"jump enters a defer statement">;
+def note_enters_do_expression : Note<
+  "jump enters a do-expression">;
 
 def note_exits_cleanup : Note<
   "jump exits scope of variable with __attribute__((cleanup))">;
@@ -7548,6 +7550,8 @@ def err_nonfunction_block_type : Error<
   "block pointer to non-function type is invalid">;
 def err_return_block_has_expr : Error<
   "void %select{block|lambda}0 should not return a value">;
+def err_return_outside_function : Error<
+  "'return' cannot be used outside a function">;
 def err_block_return_missing_expr : Error<
   "non-void block should return a value">;
 def err_func_def_incomplete_result : Error<
@@ -13123,6 +13127,28 @@ def warn_coroutine_type_aware_allocator_ignored : Warning <
   "type aware %0 will not be used for coroutine allocation">,
   InGroup<CoroTypeAwareAllocationFunction>;
 } // end of coroutines issue category
+
+let CategoryName = "do-expressions Issue" in {
+def err_do_return_outside_do_expr : Error<
+  "'do_return' can only appear inside a do-expression">;
+def err_do_return_crosses_function_scope : Error<
+  "'do_return' cannot appear inside a nested function or lambda body of an "
+  "enclosing do-expression">;
+def err_do_return_missing_value : Error<
+  "'do_return' without a value requires the enclosing do-expression to have "
+  "type 'void'">;
+def err_do_return_type_mismatch : Error<
+  "'do_return' yields type %0, conflicting with previously deduced type %1">;
+def err_do_expr_no_return_but_not_auto : Error<
+  "cannot deduce result type %0 for do-expression with no 'do_return' "
+  "statements">;
+def err_do_return_void_but_not_auto : Error<
+  "cannot deduce result type %0 from 'do_return' with omitted expression">;
+def err_do_expr_falls_off_end : Error<
+  "control may fall off the end of do-expression with non-void result type "
+  "%0; every path must exit via 'do_return', 'return', 'break', 'continue', "
+  "'throw', or a '[[noreturn]]' call">;
+} // end of do-expressions issue category
 
 let CategoryName = "Documentation Issue" in {
 def warn_not_a_doxygen_trailing_member_comment : Warning<

@@ -19243,6 +19243,12 @@ void Sema::ActOnCXXEnterDeclInitializer(Scope *S, Decl *D) {
   }
   PushExpressionEvaluationContext(
       Ctx, D, ExpressionEvaluationContextRecord::EK_VariableInit);
+
+  // Propagate the lifetime extending context flag from the parent so that
+  // temporaries created in the initializer of a variable inside a
+  // do-expression init statement can be lifetime extended.
+  currentEvaluationContext().InLifetimeExtendingContext =
+      parentEvaluationContext().InLifetimeExtendingContext;
 }
 
 void Sema::ActOnCXXExitDeclInitializer(Scope *S, Decl *D) {

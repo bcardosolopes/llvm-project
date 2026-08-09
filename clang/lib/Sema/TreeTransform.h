@@ -3224,6 +3224,21 @@ public:
                                    TemplateDepth);
   }
 
+  /// Build a new do-expression.
+  ExprResult RebuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
+                           Stmt *InitStmt, Stmt *Body,
+                           SourceLocation RBraceLoc,
+                           TypeSourceInfo *ExplicitType,
+                           unsigned TemplateDepth) {
+    return getSema().BuildDoExpr(DoLoc, LBraceLoc, InitStmt, Body, RBraceLoc,
+                                 ExplicitType, TemplateDepth);
+  }
+
+  /// Build a new do_return statement.
+  StmtResult RebuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
+    return getSema().BuildDoReturnStmt(DoReturnLoc, Operand);
+  }
+
   /// Build a new __builtin_choose_expr expression.
   ///
   /// By default, performs semantic analysis to build the new expression.
@@ -15141,6 +15156,68 @@ TreeTransform<Derived>::TransformStmtExpr(StmtExpr *E) {
 
   return getDerived().RebuildStmtExpr(E->getLParenLoc(), SubStmt.get(),
                                       E->getRParenLoc(), NewDepth);
+}
+
+template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformDoExpr(DoExpr *E) {
+  TypeSourceInfo *ExplicitTSI = nullptr;
+  if (E->hasExplicitType()) {
+    ExplicitTSI = getDerived().TransformType(E->getExplicitType());
+    if (!ExplicitTSI)
+      return ExprError();
+  }
+
+  unsigned OldDepth = E->getTemplateDepth();
+  unsigned NewDepth = getDerived().TransformTemplateDepth(OldDepth);
+
+  SemaRef.ActOnStartDoExpr(E->getDoLoc(), QualType(), NewDepth);
+  if (ExplicitTSI)
+    SemaRef.ActOnDoExprExplicitType(ExplicitTSI);
+
+  StmtResult InitStmt;
+  if (E->hasInitStmt()) {
+    EnterExpressionEvaluationContext EvalContext(
+        getSema(), Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
+        /*LambdaContextDecl=*/nullptr,
+        Sema::ExpressionEvaluationContextRecord::EK_Other,
+        /*ShouldEnter=*/true);
+    getSema().currentEvaluationContext().InLifetimeExtendingContext = true;
+
+    InitStmt = getDerived().TransformStmt(E->getInitStmt());
+    if (InitStmt.isInvalid()) {
+      SemaRef.ActOnDoExprError();
+      return ExprError();
+    }
+
+    auto LifetimeExtendTemps =
+        getSema().currentEvaluationContext().ForRangeLifetimeExtendTemps;
+    SemaRef.ActOnDoExprInitStmt(InitStmt.get(), LifetimeExtendTemps);
+  }
+
+  StmtResult Body =
+      getDerived().TransformCompoundStmt(E->getBody(), /*IsStmtExpr=*/false);
+  if (Body.isInvalid()) {
+    SemaRef.ActOnDoExprError();
+    return ExprError();
+  }
+
+  return getDerived().RebuildDoExpr(E->getDoLoc(), E->getLBraceLoc(),
+                                    InitStmt.isUsable() ? InitStmt.get()
+                                                        : nullptr,
+                                    Body.get(), E->getRBraceLoc(),
+                                    ExplicitTSI, NewDepth);
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformDoReturnStmt(DoReturnStmt *S) {
+  ExprResult Operand;
+  if (S->getOperand()) {
+    Operand = getDerived().TransformInitializer(S->getOperand(),
+                                                /*NotCopyInit=*/false);
+    if (Operand.isInvalid())
+      return StmtError();
+  }
+  return getDerived().RebuildDoReturnStmt(S->getKeywordLoc(), Operand.get());
 }
 
 template<typename Derived>

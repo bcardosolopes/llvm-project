@@ -700,6 +700,7 @@ public:
   }
 
   Value *VisitStmtExpr(const StmtExpr *E);
+  Value *VisitDoExpr(const DoExpr *E);
 
   // Unary Operators.
   Value *VisitUnaryPostDec(const UnaryOperator *E) {
@@ -3235,6 +3236,19 @@ Value *ScalarExprEmitter::VisitStmtExpr(const StmtExpr *E) {
   if (!RetAlloca.isValid())
     return nullptr;
   return CGF.EmitLoadOfScalar(CGF.MakeAddrLValue(RetAlloca, E->getType()),
+                              E->getExprLoc());
+}
+
+Value *ScalarExprEmitter::VisitDoExpr(const DoExpr *E) {
+  CodeGenFunction::StmtExprEvaluation eval(CGF);
+  // A glvalue do-expression yields a reference: EmitDoExpr returns a slot
+  // holding a `T*`, so go through the lvalue path to load the referent.
+  if (E->isGLValue())
+    return CGF.EmitLoadOfScalar(CGF.EmitDoExprLValue(E), E->getExprLoc());
+  Address Slot = CGF.EmitDoExpr(*E, AggValueSlot::ignored());
+  if (!Slot.isValid())
+    return nullptr;
+  return CGF.EmitLoadOfScalar(CGF.MakeAddrLValue(Slot, E->getType()),
                               E->getExprLoc());
 }
 

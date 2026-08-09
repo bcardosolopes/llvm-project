@@ -39,6 +39,9 @@
 #ifndef COROUTINES_KEYWORD
 #define COROUTINES_KEYWORD(X) CXX20_KEYWORD(X,KEYCOROUTINES)
 #endif
+#ifndef DOEXPR_KEYWORD
+#define DOEXPR_KEYWORD(X) KEYWORD(X,KEYDOEXPR)
+#endif
 #ifndef MODULES_KEYWORD
 #define MODULES_KEYWORD(X) KEYWORD(X,KEYMODULES)
 #endif
@@ -451,6 +454,9 @@ CXX20_KEYWORD(requires              , 0)
 
 // C++2c reflection keywords.
 KEYWORD(__metafunction              , KEYREFLECT)
+
+// do-expressions keyword.
+DOEXPR_KEYWORD(do_return)
 
 // Not a CXX20_KEYWORD because it is disabled by -fno-char8_t.
 KEYWORD(char8_t                     , CHAR8SUPPORT)
