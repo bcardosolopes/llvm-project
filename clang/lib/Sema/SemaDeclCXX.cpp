@@ -7948,6 +7948,17 @@ bool Sema::CheckReflectConstantCustomization(CXXMethodDecl *MD) {
 
   if (MD->getDescribedFunctionTemplate())
     return DiagShape(1);
+
+  // A constrained customization point whose constraints are not satisfied
+  // (e.g. vector<T, A>'s opt-in requiring std::allocator and structural T)
+  // counts as absent: the class simply does not opt in, with no diagnostic
+  // and no HasReflectConstant recorded.
+  if (MD->getTrailingRequiresClause()) {
+    ConstraintSatisfaction Satisfaction;
+    if (CheckFunctionConstraints(MD, Satisfaction, Loc) ||
+        !Satisfaction.IsSatisfied)
+      return false;
+  }
   if (!MD->isConsteval())
     return DiagShape(0);
   if (MD->getNumExplicitParams() != 0)

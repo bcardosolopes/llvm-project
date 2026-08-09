@@ -2347,11 +2347,20 @@ CXXMethodDecl *Sema::LookupReflectConstantCustomization(CXXRecordDecl *RD) {
     return nullptr;
 
   // The customization is not inherited, so look only at direct members.
+  // A constrained customization with unsatisfied constraints counts as
+  // absent (it never set HasReflectConstant, but be defensive here too).
   DeclarationName Name(&Context.Idents.get("reflect_constant"));
   for (NamedDecl *ND : RD->lookup(Name))
     if (auto *MD = dyn_cast<CXXMethodDecl>(ND->getUnderlyingDecl()))
-      if (MD->getParent() == RD->getDefinition())
+      if (MD->getParent() == RD->getDefinition()) {
+        if (MD->getTrailingRequiresClause()) {
+          ConstraintSatisfaction Satisfaction;
+          if (CheckFunctionConstraints(MD, Satisfaction, MD->getLocation()) ||
+              !Satisfaction.IsSatisfied)
+            continue;
+        }
         return MD;
+      }
   return nullptr;
 }
 

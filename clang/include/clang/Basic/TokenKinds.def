@@ -555,6 +555,9 @@ TYPE_TRAIT_1(__is_empty, IsEmpty, KEYCXX)
 TYPE_TRAIT_1(__is_enum, IsEnum, KEYCXX)
 TYPE_TRAIT_1(__is_final, IsFinal, KEYCXX)
 TYPE_TRAIT_1(__is_literal, IsLiteral, KEYCXX)
+// P2996/P4341 ext: C++20 structural type, extended by the reflect_constant
+// customization point rules.
+TYPE_TRAIT_1(__is_structural, IsStructural, KEYCXX)
 // Name for GCC 4.6 compatibility - people have already written libraries using
 // this name unfortunately.
 ALIAS("__is_literal_type", __is_literal, KEYCXX)

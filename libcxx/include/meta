@@ -2377,6 +2377,19 @@ consteval auto reflect_constant_string(std::u8string_view In) -> info {
   return substitute(^^__define_static::FixedArray, Args);
 }
 
+#if _LIBCPP_STD_VER >= 29
+// P4341 ext (non-transient constexpr allocation): the template parameter
+// objects behind containers used as constant template parameters. The
+// reflect_constant customization points of vector and basic_string (declared
+// in their headers, defined below) intern their contents via
+// reflect_constant_array and substitute the resulting array into this
+// variable template; two equal containers reach the same specialization, and
+// the specialization's allocation persists because its initialization is the
+// complete initialization of a constexpr variable.
+template <class _Tp, auto& _Contents>
+inline constexpr auto __ctp_container = _Tp(from_range, _Contents);
+#endif // _LIBCPP_STD_VER >= 29
+
 _LIBCPP_END_NAMESPACE_REFLECTION_V2
 
 _LIBCPP_BEGIN_NAMESPACE_STD
@@ -2423,6 +2436,30 @@ consteval auto define_static_string(u8string_view in) -> const char8_t * {
   meta::info array = meta::reflect_constant_string(in);
   return extract<const char8_t*>(array);
 }
+
+#if _LIBCPP_STD_VER >= 29
+// P4341 ext: the reflect_constant customization points declared in <vector>
+// and <string>. The contents are interned via reflect_constant_array (equal
+// contents yield the same array), and the returned reflection designates the
+// __ctp_container specialization holding a persisted copy of the container:
+// that variable is the template parameter object, so equal containers give
+// the same specialization within and across translation units.
+template <class _Tp, class _Allocator>
+consteval auto vector<_Tp, _Allocator>::reflect_constant() const
+    -> decltype(^^::)
+  requires is_same_v<_Allocator, allocator<_Tp>> && __is_structural(_Tp)
+{
+  return meta::substitute(^^meta::__ctp_container, {^^vector, meta::reflect_constant_array(*this)});
+}
+
+template <class _CharT, class _Traits, class _Allocator>
+consteval auto basic_string<_CharT, _Traits, _Allocator>::reflect_constant()
+    const -> decltype(^^::)
+  requires is_same_v<_Allocator, allocator<_CharT>>
+{
+  return meta::substitute(^^meta::__ctp_container, {^^basic_string, meta::reflect_constant_array(*this)});
+}
+#endif // _LIBCPP_STD_VER >= 29
 
 _LIBCPP_END_NAMESPACE_STD
 

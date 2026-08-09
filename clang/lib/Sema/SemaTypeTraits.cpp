@@ -434,6 +434,7 @@ static bool CheckUnaryTypeTraitTypeCompleteness(Sema &S, TypeTrait UTT,
   case UTT_IsStandardLayout:
   case UTT_IsPOD:
   case UTT_IsLiteral:
+  case UTT_IsStructural:
   case UTT_IsBitwiseCloneable:
   // By analogy, is_trivially_relocatable and is_trivially_equality_comparable
   // impose the same constraints.
@@ -738,6 +739,8 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
     return T.isPODType(C);
   case UTT_IsLiteral:
     return T->isLiteralType(C);
+  case UTT_IsStructural:
+    return T->isStructuralType();
   case UTT_IsEmpty:
     if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
       return !RD->isUnion() && RD->isEmpty();

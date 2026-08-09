@@ -263,6 +263,16 @@ private:
 public:
   _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI ~vector() { __destroy_vector (*this)(); }
 
+#if __has_feature(reflection) && _LIBCPP_STD_VER >= 29
+  // P4341 ext (non-transient constexpr allocation): vectors of structural
+  // elements using the default allocator are usable as constant template
+  // parameters. When the constraints are not satisfied the customization
+  // point counts as absent, and vector is simply not structural. Defined in
+  // <meta>, which provides the machinery used to persist the contents.
+  _LIBCPP_HIDE_FROM_ABI consteval auto reflect_constant() const -> decltype(^^::)
+    requires is_same_v<_Allocator, allocator<_Tp>> && __is_structural(_Tp);
+#endif
+
   _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI vector(const vector& __x)
       : __alloc_(__alloc_traits::select_on_container_copy_construction(__x.__alloc_)) {
     __init_with_size(__x.__begin_, __x.__end_, __x.size());
