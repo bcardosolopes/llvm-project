@@ -14972,6 +14972,14 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
         if (FD->isImmediateFunction())
           return true;
       }
+      // P4341 + P3603: an allocation owned by a consteval variable has
+      // consteval-only address: the owner never exists at runtime, so its
+      // persisted allocations are never emitted. Any pointer or reference
+      // into such an allocation is a consteval-only value.
+      if (const auto *PAD = dyn_cast<PersistentAllocDecl>(D)) {
+        if (PAD->getOwningVar()->isConsteval())
+          return true;
+      }
     }
   }
 
@@ -15117,6 +15125,20 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
 
     bool HasConstevalOnlyValue = ExprContainsConstevalOnlyValue(var->getInit());
 
+    // P4341: the syntactic walk cannot see consteval-only values produced
+    // through calls — e.g. 'constexpr auto b = v.data()' where v is a
+    // consteval vector: the result points into an allocation with
+    // consteval-only address. For constexpr variables (which are allowed to
+    // hold such values by silently becoming consteval), classify the
+    // evaluated value instead. Only bother when the initializer actually
+    // referenced a consteval entity (tracked in this context): this keeps
+    // the common case to a single evaluation.
+    if (!HasConstevalOnlyValue && var->isConstexpr() &&
+        (!ExprEvalContexts.back().ConstevalOnly.empty() ||
+         !ExprEvalContexts.back().ReferenceToConsteval.empty()))
+      if (std::optional<bool> ValueVerdict = TryEvaluateConstevalOnlyValue(var))
+        HasConstevalOnlyValue = *ValueVerdict;
+
     // Restore var's evaluation state if it was dirtied.
     if (!SavedWasEvaluated && Eval->WasEvaluated) {
       Eval->WasEvaluated = false;
@@ -15161,6 +15183,39 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
                   ExprEvalContexts.back().ConstevalOnly.erase(DRE);
               }
             }
+          }
+        }
+      }
+
+      // P4341/P3603: a variable that undergoes constant initialization
+      // (static storage duration, constexpr, or a const integral local)
+      // may read consteval variables in its initializer as long as the
+      // initializer is a constant expression whose value contains nothing
+      // consteval-only: the consteval reads never escape to runtime.
+      // Launder them by erasing every tracked expression that is a
+      // subexpression of the initializer. A plain local variable gets no
+      // such laundering (its initialization is a runtime operation; see
+      // P3496 for the direction that would relax this), and a dirty value
+      // (e.g. v.data() pointing into a consteval vector's allocation) stays
+      // tracked and is diagnosed.
+      auto &CEO = ExprEvalContexts.back().ConstevalOnly;
+      if (!CEO.empty()) {
+        bool AttemptsConstantInit =
+            var->hasGlobalStorage() || var->isConstexpr() ||
+            (var->getType().isConstQualified() &&
+             var->getType()->isIntegralOrEnumerationType());
+        Expr::EvalResult ER;
+        if (AttemptsConstantInit &&
+            var->getInit()->EvaluateAsConstantExpr(ER, Context) &&
+            !APValueContainsConstevalOnlyValue(ER.Val)) {
+          llvm::SmallVector<const Stmt *, 16> Worklist = {var->getInit()};
+          while (!Worklist.empty()) {
+            const Stmt *S = Worklist.pop_back_val();
+            if (!S)
+              continue;
+            if (auto *SubE = dyn_cast<Expr>(S))
+              CEO.erase(const_cast<Expr *>(SubE));
+            Worklist.append(S->child_begin(), S->child_end());
           }
         }
       }
