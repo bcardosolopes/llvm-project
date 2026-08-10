@@ -277,8 +277,12 @@ Retry:
 
         StmtResult SR = ParseForStatement(TrailingElseLoc,
                                           /*PrecedingLabel=*/nullptr);
-        if (SR.isInvalid())
+        if (SR.isInvalid()) {
+          // The ExpansionStmtDecl was already added to the enclosing context;
+          // mark it invalid so nothing downstream expects a statement.
+          ExpansionDecl->setInvalidDecl();
           return SR;
+        }
         Expansion = cast<CXXExpansionStmt>(SR.get());
         ExpansionDecl->setStmt(Expansion);
       }
@@ -2255,6 +2259,20 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
 
   if (CoawaitLoc.isValid() && getLangOpts().CPlusPlus20)
     Diag(CoawaitLoc, diag::warn_deprecated_for_co_await);
+
+  // P1306: an expansion statement is always a range-based for. If 'template
+  // for' parsed as an ordinary for-loop (e.g. 'template for (int i = 0;
+  // i < 3; ++i)'), diagnose rather than fall through: the caller expects a
+  // CXXExpansionStmt back.
+  if (ForRangeInfo.ExpansionStmt && !ForRangeInfo.ParsedForRangeDecl()) {
+    Diag(ForLoc, diag::err_expansion_stmt_not_range_for)
+        << SourceRange(TemplateKWLoc, T.getCloseLocation());
+    // Parse and discard the body to keep the parser in sync.
+    ParseScope InnerScope(this, Scope::DeclScope, C99orCXXorObjC,
+                          Tok.is(tok::l_brace));
+    ParseStatement(TrailingElseLoc);
+    return StmtError();
+  }
 
   // We need to perform most of the semantic analysis for a C++0x for-range
   // statememt before parsing the body, in order to be able to deduce the type

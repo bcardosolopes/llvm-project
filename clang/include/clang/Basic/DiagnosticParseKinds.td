@@ -1831,6 +1831,9 @@ def err_cannot_reflect_operand : Error<
   "cannot reflect the provided operand">;
 def err_expansion_statements_disabled : Error<
   "'template for' statements are not enabled; use '-fexpansion-statements'">;
+def err_expansion_stmt_not_range_for : Error<
+  "expansion statement must be a range-based 'for' statement "
+  "('template for ( declaration : initializer )')">;
 def err_annotation_with_using : Error<
   "annotations are not permitted following an attribute-using-prefix">;
 def err_annotation_used_on : Error<

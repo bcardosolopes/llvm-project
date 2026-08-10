@@ -449,3 +449,17 @@ auto parse_options() -> void {
     (void)lam;
   }
 }
+
+// An expansion statement must be a range-based for; the classic three-part
+// form used to crash the parser (the caller unconditionally cast the result
+// to CXXExpansionStmt).
+namespace not_range_for {
+void classic_form() {
+  template for (int i = 0; i < 3; ++i) { // expected-error {{expansion statement must be a range-based 'for' statement}}
+    (void)i;
+  }
+}
+void degenerate_form() {
+  template for (;;) { } // expected-error {{expansion statement must be a range-based 'for' statement}}
+}
+}  // namespace not_range_for
