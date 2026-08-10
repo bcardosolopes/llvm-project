@@ -4,6 +4,7 @@ add_clang_library(MLIRCIRTransforms
   CallConvLoweringPass.cpp
   CIRCanonicalize.cpp
   CIRSimplify.cpp
+  CIRToABIType.cpp
   CIRTransformUtils.cpp
   CXXABILowering.cpp
   EHABILowering.cpp

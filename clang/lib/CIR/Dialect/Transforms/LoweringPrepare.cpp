@@ -6,7 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CIRToABIType.h"
 #include "PassDetail.h"
+#include "mlir/ABI/ABITypeMapper.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributeInterfaces.h"
 #include "mlir/IR/IRMapping.h"
@@ -29,6 +31,7 @@
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/Interfaces/ASTAttrInterfaces.h"
 #include "clang/CIR/MissingFeatures.h"
+#include "llvm/ABI/TargetInfo.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/Instructions.h"
@@ -99,6 +102,7 @@ struct LoweringPreparePass
   void lowerStoreOfConstAggregate(cir::StoreOp op);
   void lowerLocalInitOp(cir::LocalInitOp op);
   void lowerStdOp(cir::StdOpInterface op);
+  void lowerVAArgOp(cir::VAArgOp op);
 
   /// Return the FuncOp called by `callOp`.  Uses the cached `symbolTables`
   /// member to avoid the O(M) module-wide scan that the static
@@ -2281,6 +2285,118 @@ void LoweringPreparePass::lowerStdOp(cir::StdOpInterface typedOp) {
   op->erase();
 }
 
+/// Index of the `void *overflow_arg_area` member of the x86-64 `__va_list_tag`
+/// record, whose layout is { i32 gp_offset, i32 fp_offset,
+/// ptr overflow_arg_area, ptr reg_save_area }.
+static constexpr unsigned x86_64VAListOverflowArgAreaIdx = 2;
+
+/// Ask the LLVM ABI Lowering Library whether the x86-64 SysV ABI passes an
+/// argument of type `ty` entirely on the stack.  This is the same question
+/// classic CodeGen's `X86_64ABIInfo::EmitVAArg` answers with
+/// `classifyArgumentType(...); if (!neededInt && !neededSSE)`, asked through
+/// the shared classifier instead of a hand-written copy of the SysV rules.
+///
+/// Returns false for a type the CIR-to-abi bridge cannot spell, which leaves
+/// `cir.va_arg` in place rather than guessing.
+static bool isX86_64StackOnlyArgument(mlir::Type ty, mlir::ModuleOp modOp,
+                                      const mlir::DataLayout &dl) {
+  mlir::abi::ABITypeMapper typeMapper(dl);
+  const llvm::abi::Type *abiTy =
+      cir::mapTypeToABIType(ty, typeMapper, dl, modOp);
+  if (!abiTy)
+    return false;
+  // The AVX level only changes how a vector wider than 128 bits is passed, and
+  // the bridge has no mapping for a vector, so no input here can observe it.
+  std::unique_ptr<llvm::abi::TargetInfo> targetInfo =
+      llvm::abi::createX86_64TargetInfo(
+          typeMapper.getTypeBuilder(), llvm::abi::X86AVXABILevel::None,
+          /*Has64BitPointers=*/true, llvm::abi::ABICompatInfo());
+  return targetInfo->isArgumentPassedOnStack(abiTy);
+}
+
+/// Expand `cir.va_arg` into the sequence that fetches the next argument from
+/// the `va_list` overflow area, mirroring classic CodeGen's
+/// `X86_64ABIInfo::EmitVAArgFromMemory`.
+///
+/// Leaving `cir.va_arg` for the generic `llvm.va_arg` instruction is not a
+/// workable fallback: no other frontend emits it, so target support for it has
+/// rotted, and the x86 backend has no expansion at all for `x86_fp80` (it
+/// aborts in X86TargetLowering). Only arguments the ABI passes on the stack
+/// are handled here; one that can land in a register still needs the register
+/// save area path, which is not implemented yet.
+void LoweringPreparePass::lowerVAArgOp(cir::VAArgOp op) {
+  const clang::TargetInfo &target = astCtx->getTargetInfo();
+  // x32 shares the x86-64 va_list layout but has 32-bit pointers, which the
+  // 64-bit pointer arithmetic below would get wrong.
+  if (target.getBuiltinVaListKind() !=
+          clang::TargetInfo::X86_64ABIBuiltinVaList ||
+      target.getTriple().isX32())
+    return;
+
+  mlir::Type ty = op.getType();
+  mlir::DataLayout mlirDataLayout(mlirModule);
+  if (!isX86_64StackOnlyArgument(ty, mlirModule, mlirDataLayout))
+    return;
+
+  mlir::Value vaList = op.getArgList();
+  auto vaListRecordTy = mlir::dyn_cast<cir::RecordType>(
+      mlir::cast<cir::PointerType>(vaList.getType()).getPointee());
+  if (!vaListRecordTy ||
+      vaListRecordTy.getMembers().size() <= x86_64VAListOverflowArgAreaIdx)
+    return;
+
+  CIRBaseBuilderTy builder(getContext());
+  builder.setInsertionPoint(op);
+  mlir::Location loc = op.getLoc();
+  cir::CIRDataLayout dataLayout(mlirModule);
+
+  mlir::Type areaTy =
+      vaListRecordTy.getMembers()[x86_64VAListOverflowArgAreaIdx];
+  uint64_t areaAlign = dataLayout.getABITypeAlign(areaTy).value();
+  mlir::Value areaPtr = builder.createGetMember(
+      loc, builder.getPointerTo(areaTy), vaList, "overflow_arg_area",
+      x86_64VAListOverflowArgAreaIdx);
+  mlir::Value area = builder.createAlignedLoad(loc, areaPtr, areaAlign);
+
+  // Byte-addressed view of the overflow area: all the arithmetic below is in
+  // bytes.
+  cir::PointerType bytePtrTy = builder.getPointerTo(builder.getUIntNTy(8));
+  mlir::Value byteArea = builder.createBitcast(loc, area, bytePtrTy);
+
+  // AMD64-ABI 3.5.7p5 step 7: round the overflow area up when the type needs
+  // more alignment than the 8 bytes the area already guarantees.
+  uint64_t align = dataLayout.getABITypeAlign(ty).value();
+  if (align > 8) {
+    mlir::Value bias = builder.getUnsignedInt(loc, align - 1, /*numBits=*/64);
+    mlir::Value biased = builder.createPtrStride(loc, byteArea, bias);
+    mlir::Value mask =
+        builder.getSignedInt(loc, -static_cast<int64_t>(align), /*numBits=*/64);
+    byteArea = cir::LLVMIntrinsicCallOp::create(
+                   builder, loc, builder.getStringAttr("ptrmask.p0.i64"),
+                   bytePtrTy, mlir::ValueRange{biased, mask})
+                   .getResult();
+  }
+
+  // Steps 9 and 10: bump the overflow area past this argument, keeping it
+  // 8-byte aligned for the next one.
+  uint64_t sizeInBytes = dataLayout.getTypeAllocSize(ty);
+  mlir::Value next = builder.createPtrStride(
+      loc, byteArea,
+      builder.getUnsignedInt(loc, llvm::alignTo(sizeInBytes, 8),
+                             /*numBits=*/64));
+  builder.createStore(loc, builder.createBitcast(loc, next, areaTy), areaPtr,
+                      /*isVolatile=*/false, /*isNontemporal=*/false,
+                      builder.getAlignmentAttr(areaAlign));
+
+  // Step 8: read the argument out of the (now aligned) slot.
+  mlir::Value arg = builder.createAlignedLoad(
+      loc, builder.createBitcast(loc, byteArea, builder.getPointerTo(ty)),
+      align);
+
+  op.getResult().replaceAllUsesWith(arg);
+  op.erase();
+}
+
 void LoweringPreparePass::runOnOp(mlir::Operation *op) {
   if (auto arrayCtor = dyn_cast<cir::ArrayCtor>(op)) {
     lowerArrayCtor(arrayCtor);
@@ -2323,6 +2439,8 @@ void LoweringPreparePass::runOnOp(mlir::Operation *op) {
     lowerThreeWayCmpOp(threeWayCmp);
   } else if (auto initOp = dyn_cast<cir::LocalInitOp>(op)) {
     lowerLocalInitOp(initOp);
+  } else if (auto vaArgOp = dyn_cast<cir::VAArgOp>(op)) {
+    lowerVAArgOp(vaArgOp);
   }
 }
 
@@ -2926,8 +3044,8 @@ void LoweringPreparePass::runOnOperation() {
                   cir::ComplexConjOp, cir::ComplexMulOp, cir::ComplexDivOp,
                   cir::DynamicCastOp, cir::FuncOp, cir::CallOp,
                   cir::GetGlobalOp, cir::GlobalOp, cir::StoreOp,
-                  cir::CmpThreeWayOp, cir::LocalInitOp, cir::StdOpInterface>(
-            op))
+                  cir::CmpThreeWayOp, cir::LocalInitOp, cir::VAArgOp,
+                  cir::StdOpInterface>(op))
       opsToTransform.push_back(op);
   });
 

@@ -73,6 +73,17 @@ public:
   /// and return value.
   virtual void computeInfo(FunctionInfo &FI) const = 0;
   virtual bool isPassByRef(const Type *Ty) const { return false; }
+
+  /// Whether an argument of type \p Ty consumes no argument register under
+  /// this ABI and so is passed entirely on the stack.
+  ///
+  /// Expanding `va_arg` needs this: a type the ABI never puts in a register is
+  /// always in the variable-argument overflow area, so it can be fetched from
+  /// there without also searching the register save area.  The default answer
+  /// is false, meaning "not known to be stack-only", which leaves a caller no
+  /// choice but the general path.
+  virtual bool isArgumentPassedOnStack(const Type *Ty) const { return false; }
+
   const ABICompatInfo &getABICompatInfo() const { return CompatInfo; }
 
 protected:

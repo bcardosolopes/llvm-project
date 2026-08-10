@@ -30,6 +30,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CIRToABIType.h"
 #include "PassDetail.h"
 #include "TargetLowering/CIRABIRewriteContext.h"
 
@@ -64,47 +65,27 @@ namespace {
 //===----------------------------------------------------------------------===//
 // x86_64 System V classifier bridge (scalar and struct/array types)
 //
-// Maps CIR types to llvm::abi::Type, runs the LLVM ABI Lowering Library's
-// SysV x86_64 classifier, and converts the result back into the
-// dialect-agnostic mlir::abi::FunctionClassification that CIRABIRewriteContext
-// consumes.  Integer (including `_BitInt` up to 128 bits) / pointer / bool /
-// f32 / f64 scalars and struct / union / array aggregates are handled.
+// Maps CIR types to llvm::abi::Type (cir::mapTypeToABIType), runs the LLVM ABI
+// Lowering Library's SysV x86_64 classifier, and converts the result back into
+// the dialect-agnostic mlir::abi::FunctionClassification that
+// CIRABIRewriteContext consumes.  Integer (including `_BitInt` up to 128 bits)
+// / pointer / bool / f32 / f64 scalars and struct / union / array aggregates
+// are handled.
 // `_Complex`, vectors, wider floats, packed or padded records, and a union no
 // member of which spans its declared size are reported NYI by
 // classifyX86_64Function so an unsupported signature fails the pass instead of
 // being misclassified.
 //===----------------------------------------------------------------------===//
 
-/// Whether a struct's declared argument-passing kind (from the module's
-/// record-layout metadata) allows it to be passed in registers.  A record with
-/// no layout entry (e.g. an anonymous struct) has no C++ non-trivial reason to
-/// be forced to memory, so it defaults to can-pass-in-registers.
-static bool recordCanPassInRegs(ModuleOp modOp, cir::RecordType recTy) {
-  auto layout = cir::tryGetRecordLayout(modOp, recTy.getName());
-  if (!layout)
-    return true;
-  return layout.getArgPassingKind() == cir::ArgPassingKind::CanPassInRegs;
-}
-
-/// A record's declared alignment, which the ABI uses for the byval and sret
-/// alignment of an indirect argument.  DataLayout derives alignment from the
-/// members, so it cannot see `__attribute__((aligned(N)))`.  The declared value
-/// comes from the module's record-layout metadata instead.  CIRGen emits an
-/// entry for every record it names, so the computed fallback only serves
-/// hand-written CIR.
-static llvm::Align recordDeclaredAlign(ModuleOp modOp, cir::RecordType recTy,
-                                       const DataLayout &dl) {
-  auto layout = cir::tryGetRecordLayout(modOp, recTy.getName());
-  if (!layout)
-    return llvm::Align(dl.getTypeABIAlignment(recTy));
-  return llvm::Align(layout.getRecordAlign());
-}
-
 /// The CIR types the x86_64 bridge handles.  Scalars: an integer up to 128
 /// bits (including `_BitInt` and `__int128`), pointer, bool, void, f32, or f64.
 /// Aggregates: a complete struct or union whose members are all themselves
 /// supported, or an array of a supported element type.  Everything else is
 /// reported NYI at the reject() choke point in classifyX86_64Function.
+///
+/// This is deliberately narrower than what cir::mapTypeToABIType can spell:
+/// this pass must also turn the classifier's answer back into a CIR signature,
+/// so a type only counts as supported once that round trip is implemented.
 static bool isSupportedType(mlir::Type ty, const DataLayout &dl) {
   // A pointer is only handled in the default address space (null) or an
   // already-lowered target address space.  A LangAddressSpaceAttr must be
@@ -199,91 +180,6 @@ static mlir::Type abiTypeToCIR(const llvm::abi::Type *ty, MLIRContext *ctx) {
                                     /*padded=*/false, /*is_class=*/false);
       })
       .Default([](const llvm::abi::Type *) -> mlir::Type { return nullptr; });
-}
-
-/// Map a CIR type to an llvm::abi::Type.  classifyX86_64Function pre-filters
-/// the signature, so only the scalar and struct/array types handled here can
-/// reach this function.
-static const llvm::abi::Type *mapCIRType(mlir::Type type,
-                                         mlir::abi::ABITypeMapper &typeMapper,
-                                         const DataLayout &dl, ModuleOp modOp) {
-  llvm::abi::TypeBuilder &tb = typeMapper.getTypeBuilder();
-  return llvm::TypeSwitch<mlir::Type, const llvm::abi::Type *>(type)
-      .Case([&](cir::IntType intTy) {
-        return tb.getIntegerType(intTy.getWidth(),
-                                 llvm::Align(dl.getTypeABIAlignment(type)),
-                                 intTy.isSigned(), intTy.getIsBitInt());
-      })
-      .Case([&](cir::PointerType ptrTy) {
-        unsigned addrSpace = 0;
-        if (auto targetAsAttr =
-                dyn_cast_if_present<cir::TargetAddressSpaceAttr>(
-                    ptrTy.getAddrSpace()))
-          addrSpace = targetAsAttr.getValue();
-        return tb.getPointerType(dl.getTypeSizeInBits(type),
-                                 llvm::Align(dl.getTypeABIAlignment(type)),
-                                 addrSpace);
-      })
-      .Case([&](cir::BoolType) {
-        return tb.getIntegerType(dl.getTypeSizeInBits(type),
-                                 llvm::Align(dl.getTypeABIAlignment(type)),
-                                 /*Signed=*/false);
-      })
-      .Case([&](cir::VoidType) { return tb.getVoidType(); })
-      .Case([&](cir::SingleType) {
-        return tb.getFloatType(llvm::APFloat::IEEEsingle(),
-                               llvm::Align(dl.getTypeABIAlignment(type)));
-      })
-      .Case([&](cir::DoubleType) {
-        return tb.getFloatType(llvm::APFloat::IEEEdouble(),
-                               llvm::Align(dl.getTypeABIAlignment(type)));
-      })
-      .Case([&](cir::ArrayType arrTy) {
-        const llvm::abi::Type *elemAbi =
-            mapCIRType(arrTy.getElementType(), typeMapper, dl, modOp);
-        return tb.getArrayType(elemAbi, arrTy.getSize(),
-                               dl.getTypeSizeInBits(type).getFixedValue());
-      })
-      .Case([&](cir::RecordType recTy) -> const llvm::abi::Type * {
-        llvm::abi::RecordFlags flags = llvm::abi::RecordFlags::None;
-        if (recordCanPassInRegs(modOp, recTy))
-          flags = flags | llvm::abi::RecordFlags::CanPassInRegisters;
-        llvm::TypeSize sizeBits = llvm::TypeSize::getFixed(
-            dl.getTypeSizeInBits(type).getFixedValue());
-        llvm::Align align = recordDeclaredAlign(modOp, recTy, dl);
-        SmallVector<llvm::abi::FieldInfo> fields;
-        fields.reserve(recTy.getMembers().size());
-
-        // The size passed here spans the tail padding, so an eightbyte covers
-        // the whole union rather than just the member the classifier reduces
-        // it to.
-        if (recTy.isUnion()) {
-          for (mlir::Type fieldTy : recTy.getMembers())
-            fields.push_back(llvm::abi::FieldInfo(
-                mapCIRType(fieldTy, typeMapper, dl, modOp)));
-          return tb.getUnionType(fields, sizeBits, align,
-                                 llvm::abi::StructPacking::Default, flags);
-        }
-
-        // isSupportedType rejects packed and padded structs, so every field
-        // here sits at its naturally-aligned offset.
-        uint64_t offsetBits = 0;
-        for (mlir::Type fieldTy : recTy.getMembers()) {
-          const llvm::abi::Type *mappedField =
-              mapCIRType(fieldTy, typeMapper, dl, modOp);
-          offsetBits =
-              llvm::alignTo(offsetBits, dl.getTypeABIAlignment(fieldTy) * 8);
-          fields.push_back(llvm::abi::FieldInfo(mappedField, offsetBits));
-          offsetBits += dl.getTypeSizeInBits(fieldTy).getFixedValue();
-        }
-        return tb.getRecordType(
-            fields, sizeBits, align, llvm::abi::StructPacking::Default,
-            /*BaseClasses=*/{}, /*VirtualBaseClasses=*/{}, flags);
-      })
-      .Default([](mlir::Type) -> const llvm::abi::Type * {
-        llvm_unreachable(
-            "mapCIRType: type not pre-filtered by classifyX86_64Function");
-      });
 }
 
 /// Convert an llvm::abi::ArgInfo into the ArgClassification consumed by
@@ -403,10 +299,14 @@ static std::optional<FunctionClassification> classifyX86_64Signature(
 
   const llvm::abi::Type *retAbi =
       voidRet ? typeMapper.getTypeBuilder().getVoidType()
-              : mapCIRType(retCIR, typeMapper, dl, modOp);
+              : cir::mapTypeToABIType(retCIR, typeMapper, dl, modOp);
+  assert(retAbi && "isSupportedType accepted a type with no llvm::abi mapping");
   SmallVector<const llvm::abi::Type *> argAbi;
-  for (mlir::Type a : inputs)
-    argAbi.push_back(mapCIRType(a, typeMapper, dl, modOp));
+  for (mlir::Type a : inputs) {
+    argAbi.push_back(cir::mapTypeToABIType(a, typeMapper, dl, modOp));
+    assert(argAbi.back() &&
+           "isSupportedType accepted a type with no llvm::abi mapping");
+  }
 
   std::unique_ptr<llvm::abi::FunctionInfo> fi = llvm::abi::FunctionInfo::create(
       llvm::CallingConv::C, retAbi, argAbi, required);

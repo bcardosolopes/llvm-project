@@ -120,6 +120,8 @@ public:
         Has64BitPointers(Has64BitPtrs) {}
 
   bool has64BitPointers() const { return Has64BitPointers; }
+
+  bool isArgumentPassedOnStack(const Type *Ty) const override;
 };
 
 // Gets the "best" type to represent the union.
@@ -1488,6 +1490,20 @@ void X86_64TargetInfo::computeInfo(FunctionInfo &FI) const {
       IT->Info = getIndirectResult(ArgTy, FreeIntRegs);
     }
   }
+}
+
+bool X86_64TargetInfo::isArgumentPassedOnStack(const Type *Ty) const {
+  // Classify as an unnamed argument with every argument register still free,
+  // so that a zero register requirement is a property of the type rather than
+  // of an exhausted register file: AMD64-ABI 3.2.3p2 puts the X87 classes, and
+  // anything larger than two eightbytes, in MEMORY no matter what precedes it.
+  unsigned NeededInt = 0, NeededSSE = 0;
+  ArgInfo AI = classifyArgumentType(Ty, /*FreeIntRegs=*/6, NeededInt, NeededSSE,
+                                    /*IsNamedArg=*/false);
+  // An ignored argument (an empty record) occupies no stack either, so it is
+  // not "passed on the stack" in the sense a caller reading the overflow area
+  // cares about.
+  return !AI.isIgnore() && !NeededInt && !NeededSSE;
 }
 
 std::unique_ptr<TargetInfo>
