@@ -4359,11 +4359,12 @@ ConstantAddress CodeGenModule::GetAddrOfPersistentAllocDecl(
   if (llvm::GlobalVariable *GV = getModule().getNamedGlobal(Name))
     return ConstantAddress(GV, GV->getValueType(), Alignment);
 
-  ConstantEmitter Emitter(*this);
-  llvm::Constant *Init = Emitter.emitForInitializer(
-      PAD->getValue(), PAD->getType().getAddressSpace(), PAD->getType());
-  if (!Init) {
-    ErrorUnsupported(PAD, "persistent constexpr allocation");
+  // An allocation persisted by a consteval variable is never emitted;
+  // pointers into it are consteval-only values, and Sema diagnoses every
+  // escape route. Reaching here means one slipped through.
+  if (Owner->isConsteval()) {
+    Error(Owner->getLocation(),
+          "allocation persisted by a consteval variable cannot be emitted");
     return ConstantAddress::invalid();
   }
 
@@ -4384,9 +4385,40 @@ ConstantAddress CodeGenModule::GetAddrOfPersistentAllocDecl(
       isExternallyVisible(Owner->getLinkageAndVisibility().getLinkage())
           ? llvm::GlobalValue::LinkOnceODRLinkage
           : llvm::GlobalValue::InternalLinkage;
-  auto *GV = new llvm::GlobalVariable(getModule(), Init->getType(), ReadOnly,
-                                      Linkage, Init, Name);
+
+  // Create the global *before* emitting the initializer: the persisted
+  // contents may contain pointers into this same allocation (directly or
+  // through a cycle of allocations), and emitting the initializer for such
+  // a value re-enters GetAddrOfPersistentAllocDecl for this PAD. The
+  // named-global lookup above then finds this declaration instead of
+  // recursing forever. The type is provisional (the emitter may produce a
+  // layout-compatible but differently-typed constant); replace after.
+  llvm::Type *DeclTy = getTypes().ConvertTypeForMem(PAD->getType());
+  auto *GV = new llvm::GlobalVariable(getModule(), DeclTy, ReadOnly, Linkage,
+                                      /*Initializer=*/nullptr, Name);
   GV->setAlignment(Alignment.getAsAlign());
+
+  ConstantEmitter Emitter(*this);
+  llvm::Constant *Init = Emitter.emitForInitializer(
+      PAD->getValue(), PAD->getType().getAddressSpace(), PAD->getType());
+  if (!Init) {
+    ErrorUnsupported(PAD, "persistent constexpr allocation");
+    return ConstantAddress(GV, GV->getValueType(), Alignment);
+  }
+
+  if (Init->getType() != GV->getValueType()) {
+    // Rebuild the global with the initializer's type and replace all uses
+    // (opaque pointers make the replacement a no-op cast).
+    auto *NewGV = new llvm::GlobalVariable(getModule(), Init->getType(),
+                                           ReadOnly, Linkage, Init);
+    NewGV->setAlignment(Alignment.getAsAlign());
+    NewGV->takeName(GV);
+    GV->replaceAllUsesWith(NewGV);
+    GV->eraseFromParent();
+    GV = NewGV;
+  } else {
+    GV->setInitializer(Init);
+  }
   if (supportsCOMDAT() && Linkage == llvm::GlobalValue::LinkOnceODRLinkage)
     GV->setComdat(TheModule.getOrInsertComdat(GV->getName()));
   Emitter.finalize(GV);

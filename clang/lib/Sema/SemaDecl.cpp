@@ -14905,15 +14905,20 @@ void Sema::addLifetimeBoundToImplicitThis(CXXMethodDecl *MD) {
 }
 
 
-// Helper function to recursively check if an APValue contains consteval-only values
-// (reflection values, token sequences, or references to consteval variables)
-bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
+// Helper to recursively check if an APValue contains consteval-only values
+// (reflection values, token sequences, or references to consteval entities).
+// \p VisitedAllocs guards the recursion into persistent-allocation contents:
+// the APValue graph can contain cycles (e.g., an allocation with a pointer to
+// itself).
+static bool APValueContainsConstevalOnlyValueImpl(
+    Sema &S, const APValue &V,
+    llvm::SmallPtrSetImpl<const PersistentAllocDecl *> &VisitedAllocs) {
   // In the consteval-only operations model, reflections and token sequences are
   // no longer consteval-only values: they may persist to runtime as stateless
   // empty values. In the (default) consteval-only value model, they are
   // consteval-only. Either way, pointers/references to consteval entities
   // (checked below) remain consteval-only.
-  if (!getLangOpts().ConstevalOperations) {
+  if (!S.getLangOpts().ConstevalOperations) {
     // Non-null reflection value (null reflections are safe zero-initialized
     // values).
     if (V.isReflection())
@@ -14928,12 +14933,14 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
   if (V.isArray()) {
     // Use getArrayInitializedElts() to get the number of initialized elements
     for (unsigned i = 0; i < V.getArrayInitializedElts(); ++i) {
-      if (APValueContainsConstevalOnlyValue(V.getArrayInitializedElt(i)))
+      if (APValueContainsConstevalOnlyValueImpl(S, V.getArrayInitializedElt(i),
+                                                VisitedAllocs))
         return true;
     }
     // Also check the array filler if present
     if (V.hasArrayFiller()) {
-      if (APValueContainsConstevalOnlyValue(V.getArrayFiller()))
+      if (APValueContainsConstevalOnlyValueImpl(S, V.getArrayFiller(),
+                                                VisitedAllocs))
         return true;
     }
   }
@@ -14941,26 +14948,29 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
   // Check structs
   if (V.isStruct()) {
     for (unsigned i = 0; i < V.getStructNumFields(); ++i) {
-      if (APValueContainsConstevalOnlyValue(V.getStructField(i)))
+      if (APValueContainsConstevalOnlyValueImpl(S, V.getStructField(i),
+                                                VisitedAllocs))
         return true;
     }
     // Also check the struct base if present
     for (unsigned i = 0; i < V.getStructNumBases(); ++i) {
-      if (APValueContainsConstevalOnlyValue(V.getStructBase(i)))
+      if (APValueContainsConstevalOnlyValueImpl(S, V.getStructBase(i),
+                                                VisitedAllocs))
         return true;
     }
   }
 
   // Check unions
   if (V.isUnion()) {
-    if (APValueContainsConstevalOnlyValue(V.getUnionValue()))
+    if (APValueContainsConstevalOnlyValueImpl(S, V.getUnionValue(),
+                                              VisitedAllocs))
       return true;
   }
 
   // Check LValues that refer to consteval variables or immediate functions.
-  // We intentionally do NOT recurse into the pointee's value here — the
-  // APValue graph can contain cycles (e.g., a struct with a pointer to
-  // itself), which would cause infinite recursion.
+  // We intentionally do NOT recurse into an arbitrary pointee's value here —
+  // except for persistent allocations, below, where the recursion is
+  // cycle-guarded.
   if (V.isLValue()) {
     APValue::LValueBase Base = V.getLValueBase();
     if (const auto *D = Base.dyn_cast<const ValueDecl *>()) {
@@ -14975,15 +14985,27 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
       // P4341 + P3603: an allocation owned by a consteval variable has
       // consteval-only address: the owner never exists at runtime, so its
       // persisted allocations are never emitted. Any pointer or reference
-      // into such an allocation is a consteval-only value.
+      // into such an allocation is a consteval-only value. Likewise, an
+      // allocation whose *contents* are consteval-only can never be emitted,
+      // so pointers into it are consteval-only too — recurse (guarded, since
+      // allocations can reference each other cyclically).
       if (const auto *PAD = dyn_cast<PersistentAllocDecl>(D)) {
         if (PAD->getOwningVar()->isConsteval())
+          return true;
+        if (VisitedAllocs.insert(PAD).second &&
+            APValueContainsConstevalOnlyValueImpl(S, PAD->getValue(),
+                                                  VisitedAllocs))
           return true;
       }
     }
   }
 
   return false;
+}
+
+bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
+  llvm::SmallPtrSet<const PersistentAllocDecl *, 4> VisitedAllocs;
+  return APValueContainsConstevalOnlyValueImpl(*this, V, VisitedAllocs);
 }
 
 std::optional<bool> Sema::TryEvaluateConstevalOnlyValue(VarDecl *VD) {

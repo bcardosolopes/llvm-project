@@ -82,3 +82,14 @@ consteval int sum() {
   return r0 + *b;
 }
 static_assert(sum() == 7);
+
+// The template-argument escape route is closed too: a specialization whose
+// argument points into the consteval-owned allocation is itself
+// consteval-only, so it cannot be used at runtime (the allocation is never
+// emitted).
+template <const int* P> int get() { return *P; } // expected-error {{expressions involving consteval-only values are only allowed in constant-evaluated contexts}}
+int runtime_escape() { return get<v.data()>(); } // expected-note {{in instantiation of function template specialization}}
+
+// But a consteval consumer of the same specialization is fine.
+template <const int* P> consteval int cget() { return *P; }
+static_assert(cget<v.data()>() == 1);

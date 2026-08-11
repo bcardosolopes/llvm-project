@@ -93,6 +93,11 @@ static DeclRefExpr *unwrapDeclRefToConstevalDecl(Expr *E) {
     return FD->isImmediateFunction() ? DRE : nullptr;
   if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
     return VD->isConsteval() ? DRE : nullptr;
+  // P4341 + P3603: an allocation persisted by a consteval variable is never
+  // emitted, so a pointer into it is consteval-only — including when it
+  // arrives as a template argument.
+  if (auto *PAD = dyn_cast<PersistentAllocDecl>(DRE->getDecl()))
+    return PAD->getOwningVar()->isConsteval() ? DRE : nullptr;
   return nullptr;
 }
 
@@ -21392,6 +21397,11 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
     if (auto *FD = dyn_cast<FunctionDecl>(E->getDecl());
         FD && FD->isImmediateFunction() && !FD->isDependentContext()) {
       ExprEvalContexts.back().ReferenceToConsteval.insert(E);
+    } else if (auto *PAD = dyn_cast<PersistentAllocDecl>(E->getDecl());
+               PAD && PAD->getOwningVar()->isConsteval()) {
+      // P4341 + P3603: a reference to an allocation persisted by a consteval
+      // variable is consteval-only (the allocation is never emitted).
+      ExprEvalContexts.back().ConstevalOnly.insert(E);
     } else if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
                VD && !VD->getType()->getContainedAutoType()) {
       if (VD->isConsteval()) {
