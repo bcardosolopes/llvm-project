@@ -2447,7 +2447,7 @@ def err_init_conversion_failed : Error<
   "base class|a constructor delegation|a vector element|a matrix element|a "
   "block element|a block element|a complex element|a lambda capture|a compound"
   " literal initializer|a related result|a parameter of CF audited function|a "
-  "structured binding|a member subobject}0 "
+  "structured binding|a member subobject|do-expression result}0 "
   "%diff{of type $ with an %select{rvalue|lvalue}2 of type $|"
   "with an %select{rvalue|lvalue}2 of incompatible type}1,3"
   "%select{|: different classes%diff{ ($ vs $)|}5,6"

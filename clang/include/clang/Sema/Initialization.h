@@ -41,6 +41,7 @@ namespace clang {
 class CXXBaseSpecifier;
 class CXXConstructorDecl;
 class ObjCMethodDecl;
+class Scope;
 class Sema;
 
 /// Describes an entity that is being initialized.
@@ -131,6 +132,13 @@ public:
     /// object initialized via parenthesized aggregate initialization.
     EK_ParenAggInitMember,
 
+    /// The entity being initialized is the result of a do-expression
+    /// ('do_return' operand). Like EK_Result, but the lifetime boundary is
+    /// the do-expression, not the enclosing function: references to
+    /// declarations outside the do-expression are checked when the completed
+    /// do-expression is consumed, not here.
+    EK_DoExprResult,
+
     // Note: err_init_conversion_failed in DiagnosticSemaKinds.td uses this
     // enum as an index for its first %select.  When modifying this list,
     // that diagnostic text needs to be updated as well.
@@ -203,6 +211,15 @@ private:
     SourceLocation Location;
   };
 
+  struct DE {
+    /// The location of the 'do_return'.
+    SourceLocation Location;
+
+    /// The scope immediately outside the do-expression, used to distinguish
+    /// body locals from enclosing declarations.
+    Scope *OuterScope;
+  };
+
   union {
     /// When Kind == EK_Variable, EK_Member, EK_Binding, or
     /// EK_TemplateParameter, the variable, binding, or template parameter.
@@ -221,6 +238,10 @@ private:
     TypeSourceInfo *TypeInfo;
 
     struct LN LocAndNRVO;
+
+    /// When Kind == EK_DoExprResult, the 'do_return' location and the scope
+    /// outside the do-expression.
+    struct DE DoExprResult;
 
     /// When Kind == EK_Base, the base specifier that provides the
     /// base class. The integer specifies whether the base is an inherited
@@ -330,6 +351,16 @@ public:
   static InitializedEntity InitializeStmtExprResult(SourceLocation ReturnLoc,
                                             QualType Type) {
     return InitializedEntity(EK_StmtExprResult, ReturnLoc, Type);
+  }
+
+  static InitializedEntity InitializeDoExprResult(SourceLocation DoReturnLoc,
+                                                  QualType Type,
+                                                  Scope *OuterScope) {
+    InitializedEntity Result;
+    Result.Kind = EK_DoExprResult;
+    Result.Type = Type;
+    Result.DoExprResult = {DoReturnLoc, OuterScope};
+    return Result;
   }
 
   static InitializedEntity InitializeBlock(SourceLocation BlockVarLoc,
@@ -563,6 +594,16 @@ public:
 
   /// Determine the location of the 'throw' keyword when initializing
   /// an exception object.
+  SourceLocation getDoExprResultLoc() const {
+    assert(getKind() == EK_DoExprResult && "Not a do-expression result!");
+    return DoExprResult.Location;
+  }
+
+  Scope *getDoExprOuterScope() const {
+    assert(getKind() == EK_DoExprResult && "Not a do-expression result!");
+    return DoExprResult.OuterScope;
+  }
+
   SourceLocation getThrowLoc() const {
     assert(getKind() == EK_Exception && "No 'throw' location!");
     return LocAndNRVO.Location;

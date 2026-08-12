@@ -14,6 +14,7 @@
 #include "clang/Analysis/Analyses/LifetimeSafety/LifetimeAnnotations.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Sema/Initialization.h"
+#include "clang/Sema/Scope.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/PointerIntPair.h"
 
@@ -117,6 +118,12 @@ getEntityLifetime(const InitializedEntity *Entity,
     //   -- The lifetime of a temporary bound to the returned value in a
     //      function return statement is not extended; the temporary is
     //      destroyed at the end of the full-expression in the return statement.
+    return {nullptr, LK_Return};
+
+  case InitializedEntity::EK_DoExprResult:
+    // A do-expression has return-like lifetime semantics for objects created
+    // inside it. The check separately exempts declarations outside the
+    // do-expression's scope boundary (see checkExprLifetimeImpl).
     return {nullptr, LK_Return};
 
   case InitializedEntity::EK_StmtExprResult:
@@ -1182,6 +1189,34 @@ checkExprLifetimeImpl(Sema &SemaRef, const InitializedEntity *InitEntity,
   // functions to a dedicated class.
   auto TemporaryVisitor = [&](const IndirectLocalPath &Path, Local L,
                               ReferenceKind RK) -> bool {
+    // P2806: for a do-expression result, declarations OUTSIDE the
+    // do-expression are not "stack memory being returned": they outlive the
+    // do-expression itself, and any dangle through them is diagnosed where
+    // the completed do-expression is consumed (via the DoExprClass cases in
+    // the visitors above). Only body locals and body temporaries get the
+    // return-like diagnostics here.
+    if (InitEntity &&
+        InitEntity->getKind() == InitializedEntity::EK_DoExprResult) {
+      auto IsOutsideDoExpr = [&](const Decl *D) {
+        if (!D)
+          return false;
+        Scope *Outer = InitEntity->getDoExprOuterScope();
+        for (Scope *S = SemaRef.getCurScope(); S && S != Outer;
+             S = S->getParent())
+          if (S->isDeclScope(D))
+            return false;
+        return true;
+      };
+
+      if (const auto *DRE = dyn_cast<DeclRefExpr>(L);
+          DRE && IsOutsideDoExpr(DRE->getDecl()))
+        return false;
+      for (const IndirectLocalPathEntry &Entry : Path)
+        if (Entry.Kind == IndirectLocalPathEntry::VarInit &&
+            IsOutsideDoExpr(Entry.D))
+          return false;
+    }
+
     SourceRange DiagRange = nextPathEntryRange(Path, 0, L);
     SourceLocation DiagLoc = DiagRange.getBegin();
 

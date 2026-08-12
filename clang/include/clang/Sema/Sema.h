@@ -7865,6 +7865,10 @@ public:
     /// function-like DeclContext for declarations in a namespace-scope
     /// do-expression body.
     DeclContext *SavedContext = nullptr;
+    /// Scope immediately outside the do-expression, used by lifetime analysis
+    /// to distinguish body locals from references to enclosing declarations
+    /// in a yielded result.
+    Scope *OuterScope = nullptr;
   };
 
   /// Stack of currently-open do-expressions.

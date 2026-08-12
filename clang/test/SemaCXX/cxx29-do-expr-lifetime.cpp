@@ -69,13 +69,27 @@ void lvalue_binding_works() {
 void temp_local_workaround() {
   // The prvalue→reference dangle can be avoided by stashing in a local
   // declared OUTSIDE the do-expression body — the local outlives the
-  // do-expression and the reference binds normally.
-  // (This case currently produces a -Wreturn-stack-address false positive
-  // that we accept as part of treating do_return like a function return;
-  // suppress it locally.)
+  // do-expression and the reference binds normally. No diagnostic: the
+  // do-expression's lifetime boundary is the do-expression itself, not the
+  // enclosing function, so yielding a reference to an enclosing local is
+  // fine here (and checked at the consumer if it escapes further).
   T outer{5};
-  const T &r = do -> const T & { do_return outer; }; // expected-warning {{reference to stack memory associated with local variable 'outer' returned}}
+  const T &r = do -> const T & { do_return outer; };
   (void)r;
+}
+
+const T &outer_local_escaping_function_dangles() {
+  // But the deferred check still fires where the completed do-expression
+  // escapes the function.
+  T outer{5};
+  return do -> const T & { do_return outer; }; // expected-warning {{reference to stack memory associated with local variable 'outer' returned}}
+}
+
+const T &outer_local_escaping_through_ref_dangles() {
+  T outer{5};
+  const T &r = do -> const T & { do_return outer; };
+  return r; // expected-warning {{reference to stack memory associated with local variable 'outer' returned}}
+  // expected-note@-2 {{binding reference variable 'r' here}}
 }
 
 // An init-capture is a variable whose lifetime extends to the end of the

@@ -72,7 +72,7 @@ namespace explicit_type_void_with_value {
   // 'do_return value;' is rejected when the explicit type is void.
   void bad() {
     (void)(do -> void {
-      do_return 1; // expected-error {{cannot initialize return object of type 'void' with an rvalue of type 'int'}}
+      do_return 1; // expected-error {{cannot initialize do-expression result of type 'void' with an rvalue of type 'int'}}
     });
   }
 }
@@ -117,7 +117,7 @@ namespace incompat_with_explicit_type {
   struct S {};
   int bad() {
     return do -> int {
-      do_return S{}; // expected-error {{no viable conversion from returned value of type 'S' to function return type 'int'}}
+      do_return S{}; // expected-error {{no viable conversion from 'S' to 'int'}}
       do_return 0;   // suppress fall-off-end
     };
   }

@@ -197,6 +197,7 @@ void Sema::ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
   Entry.HasDependentDoReturn = false;
   Entry.TemplateDepth =
       TemplateDepth == ~0U ? getTemplateDepth(getCurScope()) : TemplateDepth;
+  Entry.OuterScope = getCurScope();
   // PushCompoundScope (called by ParseCompoundStatementBody) asserts that
   // there is a current function scope. At namespace scope (e.g. a constexpr
   // variable initializer) there is none, so push a synthetic one and remember
@@ -556,9 +557,12 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   // result types, this triggers the same lifetime checks as a function
   // returning a reference (so e.g. `do_return prvalue();` for a
   // reference-typed do-expression diagnoses the same dangling reference
-  // that the equivalent IIFE would).
-  InitializedEntity InitEntity =
-      InitializedEntity::InitializeResult(DoReturnLoc, ResultType);
+  // that the equivalent IIFE would) — except that declarations OUTSIDE the
+  // do-expression are not "stack memory being returned": they outlive the
+  // do-expression, and any dangle through them is diagnosed where the
+  // completed do-expression is consumed.
+  InitializedEntity InitEntity = InitializedEntity::InitializeDoExprResult(
+      DoReturnLoc, ResultType, Entry.OuterScope);
   ExprResult Init =
       PerformMoveOrCopyInitialization(InitEntity, NRInfo, Operand);
   if (Init.isInvalid())
