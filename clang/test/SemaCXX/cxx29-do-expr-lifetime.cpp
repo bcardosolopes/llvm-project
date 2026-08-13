@@ -136,3 +136,22 @@ void init_capture_to_init_capture_ok() {
   (void)v;
   (void)w;
 }
+
+struct Holder {
+  int *pointer;
+};
+
+Holder aggregate_result_retains_local_address() {
+  int local;
+  return do -> Holder {
+    do_return Holder{&local}; // expected-warning {{address of stack memory associated with local variable 'local' returned}}
+  };
+}
+
+void aggregate_result_consumed_locally_ok() {
+  // Consumed within the function: `local` is still alive wherever the
+  // Holder is used, so no return-like diagnostic.
+  int local;
+  Holder h = do -> Holder { do_return Holder{&local}; };
+  (void)h;
+}

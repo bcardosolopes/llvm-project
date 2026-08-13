@@ -253,6 +253,27 @@ static bool isVarOnPath(const IndirectLocalPath &Path, VarDecl *VD) {
   return false;
 }
 
+/// Visit the `do_return` operands belonging to one do-expression, excluding
+/// nested do-expressions, lambdas, and blocks (those constructs manage their
+/// own results).
+static void forEachDoExprResult(const Stmt *S,
+                                llvm::function_ref<void(Expr *)> VisitResult,
+                                bool IsRoot = true) {
+  if (!S)
+    return;
+  if (const auto *DR = dyn_cast<DoReturnStmt>(S)) {
+    if (Expr *Op = DR->getOperand())
+      VisitResult(Op);
+    return;
+  }
+  if (!IsRoot && isa<DoExpr>(S))
+    return;
+  if (isa<LambdaExpr, BlockExpr>(S))
+    return;
+  for (const Stmt *Child : S->children())
+    forEachDoExprResult(Child, VisitResult, /*IsRoot=*/false);
+}
+
 static bool pathContainsInit(const IndirectLocalPath &Path) {
   return llvm::any_of(Path, [=](IndirectLocalPathEntry E) {
     return E.Kind == IndirectLocalPathEntry::DefaultInit ||
@@ -544,24 +565,6 @@ static void visitFunctionCallArguments(IndirectLocalPath &Path, Expr *Call,
 
 /// Visit the locals that would be reachable through a reference bound to the
 /// glvalue expression \c Init.
-/// Collect the operands of the `do_return` statements that belong to a given
-/// do-expression body. Operands inside nested do-expressions, lambdas, or
-/// blocks are excluded, since those constructs manage their own results.
-static void collectDoReturnOperands(const Stmt *S,
-                                    llvm::SmallVectorImpl<Expr *> &Out) {
-  if (!S)
-    return;
-  if (const auto *DR = dyn_cast<DoReturnStmt>(S)) {
-    if (Expr *Op = DR->getOperand())
-      Out.push_back(Op);
-    return;
-  }
-  if (isa<DoExpr, LambdaExpr, BlockExpr>(S))
-    return;
-  for (const Stmt *Child : S->children())
-    collectDoReturnOperands(Child, Out);
-}
-
 static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
                                                   Expr *Init, ReferenceKind RK,
                                                   LocalVisitor Visit) {
@@ -691,21 +694,16 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
     break;
   }
 
-  case Stmt::DoExprClass: {
+  case Stmt::DoExprClass:
     // A do-expression yielding a reference (glvalue) returns whatever its
     // `do_return` operands designate. Walk into each operand so the analysis
     // can see references into the do-expression's init-captures, whose lifetime
-    // extends to the end of the enclosing full-expression. When the
-    // do-expression's result is instead consumed by value within the
-    // full-expression, the reference-binding walk never reaches this point, so
-    // no diagnostic is produced.
-    auto *DE = cast<DoExpr>(Init);
-    llvm::SmallVector<Expr *, 4> Operands;
-    collectDoReturnOperands(DE->getBody(), Operands);
-    for (Expr *Op : Operands)
-      visitLocalsRetainedByReferenceBinding(Path, Op, RK, Visit);
+    // extends to the end of the enclosing full-expression.
+    forEachDoExprResult(Init, [&](Expr *Result) {
+      if (!Result->getType()->isVoidType())
+        visitLocalsRetainedByReferenceBinding(Path, Result, RK, Visit);
+    });
     break;
-  }
 
     // FIXME: Visit the left-hand side of an -> or ->*.
 
@@ -966,6 +964,17 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
       visitLocalsRetainedByInitializer(Path, C->getFalseExpr(), Visit, true);
     break;
   }
+
+  case Stmt::DoExprClass:
+    // A do-expression consumed by value yields whatever its `do_return`
+    // operands produce; walk into each so the analysis can see pointers or
+    // references retained inside an aggregate result (e.g. `do_return
+    // Holder{&local};`).
+    forEachDoExprResult(Init, [&](Expr *Result) {
+      visitLocalsRetainedByInitializer(Path, Result, Visit,
+                                       /*RevisitSubinits=*/true);
+    });
+    break;
 
   case Stmt::BlockExprClass:
     if (cast<BlockExpr>(Init)->getBlockDecl()->hasCaptures()) {
