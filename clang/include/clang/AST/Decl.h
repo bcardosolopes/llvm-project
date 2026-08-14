@@ -2438,6 +2438,24 @@ public:
   bool isTrivialForCall() const { return FunctionDeclBits.IsTrivialForCall; }
   void setTrivialForCall(bool IT) { FunctionDeclBits.IsTrivialForCall = IT; }
 
+  /// Name of the implicit function-like DeclContext synthesized for a
+  /// do-expression body that is parsed where the current context cannot hold
+  /// block-scope declarations: a default member initializer, a default
+  /// argument, namespace scope. See Sema::ActOnStartDoExpr.
+  static constexpr llvm::StringLiteral DoExprBodyName = "__do_expr_body";
+
+  /// Whether this is that context. A do-expression introduces block scope but
+  /// *not* function scope, so this declaration is a storage detail with no
+  /// counterpart in the language: for any question of the form "which
+  /// function or class am I in?" it must be looked through, in the same way a
+  /// RequiresExprBodyDecl is. It is never added to a lookup table, and
+  /// `isImplicit` means user code cannot declare something that answers to
+  /// this name.
+  bool isDoExprBody() const {
+    return isImplicit() && getDeclName().isIdentifier() &&
+           getName() == DoExprBodyName;
+  }
+
   /// Whether this function is defaulted. Valid for e.g.
   /// special member functions, defaulted comparisions (not methods!).
   bool isDefaulted() const { return FunctionDeclBits.IsDefaulted; }
@@ -5458,6 +5476,13 @@ bool hasArmZAState(const FunctionDecl *FD);
 
 /// Returns whether the given FunctionDecl has Arm ZT0 state.
 bool hasArmZT0State(const FunctionDecl *FD);
+
+/// Whether \p DC is the implicit DeclContext synthesized for a do-expression
+/// body. See FunctionDecl::isDoExprBody.
+inline bool isDoExprBodyContext(const DeclContext *DC) {
+  const auto *FD = dyn_cast_or_null<FunctionDecl>(DC);
+  return FD && FD->isDoExprBody();
+}
 
 } // namespace clang
 

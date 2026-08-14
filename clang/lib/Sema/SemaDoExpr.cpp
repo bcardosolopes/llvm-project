@@ -209,8 +209,8 @@ void Sema::ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
     QualType FnTy = Context.getFunctionNoProtoType(Context.VoidTy);
     auto *SyntheticFD =
         FunctionDecl::Create(Context, CurContext, DoLoc, DoLoc,
-                             DeclarationName(), FnTy, /*TInfo=*/nullptr,
-                             SC_None);
+                             &Context.Idents.get(FunctionDecl::DoExprBodyName),
+                             FnTy, /*TInfo=*/nullptr, SC_None);
     SyntheticFD->setImplicit();
     Entry.SavedContext = CurContext;
     CurContext = SyntheticFD;

@@ -3606,10 +3606,7 @@ static const DeclContext *skipExpansionStmts(const DeclContext *DC) {
 }
 
 static bool isSyntheticDoExprDeclContext(const DeclContext *DC) {
-  const auto *FD = dyn_cast<FunctionDecl>(skipExpansionStmts(DC));
-  return FD && FD->isImplicit() && !FD->getIdentifier() &&
-         FD->getLexicalDeclContext() &&
-         FD->getLexicalDeclContext()->isFileContext();
+  return isDoExprBodyContext(skipExpansionStmts(DC));
 }
 
 /// Try to evaluate the initializer for a variable declaration.
