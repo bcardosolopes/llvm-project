@@ -7959,10 +7959,18 @@ public:
     /// to distinguish body locals from references to enclosing declarations
     /// in a yielded result.
     Scope *OuterScope = nullptr;
+    /// True if the body names a parameter pack that is expanded by an
+    /// expansion enclosing the do-expression, as a lambda body may.
+    bool ContainsUnexpandedParameterPack = false;
   };
 
   /// Stack of currently-open do-expressions.
   llvm::SmallVector<DoExprStackEntry, 4> DoExprStack;
+
+  /// The do-expression, if any, that should carry an unexpanded parameter pack
+  /// named at the current position out to the enclosing expansion.
+  DoExprStackEntry *
+  getDoExprDeferringPackExpansion(sema::CapturingScopeInfo *CSI);
 
   bool isInSyntheticDoExprFunctionScope() const {
     return !DoExprStack.empty() &&

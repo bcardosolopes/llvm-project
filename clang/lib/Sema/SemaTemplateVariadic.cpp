@@ -351,6 +351,20 @@ class CollectUnexpandedParameterPacksVisitor
     /// including all the places where we normally wouldn't look. Within a
     /// lambda, we don't propagate the 'contains unexpanded parameter pack' bit
     /// outside an expression.
+    /// A do-expression carries the 'contains unexpanded parameter pack' bit
+    /// the way a lambda does, and like a lambda its body has to be searched in
+    /// full once the bit is set: the pack can be named by any statement, not
+    /// only by a subexpression that carries the bit itself. Without this, the
+    /// pruning in TraverseStmt stops at the body's first non-expression
+    /// statement and the expansion finds nothing to expand.
+    bool TraverseDoExpr(DoExpr *E) override {
+      if (!E->containsUnexpandedParameterPack())
+        return true;
+
+      SaveAndRestore _(InLambdaOrBlock, true);
+      return DynamicRecursiveASTVisitor::TraverseDoExpr(E);
+    }
+
     bool TraverseLambdaExpr(LambdaExpr *Lambda) override {
       // The ContainsUnexpandedParameterPack bit on a lambda is always correct,
       // even if it's contained within another lambda.
@@ -446,7 +460,54 @@ bool Sema::isUnexpandedParameterPackPermitted() {
   for (auto *SI : FunctionScopes)
     if (isa<sema::LambdaScopeInfo>(SI))
       return true;
-  return false;
+  // A do-expression body defers to the expansion enclosing the do-expression,
+  // exactly as a lambda body does.
+  return !DoExprStack.empty();
+}
+
+/// If the construct being diagnosed sits in the body of a do-expression, and
+/// that body is the innermost thing that could carry the pack outwards, return
+/// the do-expression that should carry it.
+///
+/// P2806 specifies a do-expression as an immediately-invoked lambda, so a pack
+/// named in its body belongs to whatever expansion encloses the do-expression,
+/// not to the body — `f(do { do_return pack * 2; }...)` expands the body once
+/// per element the same way `f([&] { return pack * 2; }()...)` does.
+///
+/// \p CSI is the innermost enclosing lambda or block, if any. A do-expression
+/// only defers when it is nested *inside* that lambda; otherwise the lambda is
+/// innermost and owns the deferral.
+Sema::DoExprStackEntry *
+Sema::getDoExprDeferringPackExpansion(sema::CapturingScopeInfo *CSI) {
+  if (DoExprStack.empty())
+    return nullptr;
+
+  DoExprStackEntry &Top = DoExprStack.back();
+
+  // Find where the enclosing lambda sits in the function-scope stack; the
+  // do-expression only wins if it was entered afterwards.
+  if (CSI) {
+    unsigned LambdaDepth = 0;
+    for (unsigned N = FunctionScopes.size(); N; --N) {
+      if (FunctionScopes[N - 1] == CSI) {
+        LambdaDepth = N;
+        break;
+      }
+    }
+    if (Top.FunctionScopeDepth < LambdaDepth)
+      return nullptr;
+  }
+
+  // A statement-expression cannot be duplicated (it may contain labels), so a
+  // pack cannot be expanded across one even by way of a do-expression. This
+  // mirrors the check the lambda path makes below.
+  for (unsigned N = FunctionScopes.size(); N >= Top.FunctionScopeDepth && N;
+       --N)
+    if (llvm::any_of(FunctionScopes[N - 1]->CompoundScopes,
+                     [](sema::CompoundScopeInfo &CS) { return CS.IsStmtExpr; }))
+      return nullptr;
+
+  return &Top;
 }
 
 /// Diagnose all of the unexpanded parameter packs in the given
@@ -464,7 +525,8 @@ Sema::DiagnoseUnexpandedParameterPacks(SourceLocation Loc,
   // FIXME: Store 'Unexpanded' on the lambda so we don't need to recompute it
   // later.
   SmallVector<UnexpandedParameterPack, 4> ParamPackReferences;
-  if (sema::CapturingScopeInfo *CSI = getEnclosingLambdaOrBlock()) {
+  sema::CapturingScopeInfo *CSI = getEnclosingLambdaOrBlock();
+  if (CSI) {
     for (auto &Pack : Unexpanded) {
       auto DeclaresThisPack = [&](NamedDecl *LocalPack) {
         if (auto *TTPT = Pack.first.dyn_cast<const TemplateTypeParmType *>()) {
@@ -476,7 +538,24 @@ Sema::DiagnoseUnexpandedParameterPacks(SourceLocation Loc,
       if (llvm::any_of(CSI->LocalPacks, DeclaresThisPack))
         ParamPackReferences.push_back(Pack);
     }
+  }
 
+  // If a do-expression body is the innermost construct that can carry these
+  // packs out to the enclosing expansion, it does — see
+  // getDoExprDeferringPackExpansion. An enclosing lambda, if there is one, has
+  // to know as well, because the expansion is outside it too. Packs the lambda
+  // itself declares are excluded: those have no enclosing expansion to reach,
+  // and the lambda path below diagnoses them.
+  if (ParamPackReferences.empty()) {
+    if (DoExprStackEntry *Entry = getDoExprDeferringPackExpansion(CSI)) {
+      Entry->ContainsUnexpandedParameterPack = true;
+      if (CSI)
+        CSI->ContainsUnexpandedParameterPack = true;
+      return false;
+    }
+  }
+
+  if (CSI) {
     if (ParamPackReferences.empty()) {
       // Construct in lambda only references packs declared outside the lambda.
       // That's OK for now, but the lambda itself is considered to contain an

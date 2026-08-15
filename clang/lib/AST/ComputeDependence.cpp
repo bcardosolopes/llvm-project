@@ -199,15 +199,23 @@ ExprDependence clang::computeDependence(StmtExpr *E, unsigned TemplateDepth) {
   return D & ~ExprDependence::UnexpandedPack;
 }
 
-ExprDependence clang::computeDependence(DoExpr *E, unsigned TemplateDepth) {
+ExprDependence clang::computeDependence(DoExpr *E, unsigned TemplateDepth,
+                                        bool ContainsUnexpandedParameterPack) {
   auto D = toExprDependenceForImpliedType(E->getType()->getDependence());
   // Like a statement-expression, treat a do-expression in a dependent context
   // as always value- and instantiation-dependent: the body may contain
   // do_return statements whose operand depends on enclosing template params.
   if (TemplateDepth)
     D |= ExprDependence::ValueInstantiation;
-  // A param pack cannot be expanded over do-expression boundaries.
-  return D & ~ExprDependence::UnexpandedPack;
+  // Unlike a statement-expression, a pack *can* be expanded over a
+  // do-expression boundary: P2806 gives a do-expression the semantics of an
+  // immediately-invoked lambda, and a lambda propagates the bit out to the
+  // enclosing expansion in exactly this way. The body is duplicated once per
+  // element, which is what a lambda body does too.
+  D &= ~ExprDependence::UnexpandedPack;
+  if (ContainsUnexpandedParameterPack)
+    D |= ExprDependence::UnexpandedPack;
+  return D;
 }
 
 ExprDependence clang::computeDependence(ConvertVectorExpr *E) {

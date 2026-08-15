@@ -15222,6 +15222,14 @@ ExprResult TreeTransform<Derived>::TransformDoExpr(DoExpr *E) {
   unsigned OldDepth = E->getTemplateDepth();
   unsigned NewDepth = getDerived().TransformTemplateDepth(OldDepth);
 
+  // The body gets its own instantiation scope, as a lambda body does. A
+  // do-expression in a pack-expansion pattern is transformed once per element,
+  // and each of those transformations produces its own copy of every
+  // declaration in the body; without a scope of their own they would collide
+  // in the enclosing function's scope. Combined with the outer scope, so the
+  // body can still name the enclosing function's locals.
+  LocalInstantiationScope BodyScope(SemaRef, /*CombineWithOuterScope=*/true);
+
   SemaRef.ActOnStartDoExpr(E->getDoLoc(), QualType(), NewDepth);
   if (ExplicitTSI)
     SemaRef.ActOnDoExprExplicitType(ExplicitTSI);
