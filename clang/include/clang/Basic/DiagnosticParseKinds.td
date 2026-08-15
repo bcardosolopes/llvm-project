@@ -225,6 +225,9 @@ def err_c2y_labeled_break_continue : Error<
 def err_do_expr_requires_cxx29 : Error<
   "do-expressions are only available in C++29; "
   "use '-std=c++2d' to enable them">;
+def note_do_expr_init_hoist_not_a_capture : Note<
+  "'do [' introduces an init-hoist, not a lambda capture: it declares a new "
+  "variable and always requires an initializer">;
 
 // Generic errors.
 def err_expected_expression : Error<"expected expression">;
