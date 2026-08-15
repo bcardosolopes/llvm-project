@@ -21,6 +21,7 @@
 #include "clang/Analysis/Analyses/ReachableCode.h"
 #include "clang/Analysis/CFG.h"
 #include "clang/Basic/DiagnosticSema.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/BitVector.h"
@@ -29,6 +30,32 @@ using namespace clang;
 
 static bool doExprHasDeducedResultType(const Sema::DoExprStackEntry &Entry) {
   return !Entry.TypeIsExplicit || Entry.ExplicitType->getContainedAutoType();
+}
+
+/// Does \p E name a variable that belongs to the body of the do-expression
+/// described by \p Entry (or to a block scope nested inside it)?
+///
+/// [expr.prim.id.unqual]p15.4, as added by P2806, makes that the condition for
+/// a `do_return` operand to be move-eligible. A variable of the *enclosing*
+/// function fails it: the do-expression ends but the variable does not, so it
+/// can still be read afterwards and must be copied.
+///
+/// The test compares source positions rather than walking the parser's Scope
+/// chain because this also runs during template instantiation, where the body
+/// has no Scope but the instantiated declarations keep the pattern's
+/// locations. Expansion locations are used so that a body local introduced by
+/// a macro is still recognized as a body local.
+static bool namesDoExprBodyLocal(const Expr *E,
+                                 const Sema::DoExprStackEntry &Entry,
+                                 const SourceManager &SM) {
+  const auto *DR = dyn_cast<DeclRefExpr>(E->IgnoreParens());
+  if (!DR)
+    return false;
+  const auto *VD = dyn_cast<VarDecl>(DR->getDecl());
+  if (!VD || !VD->hasLocalStorage())
+    return false;
+  return SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Entry.DoLoc),
+                                      SM.getExpansionLoc(VD->getLocation()));
 }
 
 static bool isParsingExpansionStmtPattern(Sema &S) {
@@ -497,8 +524,13 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
 
   // Determine move-eligibility BEFORE applying any conversions, so that a
   // named local variable in `do_return r;` gets the same implicit-move
-  // treatment as in `return r;` (C++20 [class.copy.elision]p3).
-  NamedReturnInfo NRInfo = getNamedReturnInfo(Operand);
+  // treatment as in `return r;` (C++20 [class.copy.elision]p3) -- but only for
+  // a variable of the do-expression body itself
+  // ([expr.prim.id.unqual]p15.4). Anything declared outside the body outlives
+  // the do-expression and stays usable after it, so it is copied.
+  NamedReturnInfo NRInfo;
+  if (namesDoExprBodyLocal(Operand, Entry, getSourceManager()))
+    NRInfo = getNamedReturnInfo(Operand);
 
   // Compute the result type. For deduced types, this is the operand's value
   // type after lvalue-to-rvalue/array-to-pointer/function-to-pointer
