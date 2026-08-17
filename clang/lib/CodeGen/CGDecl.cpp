@@ -1524,6 +1524,17 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
 
   bool NRVO = getLangOpts().ElideConstructors && D.isNRVOVariable();
 
+  // A do-expression's NRVO candidate is built in the do-expression's result
+  // slot instead of the function's return slot. Sema guarantees the two never
+  // claim the same variable.
+  Address NRVOSlot = ReturnValue;
+  if (getLangOpts().ElideConstructors && !DoExprStack.empty() &&
+      DoExprStack.back().NRVOCandidate == &D) {
+    assert(!NRVO && "variable claimed by two return slots");
+    NRVO = true;
+    NRVOSlot = DoExprStack.back().Slot;
+  }
+
   if (getLangOpts().OpenMP && OpenMPLocalAddr.isValid()) {
     address = OpenMPLocalAddr;
     AllocaAddr = OpenMPLocalAddr;
@@ -1575,8 +1586,8 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
       // return slot, so that we can elide the copy when returning this
       // variable (C++0x [class.copy]p34).
       AllocaAddr =
-          RawAddress(ReturnValue.emitRawPointer(*this),
-                     ReturnValue.getElementType(), ReturnValue.getAlignment());
+          RawAddress(NRVOSlot.emitRawPointer(*this), NRVOSlot.getElementType(),
+                     NRVOSlot.getAlignment());
       address = MaybeCastStackAddressSpace(AllocaAddr, Ty.getAddressSpace());
 
       if (const auto *RD = Ty->getAsRecordDecl()) {

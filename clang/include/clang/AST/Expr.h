@@ -4706,6 +4706,10 @@ class DoExpr : public Expr {
   SourceLocation LBraceLoc;
   SourceLocation RBraceLoc;
   unsigned TemplateDepth;
+  /// The body local, if any, that every value-yielding `do_return` in the
+  /// body names and that can therefore be constructed directly into the
+  /// do-expression's result slot.
+  const VarDecl *NRVOCandidate = nullptr;
 
 public:
   DoExpr(Stmt *InitStmt, CompoundStmt *Body, QualType T, ExprValueKind VK,
@@ -4745,6 +4749,11 @@ public:
 
   unsigned getTemplateDepth() const { return TemplateDepth; }
   void setTemplateDepth(unsigned D) { TemplateDepth = D; }
+
+  /// Retrieve the variable that this do-expression constructs directly into
+  /// its result slot, if the named return value optimization applies.
+  const VarDecl *getNRVOCandidate() const { return NRVOCandidate; }
+  void setNRVOCandidate(const VarDecl *VD) { NRVOCandidate = VD; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY { return DoLoc; }
   SourceLocation getEndLoc() const LLVM_READONLY { return RBraceLoc; }

@@ -1679,6 +1679,7 @@ void ASTStmtReader::VisitDoExpr(DoExpr *E) {
   bool HasExplicitType = Record.readInt() != 0;
   E->setExplicitType(HasExplicitType ? Record.readTypeSourceInfo() : nullptr);
   E->setTemplateDepth(Record.readInt());
+  E->setNRVOCandidate(readDeclAs<VarDecl>());
 }
 
 void ASTStmtReader::VisitChooseExpr(ChooseExpr *E) {
