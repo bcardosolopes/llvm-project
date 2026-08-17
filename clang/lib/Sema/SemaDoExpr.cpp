@@ -562,7 +562,10 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   // a variable of the do-expression body itself
   // ([expr.prim.id.unqual]p15.4). Anything declared outside the body outlives
   // the do-expression and stays usable after it, so it is copied.
-  NamedReturnInfo NRInfo;
+  // NamedReturnInfo has no default member initializers -- every other user
+  // assigns it from getNamedReturnInfo unconditionally -- so value-initialize
+  // it here, where the operand may not be a body local at all.
+  NamedReturnInfo NRInfo = {};
   if (namesDoExprBodyLocal(Operand, Entry, getSourceManager()))
     NRInfo = getNamedReturnInfo(Operand);
 
