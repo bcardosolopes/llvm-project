@@ -3932,7 +3932,8 @@ PersistentAllocDecl::PersistentAllocDecl(const ASTContext &C, DeclContext *DC,
                                          QualType T, const VarDecl *OwningVar,
                                          unsigned AllocIndex, bool IsImmutable,
                                          APValue Val)
-    : ValueDecl(Decl::PersistentAlloc, DC, SourceLocation(),
+    : ValueDecl(Decl::PersistentAlloc, DC,
+                OwningVar ? OwningVar->getLocation() : SourceLocation(),
                 DeclarationName(), T),
       OwningVar(OwningVar), AllocIndex(AllocIndex), IsImmutable(IsImmutable),
       Value(std::move(Val)) {

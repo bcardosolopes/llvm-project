@@ -2394,6 +2394,11 @@ static void NoteLValueLocation(EvalInfo &Info, APValue::LValueBase Base) {
 enum class CheckEvaluationResultKind {
   ConstantExpression,
   FullyInitialized,
+  // P4341: like ConstantExpression, but uninitialized subobjects are
+  // permitted. Used for persisted allocations, whose image may legitimately
+  // contain raw storage (e.g. a vector's buffer between size() and
+  // capacity()); reads of such bytes are caught at read time instead.
+  ConstantExpressionAllowUninit,
 };
 
 /// Materialized temporaries that we've already checked to determine if they're
@@ -2706,6 +2711,8 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
                                   const FieldDecl *SubobjectDecl,
                                   CheckedTemporaries &CheckedTemps) {
   if (!Value.hasValue()) {
+    if (CERK == CheckEvaluationResultKind::ConstantExpressionAllowUninit)
+      return true;
     if (SubobjectDecl) {
       Info.FFDiag(DiagLoc, diag::note_constexpr_uninitialized)
           << /*(name)*/ 1 << SubobjectDecl;
@@ -2776,7 +2783,7 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
   }
 
   if (Value.isLValue() &&
-      CERK == CheckEvaluationResultKind::ConstantExpression) {
+      CERK != CheckEvaluationResultKind::FullyInitialized) {
     LValue LVal;
     LVal.setFrom(Info.Ctx, Value);
     return CheckLValueConstantExpression(Info, DiagLoc, Type, LVal, Kind,
@@ -2784,7 +2791,7 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
   }
 
   if (Value.isMemberPointer() &&
-      CERK == CheckEvaluationResultKind::ConstantExpression)
+      CERK != CheckEvaluationResultKind::FullyInitialized)
     return CheckMemberPointerConstantExpression(Info, DiagLoc, Type, Value, Kind);
 
   // Everything else is fine.
@@ -23493,10 +23500,18 @@ bool Expr::EvaluateAsInitializer(APValue &Value, const ASTContext &Ctx,
     // pointers, no pointers into transient allocations, etc.). A stale
     // DynamicAllocLValue that survived rebasing designates a deleted
     // allocation and is diagnosed here.
+    // Uninitialized subobjects are permitted in the persisted image: raw
+    // storage (e.g. a vector buffer's tail between size() and capacity())
+    // is a normal state for an allocation, and reading it is diagnosed at
+    // read time like any other uninitialized read.
     for (auto &Entry : Rebase) {
       PersistentAllocDecl *PAD = Entry.second;
-      if (!CheckConstantExpression(Info, DeclLoc, PAD->getType(),
-                                   PAD->getValue(), ConstantExprKind::Normal))
+      CheckedTemporaries CheckedTemps;
+      if (!CheckEvaluationResult(
+              CheckEvaluationResultKind::ConstantExpressionAllowUninit, Info,
+              DeclLoc, PAD->getType(), PAD->getValue(),
+              ConstantExprKind::Normal,
+              /*SubobjectDecl=*/nullptr, CheckedTemps))
         return false;
     }
 

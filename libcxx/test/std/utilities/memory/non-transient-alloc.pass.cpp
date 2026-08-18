@@ -67,6 +67,28 @@ static_assert(vu.size() == 2);            // buffer readable
 static_assert(vu[0] != nullptr);          // the unique_ptr objects readable
 void scribble() { *vu[1] = 20; }          // pointees runtime-mutable
 
+// ==== Spare capacity: vectors whose buffer has uninitialized tail bytes ====
+// A vector built by push_back (or after reserve()) typically has
+// capacity() > size(). The bytes past size() are raw storage; they must not
+// prevent the allocation from persisting.
+
+constexpr std::vector<int> grown = [] {
+  std::vector<int> r;
+  for (int i = 1; i <= 3; ++i)
+    r.push_back(i);   // geometric growth: capacity likely 4
+  return r;
+}();
+static_assert(grown.size() == 3);
+static_assert(grown[0] == 1 && grown[2] == 3);
+
+constexpr std::vector<int> reserved = [] {
+  std::vector<int> r = {1, 2, 3};
+  r.reserve(8);
+  return r;
+}();
+static_assert(reserved.size() == 3 && reserved.capacity() == 8);
+static_assert(reserved.back() == 3);
+
 int main(int, char**) {
   // Runtime reads of everything, including the runtime-mutable parts.
   assert(*p3 == 3);
@@ -77,5 +99,7 @@ int main(int, char**) {
   assert(*vu[0] == 1);
   scribble();
   assert(*vu[1] == 20);
+  assert(grown.size() == 3 && grown[1] == 2);
+  assert(reserved.capacity() == 8 && reserved[0] == 1);
   return 0;
 }

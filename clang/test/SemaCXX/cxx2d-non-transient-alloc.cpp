@@ -133,3 +133,36 @@ static_assert(*sm.p == 9); // #read-sm
 // cxx26-error@#read-sm {{static assertion expression is not an integral constant expression}}
 // cxx26-note@#read-sm {{initializer of 'sm' is not a constant expression}}
 // cxx26-note@#decl-sm {{declared here}}
+
+// ==== Partially-initialized allocations (vector capacity > size) ====
+// A persisted allocation may contain raw storage — e.g. a vector's buffer
+// between size() and capacity() after reserve() or geometric growth. Such
+// uninitialized bytes are permitted in the persisted image; reading them is
+// diagnosed at read time.
+#if __cplusplus > 202400L
+struct MiniVec {
+  int* p;
+  int sz;
+  int cap;
+  constexpr MiniVec(int n, int c) : p(new int[c]), sz(n), cap(c) { // #minivec-alloc
+    for (int i = 0; i < n; ++i)
+      p[i] = i + 1;
+    // Elements [n, c) are raw storage, deliberately uninitialized.
+  }
+  MiniVec(const MiniVec&) = delete;
+  constexpr ~MiniVec() {
+    std::mark_immutable_if_constexpr(p);
+    delete[] p;
+  }
+};
+
+constexpr MiniVec mv(3, 5); // #decl-mv
+static_assert(mv.p[0] == 1 && mv.p[2] == 3);
+static_assert(mv.sz == 3 && mv.cap == 5);
+
+// Reading into the raw tail fails at read time, not at mv's declaration.
+constexpr int tail = mv.p[4]; // #read-tail
+// expected-error@#read-tail {{must be initialized by a constant expression}}
+// expected-note@#read-tail {{read of uninitialized object is not allowed in a constant expression}}
+// expected-note@#decl-mv {{declared here}}
+#endif
