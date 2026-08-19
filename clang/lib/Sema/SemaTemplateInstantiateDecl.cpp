@@ -1103,6 +1103,38 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
       continue;
     }
 
+    // P4341 v2: re-evaluate a dependent immutable_if_constexpr condition at
+    // instantiation; attach the attribute only when it is true.
+    if (const auto *IIC = dyn_cast<ImmutableIfConstexprAttr>(TmplAttr)) {
+      if (Expr *Cond = IIC->getCond(); Cond && Cond->isValueDependent()) {
+        EnterExpressionEvaluationContext ConstantEvaluated(
+            *this, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+        ExprResult Subst = SubstExpr(Cond, TemplateArgs);
+        if (Subst.isInvalid())
+          continue;
+        bool Value = false;
+        if (!Subst.get()->isValueDependent()) {
+          if (!Subst.get()->EvaluateAsBooleanCondition(Value, Context)) {
+            Diag(Subst.get()->getExprLoc(),
+                 diag::err_attribute_argument_type)
+                << *IIC << AANT_ArgumentIntegerConstant
+                << Subst.get()->getSourceRange();
+            continue;
+          }
+          if (!Value)
+            continue; // condition false: member does not bless
+          New->addAttr(new (Context) ImmutableIfConstexprAttr(
+              Context, *IIC, /*Cond=*/nullptr));
+          continue;
+        }
+        // Still dependent (nested template): keep the substituted condition.
+        New->addAttr(new (Context)
+                         ImmutableIfConstexprAttr(Context, *IIC, Subst.get()));
+        continue;
+      }
+      // Non-dependent (bare form): plain clone below handles it.
+    }
+
     if (const auto *DiagnoseIf = dyn_cast<DiagnoseIfAttr>(TmplAttr)) {
       instantiateDependentDiagnoseIfAttr(*this, TemplateArgs, DiagnoseIf, Tmpl,
                                          cast<FunctionDecl>(New));

@@ -458,6 +458,9 @@ KEYWORD(__metafunction              , KEYREFLECT)
 // do-expressions keyword.
 DOEXPR_KEYWORD(do_return)
 
+// P4341 v2: non-transient allocation blessing specifier (C++29).
+KEYWORD(immutable_if_constexpr      , KEYNTA)
+
 // Not a CXX20_KEYWORD because it is disabled by -fno-char8_t.
 KEYWORD(char8_t                     , CHAR8SUPPORT)
 

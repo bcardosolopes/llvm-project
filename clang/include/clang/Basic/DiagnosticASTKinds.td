@@ -393,23 +393,27 @@ def note_constexpr_nta_not_deallocated : Note<
   "allocation performed here would not be deallocated by the destruction "
   "of %0, so it cannot persist">;
 def note_constexpr_nta_mutable_read : Note<
-  "read of object in an allocation that is reachable as mutable from %0 "
-  "during its constant destruction; if the allocation is never mutated "
-  "after initialization, it can be marked with "
-  "'std::mark_immutable_if_constexpr'">;
+  "read of object in a mutable allocation persisted by %0 during its "
+  "constant destruction; if no runtime write ever occurs through the "
+  "members holding it, declare them 'immutable_if_constexpr'">;
+def note_constexpr_nta_conflicting_paths : Note<
+  "allocation persisted by %0 is declared immutable via "
+  "'immutable_if_constexpr' but is also reachable as mutable"
+  "%select{| through %2}1; declare that member 'immutable_if_constexpr' or "
+  "give it a const-qualified pointee type">;
 def note_constexpr_nta_dtor_failed : Note<
   "%0 cannot retain its allocations because its destruction is not a "
   "constant expression">;
 def note_constexpr_nta_not_static : Note<
-  "allocation performed here cannot persist: it was not marked immutable "
-  "with 'std::mark_immutable_if_constexpr' and %0 does not have static "
-  "storage duration">;
+  "allocation performed here cannot persist: it is mutable (not declared "
+  "'immutable_if_constexpr') and %0 does not have static storage "
+  "duration">;
 def note_constexpr_nta_template_arg_no_linkage : Note<
   "pointer into an allocation persisted by %0 is not usable as a constant "
   "template parameter because %0 %select{has no linkage|is thread-local}1">;
 def note_constexpr_persistent_alloc_unmarked_read : Note<
-  "read of object in a persistent allocation that was not marked immutable "
-  "with 'std::mark_immutable_if_constexpr'">;
+  "read of object in a persistent allocation that is not immutable (its "
+  "holders are not declared 'immutable_if_constexpr')">;
 def note_constexpr_persistent_alloc_modify : Note<
   "modification of an object in a persistent allocation that was marked "
   "immutable">;

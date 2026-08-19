@@ -10,24 +10,13 @@
 // A plain local variable's initialization is a runtime operation and does
 // not launder (P3496 would be the direction that relaxes this).
 
-namespace std {
-  template <class T>
-  constexpr void mark_immutable_if_constexpr(T* p) {
-    __builtin_mark_immutable_if_constexpr(
-        const_cast<void*>(static_cast<const void*>(p)));
-  }
-}
-
 // Minimal vector-like type owning a persistent allocation.
 struct IntVec {
-  int* p;
+  immutable_if_constexpr int* p;
   int n;
   constexpr IntVec(int a, int b, int c) : p(new int[3]{a, b, c}), n(3) {}
   IntVec(const IntVec&) = delete;
-  constexpr ~IntVec() {
-    std::mark_immutable_if_constexpr(p);
-    delete[] p;
-  }
+  constexpr ~IntVec() { delete[] p; }
   constexpr int operator[](int i) const { return p[i]; }
   constexpr int size() const { return n; }
   constexpr const int* data() const { return p; }

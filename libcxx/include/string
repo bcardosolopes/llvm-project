@@ -615,7 +615,6 @@ basic_string<char32_t> operator""s( const char32_t *str, size_t len );          
 #  include <__memory/allocator_traits.h>
 #  include <__memory/compressed_pair.h>
 #  include <__memory/construct_at.h>
-#  include <__memory/mark_immutable_if_constexpr.h>
 #  include <__memory/noexcept_move_assign_container.h>
 #  include <__memory/pointer_traits.h>
 #  include <__memory/swap_allocator.h>
@@ -799,7 +798,10 @@ private:
       _LIBCPP_ASSERT_INTERNAL(!__fits_in_sso(__alloc.count), "Long capacity should always be larger than the SSO");
     }
 
-    pointer __data_;
+    // P4341 v2: a string's long buffer is deep-const behind a constexpr
+    // variable; in short mode this union member is inactive and contributes
+    // no path.
+    _LIBCPP_IMMUTABLE_IF_CONSTEXPR pointer __data_;
     size_type __size_;
     size_type __cap_ : sizeof(size_type) * CHAR_BIT - 1;
     size_type __is_long_ : 1;
@@ -858,7 +860,7 @@ private:
       size_type __cap_ : sizeof(size_type) * CHAR_BIT - 1;
     };
     size_type __size_;
-    pointer __data_;
+    _LIBCPP_IMMUTABLE_IF_CONSTEXPR pointer __data_;
   };
 
   enum { __min_cap = (sizeof(__long) - 1) / sizeof(value_type) > 2 ? (sizeof(__long) - 1) / sizeof(value_type) : 2 };
@@ -1154,12 +1156,6 @@ public:
   // we can use a normal call to __reset_internal_buffer and remove the extra
   // __rep constructor.
   inline _LIBCPP_CONSTEXPR_SINCE_CXX20 ~basic_string() {
-    // P4341 ext (non-transient constexpr allocation): a string's long buffer
-    // is always immutable after the initialization of an enclosing constexpr
-    // variable completes. No-op at runtime and in short mode (the pointer
-    // then designates the SSO buffer, not the start of an allocation).
-    if (__is_long())
-      std::mark_immutable_if_constexpr(std::__to_address(__get_long_pointer()));
     __reset_internal_buffer(__rep(__uninitialized_tag()));
   }
 

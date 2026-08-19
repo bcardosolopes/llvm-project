@@ -21,24 +21,12 @@
 #ifndef HEADER
 #define HEADER
 
-namespace std {
-  template <class T>
-  constexpr void mark_immutable_if_constexpr(T* p) {
-    __builtin_mark_immutable_if_constexpr(
-        const_cast<void*>(static_cast<const void*>(p)));
-  }
-}
-
 template <class T>
 struct uptr {
-  T* p;
+  immutable_if_constexpr(__is_const(T)) T* p;
   constexpr uptr(T* p) : p(p) {}
   uptr(const uptr&) = delete;
-  constexpr ~uptr() {
-    if constexpr (__is_const(T))
-      std::mark_immutable_if_constexpr(p);
-    delete p;
-  }
+  constexpr ~uptr() { delete p; }
   constexpr T& operator*() const { return *p; }
 };
 

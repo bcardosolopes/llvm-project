@@ -3241,6 +3241,10 @@ def err_type_constraint_missing_arguments : Error<
 def err_placeholder_constraints_not_satisfied : Error<
   "deduced type %0 does not satisfy %1">;
 
+// P4341 v2: immutable_if_constexpr
+def err_immutable_if_constexpr_mutable : Error<
+  "'immutable_if_constexpr' cannot be combined with 'mutable'">;
+
 // Reflection (P2996)
 def err_expr_consteval_var : Error<
   "expressions involving consteval-only values are only allowed in constant-evaluated "

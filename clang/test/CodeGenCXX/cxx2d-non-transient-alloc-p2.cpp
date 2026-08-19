@@ -5,28 +5,20 @@
 // create the global before emitting its initializer (placeholder-first), or
 // it recurses forever.
 
-namespace std {
-  template <class T>
-  constexpr void mark_immutable_if_constexpr(T* p) {
-    __builtin_mark_immutable_if_constexpr(
-        const_cast<void*>(static_cast<const void*>(p)));
-  }
-}
-
 struct Node {
   int v;
-  Node* self;
+  // The self-pointer is a path into the very allocation that holds it; it
+  // must be blessed too, or Holder::p's blessing would conflict with an
+  // unblessed mutable path (see the row-5 rule).
+  immutable_if_constexpr Node* self;
   constexpr Node(int v) : v(v), self(this) {}
 };
 
 struct Holder {
-  Node* p;
+  immutable_if_constexpr Node* p;
   constexpr Holder(int v) : p(new Node(v)) {}
   Holder(const Holder&) = delete;
-  constexpr ~Holder() {
-    std::mark_immutable_if_constexpr(p);
-    delete p;
-  }
+  constexpr ~Holder() { delete p; }
 };
 
 constexpr Holder h(42);

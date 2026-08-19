@@ -11,12 +11,11 @@
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20 || c++23
 // ADDITIONAL_COMPILE_FLAGS: -std=c++2d
 
-// P4341: baseline validation of the mark_immutable_if_constexpr model for
-// std::unique_ptr and std::vector — everything that works, everything that
-// is runtime-mutable, and (in the CHANGE-DETECTOR section) the interior-
-// pointer holes that the v1 model ACCEPTS but the immutable_if_constexpr
-// (v2, ideas/non-transient-alloc-v2.md) model will reject. When v2 lands,
-// the change-detector cases move to the companion .verify.cpp as errors.
+// P4341 v2: baseline validation of the immutable_if_constexpr model for
+// std::unique_ptr and std::vector — everything that works and everything
+// that is runtime-mutable. The interior-pointer misuses that v1 accepted
+// (and this test used to pin down as change detectors) are now ill-formed;
+// they live in the companion .verify.cpp.
 
 #include <cassert>
 #include <memory>
@@ -107,56 +106,6 @@ constexpr const int* vi_first = vi.data();
 static_assert(vi_first == vi.data());
 static_assert(*vi_first == 1);
 
-// ================== CHANGE DETECTORS (v1 accepts, v2 rejects) =============
-// These validate the v1 semantics precisely because they are the motivating
-// misuses for v2: a non-const pointer into a marked allocation persists
-// silently, the buffer lands in .rodata, and the runtime writes below are
-// undefined behavior (typically a segfault) with zero diagnostics. Keep
-// compiling-and-not-running them until v2 flips them to ill-formed.
-
-// (a) Mutable interior pointer stored OUTSIDE the allocation, in a sibling
-// member of an enclosing aggregate.
-struct A {
-  std::vector<int> v;
-  int* p;
-};
-constexpr A a = [] {
-  std::vector<int> v = {1, 2, 3};
-  int* p = v.data();
-  return A{.v = std::move(v), .p = p};
-}();
-static_assert(a.v[0] == 1);             // buffer is "immutable"...
-static_assert(a.p == a.v.data());       // ...yet mutably reachable via a.p
-void oops_a() { ++a.p[0]; }             // compiles; UB at runtime (.rodata)
-
-// (b) Mutable interior pointer stored INSIDE the allocation: self-referential
-// element type. B::p points at B::i, which lives in the vector's buffer.
-struct B {
-  int i;
-  int* p;
-  constexpr B(int i) : i(i), p(&this->i) {}
-  constexpr B(B const& rhs) : i(rhs.i), p(&i) {}
-};
-constexpr std::vector<B> bs = {1, 2, 3};
-static_assert(bs[0].i == 1);
-static_assert(bs[0].p == &bs[0].i);     // mutable path, inside the buffer
-void oops_b() { ++bs[0].p[0]; }         // compiles; UB at runtime (.rodata)
-
-// (c) unique_ptr<const T> whose allocation is ALSO mutably reachable via a
-// sibling: the mark (conditioned on const T) wins, waiving the reachability
-// check for the whole allocation.
-struct C {
-  std::unique_ptr<const int> u;
-  int* p;
-};
-constexpr C c = [] {
-  auto* raw = new int(5);
-  return C{std::unique_ptr<const int>(raw), raw};
-}();
-static_assert(*c.u == 5);
-static_assert(c.p == c.u.get());
-void oops_c() { ++*c.p; }               // compiles; UB at runtime (.rodata)
-
 int main(int, char**) {
   // Runtime reads of everything persisted.
   assert(*uc == 3);
@@ -175,11 +124,5 @@ int main(int, char**) {
   scribble();
   assert(*vu[1] == 20);
 
-  // Deliberately NOT calling oops_a/oops_b/oops_c: they are the UB the v2
-  // design exists to make ill-formed. They must compile (that is the v1
-  // contract this test pins down) but running them writes to .rodata.
-  (void)&oops_a;
-  (void)&oops_b;
-  (void)&oops_c;
   return 0;
 }

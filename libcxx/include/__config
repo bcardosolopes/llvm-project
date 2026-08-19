@@ -271,6 +271,17 @@ typedef __char32_t char32_t;
 #    define _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
 #  endif
 
+// P4341 v2: blessing specifier for members holding pointers into
+// non-transiently persisted constexpr allocations. Expands to nothing when
+// the keyword is unavailable (pre-C++29, or other compilers).
+#  if _LIBCPP_STD_VER >= 29 && !__is_identifier(immutable_if_constexpr)
+#    define _LIBCPP_IMMUTABLE_IF_CONSTEXPR immutable_if_constexpr
+#    define _LIBCPP_IMMUTABLE_IF_CONSTEXPR_IF(...) immutable_if_constexpr(__VA_ARGS__)
+#  else
+#    define _LIBCPP_IMMUTABLE_IF_CONSTEXPR
+#    define _LIBCPP_IMMUTABLE_IF_CONSTEXPR_IF(...)
+#  endif
+
 #  if _LIBCPP_STD_VER >= 14
 #    define _LIBCPP_CONSTEXPR_SINCE_CXX14 constexpr
 #  else

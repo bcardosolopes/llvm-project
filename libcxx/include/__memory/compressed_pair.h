@@ -95,6 +95,17 @@ class __compressed_pair_padding<_ToPad, true> {};
       _LIBCPP_NO_UNIQUE_ADDRESS T2 Initializer2;                                                                       \
       _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T2> _LIBCPP_CONCAT3(__padding2_, __LINE__, _)
 
+// P4341 v2: variant taking a leading declaration-specifier (e.g.
+// immutable_if_constexpr) for the first member. The specifier applies to the
+// member declaration only — it must not leak into the padding's template
+// argument.
+#    define _LIBCPP_COMPRESSED_PAIR_SPEC(Spec, T1, Initializer1, T2, Initializer2)                                     \
+      _LIBCPP_NO_UNIQUE_ADDRESS __attribute__((__aligned__(::std::__compressed_pair_alignment<T2>))) Spec T1           \
+          Initializer1;                                                                                                \
+      _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T1> _LIBCPP_CONCAT3(__padding1_, __LINE__, _);        \
+      _LIBCPP_NO_UNIQUE_ADDRESS T2 Initializer2;                                                                       \
+      _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T2> _LIBCPP_CONCAT3(__padding2_, __LINE__, _)
+
 #    define _LIBCPP_COMPRESSED_TRIPLE(T1, Initializer1, T2, Initializer2, T3, Initializer3)                            \
       _LIBCPP_NO_UNIQUE_ADDRESS                                                                                        \
       __attribute__((__aligned__(::std::__compressed_pair_alignment<T2>),                                              \
@@ -108,6 +119,14 @@ class __compressed_pair_padding<_ToPad, true> {};
 #    define _LIBCPP_COMPRESSED_PAIR(T1, Initializer1, T2, Initializer2)                                                \
       struct {                                                                                                         \
         _LIBCPP_NO_UNIQUE_ADDRESS T1 Initializer1;                                                                     \
+        _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T1> _LIBCPP_CONCAT3(__padding1_, __LINE__, _);      \
+        _LIBCPP_NO_UNIQUE_ADDRESS T2 Initializer2;                                                                     \
+        _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T2> _LIBCPP_CONCAT3(__padding2_, __LINE__, _);      \
+      }
+
+#    define _LIBCPP_COMPRESSED_PAIR_SPEC(Spec, T1, Initializer1, T2, Initializer2)                                     \
+      struct {                                                                                                         \
+        _LIBCPP_NO_UNIQUE_ADDRESS Spec T1 Initializer1;                                                                \
         _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T1> _LIBCPP_CONCAT3(__padding1_, __LINE__, _);      \
         _LIBCPP_NO_UNIQUE_ADDRESS T2 Initializer2;                                                                     \
         _LIBCPP_NO_UNIQUE_ADDRESS ::std::__compressed_pair_padding<T2> _LIBCPP_CONCAT3(__padding2_, __LINE__, _);      \
@@ -129,6 +148,10 @@ class __compressed_pair_padding<_ToPad, true> {};
 
 #  define _LIBCPP_COMPRESSED_PAIR(T1, Name1, T2, Name2)                                                                \
     _LIBCPP_NO_UNIQUE_ADDRESS T1 Name1;                                                                                \
+    _LIBCPP_NO_UNIQUE_ADDRESS T2 Name2
+
+#  define _LIBCPP_COMPRESSED_PAIR_SPEC(Spec, T1, Name1, T2, Name2)                                                     \
+    _LIBCPP_NO_UNIQUE_ADDRESS Spec T1 Name1;                                                                           \
     _LIBCPP_NO_UNIQUE_ADDRESS T2 Name2
 
 #  define _LIBCPP_COMPRESSED_TRIPLE(T1, Name1, T2, Name2, T3, Name3)                                                   \

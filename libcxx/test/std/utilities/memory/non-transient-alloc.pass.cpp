@@ -12,8 +12,8 @@
 // ADDITIONAL_COMPILE_FLAGS: -std=c++2d
 
 // P4341: non-transient constexpr allocation with the standard library types
-// that mark their allocations (unique_ptr for const element types; vector and
-// basic_string always). See ideas/non-transient-alloc.md.
+// whose members bless their allocations (unique_ptr for const element types;
+// vector and basic_string always). See ideas/non-transient-alloc-v2.md.
 
 #include <cassert>
 #include <memory>
@@ -26,11 +26,11 @@
 constexpr std::unique_ptr<const int> p3(new int(3));
 static_assert(*p3 == 3);
 
-// Unmarked (mutable element): persists, runtime-mutable, not constant-readable.
+// Unblessed (mutable element): persists, runtime-mutable, not constant-readable.
 constexpr std::unique_ptr<int> p2(new int(2));
 void bump() { ++*p2; }
 
-// unique_ptr<T[]>: marks iff element type is const.
+// unique_ptr<T[]>: blessed iff element type is const.
 constexpr std::unique_ptr<const int[]> arr(new int[3]{1, 2, 3});
 static_assert(arr[1] == 2);
 
@@ -55,7 +55,7 @@ static_assert(s.size() == 40);
 constexpr std::string sso = "hi";
 static_assert(sso[0] == 'h');
 
-// ==== Ex 7: vector<unique_ptr<int>>: buffer marked, pointees unmarked ====
+// ==== Ex 7: vector<unique_ptr<int>>: buffer blessed, pointees not ====
 
 constexpr auto vu = [] {
   std::vector<std::unique_ptr<int>> v;

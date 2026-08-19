@@ -20,7 +20,6 @@
 #include <__algorithm/rotate.h>
 #include <__assert>
 #include <__config>
-#include <__memory/mark_immutable_if_constexpr.h>
 #include <__debug_utils/sanitizers.h>
 #include <__format/enable_insertable.h>
 #include <__fwd/vector.h>
@@ -245,11 +244,6 @@ private:
 
     _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI void operator()() {
       if (__vec_.__begin_ != nullptr) {
-        // P4341 ext (non-transient constexpr allocation): a vector's buffer
-        // is always immutable after the initialization of an enclosing
-        // constexpr variable completes (deep-const semantics). No-op at
-        // runtime.
-        std::mark_immutable_if_constexpr(std::__to_address(__vec_.__begin_));
         __vec_.clear();
         __vec_.__annotate_delete();
         __alloc_traits::deallocate(__vec_.__alloc_, __vec_.__begin_, __vec_.capacity());
@@ -590,9 +584,12 @@ public:
   _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI bool __invariants() const;
 
 private:
-  pointer __begin_ = nullptr;
-  pointer __end_   = nullptr;
-  _LIBCPP_COMPRESSED_PAIR(pointer, __cap_ = nullptr, allocator_type, __alloc_);
+  // P4341 v2: a vector's buffer is deep-const behind a constexpr variable —
+  // no runtime writes ever happen through these members after constant
+  // initialization completes — so its allocation may persist immutable.
+  _LIBCPP_IMMUTABLE_IF_CONSTEXPR pointer __begin_ = nullptr;
+  _LIBCPP_IMMUTABLE_IF_CONSTEXPR pointer __end_   = nullptr;
+  _LIBCPP_COMPRESSED_PAIR_SPEC(_LIBCPP_IMMUTABLE_IF_CONSTEXPR, pointer, __cap_ = nullptr, allocator_type, __alloc_);
 
   //  Allocate space for __n objects
   //  throws length_error if __n > max_size()

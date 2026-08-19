@@ -15,7 +15,6 @@
 #include <__compare/compare_three_way_result.h>
 #include <__compare/three_way_comparable.h>
 #include <__config>
-#include <__memory/mark_immutable_if_constexpr.h>
 #include <__cstddef/nullptr_t.h>
 #include <__cstddef/size_t.h>
 #include <__functional/hash.h>
@@ -152,7 +151,10 @@ public:
       void>;
 
 private:
-  _LIBCPP_COMPRESSED_PAIR(pointer, __ptr_, deleter_type, __deleter_);
+  // P4341 v2: a unique_ptr's allocation may persist immutable only when
+  // the element type is const (the const view is the no-write promise).
+  _LIBCPP_COMPRESSED_PAIR_SPEC(_LIBCPP_IMMUTABLE_IF_CONSTEXPR_IF(is_const<__remove_extent_t<_Tp> >::value),
+                               pointer, __ptr_, deleter_type, __deleter_);
 
   using _DeleterSFINAE _LIBCPP_NODEBUG = __unique_ptr_deleter_sfinae<_Dp>;
 
@@ -260,11 +262,6 @@ public:
 #endif
 
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 ~unique_ptr() {
-    // P4341 ext (non-transient constexpr allocation): a unique_ptr's
-    // allocation is immutable from the end of initialization onward only when
-    // the element type is const. No-op at runtime and for null pointers.
-    if constexpr (is_const<__remove_extent_t<_Tp> >::value)
-      std::mark_immutable_if_constexpr(std::__to_address(__ptr_));
     reset();
   }
 
@@ -432,7 +429,10 @@ private:
   template <class _Up, class _OtherDeleter>
   friend class unique_ptr;
 
-  _LIBCPP_COMPRESSED_PAIR(pointer, __ptr_, deleter_type, __deleter_);
+  // P4341 v2: a unique_ptr's allocation may persist immutable only when
+  // the element type is const (the const view is the no-write promise).
+  _LIBCPP_COMPRESSED_PAIR_SPEC(_LIBCPP_IMMUTABLE_IF_CONSTEXPR_IF(is_const<__remove_extent_t<_Tp> >::value),
+                               pointer, __ptr_, deleter_type, __deleter_);
 #ifdef _LIBCPP_ABI_BOUNDED_UNIQUE_PTR
   using _BoundsChecker _LIBCPP_NODEBUG = __unique_ptr_array_bounds_stored;
 #else
@@ -583,11 +583,6 @@ public:
 
 public:
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23 ~unique_ptr() {
-    // P4341 ext (non-transient constexpr allocation): a unique_ptr's
-    // allocation is immutable from the end of initialization onward only when
-    // the element type is const. No-op at runtime and for null pointers.
-    if constexpr (is_const<__remove_extent_t<_Tp> >::value)
-      std::mark_immutable_if_constexpr(std::__to_address(__ptr_));
     reset();
   }
 

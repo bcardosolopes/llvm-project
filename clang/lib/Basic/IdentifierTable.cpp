@@ -173,6 +173,8 @@ static KeywordStatus getKeywordStatusHelper(const LangOptions &LangOpts,
     return LangOpts.DeferTS ? KS_Enabled : KS_Disabled;
   case KEYDOEXPR:
     return LangOpts.DoExpressions ? KS_Enabled : KS_Unknown;
+  case KEYNTA:
+    return LangOpts.CPlusPlus29 ? KS_Enabled : KS_Unknown;
   default:
     llvm_unreachable("Unknown KeywordStatus flag");
   }

@@ -2608,6 +2608,8 @@ private:
   /// [C++11] 'alignas' '(' type-id ...[opt] ')'
   /// [C++11] 'alignas' '(' assignment-expression ...[opt] ')'
   /// \endverbatim
+  void ParseImmutableIfConstexprSpecifier(ParsedAttributes &Attrs,
+                                          SourceLocation *EndLoc = nullptr);
   void ParseAlignmentSpecifier(ParsedAttributes &Attrs,
                                SourceLocation *endLoc = nullptr);
   ExprResult ParseExtIntegerArgument();

@@ -4596,10 +4596,11 @@ class PersistentAllocDecl : public ValueDecl {
   /// allocation order.
   unsigned AllocIndex;
 
-  /// Whether std::mark_immutable_if_constexpr was called on this allocation
-  /// during the hypothetical destruction of the owning variable. Immutable
-  /// allocations are readable in later constant expressions and may be
-  /// placed in read-only storage; mutable ones are neither.
+  /// Whether this allocation was classified immutable (every path into it
+  /// blessed via immutable_if_constexpr members or const typing, or the
+  /// allocated type itself const). Immutable allocations are readable in
+  /// later constant expressions and may be placed in read-only storage;
+  /// mutable ones are neither.
   bool IsImmutable;
 
   /// The persisted contents: the value of the allocation at the end of the

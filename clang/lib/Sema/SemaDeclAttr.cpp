@@ -7120,6 +7120,36 @@ static void handleNoUniqueAddressAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(NoUniqueAddressAttr::Create(S.Context, AL));
 }
 
+// P4341 v2: 'immutable_if_constexpr' / 'immutable_if_constexpr(cond)'.
+// Valid only on non-static, non-mutable, non-bitfield data members. A
+// non-dependent condition is evaluated now; the attribute is attached only
+// when it is true (presence <=> blessed). A dependent condition is stored
+// and re-evaluated at class instantiation.
+static void handleImmutableIfConstexprAttr(Sema &S, Decl *D,
+                                           const ParsedAttr &AL) {
+  // Non-fields and bit-fields are rejected by the subject list before we
+  // get here; 'mutable' needs an explicit check.
+  auto *FD = cast<FieldDecl>(D);
+  if (FD->isMutable()) {
+    S.Diag(AL.getLoc(), diag::err_immutable_if_constexpr_mutable);
+    return;
+  }
+
+  Expr *Cond = AL.getNumArgs() ? AL.getArgAsExpr(0) : nullptr;
+  if (Cond && !Cond->isValueDependent()) {
+    bool Value = false;
+    if (!Cond->EvaluateAsBooleanCondition(Value, S.Context)) {
+      S.Diag(Cond->getExprLoc(), diag::err_attribute_argument_type)
+          << AL << AANT_ArgumentIntegerConstant << Cond->getSourceRange();
+      return;
+    }
+    if (!Value)
+      return; // condition false: no attribute, member does not bless
+    Cond = nullptr; // condition true: store as bare form
+  }
+  D->addAttr(::new (S.Context) ImmutableIfConstexprAttr(S.Context, AL, Cond));
+}
+
 static void handleDestroyAttr(Sema &S, Decl *D, const ParsedAttr &A) {
   if (!cast<VarDecl>(D)->hasGlobalStorage()) {
     S.Diag(D->getLocation(), diag::err_destroy_attr_on_non_static_var)
@@ -8171,6 +8201,9 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_NoUniqueAddress:
     handleNoUniqueAddressAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_ImmutableIfConstexpr:
+    handleImmutableIfConstexprAttr(S, D, AL);
     break;
 
   case ParsedAttr::AT_AvailableOnlyInDefaultEvalMethod:

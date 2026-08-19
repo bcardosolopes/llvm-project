@@ -1668,7 +1668,6 @@ module std [system] {
     module compressed_pair                    { header "__memory/compressed_pair.h" }
     module concepts                           { header "__memory/concepts.h" }
     module construct_at                       { header "__memory/construct_at.h" }
-    module mark_immutable_if_constexpr        { header "__memory/mark_immutable_if_constexpr.h" }
     module destroy                            { header "__memory/destroy.h" }
     module destruct_n                         { header "__memory/destruct_n.h" }
     module fwd                                { header "__fwd/memory.h" }

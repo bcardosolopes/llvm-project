@@ -11,11 +11,11 @@
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20 || c++23
 // ADDITIONAL_COMPILE_FLAGS: -std=c++2d -Xclang -verify-ignore-unexpected=note
 
-// P4341: baseline validation of what the mark_immutable_if_constexpr model
-// REJECTS for std::unique_ptr and std::vector. Everything here must stay
-// rejected under the immutable_if_constexpr (v2) model as well — these are
-// invariants of the design, not artifacts of the mark. (Notes land inside
-// libc++ headers, so only the test-file-anchored errors are matched.)
+// P4341 v2: what the immutable_if_constexpr model REJECTS for
+// std::unique_ptr and std::vector — the design invariants carried over from
+// v1, plus the interior-pointer misuses (row 5: conflicting declared
+// intent) that v1 silently accepted. (Notes land inside libc++ headers, so
+// only the test-file-anchored errors are matched.)
 
 #include <memory>
 #include <vector>
@@ -51,7 +51,7 @@ void local_marked() {
   static_assert(*lc == 6);
 }
 
-// Mixed mutability persists fine (buffer marked)...
+// Mixed mutability persists fine (buffer blessed via vector's members)...
 constexpr std::vector<std::unique_ptr<int>> ok_mixed = [] {
   std::vector<std::unique_ptr<int>> v;
   v.push_back(std::make_unique<int>(1));
@@ -60,3 +60,45 @@ constexpr std::vector<std::unique_ptr<int>> ok_mixed = [] {
 // ...while reading the pointee stays non-constant:
 static_assert(*ok_mixed[0] == 1);
 // expected-error@-1 {{static assertion expression is not an integral constant expression}}
+
+// ==== Row 5: interior mutable pointers into blessed allocations ==========
+// v1 accepted all three of these (the mark waived the whole allocation) and
+// the stray pointer was a runtime .rodata timebomb. Under v2 they are
+// ill-formed: the allocation is declared immutable via the library's
+// immutable_if_constexpr members, but also reachable as mutable.
+
+// (a) Mutable interior pointer in a sibling member of an enclosing
+// aggregate.
+struct A {
+  std::vector<int> v;
+  int* p;
+};
+constexpr A a = [] {
+  std::vector<int> v = {1, 2, 3};
+  int* p = v.data();
+  return A{.v = static_cast<std::vector<int>&&>(v), .p = p};
+}();
+// expected-error@-5 {{must be initialized by a constant expression}}
+
+// (b) Mutable interior pointer stored INSIDE the allocation:
+// self-referential element type.
+struct B {
+  int i;
+  int* p;
+  constexpr B(int i) : i(i), p(&this->i) {}
+  constexpr B(B const& rhs) : i(rhs.i), p(&i) {}
+};
+constexpr std::vector<B> bs = {1, 2, 3};
+// expected-error@-1 {{must be initialized by a constant expression}}
+
+// (c) unique_ptr<const T> whose allocation is ALSO mutably reachable via a
+// sibling: the conditional blessing on __ptr_ conflicts with the raw path.
+struct C {
+  std::unique_ptr<const int> u;
+  int* p;
+};
+constexpr C c = [] {
+  auto* raw = new int(5);
+  return C{std::unique_ptr<const int>(raw), raw};
+}();
+// expected-error@-4 {{must be initialized by a constant expression}}

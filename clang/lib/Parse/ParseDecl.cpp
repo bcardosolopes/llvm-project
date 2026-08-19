@@ -3157,6 +3157,44 @@ ExprResult Parser::ParseAlignArgument(StringRef KWName, SourceLocation Start,
   return ER;
 }
 
+/// P4341 v2: parse 'immutable_if_constexpr' or
+/// 'immutable_if_constexpr(constant-expression)' as a decl-specifier of a
+/// member declaration, recorded as an ImmutableIfConstexpr attribute.
+void Parser::ParseImmutableIfConstexprSpecifier(ParsedAttributes &Attrs,
+                                                SourceLocation *EndLoc) {
+  assert(Tok.is(tok::kw_immutable_if_constexpr) && "not the NTA specifier");
+  Token KWTok = Tok;
+  IdentifierInfo *KWName = KWTok.getIdentifierInfo();
+  SourceLocation KWLoc = ConsumeToken();
+
+  if (Tok.isNot(tok::l_paren)) {
+    // Bare form: immutable_if_constexpr(true).
+    Attrs.addNew(KWName, KWLoc, AttributeScopeInfo(), nullptr, 0,
+                 tok::kw_immutable_if_constexpr);
+    if (EndLoc)
+      *EndLoc = KWLoc;
+    return;
+  }
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+  ExprResult Cond = ParseConstantExpressionInExprEvalContext();
+  if (Cond.isInvalid()) {
+    T.skipToEnd();
+    return;
+  }
+  T.consumeClose();
+  if (EndLoc)
+    *EndLoc = T.getCloseLocation();
+
+  ArgsVector Args;
+  Args.push_back(Cond.get());
+  Attrs.addNew(KWName, KWLoc, AttributeScopeInfo(), Args.data(), 1,
+               tok::kw_immutable_if_constexpr);
+}
+
 void Parser::ParseAlignmentSpecifier(ParsedAttributes &Attrs,
                                      SourceLocation *EndLoc) {
   assert(Tok.isOneOf(tok::kw_alignas, tok::kw__Alignas) &&
@@ -4266,6 +4304,11 @@ void Parser::ParseDeclarationSpecifiers(
                                          PrevSpec, DiagID, Policy);
       isStorageClass = true;
       break;
+    case tok::kw_immutable_if_constexpr:
+      // P4341 v2: member blessing specifier; parsed into an attribute on
+      // the DeclSpec, validated in SemaDeclAttr.
+      ParseImmutableIfConstexprSpecifier(DS.getAttributes());
+      continue;
     case tok::kw___thread:
       isInvalid = DS.SetStorageClassSpecThread(DeclSpec::TSCS___thread, Loc,
                                                PrevSpec, DiagID);

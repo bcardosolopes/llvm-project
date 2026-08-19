@@ -2366,6 +2366,20 @@ def ArmMveStrictPolymorphism : TypeAttr, TargetSpecificAttr<TargetARM> {
   let Documentation = [ArmMveStrictPolymorphismDocs];
 }
 
+def ImmutableIfConstexpr : InheritableAttr {
+  // P4341 v2: 'immutable_if_constexpr(cond)' specifier on non-static data
+  // members. A null Cond means 'true'. For a non-dependent condition, Sema
+  // evaluates it immediately and only attaches the attribute when true; a
+  // dependent condition is stored and re-evaluated at instantiation (again
+  // attaching only when true). Hence: attribute present on an instantiated
+  // field <=> the member blesses its paths.
+  let Spellings = [CustomKeyword<"immutable_if_constexpr">];
+  let Subjects = SubjectList<[NonBitField], ErrorDiag>;
+  let Args = [ExprArgument<"Cond", /*optional=*/1>];
+  let LangOpts = [CPlusPlus];
+  let Documentation = [InternalOnly];
+}
+
 def NoUniqueAddress : InheritableAttr {
   let Subjects = SubjectList<[NonBitField], ErrorDiag>;
   let Spellings = [CXX11<"", "no_unique_address", 201803>, CXX11<"msvc", "no_unique_address", 201803>];

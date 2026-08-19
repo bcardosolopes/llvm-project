@@ -879,32 +879,26 @@ namespace {
     /// The number of heap allocations performed so far in this evaluation.
     unsigned NumHeapAllocs = 0;
 
-    /// P4341 ext (non-transient allocation): when nonnull, we are evaluating
+    /// P4341 v2 (non-transient allocation): when nonnull, we are evaluating
     /// the hypothetical destruction of a constexpr variable whose
-    /// initialization left these allocations alive. Reads from an allocation
-    /// in this set are subject to the reachable-as-mutable check unless the
-    /// allocation has been marked immutable; writes are permitted (the
-    /// destruction is evaluated against a discarded copy). Allocations
-    /// marked via std::mark_immutable_if_constexpr are recorded in
-    /// ImmutableAllocs.
+    /// initialization left these allocations alive. Reads from a surviving
+    /// allocation are permitted only if it was classified immutable (via
+    /// immutable_if_constexpr paths or a const allocated type) before the
+    /// destruction started; writes are permitted unconditionally (the
+    /// destruction is evaluated against a discarded copy).
     struct HypotheticalDestructionState {
       /// The allocations that survived initialization, keyed by index.
       /// (The DynAllocs themselves live in HeapAllocs, seeded from the
       /// initializer's survivors.)
       llvm::SmallPtrSet<const void *, 8> SurvivingAllocs;
 
-      /// Allocations marked immutable so far during this destruction. This
-      /// set grows as the destruction runs: a read is checked against the
-      /// marks issued so far.
-      llvm::SmallPtrSet<const void *, 8> ImmutableAllocs;
-
-      /// Survivors classified as reachable-as-mutable in the
-      /// end-of-initialization state. Fixed before the destruction starts;
-      /// the evolving destruction state must not affect it. (The standard
-      /// destructor idiom — copy the member to a local, null the member,
-      /// delete the local — would otherwise erase the mutable path right
+      /// Survivors classified immutable, fixed against the
+      /// end-of-initialization state before the destruction runs. (The
+      /// evolving destruction state must not affect classification: the
+      /// standard destructor idiom — copy the member to a local, null the
+      /// member, delete the local — would otherwise erase paths right
       /// before every read, defeating the check.)
-      llvm::SmallPtrSet<const void *, 8> MutableReachable;
+      llvm::SmallPtrSet<const void *, 8> ImmutableAllocs;
 
       const VarDecl *OwningVar = nullptr;
     };
@@ -4837,14 +4831,30 @@ static bool AreElementsOfSameArray(QualType ObjType,
   return CommonLength >= A.Entries.size() - IsArray;
 }
 
-/// P4341 ext: walk the APValue \p V (an object of type \p T stored in the
-/// variable owning surviving allocations or in one of those allocations, in
-/// its end-of-initialization state), looking for a pointer/reference to
-/// \p Target through which Target is mutable. \p T may be null when unknown
-/// (e.g. array fillers).
-static bool valueReferencesAllocAsMutable(const ASTContext &Ctx,
-                                          const APValue &V, QualType T,
-                                          DynamicAllocLValue Target) {
+/// P4341 v2: per-allocation path classification for persistence.
+///
+/// A *path* is a pointer or reference into the target allocation, stored
+/// anywhere in the end-of-initialization value graph. Each path is:
+///  - *blessed* if it is contained in (a subobject of) a data member
+///    declared immutable_if_constexpr (with a satisfied condition) — the
+///    blessing distributes down the containment chain, including through
+///    allocations owned via the blessed member — or if its declared
+///    pointee/referent type is const-qualified and not a class with mutable
+///    members;
+///  - *unblessed* otherwise.
+struct AllocPathClassification {
+  bool AnyBlessedByAttr = false; ///< some path blessed via the specifier
+  bool AnyUnblessed = false;     ///< some mutable, unblessed path
+  /// The field through which the first unblessed path was found, if any
+  /// (for diagnostics). Null if the path had no member on its chain.
+  const FieldDecl *UnblessedField = nullptr;
+};
+
+static void classifyAllocPaths(const ASTContext &Ctx, const APValue &V,
+                               QualType T, DynamicAllocLValue Target,
+                               bool BlessedByAncestor,
+                               const FieldDecl *EnclosingField,
+                               AllocPathClassification &Out) {
   auto PointeeIsMutable = [&](QualType Pointee) {
     if (Pointee.isNull())
       return true; // conservatively mutable if we can't see the type
@@ -4860,10 +4870,14 @@ static bool valueReferencesAllocAsMutable(const ASTContext &Ctx,
   case APValue::LValue: {
     DynamicAllocLValue DA = V.getLValueBase().dyn_cast<DynamicAllocLValue>();
     if (!DA || DA.getOpaqueValue() != Target.getOpaqueValue())
-      return false;
-    // The static type of the pointer/reference member is what determines
-    // mutability. Use the pointee type recorded on the member if available;
-    // otherwise fall back to the allocation's type.
+      return;
+    if (BlessedByAncestor) {
+      Out.AnyBlessedByAttr = true;
+      return;
+    }
+    // The static type of the pointer/reference determines mutability. Use
+    // the declared type if available; otherwise fall back to the
+    // allocation's type.
     QualType Pointee;
     if (!T.isNull()) {
       if (const auto *PT = T->getAs<PointerType>())
@@ -4873,47 +4887,53 @@ static bool valueReferencesAllocAsMutable(const ASTContext &Ctx,
     }
     if (Pointee.isNull())
       Pointee = V.getLValueBase().getDynamicAllocType();
-    return PointeeIsMutable(Pointee);
+    if (PointeeIsMutable(Pointee)) {
+      Out.AnyUnblessed = true;
+      if (!Out.UnblessedField)
+        Out.UnblessedField = EnclosingField;
+    }
+    return;
   }
   case APValue::Struct: {
-    const CXXRecordDecl *RD =
-        T.isNull() ? nullptr : T->getAsCXXRecordDecl();
-    unsigned BaseIdx = 0, FieldIdx = 0;
+    const CXXRecordDecl *RD = T.isNull() ? nullptr : T->getAsCXXRecordDecl();
     if (RD && RD->hasDefinition()) {
+      unsigned BaseIdx = 0, FieldIdx = 0;
       for (const CXXBaseSpecifier &BS : RD->getDefinition()->bases()) {
         if (BaseIdx >= V.getStructNumBases())
           break;
-        if (valueReferencesAllocAsMutable(Ctx, V.getStructBase(BaseIdx),
-                                          BS.getType(), Target))
-          return true;
+        classifyAllocPaths(Ctx, V.getStructBase(BaseIdx), BS.getType(),
+                           Target, BlessedByAncestor, EnclosingField, Out);
         ++BaseIdx;
       }
       for (const FieldDecl *FD : RD->getDefinition()->fields()) {
         if (FieldIdx >= V.getStructNumFields())
           break;
-        if (valueReferencesAllocAsMutable(
-                Ctx, V.getStructField(FieldIdx), FD->getType(), Target))
-          return true;
+        bool Blessed =
+            BlessedByAncestor || FD->hasAttr<ImmutableIfConstexprAttr>();
+        classifyAllocPaths(Ctx, V.getStructField(FieldIdx), FD->getType(),
+                           Target, Blessed, Blessed ? EnclosingField : FD,
+                           Out);
         ++FieldIdx;
       }
-      return false;
+      return;
     }
     // Unknown layout: walk everything without types.
     for (unsigned I = 0, N = V.getStructNumBases(); I != N; ++I)
-      if (valueReferencesAllocAsMutable(Ctx, V.getStructBase(I), QualType(),
-                                        Target))
-        return true;
+      classifyAllocPaths(Ctx, V.getStructBase(I), QualType(), Target,
+                         BlessedByAncestor, EnclosingField, Out);
     for (unsigned I = 0, N = V.getStructNumFields(); I != N; ++I)
-      if (valueReferencesAllocAsMutable(Ctx, V.getStructField(I), QualType(),
-                                        Target))
-        return true;
-    return false;
+      classifyAllocPaths(Ctx, V.getStructField(I), QualType(), Target,
+                         BlessedByAncestor, EnclosingField, Out);
+    return;
   }
   case APValue::Union:
-    if (const FieldDecl *FD = V.getUnionField())
-      return valueReferencesAllocAsMutable(Ctx, V.getUnionValue(),
-                                           FD->getType(), Target);
-    return false;
+    if (const FieldDecl *FD = V.getUnionField()) {
+      bool Blessed =
+          BlessedByAncestor || FD->hasAttr<ImmutableIfConstexprAttr>();
+      classifyAllocPaths(Ctx, V.getUnionValue(), FD->getType(), Target,
+                         Blessed, Blessed ? EnclosingField : FD, Out);
+    }
+    return;
   case APValue::Array: {
     QualType ElemTy;
     if (!T.isNull())
@@ -4921,16 +4941,15 @@ static bool valueReferencesAllocAsMutable(const ASTContext &Ctx,
                    ? Ctx.getAsArrayType(T)->getElementType()
                    : QualType();
     for (unsigned I = 0, N = V.getArrayInitializedElts(); I != N; ++I)
-      if (valueReferencesAllocAsMutable(Ctx, V.getArrayInitializedElt(I),
-                                        ElemTy, Target))
-        return true;
+      classifyAllocPaths(Ctx, V.getArrayInitializedElt(I), ElemTy, Target,
+                         BlessedByAncestor, EnclosingField, Out);
     if (V.hasArrayFiller())
-      return valueReferencesAllocAsMutable(Ctx, V.getArrayFiller(), ElemTy,
-                                           Target);
-    return false;
+      classifyAllocPaths(Ctx, V.getArrayFiller(), ElemTy, Target,
+                         BlessedByAncestor, EnclosingField, Out);
+    return;
   }
   default:
-    return false;
+    return;
   }
 }
 
@@ -5159,16 +5178,14 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
       Info.FFDiag(E, diag::note_constexpr_access_deleted_object) << AK;
       return CompleteObject();
     }
-    // P4341 ext: during the hypothetical destruction of a constexpr
+    // P4341 v2: during the hypothetical destruction of a constexpr
     // variable, an object in a surviving allocation may not be read unless
-    // the allocation has been marked immutable (so far in this destruction)
-    // or was not classified reachable-as-mutable in the end-of-
-    // initialization state. (Writes are unrestricted: the destruction is
-    // evaluated against a discarded copy.)
+    // the allocation was classified immutable before the destruction
+    // started. (Writes are unrestricted: the destruction is evaluated
+    // against a discarded copy.)
     if (Info.isHypotheticalDestruction() && isRead(AK) &&
         Info.HypDtor->SurvivingAllocs.count(DA.getOpaqueValue()) &&
-        !Info.HypDtor->ImmutableAllocs.count(DA.getOpaqueValue()) &&
-        Info.HypDtor->MutableReachable.count(DA.getOpaqueValue())) {
+        !Info.HypDtor->ImmutableAllocs.count(DA.getOpaqueValue())) {
       Info.FFDiag(E, diag::note_constexpr_nta_mutable_read)
           << Info.HypDtor->OwningVar;
       NoteLValueLocation(Info, LVal.Base);
@@ -21856,28 +21873,6 @@ public:
     case Builtin::BI__builtin_operator_delete:
       return HandleOperatorDeleteCall(Info, E);
 
-    case Builtin::BI__builtin_mark_immutable_if_constexpr: {
-      // P4341 ext: during the hypothetical destruction of a constexpr
-      // variable, mark the pointed-to allocation immutable. In any other
-      // context (including runtime lowering and ordinary constant
-      // evaluation), and for any pointer that is not the start of a
-      // surviving allocation, this is a no-op.
-      LValue Ptr;
-      if (!EvaluatePointer(E->getArg(0), Ptr, Info))
-        return false;
-      if (!Info.isHypotheticalDestruction())
-        return true;
-      DynamicAllocLValue DA = Ptr.Base.dyn_cast<DynamicAllocLValue>();
-      if (!DA || !Ptr.Offset.isZero() ||
-          (Ptr.Designator.Entries.size() >
-           (Ptr.Base.getDynamicAllocType()->isArrayType() ? 1u : 0u)))
-        return true;
-      if (!Info.HypDtor->SurvivingAllocs.count(DA.getOpaqueValue()))
-        return true;
-      Info.HypDtor->ImmutableAllocs.insert(DA.getOpaqueValue());
-      return true;
-    }
-
     default:
       return false;
     }
@@ -23205,25 +23200,50 @@ static bool EvaluatePersistence(EvalInfo &InitInfo, const VarDecl *VD,
     Info.HypDtor->SurvivingAllocs.insert(DA.getOpaqueValue());
   }
 
-  // Classify each survivor as reachable-as-mutable or not, against the
-  // end-of-initialization state. The classification is fixed here, before
-  // the destruction runs: the persisted image is the end-of-initialization
-  // state, so this is the state runtime code could have mutated the
-  // allocation through. Consulting the evolving destruction state instead
-  // would be unsound: the standard destructor idiom (copy the member to a
-  // local, null the member, delete through the local) erases the mutable
-  // path right before every read.
+  // P4341 v2: classify each survivor against the end-of-initialization
+  // state, before the destruction runs. (The classification must not consult
+  // the evolving destruction state: the standard destructor idiom — copy the
+  // member to a local, null the member, delete through the local — erases
+  // paths right before every read.) The verdict per allocation:
+  //   - allocated type const (no mutable members): immutable (inferred).
+  //   - some path blessed via immutable_if_constexpr, none unblessed:
+  //     immutable (declared).
+  //   - some path blessed via immutable_if_constexpr AND some unblessed
+  //     path: ill-formed — conflicting declared intent.
+  //   - otherwise: mutable persistence (no constant reads; static-storage
+  //     owners only; runtime-writable).
   for (auto &[DA, Alloc] : Survivors) {
-    bool Reachable = valueReferencesAllocAsMutable(Ctx, InitValue,
-                                                   VD->getType(), DA);
-    for (auto &[OtherDA, OtherAlloc] : Survivors) {
-      if (Reachable)
-        break;
-      Reachable = valueReferencesAllocAsMutable(Ctx, OtherAlloc->Value,
-                                                OtherAlloc->AllocType, DA);
+    QualType AllocElemTy = Ctx.getBaseElementType(Alloc->AllocType);
+    bool ConstAllocated = AllocElemTy.isConstQualified();
+    if (const CXXRecordDecl *ARD = AllocElemTy->getAsCXXRecordDecl())
+      if (ARD->hasDefinition() && ARD->hasMutableFields())
+        ConstAllocated = false;
+
+    AllocPathClassification PC;
+    classifyAllocPaths(Ctx, InitValue, VD->getType(), DA,
+                       /*BlessedByAncestor=*/false,
+                       /*EnclosingField=*/nullptr, PC);
+    for (auto &[OtherDA, OtherAlloc] : Survivors)
+      classifyAllocPaths(Ctx, OtherAlloc->Value, OtherAlloc->AllocType, DA,
+                         /*BlessedByAncestor=*/false,
+                         /*EnclosingField=*/nullptr, PC);
+
+    if (ConstAllocated) {
+      Info.HypDtor->ImmutableAllocs.insert(DA.getOpaqueValue());
+      continue;
     }
-    if (Reachable)
-      Info.HypDtor->MutableReachable.insert(DA.getOpaqueValue());
+    if (PC.AnyBlessedByAttr && PC.AnyUnblessed) {
+      // Row 5: conflicting intent. Diagnose at the allocation site, naming
+      // the offending member when we have one.
+      Info.FFDiag(Alloc->AllocExpr ? Alloc->AllocExpr->getExprLoc()
+                                   : VD->getLocation(),
+                  diag::note_constexpr_nta_conflicting_paths)
+          << VD << !!PC.UnblessedField << PC.UnblessedField;
+      return false;
+    }
+    if (PC.AnyBlessedByAttr)
+      Info.HypDtor->ImmutableAllocs.insert(DA.getOpaqueValue());
+    // else: mutable persistence; not in ImmutableAllocs.
   }
 
   // Run the destructor.
