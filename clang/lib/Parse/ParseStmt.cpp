@@ -2929,8 +2929,23 @@ ExprResult Parser::ParseDoExpression() {
   // a function/break/continue scope: `return`, `break`, `continue` inside the
   // body operate on the enclosing function/loop, exactly as if the body were
   // inlined at the use site.
-  StmtResult Body = ParseCompoundStatement(/*isStmtExpr=*/false,
-                                           /*isDoExpr=*/true);
+  //
+  // The body does get its own expression evaluation context, the way a
+  // statement expression's does. The body is a sequence of *statements*, each
+  // with full-expressions of its own, but it is parsed in the middle of the
+  // enclosing full-expression -- whose pending cleanup state would otherwise
+  // be visible to them. The first nested full-expression in the body would
+  // then consume it and become the ExprWithCleanups that the enclosing
+  // full-expression needed, moving the enclosing temporaries' destruction out
+  // to the end of the block. Entering a context resets the cleanup state for
+  // the body and merges it back on the way out, so a `do_return` operand's
+  // temporaries still reach the enclosing full-expression.
+  StmtResult Body;
+  {
+    EnterExpressionEvaluationContext BodyContext(
+        Actions, Actions.currentEvaluationContext().Context);
+    Body = ParseCompoundStatement(/*isStmtExpr=*/false, /*isDoExpr=*/true);
+  }
 
   if (Body.isInvalid()) {
     Actions.ActOnDoExprError();

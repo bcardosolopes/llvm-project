@@ -15192,8 +15192,17 @@ ExprResult TreeTransform<Derived>::TransformDoExpr(DoExpr *E) {
     SemaRef.ActOnDoExprInitStmt(InitStmt.get(), LifetimeExtendTemps);
   }
 
-  StmtResult Body =
-      getDerived().TransformCompoundStmt(E->getBody(), /*IsStmtExpr=*/false);
+  // As when parsing: the body's statements get an evaluation context of their
+  // own so they do not consume the enclosing full-expression's pending cleanup
+  // state. Instantiation re-runs every full-expression in the body, so it can
+  // reproduce the same theft.
+  StmtResult Body;
+  {
+    EnterExpressionEvaluationContext BodyContext(
+        getSema(), getSema().currentEvaluationContext().Context);
+    Body =
+        getDerived().TransformCompoundStmt(E->getBody(), /*IsStmtExpr=*/false);
+  }
   if (Body.isInvalid()) {
     SemaRef.ActOnDoExprError();
     return ExprError();
