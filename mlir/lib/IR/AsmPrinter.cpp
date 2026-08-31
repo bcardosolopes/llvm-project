@@ -471,6 +471,10 @@ public:
   /// be printed.
   LogicalResult printAlias(Type type);
 
+  /// Returns true if the given type is printed using an alias in this output.
+  bool hasAlias(Type type);
+  bool isPrintingAliasDefinition(Type type);
+
   /// Print the given location to the stream. If `allowAlias` is true, this
   /// allows for the internal location to use an attribute alias.
   void printLocation(LocationAttr loc, bool allowAlias = false);
@@ -1304,6 +1308,13 @@ public:
   /// Returns success if an alias was printed, failure otherwise.
   LogicalResult getAlias(Type ty, raw_ostream &os) const;
 
+  /// Returns true if an alias definition for `ty` is emitted in this output.
+  bool hasAlias(Type ty) const;
+
+  /// Returns true if `ty`'s own alias definition is the one currently being
+  /// printed.
+  bool isPrintingAliasDefinition(Type ty) const;
+
   /// Print all of the referenced aliases that can not be resolved in a deferred
   /// manner.
   void printNonDeferredAliases(AsmPrinter::Impl &p, NewLineCounter &newLine) {
@@ -1323,6 +1334,10 @@ private:
 
   /// Mapping between attribute/type and alias.
   llvm::MapVector<const void *, SymbolAlias> attrTypeToAlias;
+
+  /// Symbol whose alias definition is being printed, null outside
+  /// printAliases().
+  const void *currentAliasDefinition = nullptr;
 
   /// An allocator used for alias names.
   llvm::BumpPtrAllocator aliasAllocator;
@@ -1355,6 +1370,15 @@ LogicalResult AliasState::getAlias(Type ty, raw_ostream &os) const {
   return success();
 }
 
+bool AliasState::hasAlias(Type ty) const {
+  return attrTypeToAlias.contains(ty.getAsOpaquePointer());
+}
+
+bool AliasState::isPrintingAliasDefinition(Type ty) const {
+  return currentAliasDefinition &&
+         currentAliasDefinition == ty.getAsOpaquePointer();
+}
+
 void AliasState::printAliases(AsmPrinter::Impl &p, NewLineCounter &newLine,
                               bool isDeferred) {
   auto filterFn = [=](const auto &aliasIt) {
@@ -1364,6 +1388,9 @@ void AliasState::printAliases(AsmPrinter::Impl &p, NewLineCounter &newLine,
        llvm::make_filter_range(attrTypeToAlias, filterFn)) {
     alias.print(p.getStream());
     p.getStream() << " = ";
+
+    // See AsmPrinter::isPrintingAliasDefinition.
+    currentAliasDefinition = opaqueSymbol;
 
     if (alias.isTypeAlias()) {
       Type type = Type::getFromOpaquePointer(opaqueSymbol);
@@ -1377,6 +1404,7 @@ void AliasState::printAliases(AsmPrinter::Impl &p, NewLineCounter &newLine,
       else
         p.printAttributeImpl(attr);
     }
+    currentAliasDefinition = nullptr;
 
     p.getStream() << newLine;
   }
@@ -2417,6 +2445,14 @@ LogicalResult AsmPrinter::Impl::printAlias(Type type) {
   return state.getAliasState().getAlias(type, os);
 }
 
+bool AsmPrinter::Impl::hasAlias(Type type) {
+  return state.getAliasState().hasAlias(type);
+}
+
+bool AsmPrinter::Impl::isPrintingAliasDefinition(Type type) {
+  return state.getAliasState().isPrintingAliasDefinition(type);
+}
+
 void AsmPrinter::Impl::printAttribute(Attribute attr,
                                       AttrTypeElision typeElision) {
   if (!attr) {
@@ -3087,6 +3123,13 @@ LogicalResult AsmPrinter::printAlias(Attribute attr) {
 LogicalResult AsmPrinter::printAlias(Type type) {
   assert(impl && "expected AsmPrinter::printAlias to be overriden");
   return impl->printAlias(type);
+}
+
+
+bool AsmPrinter::shouldPrintTypeAsAliasReference(Type type) const {
+  // Null `impl` is the alias-discovery printer: false keeps discovery correct,
+  // since the dialect then prints in full and nested types still get aliases.
+  return impl && impl->hasAlias(type) && !impl->isPrintingAliasDefinition(type);
 }
 
 void AsmPrinter::printAttributeWithoutType(Attribute attr) {

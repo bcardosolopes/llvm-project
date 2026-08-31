@@ -130,6 +130,23 @@ public:
   /// Return the raw output stream used by this printer.
   virtual raw_ostream &getStream() const;
 
+  /// Returns true if `type` should be printed as a short reference to its alias
+  /// rather than in full: an alias definition for it exists in this output, and
+  /// that definition is not what is being printed right now.
+  ///
+  /// For a dialect whose types can print either in full or as a self-contained
+  /// reference (an identified record, struct or class), this is the condition
+  /// under which the reference is both shorter and resolvable. Without it such
+  /// a type is expanded at every use whose alias has not been printed yet, and
+  /// since each expansion is a fresh print that expands in turn, output on a
+  /// cyclic type graph grows without bound.
+  ///
+  /// False whenever there is no alias state to consult -- the alias-discovery
+  /// pre-pass, aliases disabled, or printing a type standalone as the bytecode
+  /// writer does -- so the caller prints in full and no context sees a name it
+  /// cannot resolve.
+  bool shouldPrintTypeAsAliasReference(Type type) const;
+
   /// Print a newline and indent the printer to the start of the current
   /// operation/attribute/type.
   /// Note: For attributes and types this method should only be used in

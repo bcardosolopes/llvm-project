@@ -514,16 +514,19 @@ Type TestRecursiveAliasType::parse(AsmParser &parser) {
   FailureOr<AsmParser::CyclicParseReset> cyclicParse =
       parser.tryStartCyclicParse(rec);
 
-  // If this type already has been parsed above in the stack, expect just the
-  // name.
-  if (failed(cyclicParse)) {
+  // No body: a self-reference from further up the stack, or a reference to an
+  // alias defined elsewhere. A dialect that prints the reference form must
+  // accept it. Keyed off the comma because parseOptionalGreater does not split
+  // a `>>` token.
+  if (failed(parser.parseOptionalComma())) {
     if (failed(parser.parseGreater()))
       return Type();
     return rec;
   }
 
-  // Otherwise, parse the body and update the type.
-  if (failed(parser.parseComma()))
+  // A body means this is the definition, so it must not already be on the
+  // stack.
+  if (failed(cyclicParse))
     return Type();
   Type subtype;
   if (parser.parseType(subtype))
@@ -537,6 +540,13 @@ Type TestRecursiveAliasType::parse(AsmParser &parser) {
 }
 
 void TestRecursiveAliasType::print(AsmPrinter &printer) const {
+  // Refer to the alias rather than repeating the body when the printer says a
+  // definition exists elsewhere in this output. Exercises
+  // AsmPrinter::shouldPrintTypeAsAliasReference from a non-CIR dialect.
+  if (printer.shouldPrintTypeAsAliasReference(*this)) {
+    printer << "<" << getName() << ">";
+    return;
+  }
 
   FailureOr<AsmPrinter::CyclicPrintReset> cyclicPrint =
       printer.tryStartCyclicPrint(*this);

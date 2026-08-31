@@ -237,12 +237,21 @@ printRecordBody(mlir::AsmPrinter &printer, RecordTy self, mlir::StringAttr name,
   if (name)
     printer << name;
 
+  // Print a nested identified record by name; its body comes from its own
+  // alias definition. Expanding it here instead is unbounded on mutually
+  // recursive types. Anonymous records have no name to refer back to.
+  if (name && printer.shouldPrintTypeAsAliasReference(self)) {
+    printer << '>';
+    return;
+  }
+
   FailureOr<AsmPrinter::CyclicPrintReset> cyclicPrintGuard =
       printer.tryStartCyclicPrint(self);
   if (failed(cyclicPrintGuard)) {
     printer << '>';
     return;
   }
+
 
   if (hasClassPrefix || name)
     printer << ' ';
@@ -285,15 +294,11 @@ Type StructType::parse(mlir::AsmParser &parser) {
   mlir::StringAttr name;
   parser.parseOptionalAttribute(name);
 
-  // Self-reference: ensure the referenced type was already parsed.
-  if (name && parser.parseOptionalGreater().succeeded()) {
-    StructType type = StructType::getChecked(eLoc, context, name, is_class);
-    if (succeeded(parser.tryStartCyclicParse(type))) {
-      parser.emitError(loc, "invalid self-reference within record");
-      return {};
-    }
-    return type;
-  }
+  // A body-less reference to an identified record: a self-reference, or a
+  // forward reference to a definition further down. Record types are mutable,
+  // so this resolves to the one type of that name and is completed later.
+  if (name && parser.parseOptionalGreater().succeeded())
+    return StructType::getChecked(eLoc, context, name, is_class);
 
   // Named definition: ensure name has not been parsed yet.
   if (name) {
@@ -428,15 +433,9 @@ Type UnionType::parse(mlir::AsmParser &parser) {
   mlir::StringAttr name;
   parser.parseOptionalAttribute(name);
 
-  // Self-reference.
-  if (name && parser.parseOptionalGreater().succeeded()) {
-    UnionType type = UnionType::getChecked(eLoc, context, name);
-    if (succeeded(parser.tryStartCyclicParse(type))) {
-      parser.emitError(loc, "invalid self-reference within record");
-      return {};
-    }
-    return type;
-  }
+  // As in the record parser: self-reference or forward reference.
+  if (name && parser.parseOptionalGreater().succeeded())
+    return UnionType::getChecked(eLoc, context, name);
 
   // Named definition.
   if (name) {

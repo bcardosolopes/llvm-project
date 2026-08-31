@@ -63,11 +63,12 @@ void testRecursiveStruct(struct RecursiveStruct *arg) {
 // RUN: FileCheck --check-prefix=CHECK4 --input-file=%t/indirect_recursive_struct.cir %s
 
 // Node B refers to A, and vice-versa, so a forward declaration is used to
-// ensure the classes can be defined. Since types alias are not yet supported
-// in recursive type, each struct is expanded until there are no more recursive
-// types, or all the recursive types are self references.
+// ensure the classes can be defined. Neither struct is expanded inside the
+// other: a nested identified record prints as a bare `!cir.struct<"Name">`
+// reference and its body comes from its own type alias, which here is defined
+// on the following line.
 
-// CHECK4: ![[B:.+]] = !cir.struct<"StructNodeB" {data !s32i, data !cir.ptr<!cir.struct<"StructNodeA" {data !s32i, data !cir.ptr<!cir.struct<"StructNodeB">>}
+// CHECK4: ![[B:.+]] = !cir.struct<"StructNodeB" {data !s32i, data !cir.ptr<!cir.struct<"StructNodeA">>}>
 // CHECK4: ![[A:.+]] = !cir.struct<"StructNodeA" {data !s32i, data !cir.ptr<![[B]]>}>
 struct StructNodeB;
 struct StructNodeA {
@@ -96,10 +97,10 @@ void testIndirectSelfReference(struct StructNodeA arg) {
 // RUN: FileCheck --check-prefix=CHECK5 --input-file=%t/complex_struct.cir %s
 
 // A sizeable complex struct just to double check that stuff is working.
-// CHECK5: !cir.struct<"anon.0" {data !cir.ptr<!cir.struct<"A" {data !cir.struct<"anon.0">, data !cir.struct<"B" {data !cir.ptr<!cir.struct<"B">>, data !cir.struct<"C" {data !cir.ptr<!cir.struct<"A">>, data !cir.ptr<!cir.struct<"B">>, data !cir.ptr<!cir.struct<"C">>}>, data !cir.union<"anon.1" {data !cir.ptr<!cir.struct<"A">>, data !cir.struct<"anon.2" {data !cir.ptr<!cir.struct<"B">>}>}>}>}>>}>
-// CHECK5: !cir.struct<"C" {data !cir.ptr<!cir.struct<"A" {data !rec_anon2E0, data !cir.struct<"B" {data !cir.ptr<!cir.struct<"B">>, data !cir.struct<"C">, data !cir.union<"anon.1" {data !cir.ptr<!cir.struct<"A">>, data !cir.struct<"anon.2" {data !cir.ptr<!cir.struct<"B">>}>}>}>}>>, data !cir.ptr<!cir.struct<"B" {data !cir.ptr<!cir.struct<"B">>, data !cir.struct<"C">, data !cir.union<"anon.1" {data !cir.ptr<!cir.struct<"A" {data !rec_anon2E0, data !cir.struct<"B">}>>, data !cir.struct<"anon.2" {data !cir.ptr<!cir.struct<"B">>}>}>}>>, data !cir.ptr<!cir.struct<"C">>}>
-// CHECK5: !cir.struct<"anon.2" {data !cir.ptr<!cir.struct<"B" {data !cir.ptr<!cir.struct<"B">>, data !rec_C, data !cir.union<"anon.1" {data !cir.ptr<!cir.struct<"A" {data !rec_anon2E0, data !cir.struct<"B">}>>, data !cir.struct<"anon.2">}>}>>}>
-// CHECK5: !cir.union<"anon.1" {data !cir.ptr<!cir.struct<"A" {data !rec_anon2E0, data !cir.struct<"B" {data !cir.ptr<!cir.struct<"B">>, data !rec_C, data !cir.union<"anon.1">}>}>>, data !rec_anon2E2}>
+// CHECK5: !cir.struct<"anon.0" {data !cir.ptr<!cir.struct<"A">>}>
+// CHECK5: !cir.struct<"C" {data !cir.ptr<!cir.struct<"A">>, data !cir.ptr<!cir.struct<"B">>, data !cir.ptr<!cir.struct<"C">>}>
+// CHECK5: !cir.struct<"anon.2" {data !cir.ptr<!cir.struct<"B">>}>
+// CHECK5: !cir.union<"anon.1" {data !cir.ptr<!cir.struct<"A">>, data !rec_anon2E2}>
 // CHECK5: !cir.struct<"B" {data !cir.ptr<!cir.struct<"B">>, data !rec_C, data !rec_anon2E1}>
 // CHECK5: !cir.struct<"A" {data !rec_anon2E0, data !rec_B}>
 struct A {

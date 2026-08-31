@@ -14,9 +14,9 @@
 // CIR-DAG: !rec_PackedS = !cir.struct<"PackedS" packed {data !s32i, data !s8i}>
 // CIR-DAG: !rec_PackedAndPaddedS = !cir.struct<"PackedAndPaddedS" packed {data !s32i, data !s8i, pad !u8i}>
 // CIR-DAG: !rec_NodeS = !cir.struct<"NodeS" {data !cir.ptr<!cir.struct<"NodeS">>}>
-// CIR-DAG: !rec_RightS = !cir.struct<"RightS" {data !cir.ptr<!cir.struct<"LeftS" {data !cir.ptr<!cir.struct<"RightS">>}>>}>
+// CIR-DAG: !rec_RightS = !cir.struct<"RightS" {data !cir.ptr<!cir.struct<"LeftS">>}>
 // CIR-DAG: !rec_LeftS = !cir.struct<"LeftS" {data !cir.ptr<!rec_RightS>}>
-// CIR-DAG: !rec_CycleEnd = !cir.struct<"CycleEnd" {data !cir.ptr<!cir.struct<"CycleStart" {data !cir.ptr<!cir.struct<"CycleMiddle" {data !cir.ptr<!cir.struct<"CycleEnd">>}>>}>>}>
+// CIR-DAG: !rec_CycleEnd = !cir.struct<"CycleEnd" {data !cir.ptr<!cir.struct<"CycleStart">>}>
 // CIR-DAG: !rec_CycleMiddle = !cir.struct<"CycleMiddle" {data !cir.ptr<!rec_CycleEnd>}>
 // CIR-DAG: !rec_CycleStart = !cir.struct<"CycleStart" {data !cir.ptr<!rec_CycleMiddle>}>
 // CIR-DAG: !rec_IncompleteArray = !cir.struct<"IncompleteArray" {data !cir.array<!s32i x 0>}>
