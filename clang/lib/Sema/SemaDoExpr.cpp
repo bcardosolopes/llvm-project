@@ -225,24 +225,49 @@ void Sema::ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
   Entry.TemplateDepth =
       TemplateDepth == ~0U ? getTemplateDepth(getCurScope()) : TemplateDepth;
   Entry.OuterScope = getCurScope();
-  // PushCompoundScope (called by ParseCompoundStatementBody) asserts that
-  // there is a current function scope. At namespace scope (e.g. a constexpr
-  // variable initializer) there is none, so push a synthetic one and remember
-  // to pop it on close. This synthetic scope only matters for the few Sema
-  // checks that consult the function-scope info during body parsing; the
-  // body's `return`/`break`/`continue` lookup is driven by the parser's
-  // Scope tree, which we deliberately do not augment.
+
+  // Parsing the body has two independent prerequisites, and a do-expression
+  // can be written in a context that supplies one but not the other.
+  //
+  // (1) A FunctionScopeInfo. PushCompoundScope (called by
+  //     ParseCompoundStatementBody) asserts that there is one. At namespace
+  //     scope (e.g. a constexpr variable initializer) there is none, so push a
+  //     synthetic one and remember to pop it on close. This synthetic scope
+  //     only matters for the few Sema checks that consult the function-scope
+  //     info during body parsing; the body's `return`/`break`/`continue`
+  //     lookup is driven by the parser's Scope tree, which we deliberately do
+  //     not augment.
   if (FunctionScopes.empty()) {
-    QualType FnTy = Context.getFunctionNoProtoType(Context.VoidTy);
+    PushFunctionScope();
+    Entry.PushedSyntheticFunctionScope = true;
+  }
+
+  // (2) A DeclContext that block-scope declarations can live in. A lambda body
+  //     gets one from its call operator; a do-expression creates no function
+  //     scope by design, so it has to supply one itself. This is a separate
+  //     question from (1): while parsing a default member initializer or a
+  //     default argument there *is* a function scope, but CurContext is the
+  //     CXXRecordDecl, and a declaration in the body would be built as a
+  //     member of the class -- which is wrong, and asserts outright for a
+  //     const variable or a local class (AccessDeclContextCheck).
+  if (!CurContext->isFunctionOrMethod()) {
+    // `void ()`, with a prototype: a local class declared in the body records
+    // this as its enclosing function, and the Itanium mangler casts that
+    // function's type to FunctionProtoType unconditionally.
+    QualType FnTy = Context.getFunctionType(Context.VoidTy, {},
+                                            FunctionProtoType::ExtProtoInfo());
     auto *SyntheticFD =
         FunctionDecl::Create(Context, CurContext, DoLoc, DoLoc,
                              &Context.Idents.get(FunctionDecl::DoExprBodyName),
                              FnTy, /*TInfo=*/nullptr, SC_None);
     SyntheticFD->setImplicit();
+    // Parented in a class (the default-member-initializer case) it needs an
+    // access specifier of its own, for the same assertion it exists to avoid.
+    // It is never added to the class's lookup, so the value is immaterial.
+    if (CurContext->isRecord())
+      SyntheticFD->setAccess(AS_public);
     Entry.SavedContext = CurContext;
     CurContext = SyntheticFD;
-    PushFunctionScope();
-    Entry.PushedSyntheticFunctionScope = true;
   }
   Entry.FunctionScopeDepth = FunctionScopes.size();
   DoExprStack.push_back(Entry);

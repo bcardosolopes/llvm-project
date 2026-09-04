@@ -20817,6 +20817,16 @@ bool Sema::tryCaptureVariable(
   while (isa<ExpansionStmtDecl>(VarDC))
     VarDC = VarDC->getParent();
 
+  // A variable declared in a do-expression body is never captured: the body
+  // introduces block scope, not function scope, so there is no boundary for a
+  // capture to cross. The synthetic DeclContext it lives in only looks like
+  // one, and when the do-expression is in a default member initializer the
+  // odr-use is marked from the implicit default constructor, at which point
+  // CurContext no longer matches and this would be reported as a reference to
+  // a local variable of an enclosing function.
+  if (isDoExprBodyContext(VarDC))
+    return true;
+
   // tryCaptureVariable is called every time a DeclRef is formed,
   // it can therefore have non-negigible impact on performances.
   // For local variables and when there is no capturing scope,
@@ -22172,10 +22182,15 @@ public:
   }
 
   void VisitDeclRefExpr(DeclRefExpr *E) {
-    // If we were asked not to visit local variables, don't.
+    // If we were asked not to visit local variables, don't. A variable
+    // declared in a do-expression body is an exception: the caller skips
+    // local variables because they belong to a scope it is not entering, but
+    // a do-expression body is part of the expression being visited, so
+    // nothing else will ever mark its declarations used and CodeGen asserts
+    // when it reaches one that was not.
     if (SkipLocalVariables) {
       if (VarDecl *VD = dyn_cast<VarDecl>(E->getDecl()))
-        if (VD->hasLocalStorage())
+        if (VD->hasLocalStorage() && !isDoExprBodyContext(VD->getDeclContext()))
           return;
     }
 
