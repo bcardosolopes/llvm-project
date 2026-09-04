@@ -316,6 +316,7 @@ Clang-Tidy Checks
    :doc:`modernize-use-constraints <modernize/use-constraints>`, "Yes"
    :doc:`modernize-use-default-member-init <modernize/use-default-member-init>`, "Yes"
    :doc:`modernize-use-designated-initializers <modernize/use-designated-initializers>`, "Yes"
+   :doc:`modernize-use-do-expr <modernize/use-do-expr>`, "Yes"
    :doc:`modernize-use-emplace <modernize/use-emplace>`, "Yes"
    :doc:`modernize-use-equals-default <modernize/use-equals-default>`, "Yes"
    :doc:`modernize-use-equals-delete <modernize/use-equals-delete>`, "Yes"

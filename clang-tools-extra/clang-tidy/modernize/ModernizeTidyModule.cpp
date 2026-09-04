@@ -36,6 +36,7 @@
 #include "UseConstraintsCheck.h"
 #include "UseDefaultMemberInitCheck.h"
 #include "UseDesignatedInitializersCheck.h"
+#include "UseDoExprCheck.h"
 #include "UseEmplaceCheck.h"
 #include "UseEqualsDefaultCheck.h"
 #include "UseEqualsDeleteCheck.h"
@@ -125,6 +126,7 @@ public:
         "modernize-use-constraints");
     CheckFactories.registerCheck<UseDefaultMemberInitCheck>(
         "modernize-use-default-member-init");
+    CheckFactories.registerCheck<UseDoExprCheck>("modernize-use-do-expr");
     CheckFactories.registerCheck<UseEmplaceCheck>("modernize-use-emplace");
     CheckFactories.registerCheck<UseEqualsDefaultCheck>(
         "modernize-use-equals-default");
