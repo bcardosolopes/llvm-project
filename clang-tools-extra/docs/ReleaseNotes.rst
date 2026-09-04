@@ -257,6 +257,13 @@ New checks
 
   Finds cyclical initialization of static variables.
 
+- New :doc:`modernize-use-do-expr
+  <clang-tidy/checks/modernize/use-do-expr>` check.
+
+  Finds immediately-invoked lambda expressions and classifies each one by
+  whether, and why, it could be spelled as a ``do`` expression instead, and
+  rewrites the ones that can be.
+
 - New :doc:`modernize-use-std-bit
   <clang-tidy/checks/modernize/use-std-bit>` check.
 
