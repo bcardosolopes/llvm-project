@@ -86,6 +86,10 @@ public:
       __loc_ = std::locale{};
     return *__loc_;
   }
+  // The locale this context was given, if any. A nested formatting operation
+  // (a template string used as a format argument) runs under the same
+  // locale without forcing one to be created.
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI optional<std::locale> __locale_opt() const { return __loc_; }
 #  endif
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI iterator out() { return std::move(__out_it_); }
   _LIBCPP_HIDE_FROM_ABI void advance_to(iterator __it) { __out_it_ = std::move(__it); }
@@ -187,6 +191,7 @@ public:
   }
 #  if _LIBCPP_HAS_LOCALIZATION
   _LIBCPP_HIDE_FROM_ABI std::locale locale() { return __loc_(__ctx_); }
+  _LIBCPP_HIDE_FROM_ABI optional<std::locale> __locale_opt() { return __loc_(__ctx_); }
 #  endif
   _LIBCPP_HIDE_FROM_ABI iterator out() { return std::move(__out_it_); }
   _LIBCPP_HIDE_FROM_ABI void advance_to(iterator __it) { __out_it_ = std::move(__it); }
