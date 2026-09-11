@@ -1320,6 +1320,17 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
     }
     return TPResult::False;
   }
+  case tok::annot_template_name: {
+    if (!NextToken().is(tok::less))
+      return TPResult::False;
+    if (TryAnnotateTypeOrScopeToken(AllowImplicitTypename))
+      return TPResult::Error;
+    if (Tok.is(tok::annot_template_name))
+      return TPResult::False;
+    return isCXXDeclarationSpecifier(AllowImplicitTypename, BracedCastResult,
+                                     InvalidAsDeclSpec);
+  }
+
   case tok::annot_template_id: {
     TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
     // If lookup for the template-name found nothing, don't assume we have a

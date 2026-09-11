@@ -258,7 +258,33 @@ bool Parser::ParseSpliceSpecifier(bool TryParseSpecialization) {
   if (SpliceTokens.expectAndConsume())
     return true;
 
-  ExprResult ER = ParseConstantExpression();
+  ExprResult ER;
+  if (Tok.isOneOf(tok::annot_typename, tok::annot_template_name,
+                  tok::annot_splice) &&
+      NextToken().is(tok::r_splice)) {
+    // An interpolated type, template, or namespace (from a token sequence)
+    // used as the whole splice operand: splice what it designates.
+    SourceLocation Loc = Tok.getLocation();
+    if (Tok.is(tok::annot_splice)) {
+      SpliceResult Inner = getSpliceAnnotation(Tok);
+      ConsumeAnnotationToken();
+      ER = Inner.isInvalid() ? ExprError() : Inner.get()->getOperand();
+    } else if (Tok.is(tok::annot_typename)) {
+      // The annotation carries a bare type with no location information.
+      TypeResult T = getTypeAnnotation(Tok);
+      ConsumeAnnotationToken();
+      ER = T.isInvalid() ? ExprError()
+                         : Actions.BuildCXXReflectExpr(
+                               Loc, Loc, Sema::GetTypeFromParser(T.get()));
+    } else {
+      TemplateName Template =
+          TemplateName::getFromVoidPointer(Tok.getAnnotationValue());
+      ConsumeAnnotationToken();
+      ER = Actions.BuildCXXReflectExpr(Loc, Loc, Template);
+    }
+  } else {
+    ER = ParseConstantExpression();
+  }
   if (ER.isInvalid() || ER.get()->containsErrors()) {
     SpliceTokens.skipToEnd();
     return true;

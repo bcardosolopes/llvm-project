@@ -474,6 +474,16 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       break;
     }
 
+    // An interpolated template name followed by a template-argument-list
+    // forms a template-id, which is then handled like any other.
+    if (Tok.is(tok::annot_template_name)) {
+      if (!NextToken().is(tok::less))
+        break;
+      if (AnnotateInterpolatedTemplateName(SS, /*AllowTypeAnnotation=*/false))
+        return true;
+      continue;
+    }
+
     // The rest of the nested-name-specifier possibilities start with
     // tok::identifier.
     if (Tok.isNot(tok::identifier))

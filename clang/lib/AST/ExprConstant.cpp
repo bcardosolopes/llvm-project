@@ -40,6 +40,7 @@
 #include "ExprConstShared.h"
 #include "clang/AST/APValue.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/SpliceSpecifier.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/CXXInheritance.h"
@@ -22089,6 +22090,11 @@ static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
       OS << "\\(";
       QT.print(OS, PP);
       OS << ")";
+    } else if (Tok.is(tok::annot_template_name)) {
+      // Interpolated template.
+      OS << "\\(";
+      TemplateName::getFromVoidPointer(Tok.getAnnotationValue()).print(OS, PP);
+      OS << ")";
     } else if (Tok.is(tok::annot_token_seq_expr)) {
       // Interpolated expression.
       Expr *E = static_cast<Expr *>(Tok.getAnnotationValue());
@@ -22502,6 +22508,32 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
 
               Token Tok = SrcTok;
               Tok.setAnnotationValue(static_cast<void *>(DRE));
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedTemplate()) {
+              // Template reflection: a template-name token. The parser forms
+              // a template-id from it when a template-argument-list follows,
+              // exactly as for a template named by an identifier.
+              Token Tok = SrcTok;
+              Tok.setKind(tok::annot_template_name);
+              Tok.setAnnotationValue(
+                  Val.getReflectedTemplate().getAsVoidPointer());
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedNamespace()) {
+              // Namespace reflection: a splice, which the parser already
+              // accepts as the leading component of a nested-name-specifier
+              // and in using-directives. A valid SpliceResult's opaque
+              // pointer is the SpliceSpecifier pointer itself.
+              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                  OK_Ordinary, SubExpr);
+              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+              SpliceSpecifier *Splice = SpliceSpecifier::Create(
+                  Info.Ctx, SrcTok.getLocation(), CE, SrcTok.getLocation(),
+                  /*TemplateArgs=*/nullptr);
+
+              Token Tok = SrcTok;
+              Tok.setKind(tok::annot_splice);
+              Tok.setAnnotationValue(static_cast<void *>(Splice));
               NewTokens.push_back(Tok);
             } else {
               // For FieldDecl, base specifiers, and other reflection kinds:

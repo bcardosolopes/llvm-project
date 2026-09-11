@@ -8500,6 +8500,8 @@ private:
   /// If an unrecoverable parse error occurs and no annotation token can be
   /// formed, this function returns true.
   ///
+  bool AnnotateInterpolatedTemplateName(CXXScopeSpec &SS,
+                                        bool AllowTypeAnnotation);
   bool AnnotateTemplateIdToken(TemplateTy Template, TemplateNameKind TNK,
                                CXXScopeSpec &SS, SourceLocation TemplateKWLoc,
                                UnqualifiedId &TemplateName,

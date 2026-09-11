@@ -945,3 +945,104 @@ namespace N34 {
     static_assert(__builtin_strcmp(stringize(tokenize("hello")), "hello") == 0);
     static_assert(__builtin_strcmp(stringize(tokenize("a + b")), "a + b") == 0);
 }
+
+// Interpolating a template reflection yields a template-name token: followed
+// by a template-argument-list it forms a template-id exactly as the spelled
+// name would. Here that names every specialization of a template known only
+// by reflection in an injected partial specialization; the two templates must
+// not collide.
+namespace N35 {
+    template <class T> struct is_wide { static constexpr bool value = false; };
+
+    template <class T> struct wide_result { T hi; T lo; static constexpr int elems = 2; };
+    template <class T> struct other { T x; static constexpr int elems = 1; };
+
+    consteval auto derive(info tmpl) -> void {
+        queue_injection(^^N35, ^^{
+            template <class... Ts>
+            struct is_wide<\(tmpl)<Ts...>> {
+                static constexpr bool value = true;
+                static constexpr int elems = \(tmpl)<Ts...>::elems;
+            };
+        });
+    }
+
+    consteval { derive(^^wide_result); }
+    consteval { derive(^^other); }
+
+    static_assert(!is_wide<int>::value);
+    static_assert(is_wide<wide_result<int>>::value);
+    static_assert(is_wide<wide_result<int>>::elems == 2);
+    static_assert(is_wide<other<char>>::value);
+    static_assert(is_wide<other<char>>::elems == 1);
+
+    // An interpolated template or type may also be the operand of an
+    // explicit splice.
+    template <class T> struct is_other { static constexpr bool value = false; };
+    consteval auto derive2(info tmpl, info ty) -> void {
+        queue_injection(^^N35, ^^{
+            template <class... Ts>
+            struct is_other<typename [:\(tmpl):]<Ts...>> {
+                static constexpr bool value = true;
+                static constexpr int n = template [:\(tmpl):]<Ts...>::elems + [:\(ty):]::elems;
+            };
+        });
+    }
+    consteval { derive2(^^other, ^^wide_result<int>); }
+    static_assert(is_other<other<int>>::value);
+    static_assert(is_other<other<int>>::n == 3);
+    static_assert(!is_other<wide_result<int>>::value);
+}
+
+// An interpolated template name behaves like the spelled name in every
+// position; an interpolated namespace behaves like a splice of it.
+namespace N36 {
+    template <class T> struct W { T v; static constexpr int n = 1; using type = T; };
+    template <template <class> class Z> struct holder { static constexpr int k = 7; };
+    template <class T> constexpr int vt = sizeof(T);
+    template <class T> constexpr T ft(T x) { return x + 1; }
+    namespace NS { constexpr int q = 42; }
+
+    consteval auto inject(info tmpl, info vtmpl, info ftmpl, info ns) -> void {
+        queue_injection(^^N36, ^^{
+            constexpr \(tmpl)<int> g1{5};              // decl-specifier
+            using A = \(tmpl)<char>;                   // alias
+            constexpr int g2 = \(tmpl)<int>::n;        // nested-name-specifier in an expression
+            using B = \(tmpl)<long>::type;             // nested-name-specifier in a type-only context
+            constexpr int g3 = holder<\(tmpl)>::k;     // template template argument
+            constexpr int g4 = \(vtmpl)<double>;       // variable template
+            constexpr int g5 = \(ftmpl)<int>(1);       // function template
+            constexpr int g6 = \(ns)::q;               // namespace as nested-name-specifier
+            constexpr auto g7 = \(tmpl)<int>{9}.v;     // functional cast
+            constexpr int body() {                     // declaration statement
+                \(tmpl)<int> x{3};
+                return x.v + \(tmpl)<int>::n;
+            }
+            namespace inner {
+                using namespace \(ns);                 // using-directive
+                constexpr int g8 = q;
+            }
+            constexpr int g9 = [:\(ns):]::q;           // interpolated namespace as splice operand
+        });
+    }
+    consteval { inject(^^W, ^^vt, ^^ft, ^^NS); }
+
+    static_assert(g1.v == 5);
+    static_assert(__is_same(A, W<char>));
+    static_assert(g2 == 1);
+    static_assert(__is_same(B, long));
+    static_assert(g3 == 7);
+    static_assert(g4 == 8);
+    static_assert(g5 == 2);
+    static_assert(g6 == 42);
+    static_assert(g7 == 9);
+    static_assert(body() == 4);
+    static_assert(inner::g8 == 42);
+    static_assert(g9 == 42);
+
+    // A bare interpolated template is not an expression.
+    consteval auto bad(info tmpl) -> void {
+        queue_injection(^^N36, ^^{ constexpr int e = \(tmpl); }); // expected-error {{expected expression}}
+    }
+    consteval { bad(^^W); }
+}

@@ -1188,6 +1188,35 @@ bool Parser::AnnotateTemplateIdToken(TemplateTy Template, TemplateNameKind TNK,
   return false;
 }
 
+/// An annot_template_name token (a template designated by an interpolated
+/// reflection in a token sequence) followed by a template-argument-list is
+/// annotated as a template-id, exactly as an identifier naming that template
+/// would be. The parser is left on the resulting annot_template_id (or
+/// annot_typename, if permitted) token.
+bool Parser::AnnotateInterpolatedTemplateName(CXXScopeSpec &SS,
+                                              bool AllowTypeAnnotation) {
+  assert(Tok.is(tok::annot_template_name) && "expected a template name");
+  assert(NextToken().is(tok::less) && "expected a template-argument-list");
+
+  TemplateName Template =
+      TemplateName::getFromVoidPointer(Tok.getAnnotationValue());
+  TemplateDecl *TD = Template.getAsTemplateDecl();
+
+  TemplateNameKind TNK = TNK_Type_template;
+  if (isa_and_nonnull<FunctionTemplateDecl>(TD))
+    TNK = TNK_Function_template;
+  else if (isa_and_nonnull<VarTemplateDecl>(TD))
+    TNK = TNK_Var_template;
+  else if (isa_and_nonnull<ConceptDecl>(TD))
+    TNK = TNK_Concept_template;
+
+  UnqualifiedId Name;
+  Name.setIdentifier(TD ? TD->getIdentifier() : nullptr, Tok.getLocation());
+  ConsumeAnnotationToken();
+  return AnnotateTemplateIdToken(TemplateTy::make(Template), TNK, SS,
+                                 SourceLocation(), Name, AllowTypeAnnotation);
+}
+
 void Parser::AnnotateTemplateIdTokenAsType(
     CXXScopeSpec &SS, ImplicitTypenameContext AllowImplicitTypename,
     bool IsClassName) {
@@ -1232,7 +1261,7 @@ static bool isEndOfTemplateArgument(Token Tok) {
 ParsedTemplateArgument Parser::ParseTemplateTemplateArgument() {
   if (!Tok.is(tok::identifier) && !Tok.is(tok::coloncolon) &&
       !Tok.is(tok::annot_cxxscope) && !Tok.is(tok::annot_template_id) &&
-      !Tok.is(tok::annot_non_type))
+      !Tok.is(tok::annot_non_type) && !Tok.is(tok::annot_template_name))
     return ParsedTemplateArgument();
 
   // C++0x [temp.arg.template]p1:
@@ -1253,6 +1282,21 @@ ParsedTemplateArgument Parser::ParseTemplateTemplateArgument() {
 
   ParsedTemplateArgument Result;
   SourceLocation EllipsisLoc;
+  if (Tok.is(tok::annot_template_name)) {
+    // A template designated by an interpolated reflection.
+    TemplateName Template =
+        TemplateName::getFromVoidPointer(Tok.getAnnotationValue());
+    SourceLocation NameLoc = Tok.getLocation();
+    ConsumeAnnotationToken();
+    TryConsumeToken(tok::ellipsis, EllipsisLoc);
+    if (isEndOfTemplateArgument(Tok)) {
+      Result = ParsedTemplateArgument(/*TemplateKwLoc=*/SourceLocation(), SS,
+                                      TemplateTy::make(Template), NameLoc);
+      if (EllipsisLoc.isValid())
+        Result = Actions.ActOnPackExpansion(Result, EllipsisLoc);
+    }
+    return Result;
+  }
   if (SS.isSet() && Tok.is(tok::kw_template)) {
     // Parse the optional 'template' keyword following the
     // nested-name-specifier.

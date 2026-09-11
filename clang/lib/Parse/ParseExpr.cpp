@@ -1444,16 +1444,19 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     break;
   }
 
-  case tok::annot_splice: {
-    // An 'annot_splice' was parsed by 'TryAnnotateTypeOrScopeToken', but it
-    // could not be spliced as a type; it must be an expression.
-    Res = ParseCXXSpliceAsExpr(SourceLocation(),
-                               /*AllowMemberReference=*/isAddressOfOperand);
-    break;
-  }
-
+  case tok::annot_splice:
+    // An 'annot_splice' followed by '::' is a splice-scope-specifier (e.g.
+    // an interpolated namespace), handled below. Otherwise it was parsed by
+    // 'TryAnnotateTypeOrScopeToken' but could not be spliced as a type; it
+    // must be an expression.
+    if (!NextToken().is(tok::coloncolon)) {
+      Res = ParseCXXSpliceAsExpr(SourceLocation(),
+                                 /*AllowMemberReference=*/isAddressOfOperand);
+      break;
+    }
+    [[fallthrough]];
   case tok::l_splice:
-    if (ParseSpliceSpecifier())
+    if (Tok.is(tok::l_splice) && ParseSpliceSpecifier())
       return ExprError();
     [[fallthrough]];
   case tok::annot_cxxscope: { // [C++] id-expression: qualified-id
@@ -1489,6 +1492,25 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     // Parse as an id-expression.
     Res = ParseCXXIdExpression(isAddressOfOperand);
     break;
+  }
+
+  case tok::annot_template_name: {
+    // A template designated by an interpolated reflection. With a
+    // template-argument-list it becomes a template-id (possibly followed by
+    // '::'); on its own it is not an expression.
+    if (!NextToken().is(tok::less)) {
+      Diag(Tok, diag::err_expected_expression);
+      ConsumeAnnotationToken();
+      return ExprError();
+    }
+    if (TryAnnotateTypeOrScopeToken(ImplicitTypenameContext::No,
+                                    isAddressOfOperand))
+      return ExprError();
+    if (Tok.is(tok::annot_template_name))
+      return ExprError();
+    return ParseCastExpression(ParseKind, isAddressOfOperand, NotCastExpr,
+                               CorrectionBehavior, isVectorLiteral,
+                               NotPrimaryExpression);
   }
 
   case tok::annot_template_id: { // [C++]          template-id

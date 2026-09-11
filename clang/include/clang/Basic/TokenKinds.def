@@ -943,6 +943,10 @@ ANNOTATION(splice)       // annotation for a splice specifier
 ANNOTATION(splice_specialization) // annotation for a splice specialization
                                   // specifier
 ANNOTATION(token_seq_expr) // annotation for an interpolation expression \(e)
+ANNOTATION(template_name)  // annotation for a template named by an
+                           // interpolated reflection; the annotation value
+                           // is a TemplateName. Followed by '<' it forms a
+                           // template-id like an identifier would.
                            // captured in a ^^{ ... } token sequence
 
 // Annotation for #pragma unused(...)
