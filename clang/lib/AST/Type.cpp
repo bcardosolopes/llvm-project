@@ -4341,8 +4341,10 @@ QualType ReflectionSpliceType::desugar() const {
 }
 
 bool ReflectionSpliceType::isSugared() const {
-  // A reflected type is sugared if it's non-dependent.
-  return !isDependentType();
+  // Only a splice whose operand could not be evaluated has no underlying type.
+  // A splice of a known template with dependent arguments is dependent but
+  // still sugar for the template-specialization type it designates.
+  return !UnderlyingTy->isSpecificBuiltinType(BuiltinType::Dependent);
 }
 
 DependentReflectionSpliceType::DependentReflectionSpliceType(

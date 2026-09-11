@@ -1660,6 +1660,24 @@ bool Sema::ActOnCXXSpliceScopeSpecifier(CXXScopeSpec &SS,
                                         SourceLocation ColonColonLoc) {
   assert(SS.isEmpty() && "splice must be leading component of NNS");
 
+  // A constant operand with dependent template arguments designates a
+  // dependent specialization of a known template. Represent that as a type
+  // nested-name-specifier so it is treated as a dependent scope rather than a
+  // non-dependent splice scope with no declaration context.
+  if (Splice->isSpecialization() &&
+      toSpliceSpecifierDependence(Splice->getOperand()->getDependence()) ==
+          SpliceSpecifierDependence::None &&
+      Splice->getDependence() != SpliceSpecifierDependence::None) {
+    TypeLocBuilder TLB;
+    QualType T = BuildReflectionSpliceTypeLoc(TLB, SourceLocation(), Splice,
+                                              /*Complain=*/true);
+    if (T.isNull())
+      return true;
+    SS.Make(Context, TLB.getTypeSourceInfo(Context, T)->getTypeLoc(),
+            ColonColonLoc);
+    return false;
+  }
+
   auto *DC = TryFindDeclContextOf(Splice);
   if (Splice->getDependence() == SpliceSpecifierDependence::None && !DC)
     return true;
@@ -1978,7 +1996,13 @@ Sema::BuildSpliceSpecifier(SourceLocation LSpliceLoc, Expr *Operand,
 QualType Sema::BuildReflectionSpliceType(SourceLocation TypenameKWLoc,
                                          SpliceSpecifier *Splice,
                                          bool Complain) {
-  if (Splice->getDependence() != SpliceSpecifierDependence::None) {
+  // Only a dependent operand makes the designated entity unknowable. A
+  // constant operand with dependent template arguments (e.g.,
+  // 'typename [:R:]<Ts...>') still names a specific template, so resolve it
+  // now and let CheckTemplateIdType produce an ordinary dependent
+  // template-specialization type, which deduction and mangling understand.
+  if (toSpliceSpecifierDependence(Splice->getOperand()->getDependence()) !=
+      SpliceSpecifierDependence::None) {
     return Context.getReflectionSpliceType(TypenameKWLoc, Splice,
                                            Context.DependentTy);
   }

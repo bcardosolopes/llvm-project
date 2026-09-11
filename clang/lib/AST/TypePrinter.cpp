@@ -1368,7 +1368,7 @@ void TypePrinter::printDecltypeAfter(const DecltypeType *T, raw_ostream &OS) {}
 
 void TypePrinter::printReflectionSpliceBefore(const ReflectionSpliceType *T,
                                               raw_ostream &OS) {
-  if (T->isDependentType()) {
+  if (!T->isSugared()) {
     OS << "typename [:";
     /*if (T->getOperand())
       T->getOperand()->printPretty(OS, nullptr, Policy);*/

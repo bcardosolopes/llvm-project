@@ -211,6 +211,72 @@ struct S {
 
 S<V> s;
 }  // namespace barry_example
+                        // ==================================
+                        // constant_operand_dependent_arguments
+                        // ==================================
+
+// A splice of a constant template reflection with dependent template
+// arguments designates a dependent specialization of a *known* template. It
+// must behave exactly like the spelled name would: be deducible in a partial
+// specialization, be distinct from the same form over a different template,
+// and be usable as a nested-name-specifier in a dependent context.
+namespace constant_operand_dependent_arguments {
+template <typename T> struct W { using type = T; static constexpr int n = 1; };
+template <typename T> struct Z { using type = T*; static constexpr int n = 2; };
+constexpr info RW = ^^W;
+constexpr info RZ = ^^Z;
+
+template <typename T> struct trait { static constexpr int v = 0; };
+template <typename... Ts> struct trait<typename [:RW:]<Ts...>> {
+  static constexpr int v = 1;
+};
+template <typename... Ts> struct trait<typename [:RZ:]<Ts...>> {
+  static constexpr int v = 2;
+};
+static_assert(trait<int>::v == 0);
+static_assert(trait<W<int>>::v == 1);
+static_assert(trait<Z<int>>::v == 2);
+
+// Partial ordering: the splice form is exactly as specialized as the name.
+template <typename T> struct ordered { static constexpr int v = 0; };
+template <typename T> requires (sizeof(T) > 0)
+struct ordered<T> { static constexpr int v = 1; };
+template <typename... Ts> struct ordered<typename [:RW:]<Ts...>> {
+  static constexpr int v = 2;
+};
+static_assert(ordered<W<int>>::v == 2);
+
+// Nested-name-specifier forms.
+template <typename... Ts>
+constexpr int n_of = template [:RW:]<Ts...>::n;
+static_assert(n_of<int> == 1);
+
+template <typename... Ts>
+using type_of_t = typename [:RZ:]<Ts...>::type;
+static_assert(is_same_v<type_of_t<int>, int*>);
+
+template <typename T>
+constexpr int fn() { return template [:RW:]<T>::n + template [:RZ:]<T>::n; }
+static_assert(fn<char>() == 3);
+
+// The operand becomes constant only after the outer template is
+// instantiated, while the member template's arguments remain dependent.
+template <info R>
+struct outer {
+  template <typename... Ts>
+  static constexpr int n() { return template [:R:]<Ts...>::n; }
+  template <typename... Ts>
+  using type = typename [:R:]<Ts...>::type;
+  template <typename... Ts>
+  static constexpr bool same = is_same_v<typename [:R:]<Ts...>, W<Ts...>>;
+};
+static_assert(outer<RW>::n<int>() == 1);
+static_assert(outer<RZ>::n<int>() == 2);
+static_assert(is_same_v<outer<RZ>::type<int>, int*>);
+static_assert(outer<RW>::same<int>);
+static_assert(!outer<RZ>::same<int>);
+}  // namespace constant_operand_dependent_arguments
+
                                  // ===========
                                  // error_cases
                                  // ===========
