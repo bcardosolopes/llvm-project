@@ -2786,18 +2786,34 @@ void Sema::ProcessPendingTokenInjections() {
 }
 
 void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
+  // For a class template, the parser hands us the ClassTemplateDecl.
+  if (auto *CT = dyn_cast_or_null<ClassTemplateDecl>(TagDecl))
+    TagDecl = CT->getTemplatedDecl();
   auto *RD = dyn_cast_or_null<CXXRecordDecl>(TagDecl);
   if (!RD || !RD->isCompleteDefinition())
     return;
 
-  // Skip dependent types (e.g., template patterns). on_complete callbacks
-  // will fire when the template is instantiated instead.
-  if (RD->isDependentType())
-    return;
+  // For the pattern of a class template, annotations fire their
+  // on_template_defined callback with a reflection of the template itself;
+  // on_complete fires for each specialization once it is instantiated.
+  // Other dependent definitions (partial specializations, members of class
+  // templates) fire neither here: the primary template's callback already
+  // covers every specialization.
+  ClassTemplateDecl *CTD = nullptr;
+  if (RD->isDependentType()) {
+    CTD = RD->getDescribedClassTemplate();
+    if (!CTD || CTD->getDeclContext()->isDependentContext())
+      return;
+  }
 
   for (auto *Attr : RD->attrs()) {
     auto *A = dyn_cast<CXX26AnnotationAttr>(Attr);
     if (!A)
+      continue;
+
+    // A dependent annotation cannot be evaluated at definition time.
+    if (CTD &&
+        (A->getArg()->isTypeDependent() || A->getArg()->isValueDependent()))
       continue;
 
     QualType AnnotTy = A->getArg()->getType();
@@ -2805,17 +2821,19 @@ void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
     if (!AnnotRD)
       continue;
 
-    // Look up "on_complete" in the annotation's type.
-    IdentifierInfo *II = &Context.Idents.get("on_complete");
+    // Look up the callback in the annotation's type.
+    IdentifierInfo *II =
+        &Context.Idents.get(CTD ? "on_template_defined" : "on_complete");
     SourceLocation Loc = RD->getEndLoc();
     DeclarationNameInfo DNI(II, Loc);
     LookupResult R(*this, DNI, LookupMemberName);
     if (!LookupQualifiedName(R, AnnotRD))
       continue;
 
-    // Build: annotation_value.on_complete(^^RD)
+    // Build: annotation_value.on_complete(^^RD), or
+    // annotation_value.on_template_defined(^^CTD) for a pattern.
     // Use ImmediateFunctionContext so that consteval calls and
-    // queue_injection inside on_complete are treated as plainly
+    // queue_injection inside the callback are treated as plainly
     // constant-evaluated.
     EnterExpressionEvaluationContext ConstantEvaluated(
         *this, ExpressionEvaluationContext::ImmediateFunctionContext);
@@ -2823,13 +2841,14 @@ void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
     // 1. Object expression from the annotation's ConstantExpr.
     Expr *ObjExpr = const_cast<Expr *>(A->getArg());
 
-    // 2. ^^RD
-    QualType ClassTy = Context.getCanonicalTagType(RD);
-    ExprResult ReflExpr = BuildCXXReflectExpr(Loc, Loc, ClassTy);
+    // 2. ^^RD or ^^CTD
+    ExprResult ReflExpr =
+        CTD ? BuildCXXReflectExpr(Loc, Loc, TemplateName(CTD))
+            : BuildCXXReflectExpr(Loc, Loc, Context.getCanonicalTagType(RD));
     if (ReflExpr.isInvalid())
       continue;
 
-    // 3. Build member reference: ObjExpr.on_complete
+    // 3. Build member reference: ObjExpr.<callback>
     CXXScopeSpec SS;
     ExprResult MemberRef = BuildMemberReferenceExpr(
         ObjExpr, AnnotTy, Loc, /*IsArrow=*/false,
@@ -2837,7 +2856,7 @@ void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
     if (MemberRef.isInvalid())
       continue;
 
-    // 4. Build call: ObjExpr.on_complete(ReflExpr)
+    // 4. Build call: ObjExpr.<callback>(ReflExpr)
     Expr *Args[] = {ReflExpr.get()};
     ExprResult Call = BuildCallExpr(nullptr, MemberRef.get(),
                                     Loc, Args, Loc);

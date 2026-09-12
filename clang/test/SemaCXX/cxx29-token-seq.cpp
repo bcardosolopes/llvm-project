@@ -1046,3 +1046,48 @@ namespace N36 {
     }
     consteval { bad(^^W); }
 }
+
+// An annotation's on_template_defined callback fires once when the annotated
+// class template's definition completes, receiving a reflection of the
+// template itself. Injections are deferred until the enclosing template
+// declaration is finished, so injected templates are parsed at depth zero.
+namespace N37 {
+    template <class T> struct traits { static constexpr int v = 0; };
+
+    struct ann {
+        consteval auto on_template_defined(info tmpl) const -> void {
+            queue_injection(^^N37, ^^{
+                template <class... Ts> struct traits<\(tmpl)<Ts...>> {
+                    static constexpr int v = \(tmpl)<Ts...>::id;
+                };
+            });
+        }
+    };
+
+    template <class T> struct [[=ann{}]] W { static constexpr int id = 1; };
+    template <class T> struct [[=ann{}]] V { static constexpr int id = 2; };
+
+    // The bridge exists before any specialization is instantiated, and the
+    // two templates' bridges coexist.
+    static_assert(traits<W<int>>::v == 1);
+    static_assert(traits<V<char>>::v == 2);
+    static_assert(traits<int>::v == 0);
+
+    // The callback does not fire for the pattern's specializations being
+    // instantiated (only on_complete does that), nor for a template without
+    // the annotation.
+    template <class T> struct plain { };
+    static_assert(traits<plain<int>>::v == 0);
+
+    // An annotation without on_template_defined is fine on a class template.
+    struct empty_ann { };
+    template <class T> struct [[=empty_ann{}]] quiet { };
+    static_assert(traits<quiet<int>>::v == 0);
+
+    // on_template_defined on a *non-template* class does not fire.
+    struct [[=ann{}]] not_a_template { static constexpr int id = 9; };
+
+    // A value-dependent annotation argument is skipped at definition time.
+    template <int N> inline constexpr ann pick{};
+    template <int N> struct [[=pick<N>]] dep { static constexpr int id = 3; };
+}

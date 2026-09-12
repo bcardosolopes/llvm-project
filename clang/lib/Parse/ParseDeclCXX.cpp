@@ -4169,7 +4169,11 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
   // unary queue_injection will inject into that namespace.
   if (TagDecl) {
     Actions.HandleAnnotationOnComplete(TagDecl);
-    while (!Actions.PendingInjections.empty()) {
+    // Inside a template declaration the template parameter depth is still
+    // elevated, so injected declarations would be parsed at the wrong depth.
+    // Leave the injections pending; ParseDeclaration drains them once the
+    // enclosing template declaration is complete.
+    while (TemplateParameterDepth == 0 && !Actions.PendingInjections.empty()) {
       auto Injections = std::move(Actions.PendingInjections);
       Actions.PendingInjections.clear();
       ProcessTokenInjections(Injections);

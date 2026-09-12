@@ -1915,10 +1915,20 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(DeclaratorContext Context,
       return ParseSimpleDeclaration(Context, DeclEnd, DeclAttrs, DeclSpecAttrs,
                                     true, nullptr, DeclSpecStart);
     [[fallthrough]];
-  case tok::kw_export:
+  case tok::kw_export: {
     ProhibitAttributes(DeclAttrs);
     ProhibitAttributes(DeclSpecAttrs);
-    return ParseDeclarationStartingWithTemplate(Context, DeclEnd, DeclAttrs);
+    DeclGroupPtrTy Result =
+        ParseDeclarationStartingWithTemplate(Context, DeclEnd, DeclAttrs);
+    // An annotation's on_template_defined callback may have queued token
+    // injections while the template's definition was being parsed; they were
+    // deferred so injected declarations are not parsed at an elevated
+    // template parameter depth.
+    if (TemplateParameterDepth == 0 && !Actions.PendingInjections.empty() &&
+        Actions.CurContext->isFileContext())
+      DrainPendingTokenInjections();
+    return Result;
+  }
   case tok::kw_inline:
     // Could be the start of an inline namespace. Allowed as an ext in C++03.
     if (getLangOpts().CPlusPlus && NextToken().is(tok::kw_namespace)) {
