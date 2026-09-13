@@ -741,6 +741,36 @@ static bool string_literal_from(APValue &Result, ASTContext &C,
 // header file.
 // -----------------------------------------------------------------------------
 
+// Expression macros
+static bool source_text_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                           EvalFn Evaluator, DiagFn Diagnoser,
+                           bool AllowInjection, QualType ResultTy,
+                           SourceRange Range, ArrayRef<Expr *> Args,
+                           Decl *ContainingDecl);
+
+static bool is_binary_operation(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
+static bool get_ith_operand_of(APValue &Result, ASTContext &C,
+                               MetaActions &Meta, EvalFn Evaluator,
+                               DiagFn Diagnoser, bool AllowInjection,
+                               QualType ResultTy, SourceRange Range,
+                               ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
+static bool token_count(APValue &Result, ASTContext &C, MetaActions &Meta,
+                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                        QualType ResultTy, SourceRange Range,
+                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
+static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
+                          EvalFn Evaluator, DiagFn Diagnoser,
+                          bool AllowInjection, QualType ResultTy,
+                          SourceRange Range, ArrayRef<Expr *> Args,
+                          Decl *ContainingDecl);
+
 static constexpr Metafunction Metafunctions[] = {
   // Kind, MinArgs, MaxArgs, Impl
 
@@ -871,6 +901,13 @@ static constexpr Metafunction Metafunctions[] = {
   // P3491 string literal manipulation
   { Metafunction::MFRK_bool, 1, 1, is_string_literal },
   { Metafunction::MFRK_charPtr, 1, 1, string_literal_from },
+
+  // Expression macros
+  { Metafunction::MFRK_spliceFromArg, 2, 2, source_text_of },
+  { Metafunction::MFRK_bool, 1, 1, is_binary_operation },
+  { Metafunction::MFRK_metaInfo, 2, 2, get_ith_operand_of },
+  { Metafunction::MFRK_sizeT, 1, 1, token_count },
+  { Metafunction::MFRK_tokenSequence, 2, 2, get_ith_token },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1669,7 +1706,14 @@ StringRef DescriptionOf(APValue RV, bool Granular = true) {
   case ReflectionKind::Annotation: {
     return "an annotation";
   }
+  case ReflectionKind::Identifier: {
+    return "an identifier";
   }
+  case ReflectionKind::Expression: {
+    return "an expression";
+  }
+  }
+  llvm_unreachable("unknown reflection kind");
 }
 
 bool DiagnoseReflectionKind(DiagFn Diagnoser, SourceRange Range,
@@ -2091,6 +2135,167 @@ bool map_decl_to_entity(APValue &Result, ASTContext &C, MetaActions &Meta,
   return SetAndSucceed(Result, makeReflection(D));
 }
 
+
+// -----------------------------------------------------------------------------
+// Expression macros
+// -----------------------------------------------------------------------------
+
+/// Strip the implicit conversions wrapped around an operand of a binary
+/// operation, giving back the operand as written. Temporaries bound by a
+/// CXXBindTemporaryExpr are kept: that node owns the destructor call.
+static Expr *operandAsWritten(Expr *E) {
+  while (true) {
+    if (auto *ICE = dyn_cast<ImplicitCastExpr>(E))
+      E = ICE->getSubExprAsWritten();
+    else if (auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = MTE->getSubExpr();
+    else if (auto *CE = dyn_cast<CXXConstructExpr>(E);
+             CE && !isa<CXXTemporaryObjectExpr>(CE) && CE->getNumArgs() == 1 &&
+             CE->getConstructor()->isCopyOrMoveConstructor())
+      E = CE->getArg(0);
+    else
+      return E;
+  }
+}
+
+/// If \p E applies a binary operator (built-in, overloaded, or rewritten),
+/// report the operator and the operands as written.
+static bool decomposeBinaryOperation(Expr *E, OverloadedOperatorKind &OO,
+                                     Expr *&LHS, Expr *&RHS) {
+  E = E->IgnoreParenImpCasts();
+  if (auto *BO = dyn_cast<BinaryOperator>(E)) {
+    OO = BinaryOperator::getOverloadedOperator(BO->getOpcode());
+    LHS = BO->getLHS();
+    RHS = BO->getRHS();
+  } else if (auto *OC = dyn_cast<CXXOperatorCallExpr>(E)) {
+    if (OC->getNumArgs() != 2 || !OC->isInfixBinaryOp())
+      return false;
+    OO = OC->getOperator();
+    LHS = OC->getArg(0);
+    RHS = OC->getArg(1);
+  } else if (auto *RBO = dyn_cast<CXXRewrittenBinaryOperator>(E)) {
+    CXXRewrittenBinaryOperator::DecomposedForm DF = RBO->getDecomposedForm();
+    OO = BinaryOperator::getOverloadedOperator(DF.Opcode);
+    LHS = const_cast<Expr *>(DF.LHS);
+    RHS = const_cast<Expr *>(DF.RHS);
+  } else {
+    return false;
+  }
+  if (OO == OO_None)
+    return false;
+  LHS = operandAsWritten(LHS);
+  RHS = operandAsWritten(RHS);
+  return true;
+}
+
+bool source_text_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                    EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                    QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                    Decl *ContainingDecl) {
+  assert(Args[1]->getType()->isReflectionType());
+
+  APValue RV;
+  if (!Evaluator(RV, Args[1], true))
+    return true;
+  if (!RV.isReflectedExpression())
+    return DiagnoseReflectionKind(Diagnoser, Range, "an expression",
+                                  DescriptionOf(RV));
+
+  const Expr *E = RV.getReflectedExpression();
+  bool Invalid = false;
+  StringRef Text = Lexer::getSourceText(
+      CharSourceRange::getTokenRange(E->getSourceRange()),
+      C.getSourceManager(), C.getLangOpts(), &Invalid);
+  if (Invalid)
+    Text = "";
+
+  Expr *StrLit = makeStrLiteral(Text, C, /*Utf8=*/false);
+  APValue::LValuePathEntry Path[1] = {APValue::LValuePathEntry::ArrayIndex(0)};
+  return SetAndSucceed(Result,
+                       APValue(StrLit, CharUnits::Zero(), Path, false));
+}
+
+bool is_binary_operation(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser,
+                         bool AllowInjection, QualType ResultTy,
+                         SourceRange Range, ArrayRef<Expr *> Args,
+                         Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  OverloadedOperatorKind OO;
+  Expr *LHS, *RHS;
+  bool Is = RV.isReflectedExpression() &&
+            decomposeBinaryOperation(RV.getReflectedExpression(), OO, LHS, RHS);
+  return SetAndSucceed(Result, makeBool(C, Is));
+}
+
+bool get_ith_operand_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                        QualType ResultTy, SourceRange Range,
+                        ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  APValue Idx;
+  if (!Evaluator(Idx, Args[1], true))
+    return true;
+
+  OverloadedOperatorKind OO;
+  Expr *LHS, *RHS;
+  if (!RV.isReflectedExpression() ||
+      !decomposeBinaryOperation(RV.getReflectedExpression(), OO, LHS, RHS))
+    return DiagnoseReflectionKind(Diagnoser, Range, "a binary operation",
+                                  DescriptionOf(RV));
+
+  Expr *Operand = Idx.getInt().getZExtValue() == 0 ? LHS : RHS;
+  return SetAndSucceed(Result, APValue(ReflectionKind::Expression, Operand));
+}
+
+bool token_count(APValue &Result, ASTContext &C, MetaActions &Meta,
+                 EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                 QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                 Decl *ContainingDecl) {
+  assert(ResultTy == C.getSizeType());
+
+  APValue TS;
+  if (!Evaluator(TS, Args[0], true))
+    return true;
+  if (!TS.isTokenSequence())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a token sequence");
+
+  return SetAndSucceed(Result, APValue(C.MakeIntValue(
+                                   TS.getTokenSequence().size(),
+                                   C.getSizeType())));
+}
+
+bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl) {
+  APValue TS;
+  if (!Evaluator(TS, Args[0], true))
+    return true;
+  APValue Idx;
+  if (!Evaluator(Idx, Args[1], true))
+    return true;
+  if (!TS.isTokenSequence())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a token sequence");
+
+  TokenSequenceData TSD = TS.getTokenSequence();
+  uint64_t I = Idx.getInt().getZExtValue();
+  if (I >= TSD.size())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a valid token index");
+
+  Token Toks[] = {*(TSD.begin() + I)};
+  return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
+}
+
 bool identifier_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                    EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                    QualType ResultTy, SourceRange Range,
@@ -2220,6 +2425,8 @@ bool identifier_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Object:
   case ReflectionKind::Value:
   case ReflectionKind::Annotation:
+  case ReflectionKind::Identifier:
+  case ReflectionKind::Expression:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_have_name)
         << DescriptionOf(RV) << Range;
   case ReflectionKind::EntityProxy:
@@ -2365,6 +2572,12 @@ bool operator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   } else if (RV.isReflectedDecl()) {
     if (auto *FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl()))
       OperatorId = findOperatorOf(FD);
+  } else if (RV.isReflectedExpression()) {
+    OverloadedOperatorKind OO;
+    Expr *LHS, *RHS;
+    if (decomposeBinaryOperation(RV.getReflectedExpression(), OO, LHS, RHS))
+      OperatorId = std::find(std::begin(OperatorIndices),
+                             std::end(OperatorIndices), OO) - OperatorIndices;
   }
 
   if (OperatorId == 0)
@@ -2411,10 +2624,18 @@ bool source_location_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Annotation:
     return findAnnotLoc(Result, C, Evaluator, ResultTy,
                         RV.getReflectedAnnotation());
+  case ReflectionKind::Expression: {
+    SourceLocExpr *SLE = new (C) SourceLocExpr(
+        C, SourceLocIdentKind::SourceLocStruct, ResultTy,
+        RV.getReflectedExpression()->getBeginLoc(), SourceLocation(),
+        /*ParentContext=*/nullptr);
+    return !Evaluator(Result, SLE, true);
+  }
   case ReflectionKind::Object:
   case ReflectionKind::Value:
   case ReflectionKind::Null:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::Identifier:
     return findDeclLoc(Result, C, Evaluator, ResultTy, nullptr);
   }
   llvm_unreachable("unknown reflection kind");
@@ -2443,6 +2664,23 @@ bool type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     QualType QT = desugarType(RV.getTypeOfReflectedResult(C),
                               /*UnwrapAliases=*/true, /*DropCV=*/false,
                               /*DropRefs=*/false);
+    return SetAndSucceed(Result, makeReflection(QT));
+  }
+  case ReflectionKind::Expression: {
+    // The type of a reflected expression follows decltype: the declared type
+    // of an unparenthesized id-expression or member access, otherwise the
+    // expression's type adjusted for its value category.
+    Expr *E = RV.getReflectedExpression();
+    QualType QT;
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+      QT = DRE->getDecl()->getType();
+    else if (const auto *ME = dyn_cast<MemberExpr>(E);
+             ME && isa<FieldDecl, VarDecl>(ME->getMemberDecl()))
+      QT = ME->getMemberDecl()->getType();
+    else
+      QT = C.getReferenceQualifiedType(E);
+    QT = desugarType(QT, /*UnwrapAliases=*/true, /*DropCV=*/false,
+                     /*DropRefs=*/false);
     return SetAndSucceed(Result, makeReflection(QT));
   }
   case ReflectionKind::Declaration: {

@@ -944,6 +944,14 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     IdentifierInfo &II = *Tok.getIdentifierInfo();
     SourceLocation ILoc = ConsumeToken();
 
+    // name!( ... ) is an expression-macro invocation.
+    if (getLangOpts().Reflection && Tok.is(tok::exclaim) &&
+        NextToken().is(tok::l_paren)) {
+      CXXScopeSpec MacroSS;
+      Res = ParseMacroInvocation(MacroSS, &II, ILoc);
+      break;
+    }
+
     // Support 'Class.property' and 'super.property' notation.
     if (getLangOpts().ObjC && Tok.is(tok::period) &&
         (Actions.getTypeName(II, ILoc, getCurScope()) ||

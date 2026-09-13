@@ -3272,6 +3272,22 @@ def err_reflect_intervening_lambda : Error<
 
 def err_interpolation_not_constant : Error<
   "interpolation expression is not a constant expression">;
+def err_macro_requires_invocation : Error<
+  "%0 is an expression macro and must be invoked as %1">;
+def err_undeclared_macro : Error<"use of undeclared expression macro %0">;
+def err_not_a_macro : Error<"%0 is not an expression macro">;
+def err_macro_overload_shape : Error<
+  "overloads of expression macro %0 disagree on which parameters are "
+  "token sequences">;
+def err_macro_undefined : Error<
+  "expression macro %0 is invoked before it is defined">;
+def err_macro_token_argument_not_constant : Error<
+  "token sequence argument of expression macro is not a constant expression">;
+def err_macro_evaluation_failed : Error<
+  "expression macro %0 did not produce a token sequence">;
+def err_macro_argument_evaluated_twice : Error<
+  "expansion of expression macro would evaluate this argument more than once">;
+def note_macro_expanded_here : Note<"in expansion of expression macro %0">;
 def err_splice_operand_not_reflection : Error<
   "splice operand must be a reflection">;
 def err_splice_operand_not_constexpr : Error<

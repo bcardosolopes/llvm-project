@@ -10142,6 +10142,10 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                                               isVirtualOkay);
   if (!NewFD) return nullptr;
 
+  if (D.getDeclSpec().isMacroSpecified())
+    NewFD->addAttr(ExpressionMacroAttr::CreateImplicit(
+        Context, D.getDeclSpec().getMacroSpecLoc()));
+
   if (OriginalLexicalContext && OriginalLexicalContext->isObjCContainer())
     NewFD->setTopLevelDeclInObjCContainer();
 

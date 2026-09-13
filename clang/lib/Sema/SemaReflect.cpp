@@ -2320,6 +2320,7 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::Annotation:
     case ReflectionKind::Identifier:
+    case ReflectionKind::Expression:
       Diag(Splice->getBeginLoc(),
            diag::err_unexpected_reflection_kind_in_splice)
           << 1 << Splice->getSourceRange();
@@ -2953,6 +2954,7 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::Identifier:
+  case ReflectionKind::Expression:
     Diag(Splice->getBeginLoc(), diag::err_expected_class_or_namespace)
         << "spliced entity" << getLangOpts().CPlusPlus;
     return nullptr;

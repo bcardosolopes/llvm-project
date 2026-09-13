@@ -613,6 +613,10 @@ public:
     return isReflection() &&
            getReflectionKind() == ReflectionKind::Identifier;
   }
+  bool isReflectedExpression() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::Expression;
+  }
 
   void dump() const;
   void dump(raw_ostream &OS, const ASTContext &Context) const;
@@ -841,6 +845,7 @@ public:
     return *(const TokenSequenceData *)(const char *)&Data;
   }
   IdentifierInfo *getReflectedIdentifier() const;
+  Expr *getReflectedExpression() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");

@@ -560,6 +560,13 @@ enum : unsigned {
   // P3491 string literal manipulation
   __metafn_is_string_literal,
   __metafn_string_literal_from,
+
+  // Expression macros (experimental)
+  __metafn_source_text_of,
+  __metafn_is_binary_operation,
+  __metafn_get_ith_operand_of,
+  __metafn_token_count,
+  __metafn_get_ith_token,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3154,6 +3161,36 @@ consteval auto queue_injection(info target_ns, token_sequence tokens) -> void;
 // Report tokens for debugging (emits a warning with the token content).
 template <class M>
 consteval auto report_tokens(M const& msg, token_sequence tokens) -> void;
+
+// Expression macros (experimental): queries on the reflection of an argument
+// expression bound to a macro parameter, and on token sequences.
+
+// The argument as spelled at the invocation.
+consteval auto source_text_of(info r) -> string_view {
+  return __metafunction(detail::__metafn_source_text_of, ^^const char *, r);
+}
+
+// Whether the expression applies a (built-in, overloaded, or rewritten)
+// binary operator. operator_of gives the operator; operands_of the operands
+// as written, each itself a reflection of an expression.
+consteval auto is_binary_operation(info r) -> bool {
+  return __metafunction(detail::__metafn_is_binary_operation, r);
+}
+
+consteval auto operands_of(info r) -> vector<info> {
+  return {__metafunction(detail::__metafn_get_ith_operand_of, r, 0),
+          __metafunction(detail::__metafn_get_ith_operand_of, r, 1)};
+}
+
+// Each token of the sequence as its own single-token sequence.
+consteval auto tokens_of(token_sequence tokens) -> vector<token_sequence> {
+  vector<token_sequence> result;
+  size_t n = __metafunction(detail::__metafn_token_count, tokens);
+  result.reserve(n);
+  for (size_t i = 0; i < n; ++i)
+    result.push_back(__metafunction(detail::__metafn_get_ith_token, tokens, i));
+  return result;
+}
 
 _LIBCPP_END_NAMESPACE_REFLECTION_V2
 

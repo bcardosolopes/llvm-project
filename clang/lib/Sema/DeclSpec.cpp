@@ -473,7 +473,7 @@ unsigned DeclSpec::getParsedSpecifiers() const {
     Res |= PQ_TypeSpecifier;
 
   if (FS_inline_specified || FS_virtual_specified || hasExplicitSpecifier() ||
-      FS_noreturn_specified || FS_forceinline_specified)
+      FS_noreturn_specified || FS_forceinline_specified || FS_macro_specified)
     Res |= PQ_FunctionSpecifier;
   return Res;
 }
@@ -1149,6 +1149,18 @@ bool DeclSpec::setFunctionSpecNoreturn(SourceLocation Loc,
   }
   FS_noreturn_specified = true;
   FS_noreturnLoc = Loc;
+  return false;
+}
+
+bool DeclSpec::setFunctionSpecMacro(SourceLocation Loc, const char *&PrevSpec,
+                                    unsigned &DiagID) {
+  if (FS_macro_specified) {
+    DiagID = diag::warn_duplicate_declspec;
+    PrevSpec = "__macro";
+    return true;
+  }
+  FS_macro_specified = true;
+  FS_macroLoc = Loc;
   return false;
 }
 

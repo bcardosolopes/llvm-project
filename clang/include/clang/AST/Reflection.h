@@ -119,6 +119,12 @@ enum class ReflectionKind {
   ///
   /// Corresponds to an IdentifierInfo*.
   Identifier,
+
+  /// \brief A reflection of an expression bound to an expression-macro
+  /// parameter. Only exists while a macro body is being evaluated.
+  ///
+  /// Corresponds to an Expr*.
+  Expression,
 };
 
 

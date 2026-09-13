@@ -466,6 +466,7 @@ CXX20_KEYWORD(requires              , 0)
 
 // C++2c reflection keywords.
 KEYWORD(__metafunction              , KEYREFLECT)
+KEYWORD(__macro                     , KEYREFLECT)
 
 // do-expressions keyword.
 DOEXPR_KEYWORD(do_return)

@@ -1852,6 +1852,8 @@ def err_mixed_attributes_and_annotations : Error<
   "attribute specifier cannot contain both attributes and annotations">;
 def warn_meant_parenthesize_reflection : Warning<
   "'%0' binds to reflection operand">, InGroup<ReflexingParse>;
+def err_macro_expansion_not_single_expression : Error<
+  "expansion of expression macro must form a single expression">;
 def err_splice_template_argument : Error<
   "unparenthesized splice expression cannot be used as a template argument">;
 }

@@ -88,6 +88,8 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
 
   Actions.SetParserBridge(this);
   Actions.SetTokenInjectionCallback(&Parser::TokenInjectionCallback);
+  Actions.SetExpressionMacroExpansionCallback(
+      &Parser::ExpressionMacroExpansionCallback);
   Actions.SetDeferredInjectedDefsCallback(&Parser::DeferredInjectedDefsCallback);
 }
 
@@ -1714,6 +1716,15 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC,
   }
 
   Token Next = NextToken();
+
+  // Leave a macro invocation, name!(...), for the expression parser: the
+  // macro has to be found before its arguments can be parsed.
+  if (getLangOpts().Reflection && Next.is(tok::exclaim) &&
+      GetLookAheadToken(2).is(tok::l_paren)) {
+    if (SS.isNotEmpty())
+      AnnotateScopeToken(SS, !WasScopeAnnotation);
+    return AnnotatedNameKind::Unresolved;
+  }
 
   // Look up and classify the identifier. We don't perform any typo-correction
   // after a scope specifier, because in general we can't recover from typos

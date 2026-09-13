@@ -8598,6 +8598,16 @@ private:
   ExprResult ParseCXXReflectExpression(SourceLocation OpLoc);
   ExprResult ParseCXXMetafunctionExpression();
 
+  // Expression macros: 'name!(args)'.
+  ExprResult ParseMacroInvocation(CXXScopeSpec &SS, const IdentifierInfo *II,
+                                  SourceLocation NameLoc);
+  ExprResult ParseMacroRawArgument(bool Greedy);
+  ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,
+                                           SourceLocation Loc);
+  static ExprResult ExpressionMacroExpansionCallback(void *P,
+                                                     TokenSequenceData TSD,
+                                                     SourceLocation Loc);
+
   bool ParseSpliceSpecifier(bool TryParseSpecialization = false);
 
   ExprResult ParseCXXSpliceAsExpr(SourceLocation TemplateKWLoc,

@@ -930,6 +930,13 @@ def AlignMac68k : InheritableAttr {
   let Documentation = [InternalOnly];
 }
 
+def ExpressionMacro : InheritableAttr {
+  // Attached implicitly to functions declared with the '__macro' specifier.
+  let Spellings = [];
+  let SemaHandler = 0;
+  let Documentation = [InternalOnly];
+}
+
 def AlignNatural : InheritableAttr {
   // This attribute has no spellings as it is only ever created implicitly.
   let Spellings = [];

@@ -380,3 +380,143 @@ DeclResult Parser::ParseCXXSpliceAsNamespace() {
 
   return Actions.ActOnCXXSpliceExpectingNamespace(Splice);
 }
+
+//===----------------------------------------------------------------------===//
+// Expression macros: name!(args)
+//===----------------------------------------------------------------------===//
+
+/// Parse the argument list of an expression-macro invocation and hand it to
+/// Sema. The macro name has already been consumed; the current token is '!'.
+ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
+                                        const IdentifierInfo *II,
+                                        SourceLocation NameLoc) {
+  assert(Tok.is(tok::exclaim) && NextToken().is(tok::l_paren));
+
+  // The macro's parameter shape decides how each argument is parsed, so the
+  // macro has to be found before the arguments are read.
+  SmallVector<bool, 4> RawParams;
+  bool ShapeError;
+  {
+    LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
+    Actions.LookupParsedName(R, getCurScope(), &SS, /*ObjectType=*/QualType());
+    ShapeError = Actions.GetMacroParameterShape(R, RawParams);
+  }
+
+  ConsumeToken(); // '!'
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  if (ShapeError) {
+    T.skipToEnd();
+    return ExprError();
+  }
+
+  ExprVector Args;
+  if (Tok.isNot(tok::r_paren)) {
+    while (true) {
+      unsigned Idx = Args.size();
+      bool Raw = Idx < RawParams.size() && RawParams[Idx];
+      ExprResult Arg;
+      if (Raw)
+        Arg = ParseMacroRawArgument(/*Greedy=*/Idx + 1 == RawParams.size());
+      else if (Tok.is(tok::l_brace))
+        Arg = ParseBraceInitializer();
+      else
+        Arg = ParseAssignmentExpression();
+      if (Arg.isInvalid()) {
+        T.skipToEnd();
+        return ExprError();
+      }
+      Args.push_back(Arg.get());
+      if (!TryConsumeToken(tok::comma))
+        break;
+    }
+  } else if (RawParams.size() == 1 && RawParams[0]) {
+    // name!() with a single raw parameter: the argument is an empty sequence.
+    ExprResult Empty = Actions.ActOnCXXTokenSequenceReflection(
+        Tok.getLocation(), SourceRange(Tok.getLocation()), {});
+    if (Empty.isInvalid())
+      return ExprError();
+    Args.push_back(Empty.get());
+  }
+
+  if (T.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnMacroInvocation(getCurScope(), SS, II, NameLoc,
+                                      T.getOpenLocation(), Args,
+                                      T.getCloseLocation());
+}
+
+/// Capture the tokens of a raw (token_sequence) macro argument: balanced
+/// parentheses, brackets and braces, ending at a top-level comma (unless the
+/// parameter is the last one and therefore greedy) or at the closing paren.
+ExprResult Parser::ParseMacroRawArgument(bool Greedy) {
+  SmallVector<Token, 16> Tokens;
+  SourceLocation StartLoc = Tok.getLocation();
+  SourceLocation EndLoc = StartLoc;
+  unsigned Depth = 0;
+  while (true) {
+    if (Tok.is(tok::eof)) {
+      Diag(Tok, diag::err_expected) << tok::r_paren;
+      return ExprError();
+    }
+    if (Depth == 0 &&
+        (Tok.is(tok::r_paren) || (Tok.is(tok::comma) && !Greedy)))
+      break;
+    if (Tok.isOneOf(tok::l_paren, tok::l_square, tok::l_brace)) {
+      ++Depth;
+    } else if (Tok.isOneOf(tok::r_paren, tok::r_square, tok::r_brace)) {
+      if (Depth == 0)
+        break; // Mismatched closer; the caller diagnoses the missing ')'.
+      --Depth;
+    }
+    Tokens.push_back(Tok);
+    EndLoc = Tok.getLocation();
+    ConsumeAnyToken();
+  }
+  return Actions.ActOnCXXTokenSequenceReflection(
+      StartLoc, SourceRange(StartLoc, EndLoc), Tokens);
+}
+
+ExprResult Parser::ExpressionMacroExpansionCallback(void *P,
+                                                    TokenSequenceData TSD,
+                                                    SourceLocation Loc) {
+  return static_cast<Parser *>(P)->ParseExpressionMacroExpansion(TSD, Loc);
+}
+
+/// Parse the token sequence produced by an expression macro as a single
+/// expression, in place of the invocation.
+ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
+                                                 SourceLocation Loc) {
+  SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
+  Token Eof;
+  Eof.startToken();
+  Eof.setKind(tok::eof);
+  Eof.setLocation(Loc);
+  Toks.push_back(Eof);
+
+  Token SavedTok = Tok;
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                      /*IsReinject=*/true);
+  ConsumeAnyToken();
+
+  // The expansion is delimited by its own eof, so it is parsed free of the
+  // enclosing context's bracket rules.
+  ExprResult Result;
+  {
+    GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
+    ColonProtectionRAIIObject ColonProtection(*this, false);
+    Result = ParseExpression();
+  }
+  if (!Result.isInvalid() && Tok.isNot(tok::eof)) {
+    Diag(Tok, diag::err_macro_expansion_not_single_expression);
+    Result = ExprError();
+  }
+  // Drain what is left so the enclosing token stream resumes cleanly.
+  while (Tok.isNot(tok::eof))
+    ConsumeAnyToken();
+
+  Tok = SavedTok;
+  return Result;
+}

@@ -634,6 +634,7 @@ let Class = PropertyTypeCase<APValue, "Reflection"> in {
       break;
     }
     case ReflectionKind::Identifier:
+    case ReflectionKind::Expression:
       // Not yet supported through the property-based serializer; the writer
       // side diagnoses (see ASTStmtWriter::VisitCXXReflectExpr). Round-trip
       // as a Null reflection to avoid corrupted state.

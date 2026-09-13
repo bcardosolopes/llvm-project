@@ -400,6 +400,8 @@ private:
   unsigned FS_virtual_specified : 1;
   LLVM_PREFERRED_TYPE(bool)
   unsigned FS_noreturn_specified : 1;
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned FS_macro_specified : 1;
 
   // friend-specifier
   LLVM_PREFERRED_TYPE(bool)
@@ -443,7 +445,8 @@ private:
   SourceLocation TQ_constLoc, TQ_restrictLoc, TQ_volatileLoc, TQ_atomicLoc,
       TQ_unalignedLoc;
   SourceLocation OB_Loc;
-  SourceLocation FS_inlineLoc, FS_virtualLoc, FS_explicitLoc, FS_noreturnLoc;
+  SourceLocation FS_inlineLoc, FS_virtualLoc, FS_explicitLoc, FS_noreturnLoc,
+      FS_macroLoc;
   SourceLocation FS_explicitCloseParenLoc;
   SourceLocation FS_forceinlineLoc;
   SourceLocation FriendLoc, ModulePrivateLoc, ConstexprLoc;
@@ -501,6 +504,7 @@ public:
         OB_state(static_cast<unsigned>(OverflowBehaviorState::Unspecified)),
         FS_inline_specified(false), FS_forceinline_specified(false),
         FS_virtual_specified(false), FS_noreturn_specified(false),
+        FS_macro_specified(false),
         FriendSpecifiedFirst(false), ConstexprSpecifier(static_cast<unsigned>(
                                          ConstexprSpecKind::Unspecified)),
         Attrs(attrFactory), writtenBS(), ObjCQualifiers(nullptr) {}
@@ -696,6 +700,9 @@ public:
   bool isNoreturnSpecified() const { return FS_noreturn_specified; }
   SourceLocation getNoreturnSpecLoc() const { return FS_noreturnLoc; }
 
+  bool isMacroSpecified() const { return FS_macro_specified; }
+  SourceLocation getMacroSpecLoc() const { return FS_macroLoc; }
+
   void ClearFunctionSpecs() {
     FS_inline_specified = false;
     FS_inlineLoc = SourceLocation();
@@ -708,6 +715,8 @@ public:
     FS_explicitCloseParenLoc = SourceLocation();
     FS_noreturn_specified = false;
     FS_noreturnLoc = SourceLocation();
+    FS_macro_specified = false;
+    FS_macroLoc = SourceLocation();
   }
 
   /// This method calls the passed in handler on each CVRU qual being
@@ -848,6 +857,8 @@ public:
                                SourceLocation CloseParenLoc);
   bool setFunctionSpecNoreturn(SourceLocation Loc, const char *&PrevSpec,
                                unsigned &DiagID);
+  bool setFunctionSpecMacro(SourceLocation Loc, const char *&PrevSpec,
+                            unsigned &DiagID);
 
   bool SetFriendSpec(SourceLocation Loc, const char *&PrevSpec,
                      unsigned &DiagID);

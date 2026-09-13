@@ -4449,6 +4449,18 @@ void Parser::ParseDeclarationSpecifiers(
       isInvalid = DS.SetConstexprSpec(ConstexprSpecKind::Consteval, Loc,
                                       PrevSpec, DiagID);
       break;
+    case tok::kw___macro:
+      // An expression macro is a consteval function returning token_sequence;
+      // the specifier also marks the declaration so Sema treats it as a macro.
+      isInvalid = DS.setFunctionSpecMacro(Loc, PrevSpec, DiagID);
+      if (!isInvalid)
+        isInvalid = DS.SetConstexprSpec(ConstexprSpecKind::Consteval, Loc,
+                                        PrevSpec, DiagID);
+      if (!isInvalid)
+        isInvalid = DS.SetTypeSpecType(
+            DeclSpec::TST_typename, Loc, PrevSpec, DiagID,
+            ParsedType::make(Actions.getASTContext().TokenSequenceTy), Policy);
+      break;
     case tok::kw_constinit:
       isInvalid = DS.SetConstexprSpec(ConstexprSpecKind::Constinit, Loc,
                                       PrevSpec, DiagID);
@@ -6182,6 +6194,7 @@ bool Parser::isDeclarationSpecifier(
     // C++20 consteval and constinit.
   case tok::kw_consteval:
   case tok::kw_constinit:
+  case tok::kw___macro:
 
     // C11 _Atomic
   case tok::kw__Atomic:

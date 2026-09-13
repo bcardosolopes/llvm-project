@@ -1026,6 +1026,8 @@ ExprDependence clang::computeDependence(CXXReflectExpr *E,
     D |= RV.getReflectedAnnotation()->getArg()->getDependence();
     return D;
   }
+  case ReflectionKind::Expression:
+    return D | RV.getReflectedExpression()->getDependence();
   case ReflectionKind::Null:
   case ReflectionKind::Object:
   case ReflectionKind::Value:

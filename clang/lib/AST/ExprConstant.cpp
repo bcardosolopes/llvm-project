@@ -22381,10 +22381,83 @@ public:
   bool VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E);
   bool VisitCXXBuiltinTokenizeExpr(const CXXBuiltinTokenizeExpr *E);
   bool VisitBinaryOperator(const BinaryOperator *E);
+  bool VisitDeclRefExpr(const DeclRefExpr *E);
 };
 
 bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
   return Success(E->getReflection(), E);
+}
+
+bool ReflectionEvaluator::VisitDeclRefExpr(const DeclRefExpr *E) {
+  // An expression-macro parameter denotes whatever was bound to it in the
+  // macro's frame: a reflection of the argument expression or a token
+  // sequence.
+  // Only the macro's own frame has such a binding; speculative evaluation
+  // while the body is still being parsed has no frame at all.
+  if (const auto *PVD = dyn_cast<ParmVarDecl>(E->getDecl())) {
+    CallStackFrame *Frame = Info.CurrentCall;
+    if (Frame->Callee && Frame->Callee == PVD->getDeclContext() &&
+        Frame->Arguments.CallIndex)
+      if (const APValue *V = Info.getParamSlot(Frame->Arguments, PVD))
+        if (V->isReflection() || V->isTokenSequence())
+          return Success(*V, E);
+  }
+  if (Info.checkingPotentialConstantExpression())
+    return false;
+  return Error(E);
+}
+
+/// Whether \p T is std::meta::operators, whose values interpolate as the
+/// operator's token.
+static bool isStdMetaOperatorsEnum(QualType T) {
+  const auto *ET = T->getAs<EnumType>();
+  if (!ET)
+    return false;
+  const EnumDecl *ED = ET->getDecl();
+  if (!ED->getIdentifier() || ED->getName() != "operators")
+    return false;
+  auto SkipInline = [](const DeclContext *DC) {
+    while (const auto *NS = dyn_cast<NamespaceDecl>(DC)) {
+      if (!NS->isInline())
+        break;
+      DC = NS->getParent();
+    }
+    return DC;
+  };
+  const auto *Meta = dyn_cast<NamespaceDecl>(SkipInline(ED->getDeclContext()));
+  if (!Meta || !Meta->getIdentifier() || Meta->getName() != "meta")
+    return false;
+  return SkipInline(Meta->getParent())->isStdNamespace();
+}
+
+/// The std::meta::operators enumerator order, as in ExprConstantMeta.cpp.
+static OverloadedOperatorKind metaOperatorKind(uint64_t Index) {
+  static constexpr OverloadedOperatorKind Table[] = {
+    OO_None, OO_New, OO_Delete, OO_Array_New, OO_Array_Delete, OO_Coawait,
+    OO_Call, OO_Subscript, OO_Arrow, OO_ArrowStar, OO_Tilde, OO_Exclaim,
+    OO_Plus, OO_Minus, OO_Star, OO_Slash, OO_Percent, OO_Caret, OO_Amp, OO_Pipe,
+    OO_Equal, OO_PlusEqual, OO_MinusEqual, OO_StarEqual, OO_SlashEqual,
+    OO_PercentEqual, OO_CaretEqual, OO_AmpEqual, OO_PipeEqual, OO_EqualEqual,
+    OO_ExclaimEqual, OO_Less, OO_Greater, OO_LessEqual, OO_GreaterEqual,
+    OO_Spaceship, OO_AmpAmp, OO_PipePipe, OO_LessLess, OO_GreaterGreater,
+    OO_LessLessEqual, OO_GreaterGreaterEqual, OO_PlusPlus, OO_MinusMinus,
+    OO_Comma,
+  };
+  return Index < std::size(Table) ? Table[Index] : OO_None;
+}
+
+static tok::TokenKind tokenKindForOverloadedOperator(OverloadedOperatorKind OO) {
+  switch (OO) {
+#define OVERLOADED_OPERATOR(Name, Spelling, Token, Unary, Binary, MemberOnly)  \
+  case OO_##Name:                                                              \
+    return tok::Token;
+#define OVERLOADED_OPERATOR_MULTI(Name, Spelling, Unary, Binary, MemberOnly)   \
+  case OO_##Name:                                                              \
+    return tok::unknown;
+#include "clang/Basic/OperatorKinds.def"
+  default:
+    return tok::unknown;
+  }
 }
 
 bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
@@ -22453,6 +22526,22 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
               Token Tok = SrcTok;
               Tok.setKind(tok::annot_typename);
               Tok.setAnnotationValue(QT.getAsOpaquePtr());
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedExpression()) {
+              // A macro argument: one opaque value per interpolation, unique
+              // so it is emitted in place, evaluating the argument exactly
+              // where (and as often as) it was interpolated.
+              Expr *Arg = Val.getReflectedExpression();
+              auto *OVE = new (Info.Ctx) OpaqueValueExpr(
+                  Arg->getExprLoc(), Arg->getType(), Arg->getValueKind(),
+                  Arg->getObjectKind(), Arg);
+              OVE->setIsUnique(true);
+
+              Token Tok = SrcTok;
+              Tok.setKind(tok::annot_primary_expr);
+              Tok.setLocation(Arg->getBeginLoc());
+              Tok.setAnnotationEndLoc(Arg->getEndLoc());
+              Tok.setAnnotationValue(static_cast<void *>(OVE));
               NewTokens.push_back(Tok);
             } else if (Val.isReflectedIdentifier()) {
               IdentifierInfo *II = Val.getReflectedIdentifier();
@@ -22571,6 +22660,26 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
 
             Expr *ResultExpr;
             QualType ExprType = SubExpr->getType();
+
+            // A std::meta::operators value spells the operator's token.
+            if (Val.isInt() && isStdMetaOperatorsEnum(ExprType)) {
+              OverloadedOperatorKind OO =
+                  metaOperatorKind(Val.getInt().getZExtValue());
+              tok::TokenKind Kind = tokenKindForOverloadedOperator(OO);
+              if (Kind == tok::unknown) {
+                Info.FFDiag(SubExpr);
+                return false;
+              }
+              Token Tok;
+              Tok.startToken();
+              Tok.setKind(Kind);
+              Tok.setLocation(SrcTok.getLocation());
+              Tok.setLength(strlen(getOperatorSpelling(OO)));
+              if (SrcTok.hasLeadingSpace())
+                Tok.setFlag(Token::LeadingSpace);
+              NewTokens.push_back(Tok);
+              continue;
+            }
 
             // For integral and enum types, create an IntegerLiteral
             // directly from the value. This avoids issues where implicit
@@ -24424,6 +24533,38 @@ bool Expr::EvaluateWithSubstitution(APValue &Value, ASTContext &Ctx,
   FullExpressionRAII Scope(Info);
   return Evaluate(Value, Info, this) && Scope.destroy() &&
          !Info.EvalStatus.HasSideEffects;
+}
+
+bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
+                             ArrayRef<APValue> ParamValues, APValue &Result,
+                             const ASTContext &Ctx,
+                             SmallVectorImpl<PartialDiagnosticAt> &Diags) {
+  Expr::EvalStatus Status;
+  Status.Diag = &Diags;
+  EvalInfo Info(Ctx, Status, EvaluationMode::ConstantExpression);
+  Info.InConstantContext = true;
+
+  // The parameters hold reflections and token sequences rather than values of
+  // their declared types; nothing about them is evaluated from an argument.
+  CallRef Call = Info.CurrentCall->createCall(Macro);
+  for (unsigned I = 0, N = std::min<unsigned>(ParamValues.size(),
+                                              Macro->getNumParams());
+       I != N; ++I) {
+    LValue LV;
+    Info.CurrentCall->createParam(Call, Macro->getParamDecl(I), LV) =
+        ParamValues[I];
+  }
+
+  CallStackFrame Frame(Info, Macro->getSourceRange(), Macro, /*This=*/nullptr,
+                       /*CallExpr=*/nullptr, Call);
+  StmtResult Ret = {Result, nullptr};
+  EvalStmtResult ESR = EvaluateStmt(Ret, Info, Macro->getBody());
+  if (ESR == ESR_Succeeded) {
+    Info.FFDiag(Macro->getEndLoc(), diag::note_constexpr_no_return);
+    return false;
+  }
+  Info.discardCleanups();
+  return ESR == ESR_Returned && !Info.EvalStatus.HasSideEffects;
 }
 
 bool Expr::isPotentialConstantExpr(const FunctionDecl *FD,

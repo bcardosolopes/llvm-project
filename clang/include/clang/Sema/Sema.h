@@ -1368,6 +1368,10 @@ public:
     // processing was deferred until their (being-defined) class was complete.
     typedef void DeferredInjectedDefsCB(void *P, const Decl *ForClass,
                                         bool ShouldParse);
+    // Parse an expression macro's token sequence as a single expression.
+    typedef ExprResult ExpressionMacroExpansionCB(void *P,
+                                                  TokenSequenceData TSD,
+                                                  SourceLocation Loc);
 
     void setParser(void *P) { OpaqueParser = P; }
 
@@ -1383,6 +1387,22 @@ public:
 
     void setDeferredInjectedDefsCallback(DeferredInjectedDefsCB *CB) {
       DeferredInjectedDefsCallback = CB;
+    }
+
+    void setExpressionMacroExpansionCallback(
+        ExpressionMacroExpansionCB *CB) {
+      ExpressionMacroExpansionCallback = CB;
+    }
+
+    bool canParseExpressionMacroExpansion() const {
+      return ExpressionMacroExpansionCallback && OpaqueParser;
+    }
+
+    ExprResult parseExpressionMacroExpansion(TokenSequenceData TSD,
+                                             SourceLocation Loc) const {
+      assert(ExpressionMacroExpansionCallback && OpaqueParser &&
+             "expression macro expansion requested without a parser bridge");
+      return ExpressionMacroExpansionCallback(OpaqueParser, TSD, Loc);
     }
 
     bool hasLateTemplateParser() const { return LateTemplateParser; }
@@ -1425,6 +1445,7 @@ public:
     LateTemplateParserCleanupCB *LateTemplateParserCleanup = nullptr;
     TokenInjectionCB *TokenInjectionCallback = nullptr;
     DeferredInjectedDefsCB *DeferredInjectedDefsCallback = nullptr;
+    ExpressionMacroExpansionCB *ExpressionMacroExpansionCallback = nullptr;
     void *OpaqueParser = nullptr;
   };
 
@@ -1440,6 +1461,17 @@ public:
   void SetDeferredInjectedDefsCallback(
       SemaParserBridge::DeferredInjectedDefsCB *CB) {
     ParserBridge.setDeferredInjectedDefsCallback(CB);
+  }
+  void SetExpressionMacroExpansionCallback(
+      SemaParserBridge::ExpressionMacroExpansionCB *CB) {
+    ParserBridge.setExpressionMacroExpansionCallback(CB);
+  }
+  bool CanParseExpressionMacroExpansion() const {
+    return ParserBridge.canParseExpressionMacroExpansion();
+  }
+  ExprResult ParseExpressionMacroExpansionFromParserBridge(
+      TokenSequenceData TSD, SourceLocation Loc) {
+    return ParserBridge.parseExpressionMacroExpansion(TSD, Loc);
   }
   bool HasLateTemplateParser() const {
     return ParserBridge.hasLateTemplateParser();
@@ -16224,6 +16256,26 @@ public:
                                              ArrayRef<Token> Tokens);
 
   ExprResult ActOnTokenSequenceInterpolation(Expr *E);
+
+  // Expression macros: '__macro' declarations invoked as 'name!(args)'.
+  static bool IsExpressionMacro(const NamedDecl *D);
+  /// Set while a macro invocation's callee is being built and resolved; a
+  /// macro name is not usable as an expression anywhere else.
+  bool AllowMacroCallee = false;
+  /// Determine which parameters of the macros in \p R are raw token-sequence
+  /// parameters. Diagnoses and returns true if \p R does not name macros or
+  /// the overloads disagree.
+  bool GetMacroParameterShape(LookupResult &R,
+                              SmallVectorImpl<bool> &RawParams);
+  ExprResult ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
+                                  const IdentifierInfo *II, SourceLocation NameLoc,
+                                  SourceLocation LParenLoc, MultiExprArg Args,
+                                  SourceLocation RParenLoc);
+  ExprResult BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
+                                           SourceLocation LParenLoc,
+                                           ArrayRef<Expr *> Args,
+                                           SourceLocation RParenLoc,
+                                           CallExpr::ADLCallKind UsesADL);
 
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,

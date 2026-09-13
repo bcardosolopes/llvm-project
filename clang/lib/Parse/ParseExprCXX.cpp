@@ -709,6 +709,14 @@ ExprResult Parser::tryParseCXXIdExpression(CXXScopeSpec &SS,
                            /*AllowDeductionGuide=*/false, &TemplateKWLoc, Name))
       return ExprError();
 
+    // ns::name!( ... ) is an expression-macro invocation.
+    if (getLangOpts().Reflection &&
+        Name.getKind() == UnqualifiedIdKind::IK_Identifier &&
+        Tok.is(tok::exclaim) && NextToken().is(tok::l_paren)) {
+      E = ParseMacroInvocation(SS, Name.Identifier, Name.StartLocation);
+      break;
+    }
+
     // This is only the direct operand of an & operator if it is not
     // followed by a postfix-expression suffix.
     if (isAddressOfOperand && isPostfixExpressionSuffixStart())

@@ -5072,6 +5072,7 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     break;
   }
   case ReflectionKind::Identifier:
+  case ReflectionKind::Expression:
     llvm_unreachable("token sequences and identifiers cannot be mangled");
   }
   Out << 'E';
@@ -5297,8 +5298,13 @@ recurse:
     return;
   }
 
-  // These are used for internal purposes and cannot be meaningfully mangled.
+  // These are used for internal purposes and cannot be meaningfully mangled,
+  // except that an interpolated macro argument stands for its source.
   case Expr::OpaqueValueExprClass:
+    if (const Expr *Source = cast<OpaqueValueExpr>(E)->getSourceExpr()) {
+      mangleExpression(Source, Arity);
+      break;
+    }
     llvm_unreachable("cannot mangle opaque value; mangling wrong thing?");
 
   case Expr::InitListExprClass: {

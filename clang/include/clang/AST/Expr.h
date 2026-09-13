@@ -763,6 +763,15 @@ public:
                              SmallVectorImpl<PartialDiagnosticAt> &Notes,
                              bool IsConstantInitializer) const;
 
+  /// Evaluate the body of an expression macro with its parameters bound to
+  /// \p ParamValues (reflections of the argument expressions, or token
+  /// sequences for raw parameters). On success \p Result holds the returned
+  /// token sequence.
+  static bool EvaluateMacroBody(const FunctionDecl *Macro,
+                                ArrayRef<APValue> ParamValues, APValue &Result,
+                                const ASTContext &Ctx,
+                                SmallVectorImpl<PartialDiagnosticAt> &Diags);
+
   /// EvaluateWithSubstitution - Evaluate an expression as if from the context
   /// of a call to the given function with the given arguments, inside an
   /// unevaluated context. Returns true if the expression could be folded to a
