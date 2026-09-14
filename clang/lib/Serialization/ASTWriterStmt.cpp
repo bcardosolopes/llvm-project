@@ -609,6 +609,7 @@ void ASTStmtWriter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
 void ASTStmtWriter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
   VisitExpr(E);
   Record.push_back(E->getNumArgs());
+  Record.AddSourceLocation(E->getExclaimLoc());
   Record.AddSourceLocation(E->getLParenLoc());
   Record.AddSourceLocation(E->getRParenLoc());
   Record.AddStmt(E->getCallee());

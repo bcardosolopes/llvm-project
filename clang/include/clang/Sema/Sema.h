@@ -16266,6 +16266,7 @@ public:
                               SmallVectorImpl<bool> &RawParams);
   ExprResult ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
                                   const IdentifierInfo *II, SourceLocation NameLoc,
+                                  SourceLocation ExclaimLoc,
                                   SourceLocation LParenLoc, MultiExprArg Args,
                                   SourceLocation RParenLoc);
   /// Resolve and expand a macro invocation, or defer it (as a
@@ -16274,13 +16275,19 @@ public:
   /// instantiated; the locals visible before it are made visible to the
   /// expansion.
   ExprResult BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
+                                  SourceLocation ExclaimLoc,
                                   SourceLocation LParenLoc, MultiExprArg Args,
                                   SourceLocation RParenLoc,
                                   const Stmt *InstantiationPattern = nullptr);
   /// Collect the instantiations of the local declarations that are visible
-  /// before \p PatternStmt in the function template being instantiated.
+  /// before \p PatternStmt in the function template being instantiated, one
+  /// inner vector per lexical scope, outermost first.
   void CollectInstantiatedLocalDeclsForLookup(
-      const Stmt *PatternStmt, SmallVectorImpl<NamedDecl *> &Decls);
+      const Stmt *PatternStmt,
+      SmallVectorImpl<SmallVector<NamedDecl *, 4>> &ScopeLevels);
+  /// The scope levels collected for the macro expansion currently being
+  /// parsed during template instantiation (empty otherwise).
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> MacroExpansionLocalScopes;
   ExprResult BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
                                            SourceLocation LParenLoc,
                                            ArrayRef<Expr *> Args,

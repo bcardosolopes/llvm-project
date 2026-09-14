@@ -3292,7 +3292,7 @@ def err_macro_member : Error<"an expression macro cannot be a class member">;
 def err_macro_parameter_pack : Error<
   "an expression macro cannot have a parameter pack">;
 def err_macro_argument_in_lambda : Error<
-  "a macro argument cannot be interpolated into the body of a lambda">;
+  "an expression argument cannot be interpolated into the body of a lambda">;
 def err_splice_operand_not_reflection : Error<
   "splice operand must be a reflection">;
 def err_splice_operand_not_constexpr : Error<

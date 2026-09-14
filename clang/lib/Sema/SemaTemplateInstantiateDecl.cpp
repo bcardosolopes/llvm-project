@@ -39,23 +39,42 @@
 
 using namespace clang;
 
-static void collectLocalDeclsForLookup(
-    const DeclStmt *DS, SmallVectorImpl<const NamedDecl *> &Decls) {
-  auto AddDecl = [&](const NamedDecl *ND) {
-    if (!ND->getDeclName() || llvm::is_contained(Decls, ND))
+static void addLocalDeclForLookup(const NamedDecl *ND,
+                                  SmallVectorImpl<const NamedDecl *> &Decls) {
+  auto AddDecl = [&](const NamedDecl *D) {
+    if (!D->getDeclName() || llvm::is_contained(Decls, D))
       return;
-    Decls.push_back(ND);
+    Decls.push_back(D);
   };
 
-  for (const Decl *D : DS->decls()) {
-    auto *ND = dyn_cast<NamedDecl>(D);
-    if (!ND)
-      continue;
+  AddDecl(ND);
+  if (const auto *ED = dyn_cast<EnumDecl>(ND))
+    for (const auto *ECD : ED->enumerators())
+      AddDecl(ECD);
+  if (const auto *DD = dyn_cast<DecompositionDecl>(ND))
+    for (const auto *BD : DD->bindings())
+      AddDecl(BD);
+}
 
-    AddDecl(ND);
-    if (auto *ED = dyn_cast<EnumDecl>(ND))
-      for (const auto *ECD : ED->enumerators())
-        AddDecl(ECD);
+static void collectLocalDeclsForLookup(
+    const DeclStmt *DS, SmallVectorImpl<const NamedDecl *> &Decls) {
+  for (const Decl *D : DS->decls())
+    if (const auto *ND = dyn_cast<NamedDecl>(D))
+      addLocalDeclForLookup(ND, Decls);
+}
+
+/// The target lives in one of the initializers of \p DS: names declared
+/// earlier in the same declaration-statement, and the one whose initializer
+/// holds the target, are in scope there ([basic.scope.pdecl]).
+static void collectLocalDeclsUpToTarget(
+    const DeclStmt *DS, llvm::function_ref<bool(const Stmt *)> Contains,
+    SmallVectorImpl<const NamedDecl *> &Decls) {
+  for (const Decl *D : DS->decls()) {
+    if (const auto *ND = dyn_cast<NamedDecl>(D))
+      addLocalDeclForLookup(ND, Decls);
+    if (const auto *VD = dyn_cast<VarDecl>(D);
+        VD && VD->getInit() && Contains(VD->getInit()))
+      return;
   }
 }
 
@@ -75,64 +94,92 @@ static bool containsConstevalBlockDecl(const Stmt *S,
   return false;
 }
 
+using LocalDeclLevels = SmallVector<SmallVector<const NamedDecl *, 4>, 4>;
+
+/// Collect the local declarations visible before the statement matched by
+/// \p Contains, one inner vector per lexical scope, outermost first. New
+/// levels start when descending into a nested scope, so a caller can
+/// reconstruct shadowing.
 static bool collectVisibleLocalDeclsBefore(
     const Stmt *S, llvm::function_ref<bool(const Stmt *)> Contains,
-    SmallVectorImpl<const NamedDecl *> &Decls) {
+    LocalDeclLevels &Levels) {
   if (!S)
     return false;
 
   if (auto *DS = dyn_cast<DeclStmt>(S)) {
-    if (Contains(DS))
+    if (Contains(DS)) {
+      collectLocalDeclsUpToTarget(DS, Contains, Levels.back());
       return true;
-    collectLocalDeclsForLookup(DS, Decls);
+    }
+    collectLocalDeclsForLookup(DS, Levels.back());
     return false;
   }
 
   if (auto *CS = dyn_cast<CompoundStmt>(S)) {
     for (const Stmt *Child : CS->body()) {
       if (auto *DS = dyn_cast<DeclStmt>(Child)) {
-        if (Contains(DS))
+        if (Contains(DS)) {
+          collectLocalDeclsUpToTarget(DS, Contains, Levels.back());
           return true;
-        collectLocalDeclsForLookup(DS, Decls);
+        }
+        collectLocalDeclsForLookup(DS, Levels.back());
         continue;
       }
 
       if (Contains(Child))
-        return collectVisibleLocalDeclsBefore(Child, Contains, Decls);
+        {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(Child, Contains, Levels);
+    }
     }
     return false;
   }
 
   if (auto *IS = dyn_cast<IfStmt>(S)) {
     if (Contains(IS->getInit()))
-      return collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Decls);
-    collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Levels);
+    }
+    collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Levels);
 
     auto AddCondDecls = [&] {
       if (const DeclStmt *Cond = IS->getConditionVariableDeclStmt())
-        collectLocalDeclsForLookup(Cond, Decls);
+        collectLocalDeclsForLookup(Cond, Levels.back());
     };
 
     if (Contains(IS->getThen())) {
       AddCondDecls();
-      return collectVisibleLocalDeclsBefore(IS->getThen(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(IS->getThen(), Contains, Levels);
+    }
     }
     if (Contains(IS->getElse())) {
       AddCondDecls();
-      return collectVisibleLocalDeclsBefore(IS->getElse(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(IS->getElse(), Contains, Levels);
+    }
     }
     return false;
   }
 
   if (auto *SS = dyn_cast<SwitchStmt>(S)) {
     if (Contains(SS->getInit()))
-      return collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Decls);
-    collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Levels);
+    }
+    collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Levels);
 
     if (Contains(SS->getBody())) {
       if (const DeclStmt *Cond = SS->getConditionVariableDeclStmt())
-        collectLocalDeclsForLookup(Cond, Decls);
-      return collectVisibleLocalDeclsBefore(SS->getBody(), Contains, Decls);
+        collectLocalDeclsForLookup(Cond, Levels.back());
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(SS->getBody(), Contains, Levels);
+    }
     }
     return false;
   }
@@ -140,43 +187,83 @@ static bool collectVisibleLocalDeclsBefore(
   if (auto *WS = dyn_cast<WhileStmt>(S)) {
     if (Contains(WS->getBody())) {
       if (const DeclStmt *Cond = WS->getConditionVariableDeclStmt())
-        collectLocalDeclsForLookup(Cond, Decls);
-      return collectVisibleLocalDeclsBefore(WS->getBody(), Contains, Decls);
+        collectLocalDeclsForLookup(Cond, Levels.back());
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(WS->getBody(), Contains, Levels);
+    }
     }
     return false;
   }
 
   if (auto *FS = dyn_cast<ForStmt>(S)) {
     if (Contains(FS->getInit()))
-      return collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Decls);
-    collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Levels);
+    }
+    collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Levels);
 
     if (Contains(FS->getBody())) {
       if (const DeclStmt *Cond = FS->getConditionVariableDeclStmt())
-        collectLocalDeclsForLookup(Cond, Decls);
-      return collectVisibleLocalDeclsBefore(FS->getBody(), Contains, Decls);
+        collectLocalDeclsForLookup(Cond, Levels.back());
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(FS->getBody(), Contains, Levels);
+    }
     }
     return false;
   }
 
   if (auto *FRS = dyn_cast<CXXForRangeStmt>(S)) {
     if (Contains(FRS->getInit()))
-      return collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Decls);
-    collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Levels);
+    }
+    collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Levels);
 
     if (Contains(FRS->getLoopVarStmt()))
-      return collectVisibleLocalDeclsBefore(
-          FRS->getLoopVarStmt(), Contains, Decls);
-    collectVisibleLocalDeclsBefore(FRS->getLoopVarStmt(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(FRS->getLoopVarStmt(), Contains, Levels);
+    }
+    collectVisibleLocalDeclsBefore(FRS->getLoopVarStmt(), Contains, Levels);
 
     if (Contains(FRS->getBody()))
-      return collectVisibleLocalDeclsBefore(FRS->getBody(), Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(FRS->getBody(), Contains, Levels);
+    }
+    return false;
+  }
+
+  if (auto *TS = dyn_cast<CXXTryStmt>(S)) {
+    if (Contains(TS->getTryBlock())) {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(TS->getTryBlock(), Contains,
+                                            Levels);
+    }
+    for (unsigned I = 0, N = TS->getNumHandlers(); I != N; ++I) {
+      const CXXCatchStmt *H = TS->getHandler(I);
+      if (!Contains(H))
+        continue;
+      Levels.emplace_back();
+      if (const VarDecl *Ex = H->getExceptionDecl())
+        addLocalDeclForLookup(Ex, Levels.back());
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(H->getHandlerBlock(), Contains,
+                                            Levels);
+    }
     return false;
   }
 
   for (const Stmt *Child : S->children())
     if (Contains(Child))
-      return collectVisibleLocalDeclsBefore(Child, Contains, Decls);
+      {
+      Levels.emplace_back();
+      return collectVisibleLocalDeclsBefore(Child, Contains, Levels);
+    }
   return false;
 }
 
@@ -185,9 +272,15 @@ static bool collectVisibleLocalDeclsBefore(
 static bool collectVisibleLocalDeclsForConstevalBlock(
     const Stmt *S, const ConstevalBlockDecl *Target,
     SmallVectorImpl<const NamedDecl *> &Decls) {
-  return collectVisibleLocalDeclsBefore(
-      S, [&](const Stmt *C) { return containsConstevalBlockDecl(C, Target); },
-      Decls);
+  LocalDeclLevels Levels(1);
+  if (!collectVisibleLocalDeclsBefore(
+          S,
+          [&](const Stmt *C) { return containsConstevalBlockDecl(C, Target); },
+          Levels))
+    return false;
+  for (const auto &Level : Levels)
+    Decls.append(Level.begin(), Level.end());
+  return true;
 }
 
 static bool containsStmt(const Stmt *S, const Stmt *Target) {
@@ -202,7 +295,8 @@ static bool containsStmt(const Stmt *S, const Stmt *Target) {
 }
 
 void Sema::CollectInstantiatedLocalDeclsForLookup(
-    const Stmt *PatternStmt, SmallVectorImpl<NamedDecl *> &Decls) {
+    const Stmt *PatternStmt,
+    SmallVectorImpl<SmallVector<NamedDecl *, 4>> &ScopeLevels) {
   LocalInstantiationScope *Scope = CurrentInstantiationScope;
   if (!Scope)
     return;
@@ -223,19 +317,25 @@ void Sema::CollectInstantiatedLocalDeclsForLookup(
   if (!Body)
     return;
 
-  SmallVector<const NamedDecl *, 8> VisiblePatternDecls;
+  LocalDeclLevels PatternLevels(1);
   collectVisibleLocalDeclsBefore(
       Body, [&](const Stmt *C) { return containsStmt(C, PatternStmt); },
-      VisiblePatternDecls);
+      PatternLevels);
 
-  for (const NamedDecl *ND : VisiblePatternDecls) {
-    auto *Inst = Scope->getInstantiationOfIfExists(ND);
-    if (!Inst)
-      continue;
-    auto *InstND = dyn_cast_or_null<NamedDecl>(Inst->dyn_cast<Decl *>());
-    if (!InstND || !InstND->getDeclName() || llvm::is_contained(Decls, InstND))
-      continue;
-    Decls.push_back(InstND);
+  llvm::SmallPtrSet<const NamedDecl *, 16> Seen;
+  for (const auto &Level : PatternLevels) {
+    SmallVector<NamedDecl *, 4> Mapped;
+    for (const NamedDecl *ND : Level) {
+      auto *Inst = Scope->getInstantiationOfIfExists(ND);
+      if (!Inst)
+        continue;
+      auto *InstND = dyn_cast_or_null<NamedDecl>(Inst->dyn_cast<Decl *>());
+      if (!InstND || !InstND->getDeclName() || !Seen.insert(InstND).second)
+        continue;
+      Mapped.push_back(InstND);
+    }
+    if (!Mapped.empty())
+      ScopeLevels.push_back(std::move(Mapped));
   }
 }
 

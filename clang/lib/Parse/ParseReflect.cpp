@@ -403,7 +403,7 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
     ShapeError = Actions.GetMacroParameterShape(R, RawParams);
   }
 
-  ConsumeToken(); // '!'
+  SourceLocation ExclaimLoc = ConsumeToken();
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
 
@@ -432,20 +432,16 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
       if (!TryConsumeToken(tok::comma))
         break;
     }
-  } else if (RawParams.size() == 1 && RawParams[0]) {
-    // name!() with a single raw parameter: the argument is an empty sequence.
-    ExprResult Empty = Actions.ActOnCXXTokenSequenceReflection(
-        Tok.getLocation(), SourceRange(Tok.getLocation()), {});
-    if (Empty.isInvalid())
-      return ExprError();
-    Args.push_back(Empty.get());
   }
+  // name!() is an empty argument list, never a single empty token sequence;
+  // a raw parameter that wants to permit an empty invocation declares a
+  // default argument.
 
   if (T.consumeClose())
     return ExprError();
 
   return Actions.ActOnMacroInvocation(getCurScope(), SS, II, NameLoc,
-                                      T.getOpenLocation(), Args,
+                                      ExclaimLoc, T.getOpenLocation(), Args,
                                       T.getCloseLocation());
 }
 
@@ -522,27 +518,48 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
     return false;
   };
   std::optional<ParseScope> FnScope;
-  SmallVector<NamedDecl *, 8> Seeded;
+  llvm::SmallPtrSet<NamedDecl *, 16> SeenSeeded;
+  SmallVector<NamedDecl *, 8> SeededBase;
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> SeededLevels;
+  unsigned NumLevelScopes = 0;
   if (Actions.CurContext->isFunctionOrMethod() &&
       !HasScopeFor(Actions.CurContext)) {
     FnScope.emplace(this, Scope::FnScope | Scope::DeclScope |
                               Scope::CompoundStmtScope);
     getCurScope()->setEntity(Actions.CurContext);
-    auto Seed = [&](NamedDecl *D) {
-      if (!D->getDeclName() || getCurScope()->isDeclScope(D))
+    auto SeedInto = [&](NamedDecl *D, SmallVectorImpl<NamedDecl *> &Out) {
+      if (!D->getDeclName() || !SeenSeeded.insert(D).second)
         return;
       getCurScope()->AddDecl(D);
       Actions.IdResolver.AddDecl(D);
-      Seeded.push_back(D);
+      Out.push_back(D);
     };
     if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext))
       for (ParmVarDecl *P : FD->parameters())
-        Seed(P);
+        SeedInto(P, SeededBase);
     for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup)
-      Seed(D);
+      SeedInto(D, SeededBase);
+    // Each level of locals Sema collected gets its own nested scope, so an
+    // inner declaration hides an outer one the way it did at the invocation.
+    for (const auto &Level : Actions.MacroExpansionLocalScopes) {
+      if (Level.empty())
+        continue;
+      EnterScope(Scope::DeclScope);
+      ++NumLevelScopes;
+      SeededLevels.emplace_back();
+      for (NamedDecl *D : Level)
+        SeedInto(D, SeededLevels.back());
+    }
   }
   auto Unseed = llvm::make_scope_exit([&] {
-    for (NamedDecl *D : Seeded) {
+    for (unsigned I = NumLevelScopes; I--;) {
+      for (NamedDecl *D : SeededLevels[I]) {
+        getCurScope()->RemoveDecl(D);
+        Actions.IdResolver.RemoveDecl(D);
+      }
+      ExitScope();
+    }
+    for (NamedDecl *D : SeededBase) {
       getCurScope()->RemoveDecl(D);
       Actions.IdResolver.RemoveDecl(D);
     }

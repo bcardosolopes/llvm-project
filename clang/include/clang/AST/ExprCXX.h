@@ -6293,18 +6293,20 @@ class CXXMacroInvocationExpr : public Expr {
   /// lookup) followed by the arguments.
   Stmt **SubExprs;
   unsigned NumArgs;
+  SourceLocation ExclaimLoc;
   SourceLocation LParenLoc;
   SourceLocation RParenLoc;
 
   CXXMacroInvocationExpr(ASTContext &C, UnresolvedLookupExpr *Callee,
-                         ArrayRef<Expr *> Args, SourceLocation LParenLoc,
-                         SourceLocation RParenLoc);
+                         ArrayRef<Expr *> Args, SourceLocation ExclaimLoc,
+                         SourceLocation LParenLoc, SourceLocation RParenLoc);
   CXXMacroInvocationExpr(ASTContext &C, EmptyShell Empty, unsigned NumArgs);
 
 public:
   static CXXMacroInvocationExpr *Create(ASTContext &C,
                                         UnresolvedLookupExpr *Callee,
                                         ArrayRef<Expr *> Args,
+                                        SourceLocation ExclaimLoc,
                                         SourceLocation LParenLoc,
                                         SourceLocation RParenLoc);
   static CXXMacroInvocationExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
@@ -6321,6 +6323,8 @@ public:
     return ArrayRef(reinterpret_cast<Expr *const *>(SubExprs + 1), NumArgs);
   }
 
+  SourceLocation getExclaimLoc() const { return ExclaimLoc; }
+  void setExclaimLoc(SourceLocation Loc) { ExclaimLoc = Loc; }
   SourceLocation getLParenLoc() const { return LParenLoc; }
   void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
   SourceLocation getRParenLoc() const { return RParenLoc; }

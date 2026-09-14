@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 %s -std=c++26 -freflection -fconsteval-operations -fsyntax-only -verify
+// RUN: %clang_cc1 %s -std=c++26 -freflection -fconsteval-operations -fsyntax-only -fcxx-exceptions -verify
 
 using token_sequence = decltype(^^{ });
 namespace std { class type_info { public: virtual ~type_info(); }; }
@@ -177,7 +177,7 @@ static_assert(n == 9);
 
 // An argument cannot be interpolated into a lambda body.
 __macro deferred(auto&& x) { return ^^{ [] { return \(x); } }; }
-int d = deferred!(1)();  // expected-error {{a macro argument cannot be interpolated into the body of a lambda}}
+int d = deferred!(1)();  // expected-error {{an expression argument cannot be interpolated into the body of a lambda}}
 
 }  // namespace N7
 
@@ -202,3 +202,84 @@ struct S {
 __macro pack(auto&&... xs) { return ^^{ 0 }; }  // expected-error {{an expression macro cannot have a parameter pack}}
 
 }  // namespace N8
+
+namespace N9 {
+
+// The evaluate-once and lambda rules see through nested macro invocations:
+// forwarding an argument into a nested macro is still an evaluation of the
+// outer argument.
+__macro relay(auto&& x) { return ^^{ \(x) }; }
+
+__macro once_nested(auto&& x) { return ^^{ relay!(\(x)) }; }
+static_assert(once_nested!(5) == 5);
+
+__macro twice_nested(auto&& x) { return ^^{ relay!(\(x)) + relay!(\(x)) }; }
+int next();
+int a = twice_nested!(next());  // expected-error {{expansion of expression macro would evaluate this argument more than once}}
+
+__macro lambda_nested(auto&& x) { return ^^{ [] { return relay!(\(x)); } }; }
+int b = lambda_nested!(1)();  // expected-error {{an expression argument cannot be interpolated into the body of a lambda}}
+
+}  // namespace N9
+
+namespace N10 {
+
+// Locals visible at a deferred invocation keep their lexical scope
+// structure in the expansion.
+__macro geta(auto&& p) { return ^^{ a + \(p) }; }
+__macro getb(auto&& p) { return ^^{ b1 + \(p) }; }
+__macro getx(auto&& p) { return ^^{ x + \(p) }; }
+__macro gete(auto&& p) { return ^^{ e + \(p) }; }
+
+// A name declared earlier in the same declaration-statement.
+template <class T>
+constexpr int same_stmt(T v) {
+  int a = 4, b = geta!(v);
+  return b;
+}
+static_assert(same_stmt(3) == 7);
+
+// Structured bindings.
+struct Pair { int first, second; };
+template <class T>
+constexpr int bindings(T v) {
+  auto [b1, b2] = Pair{10, 20};
+  return getb!(v) + b2 - b2;
+}
+static_assert(bindings(1) == 11);
+
+// The innermost of two same-named declarations wins.
+template <class T>
+constexpr int shadowed(T v) {
+  int x = 100;
+  {
+    int x = 1;
+    return getx!(v) + (x - x);
+  }
+}
+static_assert(shadowed(1) == 2);
+
+// A catch parameter is visible inside its handler.
+template <class T>
+int catches(T v) {
+  try {
+    return 0;
+  } catch (int e) {
+    return gete!(v);
+  }
+}
+template int catches<int>(int);
+
+}  // namespace N10
+
+namespace N11 {
+
+// name!() is an empty argument list, never a single empty token sequence.
+__macro raw(token_sequence x = ^^{ 42 }) { return x; }
+static_assert(raw!() == 42);
+static_assert(raw!(7) == 7);
+
+__macro rawreq(token_sequence x) { return x; }  // expected-note {{candidate function not viable}}
+int c = rawreq!();  // expected-error {{no matching function for call to 'rawreq'}}
+
+}  // namespace N11

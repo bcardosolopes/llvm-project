@@ -9389,7 +9389,8 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
 
   return getSema().BuildMacroInvocation(
       /*S=*/nullptr, cast<UnresolvedLookupExpr>(Callee.get()),
-      E->getLParenLoc(), Args, E->getRParenLoc(), /*InstantiationPattern=*/E);
+      E->getExclaimLoc(), E->getLParenLoc(), Args, E->getRParenLoc(),
+      /*InstantiationPattern=*/E);
 }
 
 template <typename Derived>

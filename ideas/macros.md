@@ -46,7 +46,10 @@ arguments.
 
 A macro cannot be a class member, and cannot declare a parameter pack (both
 are diagnosed). Default arguments are allowed: `id!()` binds the default
-argument expression exactly as a call would. Explicit template arguments
+argument expression exactly as a call would. `name!()` is an empty argument
+list — never a single empty token sequence — so a sole raw parameter needs a
+default argument (`token_sequence body = ^^{}`) for an empty invocation to be
+viable. Explicit template arguments
 cannot be written at an invocation; the only spelling that fits the
 `name!(` recognition is `name<Args>!(...)`, which is left for a later
 iteration. Macro templates deduce everything from the arguments for now.
@@ -194,11 +197,16 @@ reflection twice in *potentially evaluated* positions is likewise ill-formed;
 If a macro wants laziness (`log_if!(cond, expensive())`), that is a future
 parameter kind, not a change to this default.
 
-An argument cannot be interpolated into the body of a lambda inside the
-expansion (`^^{ [&] { return \(x); } }` is ill-formed). The argument's names
-were bound in the enclosing function and were never captured; evaluating it
-from a different function would be unsound. Use a `do` expression for
-statements.
+An *expression* argument cannot be interpolated into the body of a lambda
+inside the expansion (`^^{ [&] { return \(x); } }` is ill-formed). The
+argument's names were bound in the enclosing function and were never
+captured; evaluating it from a different function would be unsound. Use a
+`do` expression for statements. Raw token arguments have no bindings and can
+be pasted anywhere — that is how `λ!` builds its lambda body.
+
+Both this rule and evaluate-once see through nested macro invocations:
+forwarding an argument into a nested macro's expansion is still an
+evaluation of the outer argument, and still cannot land it inside a lambda.
 
 Other interpolations behave as they already do for token injection:
 `token_sequence` values are concatenated in place, reflections of types,

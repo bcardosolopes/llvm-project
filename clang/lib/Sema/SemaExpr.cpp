@@ -68,7 +68,6 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/SaveAndRestore.h"
-#include "clang/AST/RecursiveASTVisitor.h"
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/TypeSize.h"
 #include <limits>
@@ -7311,6 +7310,7 @@ bool Sema::GetMacroParameterShape(LookupResult &R,
 ExprResult Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
                                       const IdentifierInfo *II,
                                       SourceLocation NameLoc,
+                                      SourceLocation ExclaimLoc,
                                       SourceLocation LParenLoc,
                                       MultiExprArg Args,
                                       SourceLocation RParenLoc) {
@@ -7331,10 +7331,11 @@ ExprResult Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
   if (Callee.isInvalid())
     return ExprError();
   return BuildMacroInvocation(S, cast<UnresolvedLookupExpr>(Callee.get()),
-                              LParenLoc, Args, RParenLoc);
+                              ExclaimLoc, LParenLoc, Args, RParenLoc);
 }
 
 ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
+                                      SourceLocation ExclaimLoc,
                                       SourceLocation LParenLoc,
                                       MultiExprArg Args,
                                       SourceLocation RParenLoc,
@@ -7346,8 +7347,8 @@ ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
     Dependent |= Arg->isInstantiationDependent() ||
                  Arg->containsUnexpandedParameterPack();
   if (Dependent)
-    return CXXMacroInvocationExpr::Create(Context, Callee, Args, LParenLoc,
-                                          RParenLoc);
+    return CXXMacroInvocationExpr::Create(Context, Callee, Args, ExclaimLoc,
+                                          LParenLoc, RParenLoc);
 
   // Overload resolution as for a call, but the result is never a call.
   OverloadCandidateSet CandidateSet(Callee->getNameLoc(),
@@ -7376,22 +7377,16 @@ ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
     return ExprError();
 
   // During instantiation the parser has no scope for the function being
-  // instantiated; make the locals visible before the invocation available to
-  // the expansion, the way consteval blocks do for injected code.
-  SmallVector<NamedDecl *, 8> AddedLocals;
-  if (InstantiationPattern) {
-    SmallVector<NamedDecl *, 8> Visible;
-    CollectInstantiatedLocalDeclsForLookup(InstantiationPattern, Visible);
-    for (NamedDecl *ND : Visible)
-      if (!llvm::is_contained(InjectedLocalDeclsForLookup, ND)) {
-        InjectedLocalDeclsForLookup.push_back(ND);
-        AddedLocals.push_back(ND);
-      }
-  }
-  auto RestoreLocals = llvm::make_scope_exit([&] {
-    for (NamedDecl *ND : AddedLocals)
-      llvm::erase(InjectedLocalDeclsForLookup, ND);
-  });
+  // instantiated; reconstruct the lexical scopes of the locals visible before
+  // the invocation, so the expansion's names resolve as they would have in
+  // the template, with inner declarations hiding outer ones.
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> SavedScopes;
+  SavedScopes.swap(MacroExpansionLocalScopes);
+  auto RestoreScopes = llvm::make_scope_exit(
+      [&] { SavedScopes.swap(MacroExpansionLocalScopes); });
+  if (InstantiationPattern)
+    CollectInstantiatedLocalDeclsForLookup(InstantiationPattern,
+                                           MacroExpansionLocalScopes);
 
   return BuildExpressionMacroExpansion(
       Fn.get(), Macro, LParenLoc, Args, RParenLoc,
@@ -7399,20 +7394,42 @@ ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
 }
 
 namespace {
-/// Counts how often each opaque value appears in a potentially-evaluated
-/// position of a macro expansion. Lambda bodies are not visited: they are a
-/// separate function, and an argument cannot be interpolated into one.
+/// Counts how often each interpolated argument appears in a
+/// potentially-evaluated position of a macro expansion. A nested macro
+/// invocation within the expansion wraps the enclosing macro's opaque values
+/// as the sources of its own, so the counter follows source-expression
+/// chains back to the tracked ones. Lambda bodies are not visited: they are
+/// a separate function, and an expression argument cannot be interpolated
+/// into one.
 class MacroArgumentUseCounter
     : public ConstEvaluatedExprVisitor<MacroArgumentUseCounter> {
   using Inherited = ConstEvaluatedExprVisitor<MacroArgumentUseCounter>;
+
+  const llvm::SmallPtrSetImpl<const OpaqueValueExpr *> &Tracked;
+  llvm::SmallPtrSet<const OpaqueValueExpr *, 16> Visited;
 
 public:
   llvm::SmallDenseMap<const OpaqueValueExpr *, unsigned, 8> Uses;
   SmallVector<const LambdaExpr *, 2> Lambdas;
 
-  explicit MacroArgumentUseCounter(const ASTContext &Ctx) : Inherited(Ctx) {}
+  MacroArgumentUseCounter(
+      const ASTContext &Ctx,
+      const llvm::SmallPtrSetImpl<const OpaqueValueExpr *> &Tracked)
+      : Inherited(Ctx), Tracked(Tracked) {}
 
-  void VisitOpaqueValueExpr(const OpaqueValueExpr *E) { ++Uses[E]; }
+  void VisitOpaqueValueExpr(const OpaqueValueExpr *E) {
+    // The same opaque value node can appear several times in the semantic
+    // form of one construct (a GNU ?: places it in two positions); it is
+    // still bound - and its source evaluated - once.
+    if (!Visited.insert(E).second)
+      return;
+    if (Tracked.contains(E)) {
+      ++Uses[E];
+      return;
+    }
+    if (const Expr *Src = E->getSourceExpr())
+      this->Visit(Src);
+  }
   void VisitLambdaExpr(const LambdaExpr *LE) {
     Lambdas.push_back(LE);
     Inherited::VisitLambdaExpr(LE);
@@ -7420,9 +7437,16 @@ public:
 };
 } // namespace
 
+/// Whether \p Needle appears within \p Haystack, following opaque values'
+/// source expressions (which is how a nested macro's expansion refers to the
+/// enclosing macro's interpolated arguments).
 static bool stmtContains(const Stmt *Haystack, const Stmt *Needle) {
   if (Haystack == Needle)
     return true;
+  if (const auto *OVE = dyn_cast<OpaqueValueExpr>(Haystack))
+    if (const Expr *Src = OVE->getSourceExpr())
+      if (stmtContains(Src, Needle))
+        return true;
   for (const Stmt *Child : Haystack->children())
     if (Child && stmtContains(Child, Needle))
       return true;
@@ -7436,7 +7460,9 @@ static bool stmtContains(const Stmt *Haystack, const Stmt *Needle) {
 /// argument's names never having been captured.
 static bool CheckMacroArgumentEvaluation(Sema &S, Expr *Expansion,
                                          ArrayRef<OpaqueValueExpr *> ArgOVEs) {
-  MacroArgumentUseCounter Counter(S.Context);
+  llvm::SmallPtrSet<const OpaqueValueExpr *, 8> Tracked(ArgOVEs.begin(),
+                                                        ArgOVEs.end());
+  MacroArgumentUseCounter Counter(S.Context, Tracked);
   Counter.Visit(Expansion);
 
   for (const LambdaExpr *LE : Counter.Lambdas)
