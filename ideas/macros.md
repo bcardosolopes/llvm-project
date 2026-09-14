@@ -166,9 +166,21 @@ the semantically analyzed tree, so `f<a>(b) == c` has already been resolved.
 
 ### Tokens
 
-For raw parameters the only additional surface is a token list:
-`tokens_of(ts)` returns each token of the sequence as its own
-`token_sequence`; `stringize` gives a token's spelling. Concatenation and
+For raw parameters the only additional surface is a token list plus
+classification: `tokens_of(ts)` returns each token of the sequence as its own
+`token_sequence`; `stringize` gives a token's spelling. A single token's
+lexical category is `token_kind_of(tok) -> token_kind`, where `token_kind` is
+`{ identifier, keyword, literal, punctuator, annotation, unknown }`. All
+operators and punctuators collapse into `punctuator` — to match a *specific*
+operator, compare the token directly (`tok == ^^{ + }`), since token sequences
+compare equal by content. `unknown` covers empty and multi-token sequences.
+Classify by `token_kind_of`, not by `stringize` string-sniffing. Note that
+alternative tokens keep their spelling, so `^^{ or } != ^^{ || }` even though
+both are `punctuator`; kind-based checks see through this, `==` does not.
+A token can also be converted into the two vocabularies interpolation already
+understands: `identifier_of(tok) -> info` (an identifier reflection, as
+`id(...)` produces) and `operator_of(tok) -> operators` (for a token spelling a
+complete operator; `(`, `[`, `new` do not qualify). Concatenation and
 interpolation of `token_sequence` values already exist. There are no grammar
 fragment parameters and no parser-combinator API; if a macro wants to treat
 raw tokens as an expression, that is a future `parse_expression(ts)`

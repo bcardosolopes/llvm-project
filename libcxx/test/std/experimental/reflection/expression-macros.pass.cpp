@@ -177,6 +177,31 @@ void test_check() {
   assert(test::failures[4].rhs == "4");
 }
 
+// ------------------------------------------- token classification ----------
+
+static_assert([] {
+  using std::meta::token_kind;
+  auto toks = std::meta::tokens_of(^^{ x << 42 });
+  return toks.size() == 3 &&
+         std::meta::token_kind_of(toks[0]) == token_kind::identifier &&
+         std::meta::token_kind_of(toks[1]) == token_kind::punctuator &&
+         std::meta::token_kind_of(toks[2]) == token_kind::literal &&
+         std::meta::operator_of(toks[1]) ==
+             std::meta::operators::op_less_less &&
+         std::meta::identifier_of(toks[0]) == std::meta::id("x");
+}());
+
+// A keyword is its own kind; alternative tokens are still punctuators; empty or
+// multi-token sequences are `unknown`.
+static_assert([] {
+  using std::meta::token_kind;
+  return std::meta::token_kind_of(^^{ int }) == token_kind::keyword &&
+         std::meta::token_kind_of(^^{ , }) == token_kind::punctuator &&
+         std::meta::token_kind_of(^^{ or }) == token_kind::punctuator &&
+         std::meta::token_kind_of(^^{ a b }) == token_kind::unknown &&
+         std::meta::token_kind_of(^^{}) == token_kind::unknown;
+}());
+
 // ------------------------------------------------------------------ λ! -----
 
 consteval std::optional<int> placeholder_index(std::string_view s) {

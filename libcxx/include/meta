@@ -567,6 +567,9 @@ enum : unsigned {
   __metafn_get_ith_operand_of,
   __metafn_token_count,
   __metafn_get_ith_token,
+  __metafn_token_kind_of,
+  __metafn_identifier_of_token,
+  __metafn_operator_of_token,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3180,6 +3183,33 @@ consteval auto is_binary_operation(info r) -> bool {
 consteval auto operands_of(info r) -> vector<info> {
   return {__metafunction(detail::__metafn_get_ith_operand_of, r, 0),
           __metafunction(detail::__metafn_get_ith_operand_of, r, 1)};
+}
+
+// The lexical category of a single token. All operators and punctuators
+// collapse into `punctuator` (compare against a specific spelling with
+// `tok == ^^{ + }` when you need to distinguish them). A sequence that is
+// empty or holds more than one token classifies as `unknown`.
+enum class token_kind {
+  identifier,
+  keyword,
+  literal,
+  punctuator,
+  annotation,
+  unknown,
+};
+
+// Token classification and conversions into the interpolable vocabularies
+// (identifier reflections and operators values).
+consteval auto token_kind_of(token_sequence tok) -> token_kind {
+  return token_kind(__metafunction(detail::__metafn_token_kind_of, tok));
+}
+
+consteval auto identifier_of(token_sequence tok) -> info {
+  return __metafunction(detail::__metafn_identifier_of_token, tok);
+}
+
+consteval auto operator_of(token_sequence tok) -> operators {
+  return operators(__metafunction(detail::__metafn_operator_of_token, tok));
 }
 
 // Each token of the sequence as its own single-token sequence.

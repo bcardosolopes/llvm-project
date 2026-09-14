@@ -17,6 +17,7 @@
 #define LLVM_CLANG_AST_REFLECTION_H
 
 #include "clang/Basic/OperatorKinds.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/AST/TypeBase.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
@@ -144,6 +145,10 @@ struct TokenSequenceData : public ArrayRef<Token> {
 /// OverloadedOperatorKind.
 OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index);
 unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO);
+
+/// The overloadable operator a single token spells, or OO_None. Operators
+/// without a one-token spelling ('()', '[]', new, delete) never match.
+OverloadedOperatorKind getOverloadedOperatorForTokenKind(tok::TokenKind Kind);
 
 /// Remove deduced placeholder sugar ('auto', 'decltype(auto)', deduced class
 /// template names) from \p T so it can be spelled as a concrete type. The

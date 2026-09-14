@@ -89,6 +89,18 @@ QualType stripDeducedTypeSugar(const ASTContext &C, QualType T) {
   return T;
 }
 
+OverloadedOperatorKind getOverloadedOperatorForTokenKind(tok::TokenKind Kind) {
+  switch (Kind) {
+#define OVERLOADED_OPERATOR(Name, Spelling, Token, Unary, Binary, MemberOnly)  \
+  case tok::Token:                                                             \
+    return OO_##Name;
+#define OVERLOADED_OPERATOR_MULTI(Name, Spelling, Unary, Binary, MemberOnly)
+#include "clang/Basic/OperatorKinds.def"
+  default:
+    return OO_None;
+  }
+}
+
 unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO) {
   const auto *It = llvm::find(MetaOperatorOrder, OO);
   return It == std::end(MetaOperatorOrder) ? 0 : It - MetaOperatorOrder;
