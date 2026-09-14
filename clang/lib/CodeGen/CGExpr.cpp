@@ -576,10 +576,23 @@ EmitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *M) {
   for (const auto &Ignored : CommaLHSs)
     EmitIgnoredExpr(Ignored);
 
+  // An OVE of record type that is already bound (e.g. the common expression of
+  // a GNU binary conditional) denotes an existing object, so just reuse it.  A
+  // unique OVE whose source is a prvalue -- as produced by interpolating an
+  // expression-macro argument -- has no binding yet, and its source cannot be
+  // emitted as an l-value.  Materialize such a source through the
+  // reference-temporary path below, which handles lifetime extension and the
+  // temporary's destructor, then bind the OVE to the resulting object so that
+  // any other reference to it denotes the same object.
+  const OpaqueValueExpr *OpaqueToBind = nullptr;
   if (const auto *opaque = dyn_cast<OpaqueValueExpr>(E)) {
     if (opaque->getType()->isRecordType()) {
       assert(Adjustments.empty());
-      return EmitOpaqueValueLValue(opaque);
+      const Expr *Src = opaque->getSourceExpr();
+      if (OpaqueLValues.count(opaque) || !Src || Src->isGLValue())
+        return EmitOpaqueValueLValue(opaque);
+      OpaqueToBind = opaque;
+      E = Src;
     }
   }
 
@@ -691,7 +704,10 @@ EmitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *M) {
     }
   }
 
-  return MakeAddrLValue(Object, M->getType(), AlignmentSource::Decl);
+  LValue Result = MakeAddrLValue(Object, M->getType(), AlignmentSource::Decl);
+  if (OpaqueToBind)
+    OpaqueLValues.try_emplace(OpaqueToBind, Result);
+  return Result;
 }
 
 RValue

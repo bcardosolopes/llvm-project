@@ -181,6 +181,61 @@ void test_check() {
   assert(test::failures[4].rhs == "4");
 }
 
+// -------------------------------- class prvalue operands (codegen) ---------
+
+// Binding `auto&& r = \(operand)` where the operand is a class prvalue with a
+// non-trivial destructor used to crash codegen: interpolation produces a
+// *prvalue* OpaqueValueExpr under the MaterializeTemporaryExpr, and
+// EmitMaterializeTemporaryExpr assumed any record-type OVE was already bound
+// to an existing object. The temporary must be materialized once, live until
+// the end of the extending scope, and be destroyed exactly once.
+
+namespace prvalue_operand {
+int ctors = 0, dtors = 0, live = 0;
+
+struct V {
+  int n;
+  V(std::initializer_list<int> il) : n(static_cast<int>(il.size())) {
+    ++ctors;
+    ++live;
+  }
+  V(const V& o) : n(o.n) {
+    ++ctors;
+    ++live;
+  }
+  ~V() {
+    ++dtors;
+    --live;
+  }
+};
+bool operator==(const V& a, const V& b) { return a.n == b.n; }
+
+template <class T>
+__macro bind_operands(T&& cond) {
+  auto ops = operands_of(cond);
+  return ^^{ do {
+    auto&& l = \(ops[0]);
+    auto&& r = \(ops[1]);
+    assert(live == 2);       // both operands alive inside the scope
+    assert(r.n == 3);        // the temporary is intact, not a dangling copy
+    assert(!(l == r));
+  } };
+}
+
+void test() {
+  {
+    V a{1};
+    int c0 = ctors, d0 = dtors;
+    bind_operands!(a == V{1, 2, 3});
+    assert(ctors - c0 == 1);  // exactly one temporary constructed
+    assert(dtors - d0 == 1);  // ...and destroyed by scope exit
+    assert(live == 1);        // only `a` remains
+  }
+  assert(live == 0);
+  assert(ctors == dtors);
+}
+} // namespace prvalue_operand
+
 // ------------------------------------------- token classification ----------
 
 static_assert([] {
@@ -297,6 +352,7 @@ int main(int, char**) {
   assert(add_two(40) == 42);
   test_fwd();
   test_check();
+  prvalue_operand::test();
   test_lambda();
   test_define_op();
   return 0;
