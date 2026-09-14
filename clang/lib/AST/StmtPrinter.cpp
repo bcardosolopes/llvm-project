@@ -2943,6 +2943,17 @@ void StmtPrinter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *S) {
   OS << ")";
 }
 
+void StmtPrinter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *S) {
+  PrintExpr(S->getCallee());
+  OS << "!(";
+  for (unsigned I = 0, N = S->getNumArgs(); I != N; ++I) {
+    if (I)
+      OS << ", ";
+    PrintExpr(S->getArg(I));
+  }
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *S) {
   OS << "std::meta::stringize(";
   PrintExpr(S->getOperand());

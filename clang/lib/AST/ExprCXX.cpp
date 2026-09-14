@@ -2414,6 +2414,37 @@ CXXBuiltinStringizeExpr *CXXBuiltinStringizeExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXBuiltinStringizeExpr(EmptyShell());
 }
 
+CXXMacroInvocationExpr::CXXMacroInvocationExpr(ASTContext &C,
+                                               UnresolvedLookupExpr *Callee,
+                                               ArrayRef<Expr *> Args,
+                                               SourceLocation LParenLoc,
+                                               SourceLocation RParenLoc)
+    : Expr(CXXMacroInvocationExprClass, C.DependentTy, VK_PRValue,
+           OK_Ordinary),
+      SubExprs(new (C) Stmt *[Args.size() + 1]), NumArgs(Args.size()),
+      LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
+  SubExprs[0] = Callee;
+  for (unsigned I = 0; I != NumArgs; ++I)
+    SubExprs[I + 1] = Args[I];
+  setDependence(computeDependence(this));
+}
+
+CXXMacroInvocationExpr::CXXMacroInvocationExpr(ASTContext &C, EmptyShell Empty,
+                                               unsigned NumArgs)
+    : Expr(CXXMacroInvocationExprClass, Empty),
+      SubExprs(new (C) Stmt *[NumArgs + 1]), NumArgs(NumArgs) {}
+
+CXXMacroInvocationExpr *CXXMacroInvocationExpr::Create(
+    ASTContext &C, UnresolvedLookupExpr *Callee, ArrayRef<Expr *> Args,
+    SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXMacroInvocationExpr(C, Callee, Args, LParenLoc, RParenLoc);
+}
+
+CXXMacroInvocationExpr *CXXMacroInvocationExpr::CreateEmpty(ASTContext &C,
+                                                            unsigned NumArgs) {
+  return new (C) CXXMacroInvocationExpr(C, EmptyShell(), NumArgs);
+}
+
 StackLocationExpr::StackLocationExpr(QualType ResultTy, SourceRange Range,
                                      int FrameOffset)
     : Expr(StackLocationExprClass, ResultTy, VK_PRValue, OK_Ordinary),

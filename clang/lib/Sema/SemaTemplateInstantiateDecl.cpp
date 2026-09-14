@@ -75,14 +75,14 @@ static bool containsConstevalBlockDecl(const Stmt *S,
   return false;
 }
 
-static bool collectVisibleLocalDeclsForConstevalBlock(
-    const Stmt *S, const ConstevalBlockDecl *Target,
+static bool collectVisibleLocalDeclsBefore(
+    const Stmt *S, llvm::function_ref<bool(const Stmt *)> Contains,
     SmallVectorImpl<const NamedDecl *> &Decls) {
   if (!S)
     return false;
 
   if (auto *DS = dyn_cast<DeclStmt>(S)) {
-    if (containsConstevalBlockDecl(DS, Target))
+    if (Contains(DS))
       return true;
     collectLocalDeclsForLookup(DS, Decls);
     return false;
@@ -91,104 +91,152 @@ static bool collectVisibleLocalDeclsForConstevalBlock(
   if (auto *CS = dyn_cast<CompoundStmt>(S)) {
     for (const Stmt *Child : CS->body()) {
       if (auto *DS = dyn_cast<DeclStmt>(Child)) {
-        if (containsConstevalBlockDecl(DS, Target))
+        if (Contains(DS))
           return true;
         collectLocalDeclsForLookup(DS, Decls);
         continue;
       }
 
-      if (containsConstevalBlockDecl(Child, Target))
-        return collectVisibleLocalDeclsForConstevalBlock(Child, Target, Decls);
+      if (Contains(Child))
+        return collectVisibleLocalDeclsBefore(Child, Contains, Decls);
     }
     return false;
   }
 
   if (auto *IS = dyn_cast<IfStmt>(S)) {
-    if (containsConstevalBlockDecl(IS->getInit(), Target))
-      return collectVisibleLocalDeclsForConstevalBlock(IS->getInit(), Target,
-                                                       Decls);
-    collectVisibleLocalDeclsForConstevalBlock(IS->getInit(), Target, Decls);
+    if (Contains(IS->getInit()))
+      return collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Decls);
+    collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Decls);
 
     auto AddCondDecls = [&] {
       if (const DeclStmt *Cond = IS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Decls);
     };
 
-    if (containsConstevalBlockDecl(IS->getThen(), Target)) {
+    if (Contains(IS->getThen())) {
       AddCondDecls();
-      return collectVisibleLocalDeclsForConstevalBlock(IS->getThen(), Target,
-                                                       Decls);
+      return collectVisibleLocalDeclsBefore(IS->getThen(), Contains, Decls);
     }
-    if (containsConstevalBlockDecl(IS->getElse(), Target)) {
+    if (Contains(IS->getElse())) {
       AddCondDecls();
-      return collectVisibleLocalDeclsForConstevalBlock(IS->getElse(), Target,
-                                                       Decls);
+      return collectVisibleLocalDeclsBefore(IS->getElse(), Contains, Decls);
     }
     return false;
   }
 
   if (auto *SS = dyn_cast<SwitchStmt>(S)) {
-    if (containsConstevalBlockDecl(SS->getInit(), Target))
-      return collectVisibleLocalDeclsForConstevalBlock(SS->getInit(), Target,
-                                                       Decls);
-    collectVisibleLocalDeclsForConstevalBlock(SS->getInit(), Target, Decls);
+    if (Contains(SS->getInit()))
+      return collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Decls);
+    collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Decls);
 
-    if (containsConstevalBlockDecl(SS->getBody(), Target)) {
+    if (Contains(SS->getBody())) {
       if (const DeclStmt *Cond = SS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Decls);
-      return collectVisibleLocalDeclsForConstevalBlock(SS->getBody(), Target,
-                                                       Decls);
+      return collectVisibleLocalDeclsBefore(SS->getBody(), Contains, Decls);
     }
     return false;
   }
 
   if (auto *WS = dyn_cast<WhileStmt>(S)) {
-    if (containsConstevalBlockDecl(WS->getBody(), Target)) {
+    if (Contains(WS->getBody())) {
       if (const DeclStmt *Cond = WS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Decls);
-      return collectVisibleLocalDeclsForConstevalBlock(WS->getBody(), Target,
-                                                       Decls);
+      return collectVisibleLocalDeclsBefore(WS->getBody(), Contains, Decls);
     }
     return false;
   }
 
   if (auto *FS = dyn_cast<ForStmt>(S)) {
-    if (containsConstevalBlockDecl(FS->getInit(), Target))
-      return collectVisibleLocalDeclsForConstevalBlock(FS->getInit(), Target,
-                                                       Decls);
-    collectVisibleLocalDeclsForConstevalBlock(FS->getInit(), Target, Decls);
+    if (Contains(FS->getInit()))
+      return collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Decls);
+    collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Decls);
 
-    if (containsConstevalBlockDecl(FS->getBody(), Target)) {
+    if (Contains(FS->getBody())) {
       if (const DeclStmt *Cond = FS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Decls);
-      return collectVisibleLocalDeclsForConstevalBlock(FS->getBody(), Target,
-                                                       Decls);
+      return collectVisibleLocalDeclsBefore(FS->getBody(), Contains, Decls);
     }
     return false;
   }
 
   if (auto *FRS = dyn_cast<CXXForRangeStmt>(S)) {
-    if (containsConstevalBlockDecl(FRS->getInit(), Target))
-      return collectVisibleLocalDeclsForConstevalBlock(FRS->getInit(), Target,
-                                                       Decls);
-    collectVisibleLocalDeclsForConstevalBlock(FRS->getInit(), Target, Decls);
+    if (Contains(FRS->getInit()))
+      return collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Decls);
+    collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Decls);
 
-    if (containsConstevalBlockDecl(FRS->getLoopVarStmt(), Target))
-      return collectVisibleLocalDeclsForConstevalBlock(
-          FRS->getLoopVarStmt(), Target, Decls);
-    collectVisibleLocalDeclsForConstevalBlock(FRS->getLoopVarStmt(), Target,
-                                              Decls);
+    if (Contains(FRS->getLoopVarStmt()))
+      return collectVisibleLocalDeclsBefore(
+          FRS->getLoopVarStmt(), Contains, Decls);
+    collectVisibleLocalDeclsBefore(FRS->getLoopVarStmt(), Contains, Decls);
 
-    if (containsConstevalBlockDecl(FRS->getBody(), Target))
-      return collectVisibleLocalDeclsForConstevalBlock(FRS->getBody(), Target,
-                                                       Decls);
+    if (Contains(FRS->getBody()))
+      return collectVisibleLocalDeclsBefore(FRS->getBody(), Contains, Decls);
     return false;
   }
 
   for (const Stmt *Child : S->children())
-    if (containsConstevalBlockDecl(Child, Target))
-      return collectVisibleLocalDeclsForConstevalBlock(Child, Target, Decls);
+    if (Contains(Child))
+      return collectVisibleLocalDeclsBefore(Child, Contains, Decls);
   return false;
+}
+
+/// Collect the local declarations visible before the consteval block
+/// \p Target within \p S.
+static bool collectVisibleLocalDeclsForConstevalBlock(
+    const Stmt *S, const ConstevalBlockDecl *Target,
+    SmallVectorImpl<const NamedDecl *> &Decls) {
+  return collectVisibleLocalDeclsBefore(
+      S, [&](const Stmt *C) { return containsConstevalBlockDecl(C, Target); },
+      Decls);
+}
+
+static bool containsStmt(const Stmt *S, const Stmt *Target) {
+  if (!S)
+    return false;
+  if (S == Target)
+    return true;
+  for (const Stmt *Child : S->children())
+    if (containsStmt(Child, Target))
+      return true;
+  return false;
+}
+
+void Sema::CollectInstantiatedLocalDeclsForLookup(
+    const Stmt *PatternStmt, SmallVectorImpl<NamedDecl *> &Decls) {
+  LocalInstantiationScope *Scope = CurrentInstantiationScope;
+  if (!Scope)
+    return;
+
+  // Find the function template whose body contains the pattern statement; a
+  // lambda inside it is instantiated within the same synthesis context.
+  const Stmt *Body = nullptr;
+  for (const CodeSynthesisContext &Ctx : llvm::reverse(CodeSynthesisContexts)) {
+    const auto *FD = dyn_cast_or_null<FunctionDecl>(Ctx.Entity);
+    const FunctionDecl *Pattern =
+        FD ? FD->getTemplateInstantiationPattern() : nullptr;
+    if (Pattern && Pattern->hasBody() &&
+        containsStmt(Pattern->getBody(), PatternStmt)) {
+      Body = Pattern->getBody();
+      break;
+    }
+  }
+  if (!Body)
+    return;
+
+  SmallVector<const NamedDecl *, 8> VisiblePatternDecls;
+  collectVisibleLocalDeclsBefore(
+      Body, [&](const Stmt *C) { return containsStmt(C, PatternStmt); },
+      VisiblePatternDecls);
+
+  for (const NamedDecl *ND : VisiblePatternDecls) {
+    auto *Inst = Scope->getInstantiationOfIfExists(ND);
+    if (!Inst)
+      continue;
+    auto *InstND = dyn_cast_or_null<NamedDecl>(Inst->dyn_cast<Decl *>());
+    if (!InstND || !InstND->getDeclName() || llvm::is_contained(Decls, InstND))
+      continue;
+    Decls.push_back(InstND);
+  }
 }
 
 static void collectInstantiatedLocalDeclsForConstevalLookup(

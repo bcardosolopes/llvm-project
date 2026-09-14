@@ -2534,28 +2534,8 @@ bool operator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   assert(Args[0]->getType()->isReflectionType());
   assert(ResultTy == C.getSizeType());
 
-  static constexpr OverloadedOperatorKind OperatorIndices[] = {
-    OO_None, OO_New, OO_Delete, OO_Array_New, OO_Array_Delete, OO_Coawait,
-    OO_Call, OO_Subscript, OO_Arrow, OO_ArrowStar, OO_Tilde, OO_Exclaim,
-    OO_Plus, OO_Minus, OO_Star, OO_Slash, OO_Percent, OO_Caret, OO_Amp, OO_Pipe,
-    OO_Equal, OO_PlusEqual, OO_MinusEqual, OO_StarEqual, OO_SlashEqual,
-    OO_PercentEqual, OO_CaretEqual, OO_AmpEqual, OO_PipeEqual, OO_EqualEqual,
-    OO_ExclaimEqual, OO_Less, OO_Greater, OO_LessEqual, OO_GreaterEqual,
-    OO_Spaceship, OO_AmpAmp, OO_PipePipe, OO_LessLess, OO_GreaterGreater,
-    OO_LessLessEqual, OO_GreaterGreaterEqual, OO_PlusPlus, OO_MinusMinus,
-    OO_Comma,
-  };
-
   auto findOperatorOf = [](FunctionDecl *FD) -> size_t {
-    OverloadedOperatorKind OO = FD->getOverloadedOperator();
-    if (OO == OO_None)
-      return 0;
-
-    auto *OpPtr = std::find(std::begin(OperatorIndices),
-                            std::end(OperatorIndices), OO);
-    assert(OpPtr < std::end(OperatorIndices));
-
-    return (OpPtr - OperatorIndices);
+    return getMetaIndexForOverloadedOperator(FD->getOverloadedOperator());
   };
 
   APValue RV;
@@ -2576,8 +2556,7 @@ bool operator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     OverloadedOperatorKind OO;
     Expr *LHS, *RHS;
     if (decomposeBinaryOperation(RV.getReflectedExpression(), OO, LHS, RHS))
-      OperatorId = std::find(std::begin(OperatorIndices),
-                             std::end(OperatorIndices), OO) - OperatorIndices;
+      OperatorId = getMetaIndexForOverloadedOperator(OO);
   }
 
   if (OperatorId == 0)

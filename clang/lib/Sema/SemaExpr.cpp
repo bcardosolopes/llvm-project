@@ -3424,11 +3424,9 @@ static bool isRawMacroParameter(const ParmVarDecl *PVD) {
 ExprResult Sema::BuildDeclarationNameExpr(const CXXScopeSpec &SS,
                                           LookupResult &R, bool NeedsADL,
                                           bool AcceptInvalidDecl) {
-  // A macro name is only meaningful as the callee of 'name!(...)'. During
-  // instantiation the callee of a dependent invocation is rebuilt through
-  // here too; it was checked when the template was parsed.
-  if (!AllowMacroCallee && !inTemplateInstantiation())
-    for (NamedDecl *D : R)
+  // A macro name is only meaningful as the callee of 'name!(...)', which is
+  // built directly from the lookup result and never comes through here.
+  for (NamedDecl *D : R)
       if (IsExpressionMacro(D)) {
         Diag(R.getNameLoc(), diag::err_macro_requires_invocation)
             << R.getLookupName() << (R.getLookupName().getAsString() + "!(...)");
@@ -7324,34 +7322,101 @@ ExprResult Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
 
   // Macros are found by ordinary lookup only; the shape of the argument list
   // was already decided by that lookup, so ADL cannot add candidates.
-  llvm::SaveAndRestore<bool> AllowCallee(AllowMacroCallee, true);
-  ExprResult Fn = BuildDeclarationNameExpr(SS, R, /*NeedsADL=*/false);
+  UnresolvedSet<8> Macros;
+  for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
+    Macros.addDecl(*I, I.getAccess());
+  ExprResult Callee = CreateUnresolvedLookupExpr(
+      /*NamingClass=*/nullptr, SS.getWithLocInContext(Context),
+      R.getLookupNameInfo(), Macros, /*PerformADL=*/false);
+  if (Callee.isInvalid())
+    return ExprError();
+  return BuildMacroInvocation(S, cast<UnresolvedLookupExpr>(Callee.get()),
+                              LParenLoc, Args, RParenLoc);
+}
+
+ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
+                                      SourceLocation LParenLoc,
+                                      MultiExprArg Args,
+                                      SourceLocation RParenLoc,
+                                      const Stmt *InstantiationPattern) {
+  // Anything dependent defers expansion to instantiation, where the arguments
+  // are transformed like those of any other expression.
+  bool Dependent = Callee->isInstantiationDependent();
+  for (Expr *Arg : Args)
+    Dependent |= Arg->isInstantiationDependent() ||
+                 Arg->containsUnexpandedParameterPack();
+  if (Dependent)
+    return CXXMacroInvocationExpr::Create(Context, Callee, Args, LParenLoc,
+                                          RParenLoc);
+
+  // Overload resolution as for a call, but the result is never a call.
+  OverloadCandidateSet CandidateSet(Callee->getNameLoc(),
+                                    OverloadCandidateSet::CSK_Normal);
+  ExprResult Result;
+  if (buildOverloadedCallSet(S, Callee, Callee, Args, RParenLoc, &CandidateSet,
+                             &Result))
+    return ExprError();
+
+  OverloadCandidateSet::iterator Best;
+  OverloadingResult OR =
+      CandidateSet.BestViableFunction(*this, Callee->getBeginLoc(), Best);
+  if (OR != OR_Success) {
+    // Let the call machinery produce the usual overload diagnostics.
+    (void)BuildOverloadedCallExpr(S, Callee, Callee, LParenLoc, Args,
+                                  RParenLoc, /*ExecConfig=*/nullptr);
+    return ExprError();
+  }
+
+  FunctionDecl *Macro = Best->Function;
+  CheckUnresolvedLookupAccess(Callee, Best->FoundDecl);
+  if (DiagnoseUseOfDecl(Macro, Callee->getNameLoc()))
+    return ExprError();
+  ExprResult Fn = FixOverloadedFunctionReference(Callee, Best->FoundDecl, Macro);
   if (Fn.isInvalid())
     return ExprError();
-  return ActOnCallExpr(S, Fn.get(), LParenLoc, Args, RParenLoc);
+
+  // During instantiation the parser has no scope for the function being
+  // instantiated; make the locals visible before the invocation available to
+  // the expansion, the way consteval blocks do for injected code.
+  SmallVector<NamedDecl *, 8> AddedLocals;
+  if (InstantiationPattern) {
+    SmallVector<NamedDecl *, 8> Visible;
+    CollectInstantiatedLocalDeclsForLookup(InstantiationPattern, Visible);
+    for (NamedDecl *ND : Visible)
+      if (!llvm::is_contained(InjectedLocalDeclsForLookup, ND)) {
+        InjectedLocalDeclsForLookup.push_back(ND);
+        AddedLocals.push_back(ND);
+      }
+  }
+  auto RestoreLocals = llvm::make_scope_exit([&] {
+    for (NamedDecl *ND : AddedLocals)
+      llvm::erase(InjectedLocalDeclsForLookup, ND);
+  });
+
+  return BuildExpressionMacroExpansion(
+      Fn.get(), Macro, LParenLoc, Args, RParenLoc,
+      static_cast<CallExpr::ADLCallKind>(Best->IsADLCandidate));
 }
 
 namespace {
 /// Counts how often each opaque value appears in a potentially-evaluated
-/// position of a macro expansion.
+/// position of a macro expansion. Lambda bodies are not visited: they are a
+/// separate function, and an argument cannot be interpolated into one.
 class MacroArgumentUseCounter
-    : public RecursiveASTVisitor<MacroArgumentUseCounter> {
+    : public ConstEvaluatedExprVisitor<MacroArgumentUseCounter> {
+  using Inherited = ConstEvaluatedExprVisitor<MacroArgumentUseCounter>;
+
 public:
   llvm::SmallDenseMap<const OpaqueValueExpr *, unsigned, 8> Uses;
+  SmallVector<const LambdaExpr *, 2> Lambdas;
 
-  bool shouldVisitTemplateInstantiations() const { return false; }
-  bool VisitOpaqueValueExpr(OpaqueValueExpr *E) {
-    ++Uses[E];
-    return true;
+  explicit MacroArgumentUseCounter(const ASTContext &Ctx) : Inherited(Ctx) {}
+
+  void VisitOpaqueValueExpr(const OpaqueValueExpr *E) { ++Uses[E]; }
+  void VisitLambdaExpr(const LambdaExpr *LE) {
+    Lambdas.push_back(LE);
+    Inherited::VisitLambdaExpr(LE);
   }
-  // Unevaluated operands evaluate nothing.
-  bool TraverseDecltypeTypeLoc(DecltypeTypeLoc, bool) { return true; }
-  bool TraverseDecltypeType(DecltypeType *, bool) { return true; }
-  bool TraverseUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *) {
-    return true;
-  }
-  bool TraverseCXXNoexceptExpr(CXXNoexceptExpr *) { return true; }
-  bool TraverseRequiresExpr(RequiresExpr *) { return true; }
 };
 } // namespace
 
@@ -7366,11 +7431,20 @@ static bool stmtContains(const Stmt *Haystack, const Stmt *Needle) {
 
 /// Each interpolated argument expression is evaluated exactly once. Two
 /// interpolations of the same argument, or of an argument and one of its
-/// subexpressions, would evaluate part of it twice.
+/// subexpressions, would evaluate part of it twice. An interpolation inside a
+/// lambda body would be evaluated whenever the lambda is called, with the
+/// argument's names never having been captured.
 static bool CheckMacroArgumentEvaluation(Sema &S, Expr *Expansion,
                                          ArrayRef<OpaqueValueExpr *> ArgOVEs) {
-  MacroArgumentUseCounter Counter;
-  Counter.TraverseStmt(Expansion);
+  MacroArgumentUseCounter Counter(S.Context);
+  Counter.Visit(Expansion);
+
+  for (const LambdaExpr *LE : Counter.Lambdas)
+    for (OpaqueValueExpr *OVE : ArgOVEs)
+      if (stmtContains(LE->getBody(), OVE)) {
+        S.Diag(OVE->getExprLoc(), diag::err_macro_argument_in_lambda);
+        return true;
+      }
 
   SmallVector<OpaqueValueExpr *, 4> Used;
   for (OpaqueValueExpr *OVE : ArgOVEs) {
@@ -7527,14 +7601,10 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
   // An expression macro never produces a call: its body runs now and the
   // token sequence it returns is parsed in place of the invocation.
   if (isExpressionMacro(FDecl)) {
-    if (!AllowMacroCallee && !inTemplateInstantiation()) {
-      Diag(Fn->getExprLoc(), diag::err_macro_requires_invocation)
-          << FDecl->getDeclName()
-          << (FDecl->getDeclName().getAsString() + "!(...)");
-      return ExprError();
-    }
-    return BuildExpressionMacroExpansion(Fn, FDecl, LParenLoc, Args, RParenLoc,
-                                         UsesADL);
+    Diag(Fn->getExprLoc(), diag::err_macro_requires_invocation)
+        << FDecl->getDeclName()
+        << (FDecl->getDeclName().getAsString() + "!(...)");
+    return ExprError();
   }
 
   // Functions with 'interrupt' attribute cannot be called directly.

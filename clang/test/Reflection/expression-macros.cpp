@@ -1,10 +1,11 @@
 // RUN: %clang_cc1 %s -std=c++26 -freflection -fconsteval-operations -fsyntax-only -verify
 
 using token_sequence = decltype(^^{ });
+namespace std { class type_info { public: virtual ~type_info(); }; }
 
 namespace N1 {
 
-__macro id(int x) {  // expected-note {{passing argument to parameter 'x' here}}
+__macro id(int x) {  // expected-note {{candidate function not viable}}
   return ^^{ \(x) };
 }
 
@@ -25,7 +26,7 @@ int g = id(1);     // expected-error {{'id' is an expression macro and must be i
 auto h = &id;      // expected-error {{'id' is an expression macro and must be invoked as id!(...)}}
 int i = f!(1);     // expected-error {{'f' is not an expression macro}}
 int j = nope!(1);  // expected-error {{use of undeclared expression macro 'nope'}}
-int k = id!("x");  // expected-error {{cannot initialize a parameter of type 'int' with an lvalue of type 'const char[2]'}}
+int k = id!("x");  // expected-error {{no matching function for call to 'id'}}
 
 }  // namespace N1
 
@@ -120,3 +121,84 @@ __macro broken(int x) {
 int v = broken!(1);  // expected-note {{in expansion of expression macro 'broken'}}
 
 }  // namespace N5
+
+namespace N6 {
+
+// Value-dependent (but not type-dependent) arguments defer expansion too.
+__macro id(auto&& x) { return ^^{ \(x) }; }
+
+template <int N>
+constexpr int f() { return id!(N); }
+static_assert(f<42>() == 42);
+
+template <int N>
+constexpr int g() { return id!(N + 1) * 2; }
+static_assert(g<3>() == 8);
+
+// The expansion of a deferred invocation sees the instantiated function's
+// locals and parameters, as expansion-site lookup requires.
+__macro use(auto&& x) { return ^^{ local + \(x) + y }; }
+
+template <class T>
+constexpr int h(T x, int y) {
+  int local = 4;
+  return use!(x);
+}
+static_assert(h(3, 10) == 17);
+
+__macro use_local(auto&& x) { return ^^{ local + \(x) }; }
+
+template <class T>
+constexpr int in_lambda(T x) {
+  int local = 100;
+  return [&] { return use_local!(x); }();
+}
+static_assert(in_lambda(1) == 101);
+
+}  // namespace N6
+
+namespace N7 {
+
+// The bang is required in generated code as well.
+__macro id(int x) { return ^^{ \(x) }; }
+__macro outer(int x) {
+  return ^^{ id(\(x)) };  // expected-error {{'id' is an expression macro and must be invoked as id!(...)}}
+}
+int a = outer!(7);  // expected-note {{in expansion of expression macro 'outer'}}
+
+__macro outer_ok(int x) { return ^^{ id!(\(x)) }; }
+static_assert(outer_ok!(7) == 7);
+
+// typeid of a non-polymorphic operand is unevaluated.
+struct NonPoly {};
+__macro tid(auto&& x) { return ^^{ (typeid(\(x)), \(x)) }; }
+constexpr int n = tid!(9);
+static_assert(n == 9);
+
+// An argument cannot be interpolated into a lambda body.
+__macro deferred(auto&& x) { return ^^{ [] { return \(x); } }; }
+int d = deferred!(1)();  // expected-error {{a macro argument cannot be interpolated into the body of a lambda}}
+
+}  // namespace N7
+
+namespace N8 {
+
+// Raw delimiters must match, not merely balance in count.
+__macro ignore(token_sequence) { return ^^{ 0 }; }
+static_assert(ignore!([]) == 0);
+static_assert(ignore!(([{}])) == 0);
+int a = ignore!([});  // expected-error {{expected ']'}}
+int b = ignore!(({));  // expected-error {{expected '}'}}
+
+// Default arguments are fine: the bound expression is the default argument.
+__macro dflt(int x = 5) { return ^^{ \(x) * 2 }; }
+static_assert(dflt!() == 10);
+static_assert(dflt!(4) == 8);
+
+struct S {
+  __macro member(int x) { return ^^{ \(x) }; }  // expected-error {{an expression macro cannot be a class member}}
+};
+
+__macro pack(auto&&... xs) { return ^^{ 0 }; }  // expected-error {{an expression macro cannot have a parameter pack}}
+
+}  // namespace N8

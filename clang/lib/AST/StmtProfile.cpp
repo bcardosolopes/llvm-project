@@ -2516,6 +2516,11 @@ void StmtProfiler::VisitCXXBuiltinStringizeExpr(
   VisitExpr(E);
 }
 
+void StmtProfiler::VisitCXXMacroInvocationExpr(
+    const CXXMacroInvocationExpr *E) {
+  VisitExpr(E);
+}
+
 void StmtProfiler::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
   VisitExpr(E);
 }

@@ -9357,6 +9357,42 @@ TreeTransform<Derived>::TransformCXXBuiltinTokenizeExpr(
 }
 
 template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
+    CXXMacroInvocationExpr *E) {
+  // The macros were found by ordinary lookup when the template was parsed;
+  // only the declarations themselves may need transforming.
+  UnresolvedLookupExpr *Old = E->getCallee();
+  UnresolvedSet<8> Macros;
+  for (auto I = Old->decls_begin(), End = Old->decls_end(); I != End; ++I) {
+    NamedDecl *D = cast_or_null<NamedDecl>(
+        getDerived().TransformDecl(Old->getNameLoc(), *I));
+    if (!D)
+      return ExprError();
+    Macros.addDecl(D, I.getAccess());
+  }
+  NestedNameSpecifierLoc QualifierLoc = Old->getQualifierLoc();
+  if (QualifierLoc) {
+    QualifierLoc = getDerived().TransformNestedNameSpecifierLoc(QualifierLoc);
+    if (!QualifierLoc)
+      return ExprError();
+  }
+  ExprResult Callee = getSema().CreateUnresolvedLookupExpr(
+      /*NamingClass=*/nullptr, QualifierLoc, Old->getNameInfo(), Macros,
+      /*PerformADL=*/false);
+  if (Callee.isInvalid())
+    return ExprError();
+
+  SmallVector<Expr *, 4> Args;
+  if (getDerived().TransformExprs(E->getArgs().data(), E->getNumArgs(),
+                                  /*IsCall=*/true, Args))
+    return ExprError();
+
+  return getSema().BuildMacroInvocation(
+      /*S=*/nullptr, cast<UnresolvedLookupExpr>(Callee.get()),
+      E->getLParenLoc(), Args, E->getRParenLoc(), /*InstantiationPattern=*/E);
+}
+
+template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCXXBuiltinStringizeExpr(
     CXXBuiltinStringizeExpr *E) {

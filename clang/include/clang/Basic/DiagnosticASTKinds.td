@@ -35,6 +35,8 @@ def note_constexpr_invalid_function : Note<
 def note_constexpr_invalid_inhctor : Note<
   "constructor inherited from base class %0 cannot be used in a "
   "constant expression; derived class cannot be implicitly initialized">;
+def note_constexpr_macro_operator_not_token : Note<
+  "operator '%0' is not a single token and cannot be interpolated">;
 def note_constexpr_no_return : Note<
   "control reached end of constexpr function">;
 def note_constexpr_virtual_call : Note<

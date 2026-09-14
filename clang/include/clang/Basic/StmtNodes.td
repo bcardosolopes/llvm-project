@@ -205,6 +205,7 @@ def CXXBuiltinIdExpr : StmtNode<Expr>;
 def CXXBuiltinStrLiteralExpr : StmtNode<Expr>;
 def CXXBuiltinTokenizeExpr : StmtNode<Expr>;
 def CXXBuiltinStringizeExpr : StmtNode<Expr>;
+def CXXMacroInvocationExpr : StmtNode<Expr>;
 def StackLocationExpr : StmtNode<Expr>;
 def ExtractLValueExpr : StmtNode<Expr>;
 def ExplDependentCallExpr : StmtNode<Expr>;

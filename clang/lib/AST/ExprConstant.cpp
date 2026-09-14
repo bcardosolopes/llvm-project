@@ -22430,22 +22430,6 @@ static bool isStdMetaOperatorsEnum(QualType T) {
   return SkipInline(Meta->getParent())->isStdNamespace();
 }
 
-/// The std::meta::operators enumerator order, as in ExprConstantMeta.cpp.
-static OverloadedOperatorKind metaOperatorKind(uint64_t Index) {
-  static constexpr OverloadedOperatorKind Table[] = {
-    OO_None, OO_New, OO_Delete, OO_Array_New, OO_Array_Delete, OO_Coawait,
-    OO_Call, OO_Subscript, OO_Arrow, OO_ArrowStar, OO_Tilde, OO_Exclaim,
-    OO_Plus, OO_Minus, OO_Star, OO_Slash, OO_Percent, OO_Caret, OO_Amp, OO_Pipe,
-    OO_Equal, OO_PlusEqual, OO_MinusEqual, OO_StarEqual, OO_SlashEqual,
-    OO_PercentEqual, OO_CaretEqual, OO_AmpEqual, OO_PipeEqual, OO_EqualEqual,
-    OO_ExclaimEqual, OO_Less, OO_Greater, OO_LessEqual, OO_GreaterEqual,
-    OO_Spaceship, OO_AmpAmp, OO_PipePipe, OO_LessLess, OO_GreaterGreater,
-    OO_LessLessEqual, OO_GreaterGreaterEqual, OO_PlusPlus, OO_MinusMinus,
-    OO_Comma,
-  };
-  return Index < std::size(Table) ? Table[Index] : OO_None;
-}
-
 static tok::TokenKind tokenKindForOverloadedOperator(OverloadedOperatorKind OO) {
   switch (OO) {
 #define OVERLOADED_OPERATOR(Name, Spelling, Token, Unary, Binary, MemberOnly)  \
@@ -22663,11 +22647,13 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
 
             // A std::meta::operators value spells the operator's token.
             if (Val.isInt() && isStdMetaOperatorsEnum(ExprType)) {
-              OverloadedOperatorKind OO =
-                  metaOperatorKind(Val.getInt().getZExtValue());
+              OverloadedOperatorKind OO = getOverloadedOperatorForMetaIndex(
+                  Val.getInt().getZExtValue());
               tok::TokenKind Kind = tokenKindForOverloadedOperator(OO);
               if (Kind == tok::unknown) {
-                Info.FFDiag(SubExpr);
+                Info.FFDiag(SubExpr,
+                            diag::note_constexpr_macro_operator_not_token)
+                    << getOperatorSpelling(OO);
                 return false;
               }
               Token Tok;
@@ -24072,6 +24058,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXBuiltinStrLiteralExprClass:
   case Expr::CXXBuiltinTokenizeExprClass:
+  case Expr::CXXMacroInvocationExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

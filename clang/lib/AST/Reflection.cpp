@@ -56,3 +56,28 @@ bool TagDataMemberSpec::operator!=(TagDataMemberSpec const &Rhs) const {
 }
 
 }  // end namespace clang
+
+namespace clang {
+static constexpr OverloadedOperatorKind MetaOperatorOrder[] = {
+    OO_None, OO_New, OO_Delete, OO_Array_New, OO_Array_Delete, OO_Coawait,
+    OO_Call, OO_Subscript, OO_Arrow, OO_ArrowStar, OO_Tilde, OO_Exclaim,
+    OO_Plus, OO_Minus, OO_Star, OO_Slash, OO_Percent, OO_Caret, OO_Amp,
+    OO_Pipe, OO_Equal, OO_PlusEqual, OO_MinusEqual, OO_StarEqual,
+    OO_SlashEqual, OO_PercentEqual, OO_CaretEqual, OO_AmpEqual, OO_PipeEqual,
+    OO_EqualEqual, OO_ExclaimEqual, OO_Less, OO_Greater, OO_LessEqual,
+    OO_GreaterEqual, OO_Spaceship, OO_AmpAmp, OO_PipePipe, OO_LessLess,
+    OO_GreaterGreater, OO_LessLessEqual, OO_GreaterGreaterEqual, OO_PlusPlus,
+    OO_MinusMinus, OO_Comma,
+};
+
+OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index) {
+  return Index < std::size(MetaOperatorOrder) ? MetaOperatorOrder[Index]
+                                              : OO_None;
+}
+
+unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO) {
+  const auto *It = llvm::find(MetaOperatorOrder, OO);
+  return It == std::end(MetaOperatorOrder) ? 0 : It - MetaOperatorOrder;
+}
+
+} // namespace clang

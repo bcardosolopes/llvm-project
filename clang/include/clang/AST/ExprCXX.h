@@ -6283,6 +6283,66 @@ public:
   }
 };
 
+/// An expression-macro invocation, 'name!(args)', whose expansion is deferred
+/// to instantiation because an argument is dependent. A non-dependent
+/// invocation is replaced by its expansion outright and never becomes a node.
+class CXXMacroInvocationExpr : public Expr {
+  friend class ASTStmtReader;
+
+  /// The callee (an UnresolvedLookupExpr naming the macros found by ordinary
+  /// lookup) followed by the arguments.
+  Stmt **SubExprs;
+  unsigned NumArgs;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXMacroInvocationExpr(ASTContext &C, UnresolvedLookupExpr *Callee,
+                         ArrayRef<Expr *> Args, SourceLocation LParenLoc,
+                         SourceLocation RParenLoc);
+  CXXMacroInvocationExpr(ASTContext &C, EmptyShell Empty, unsigned NumArgs);
+
+public:
+  static CXXMacroInvocationExpr *Create(ASTContext &C,
+                                        UnresolvedLookupExpr *Callee,
+                                        ArrayRef<Expr *> Args,
+                                        SourceLocation LParenLoc,
+                                        SourceLocation RParenLoc);
+  static CXXMacroInvocationExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
+
+  UnresolvedLookupExpr *getCallee() const {
+    return cast<UnresolvedLookupExpr>(SubExprs[0]);
+  }
+  void setCallee(UnresolvedLookupExpr *E) { SubExprs[0] = E; }
+
+  unsigned getNumArgs() const { return NumArgs; }
+  Expr *getArg(unsigned I) const { return cast<Expr>(SubExprs[I + 1]); }
+  void setArg(unsigned I, Expr *E) { SubExprs[I + 1] = E; }
+  ArrayRef<Expr *> getArgs() const {
+    return ArrayRef(reinterpret_cast<Expr *const *>(SubExprs + 1), NumArgs);
+  }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY {
+    return getCallee()->getBeginLoc();
+  }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() {
+    return child_range(SubExprs, SubExprs + 1 + NumArgs);
+  }
+  const_child_range children() const {
+    return const_child_range(SubExprs, SubExprs + 1 + NumArgs);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXMacroInvocationExprClass;
+  }
+};
+
 // Implementation detail of the 'is_accessible' metafunction.
 // Used to "reach up the stack" to find the context from which the metafunction
 // was called, such that the accessibility of a class member can thereafter be

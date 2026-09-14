@@ -615,6 +615,18 @@ void ASTStmtReader::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
   }
 }
 
+void ASTStmtReader::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
+  VisitExpr(E);
+  unsigned NumArgs = Record.readInt();
+  assert(NumArgs == E->getNumArgs() && "wrong number of arguments");
+  (void)NumArgs;
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setCallee(cast<UnresolvedLookupExpr>(Record.readSubExpr()));
+  for (unsigned I = 0, N = E->getNumArgs(); I != N; ++I)
+    E->setArg(I, Record.readSubExpr());
+}
+
 void ASTStmtReader::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *E) {
   VisitExpr(E);
   E->setKwLoc(Record.readSourceLocation());
@@ -4932,6 +4944,11 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     }
     case EXPR_BUILTIN_STRINGIZE: {
       S = CXXBuiltinStringizeExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_MACRO_INVOCATION: {
+      S = CXXMacroInvocationExpr::CreateEmpty(
+          Context, Record[ASTStmtReader::NumExprFields]);
       break;
     }
     case EXPR_SPLICE: {

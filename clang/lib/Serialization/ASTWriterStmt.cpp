@@ -606,6 +606,17 @@ void ASTStmtWriter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
   Code = serialization::EXPR_BUILTIN_TOKENIZE;
 }
 
+void ASTStmtWriter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getNumArgs());
+  Record.AddSourceLocation(E->getLParenLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  Record.AddStmt(E->getCallee());
+  for (Expr *Arg : E->getArgs())
+    Record.AddStmt(Arg);
+  Code = serialization::EXPR_MACRO_INVOCATION;
+}
+
 void ASTStmtWriter::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getKwLoc());

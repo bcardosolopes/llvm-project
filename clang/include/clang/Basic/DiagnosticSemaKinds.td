@@ -3288,6 +3288,11 @@ def err_macro_evaluation_failed : Error<
 def err_macro_argument_evaluated_twice : Error<
   "expansion of expression macro would evaluate this argument more than once">;
 def note_macro_expanded_here : Note<"in expansion of expression macro %0">;
+def err_macro_member : Error<"an expression macro cannot be a class member">;
+def err_macro_parameter_pack : Error<
+  "an expression macro cannot have a parameter pack">;
+def err_macro_argument_in_lambda : Error<
+  "a macro argument cannot be interpolated into the body of a lambda">;
 def err_splice_operand_not_reflection : Error<
   "splice operand must be a reflection">;
 def err_splice_operand_not_constexpr : Error<

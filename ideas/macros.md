@@ -39,9 +39,17 @@ __macro trace(T&& value) { ... }
 
 Macros are only ever found by ordinary unqualified or qualified lookup, never
 by argument-dependent lookup. A macro name may only appear as the callee of a
-macro invocation (below); using it anywhere else is ill-formed. Both rules
-follow from the invocation syntax: the parser has to find the macro before it
-parses the arguments.
+macro invocation (below); using it anywhere else is ill-formed, including
+inside a token sequence produced by another macro. Both rules follow from the
+invocation syntax: the parser has to find the macro before it parses the
+arguments.
+
+A macro cannot be a class member, and cannot declare a parameter pack (both
+are diagnosed). Default arguments are allowed: `id!()` binds the default
+argument expression exactly as a call would. Explicit template arguments
+cannot be written at an invocation; the only spelling that fits the
+`name!(` recognition is `name<Args>!(...)`, which is left for a later
+iteration. Macro templates deduce everything from the arguments for now.
 
 ## Invocation
 
@@ -102,8 +110,11 @@ anaphoric macros (`λ!(_1 > _2)`, where `_1` must see a name the macro
 introduces) and for tiny DSLs (`define_op!(left_shift, x << y)`). It is exactly
 as unhygienic as a preprocessor macro, and that is the point.
 
-Delimiting is preprocessor-style: `()`, `[]`, `{}` are balanced; a top-level
-comma ends the argument. `<>` is not balanced (same wart as the preprocessor).
+Delimiting is preprocessor-style: `()`, `[]`, `{}` must nest properly (a
+mismatched closer is an error); a top-level comma ends the argument. `<>` is
+not balanced (same wart as the preprocessor). The tokens are captured after
+preprocessing: object-like and function-like macros in a raw argument have
+already been expanded, `#` and `##` mean nothing, and `-E` output round-trips.
 A raw parameter in the *last* position is greedy: it consumes everything up to
 the closing paren, commas included, like `__VA_ARGS__`. That is what lets
 `λ!(std::pair<int, int>{_1, _2})` work without the author thinking about it.
@@ -183,12 +194,20 @@ reflection twice in *potentially evaluated* positions is likewise ill-formed;
 If a macro wants laziness (`log_if!(cond, expensive())`), that is a future
 parameter kind, not a change to this default.
 
+An argument cannot be interpolated into the body of a lambda inside the
+expansion (`^^{ [&] { return \(x); } }` is ill-formed). The argument's names
+were bound in the enclosing function and were never captured; evaluating it
+from a different function would be unsound. Use a `do` expression for
+statements.
+
 Other interpolations behave as they already do for token injection:
 `token_sequence` values are concatenated in place, reflections of types,
 templates, namespaces and declarations materialize as the corresponding
 tokens, and constant values become literals. Additionally, a value of type
 `std::meta::operators` interpolates as the operator's token, so a decomposed
-comparison can be re-applied with `\(operator_of(cond))`. Use `str_lit` to
+comparison can be re-applied with `\(operator_of(cond))`. Only operators that
+are a single token can be interpolated this way; `()`, `[]`, `new`, `delete`
+and friends are rejected during evaluation. Use `str_lit` to
 turn a `string_view` (such as `source_text_of(e)`) into a string literal token.
 
 ## Expansion
@@ -204,12 +223,15 @@ Names spelled literally in the token sequence are looked up from the expansion
 context. Names local to the macro body are not visible to the expansion; to
 carry information from the body into the expansion, interpolate it.
 
-If any argument is type- or value-dependent, overload resolution and expansion
-are deferred to instantiation, exactly as for a call. The expansion is then
-parsed in the instantiated context. This is the main implementation risk of
-the feature (it requires re-entering the parser during template
-instantiation), and it is the case that matters most, because `fwd!(x)` lives
-in generic code.
+If any argument is type-, value-, or otherwise instantiation-dependent, the
+invocation is kept as a `CXXMacroInvocationExpr` (callee, arguments, and
+locations) and overload resolution and expansion are deferred to instantiation,
+exactly as for a call. The expansion is then parsed in the instantiated
+context: the parser is given a scope for the instantiated function with its
+parameters and with the instantiations of the locals visible before the
+invocation, so unqualified names in the macro's tokens resolve as they would
+have at the invocation site. This is the case that matters most, because
+`fwd!(x)` lives in generic code.
 
 ## Name lookup and hygiene
 

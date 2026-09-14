@@ -10142,9 +10142,23 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                                               isVirtualOkay);
   if (!NewFD) return nullptr;
 
-  if (D.getDeclSpec().isMacroSpecified())
-    NewFD->addAttr(ExpressionMacroAttr::CreateImplicit(
-        Context, D.getDeclSpec().getMacroSpecLoc()));
+  if (D.getDeclSpec().isMacroSpecified()) {
+    SourceLocation MacroLoc = D.getDeclSpec().getMacroSpecLoc();
+    NewFD->addAttr(ExpressionMacroAttr::CreateImplicit(Context, MacroLoc));
+    if (DC->isRecord()) {
+      Diag(MacroLoc, diag::err_macro_member);
+      NewFD->setInvalidDecl();
+    }
+    if (D.isFunctionDeclarator()) {
+      const DeclaratorChunk::FunctionTypeInfo &FTI = D.getFunctionTypeInfo();
+      for (unsigned I = 0; I != FTI.NumParams; ++I)
+        if (auto *P = dyn_cast_or_null<ParmVarDecl>(FTI.Params[I].Param);
+            P && P->isParameterPack()) {
+          Diag(P->getLocation(), diag::err_macro_parameter_pack);
+          NewFD->setInvalidDecl();
+        }
+    }
+  }
 
   if (OriginalLexicalContext && OriginalLexicalContext->isObjCContainer())
     NewFD->setTopLevelDeclInObjCContainer();

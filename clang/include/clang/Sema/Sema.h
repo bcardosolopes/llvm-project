@@ -16259,9 +16259,6 @@ public:
 
   // Expression macros: '__macro' declarations invoked as 'name!(args)'.
   static bool IsExpressionMacro(const NamedDecl *D);
-  /// Set while a macro invocation's callee is being built and resolved; a
-  /// macro name is not usable as an expression anywhere else.
-  bool AllowMacroCallee = false;
   /// Determine which parameters of the macros in \p R are raw token-sequence
   /// parameters. Diagnoses and returns true if \p R does not name macros or
   /// the overloads disagree.
@@ -16271,6 +16268,19 @@ public:
                                   const IdentifierInfo *II, SourceLocation NameLoc,
                                   SourceLocation LParenLoc, MultiExprArg Args,
                                   SourceLocation RParenLoc);
+  /// Resolve and expand a macro invocation, or defer it (as a
+  /// CXXMacroInvocationExpr) if anything about it is dependent. When called
+  /// from instantiation, \p InstantiationPattern is the deferred node being
+  /// instantiated; the locals visible before it are made visible to the
+  /// expansion.
+  ExprResult BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
+                                  SourceLocation LParenLoc, MultiExprArg Args,
+                                  SourceLocation RParenLoc,
+                                  const Stmt *InstantiationPattern = nullptr);
+  /// Collect the instantiations of the local declarations that are visible
+  /// before \p PatternStmt in the function template being instantiated.
+  void CollectInstantiatedLocalDeclsForLookup(
+      const Stmt *PatternStmt, SmallVectorImpl<NamedDecl *> &Decls);
   ExprResult BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
                                            SourceLocation LParenLoc,
                                            ArrayRef<Expr *> Args,

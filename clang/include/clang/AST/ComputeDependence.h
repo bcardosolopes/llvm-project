@@ -114,6 +114,7 @@ class StackLocationExpr;
 class ExtractLValueExpr;
 class ExplDependentCallExpr;
 class CXXBuiltinStringizeExpr;
+class CXXMacroInvocationExpr;
 class ArraySectionExpr;
 class OMPArrayShapingExpr;
 class OMPIteratorExpr;
@@ -224,6 +225,7 @@ ExprDependence computeDependence(StackLocationExpr *E);
 ExprDependence computeDependence(ExtractLValueExpr *E);
 ExprDependence computeDependence(ExplDependentCallExpr *E);
 ExprDependence computeDependence(CXXBuiltinStringizeExpr *E);
+ExprDependence computeDependence(CXXMacroInvocationExpr *E);
 
 ExprDependence computeDependence(CXXExpansionInitListExpr *E);
 ExprDependence computeDependence(CXXExpansionInitListSelectExpr *E);

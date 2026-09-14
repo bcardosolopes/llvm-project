@@ -19,6 +19,7 @@
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
 #include "clang/Sema/Lookup.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 using namespace clang;
 
@@ -455,21 +456,29 @@ ExprResult Parser::ParseMacroRawArgument(bool Greedy) {
   SmallVector<Token, 16> Tokens;
   SourceLocation StartLoc = Tok.getLocation();
   SourceLocation EndLoc = StartLoc;
-  unsigned Depth = 0;
+  SmallVector<tok::TokenKind, 4> Closers;
   while (true) {
     if (Tok.is(tok::eof)) {
-      Diag(Tok, diag::err_expected) << tok::r_paren;
+      Diag(Tok, diag::err_expected)
+          << (Closers.empty() ? tok::r_paren : Closers.back());
       return ExprError();
     }
-    if (Depth == 0 &&
+    if (Closers.empty() &&
         (Tok.is(tok::r_paren) || (Tok.is(tok::comma) && !Greedy)))
       break;
-    if (Tok.isOneOf(tok::l_paren, tok::l_square, tok::l_brace)) {
-      ++Depth;
+    if (Tok.is(tok::l_paren)) {
+      Closers.push_back(tok::r_paren);
+    } else if (Tok.is(tok::l_square)) {
+      Closers.push_back(tok::r_square);
+    } else if (Tok.is(tok::l_brace)) {
+      Closers.push_back(tok::r_brace);
     } else if (Tok.isOneOf(tok::r_paren, tok::r_square, tok::r_brace)) {
-      if (Depth == 0)
-        break; // Mismatched closer; the caller diagnoses the missing ')'.
-      --Depth;
+      if (Closers.empty() || Tok.isNot(Closers.back())) {
+        Diag(Tok, diag::err_expected)
+            << (Closers.empty() ? tok::r_paren : Closers.back());
+        return ExprError();
+      }
+      Closers.pop_back();
     }
     Tokens.push_back(Tok);
     EndLoc = Tok.getLocation();
@@ -500,6 +509,44 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
   PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
                       /*IsReinject=*/true);
   ConsumeAnyToken();
+
+  // During template instantiation the parser is not positioned inside the
+  // function being instantiated. Give the expansion a function scope with the
+  // instantiated parameters and the locals Sema collected as visible at the
+  // invocation, so unqualified names resolve as they would have in the
+  // template.
+  auto HasScopeFor = [&](DeclContext *DC) {
+    for (Scope *S = getCurScope(); S; S = S->getParent())
+      if (S->getEntity() == DC)
+        return true;
+    return false;
+  };
+  std::optional<ParseScope> FnScope;
+  SmallVector<NamedDecl *, 8> Seeded;
+  if (Actions.CurContext->isFunctionOrMethod() &&
+      !HasScopeFor(Actions.CurContext)) {
+    FnScope.emplace(this, Scope::FnScope | Scope::DeclScope |
+                              Scope::CompoundStmtScope);
+    getCurScope()->setEntity(Actions.CurContext);
+    auto Seed = [&](NamedDecl *D) {
+      if (!D->getDeclName() || getCurScope()->isDeclScope(D))
+        return;
+      getCurScope()->AddDecl(D);
+      Actions.IdResolver.AddDecl(D);
+      Seeded.push_back(D);
+    };
+    if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext))
+      for (ParmVarDecl *P : FD->parameters())
+        Seed(P);
+    for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup)
+      Seed(D);
+  }
+  auto Unseed = llvm::make_scope_exit([&] {
+    for (NamedDecl *D : Seeded) {
+      getCurScope()->RemoveDecl(D);
+      Actions.IdResolver.RemoveDecl(D);
+    }
+  });
 
   // The expansion is delimited by its own eof, so it is parsed free of the
   // enclosing context's bracket rules.
