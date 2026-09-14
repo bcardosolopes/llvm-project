@@ -16,11 +16,13 @@
 
 // Expression macros: __macro declarations invoked as name!(args).
 //
-//   id!    - typed parameter, grouping of the argument is preserved
-//   fwd!   - type_of(param) is decltype of the argument as written
-//   check! - decomposition of a comparison, evaluate-once, source text,
-//            and macros composing (its expansion invokes fwd!)
-//   λ!     - raw token_sequence parameter (anaphoric placeholders)
+//   id!        - typed parameter, grouping of the argument is preserved
+//   fwd!       - type_of(param) is decltype of the argument as written
+//   check!     - decomposition of a comparison, evaluate-once, source text,
+//                and macros composing (its expansion invokes fwd!)
+//   λ!         - raw token_sequence parameter (anaphoric placeholders)
+//   define_op! - a declaration macro: expansion is a queue_injection, and the
+//                pattern is classified with token_kind_of
 
 #include <meta>
 #include <algorithm>
@@ -49,9 +51,12 @@ int add_two(int n) { return id!(n + 2); }
 
 // --------------------------------------------------------------- fwd! ------
 
+// Metafunctions taking a reflection are found by ADL, so most of these tests
+// can drop the `std::meta::` qualification. Functions whose arguments are
+// strings (`id`, `str_lit`) still need it.
 template <class T>
 __macro fwd(T&& t) {
-  return ^^{ static_cast<\(std::meta::type_of(t))&&>(\(t)) };
+  return ^^{ static_cast<\(type_of(t))&&>(\(t)) };
 }
 
 struct Tracker {
@@ -110,16 +115,15 @@ consteval bool is_comparison(std::meta::operators op) {
 template <class T>
   requires requires(T&& t) { static_cast<bool>(static_cast<T&&>(t)); }
 __macro check(T&& cond) {
-  auto text = std::meta::str_lit(std::meta::source_text_of(cond));
-  unsigned line = std::meta::source_location_of(cond).line();
+  auto text = std::meta::str_lit(source_text_of(cond));
+  unsigned line = source_location_of(cond).line();
 
-  if (std::meta::is_binary_operation(cond) &&
-      is_comparison(std::meta::operator_of(cond))) {
-    auto ops = std::meta::operands_of(cond);
+  if (is_binary_operation(cond) && is_comparison(operator_of(cond))) {
+    auto ops = operands_of(cond);
     return ^^{ do {
       auto&& l = \(ops[0]);
       auto&& r = \(ops[1]);
-      if (!(fwd!(l) \(std::meta::operator_of(cond)) fwd!(r)))
+      if (!(fwd!(l) \(operator_of(cond)) fwd!(r)))
         ::test::fail(\(text), \(line), l, r);
     } };
   }
@@ -181,26 +185,30 @@ void test_check() {
 
 static_assert([] {
   using std::meta::token_kind;
-  auto toks = std::meta::tokens_of(^^{ x << 42 });
+  auto toks = tokens_of(^^{ x << 42 });
   return toks.size() == 3 &&
-         std::meta::token_kind_of(toks[0]) == token_kind::identifier &&
-         std::meta::token_kind_of(toks[1]) == token_kind::punctuator &&
-         std::meta::token_kind_of(toks[2]) == token_kind::literal &&
-         std::meta::operator_of(toks[1]) ==
-             std::meta::operators::op_less_less &&
-         std::meta::identifier_of(toks[0]) == std::meta::id("x");
+         token_kind_of(toks[0]) == token_kind::identifier &&
+         token_kind_of(toks[1]) == token_kind::punctuator &&
+         token_kind_of(toks[2]) == token_kind::literal &&
+         operator_of(toks[1]) == std::meta::operators::op_less_less &&
+         identifier_of(toks[0]) == std::meta::id("x");
 }());
 
 // A keyword is its own kind; alternative tokens are still punctuators; empty or
 // multi-token sequences are `unknown`.
 static_assert([] {
   using std::meta::token_kind;
-  return std::meta::token_kind_of(^^{ int }) == token_kind::keyword &&
-         std::meta::token_kind_of(^^{ , }) == token_kind::punctuator &&
-         std::meta::token_kind_of(^^{ or }) == token_kind::punctuator &&
-         std::meta::token_kind_of(^^{ a b }) == token_kind::unknown &&
-         std::meta::token_kind_of(^^{}) == token_kind::unknown;
+  return token_kind_of(^^{ int }) == token_kind::keyword &&
+         token_kind_of(^^{ , }) == token_kind::punctuator &&
+         token_kind_of(^^{ or }) == token_kind::punctuator &&
+         token_kind_of(^^{ a b }) == token_kind::unknown &&
+         token_kind_of(^^{}) == token_kind::unknown;
 }());
+
+// Alternative tokens keep their spelling, so token identity distinguishes them
+// even though both are punctuators spelling the same operator.
+static_assert(^^{ or } != ^^{ || });
+static_assert(operator_of(^^{ or }) == operator_of(^^{ || }));
 
 // ------------------------------------------------------------------ λ! -----
 
@@ -212,8 +220,8 @@ consteval std::optional<int> placeholder_index(std::string_view s) {
 
 __macro λ(std::meta::token_sequence body) {
   int arity = 0;
-  for (std::meta::token_sequence tok : std::meta::tokens_of(body))
-    if (auto n = placeholder_index(std::meta::stringize(tok)))
+  for (std::meta::token_sequence tok : tokens_of(body))
+    if (auto n = placeholder_index(stringize(tok)))
       arity = std::max(arity, *n);
 
   std::meta::list_builder params(^^{ , });
@@ -233,10 +241,63 @@ void test_lambda() {
   assert(λ!(42)() == 42);
 }
 
+// ------------------------------------------------------- define_op! --------
+
+// A *declaration* macro: the expansion is a queue_injection, so invoking it in
+// a consteval block injects a declaration instead of producing an expression.
+// The pattern is one of `x op y` (binary), `op x` (prefix), or `x op`
+// (postfix); which one it is falls out of token_kind_of on the first token.
+__macro define_op(std::meta::token_sequence name,
+                  std::meta::token_sequence pattern) {
+  auto toks = tokens_of(pattern);
+
+  if (toks.size() == 3) {  // id op id
+    auto body = ^^{ fwd!(l) } + toks[1] + ^^{ fwd!(r) };
+    return ^^{ queue_injection(^^{
+      struct \(name) {
+        template <class L, class R>
+        constexpr decltype(auto) operator()(L&& l, R&& r) const {
+          return (\(body));
+        }
+      };
+    }) };
+  }
+
+  std::meta::token_sequence body =
+      token_kind_of(toks[0]) == std::meta::token_kind::identifier
+          ? ^^{ fwd!(t) } + toks[1]   // id op  (postfix)
+          : toks[0] + ^^{ fwd!(t) };  // op id  (prefix)
+
+  return ^^{ queue_injection(^^{
+    struct \(name) {
+      template <class T>
+      constexpr decltype(auto) operator()(T&& t) const {
+        return (\(body));
+      }
+    };
+  }) };
+}
+
+consteval {
+  define_op!(left_shift, x << y);
+  define_op!(negate, -x);
+  define_op!(post_inc, x++);
+}
+
+void test_define_op() {
+  static_assert(left_shift{}(1, 4) == 16);
+  static_assert(negate{}(5) == -5);
+
+  int n = 3;
+  assert(post_inc{}(n) == 3);
+  assert(n == 4);
+}
+
 int main(int, char**) {
   assert(add_two(40) == 42);
   test_fwd();
   test_check();
   test_lambda();
+  test_define_op();
   return 0;
 }
