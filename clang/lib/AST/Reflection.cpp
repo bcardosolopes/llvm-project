@@ -75,6 +75,20 @@ OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index) {
                                               : OO_None;
 }
 
+QualType stripDeducedTypeSugar(const ASTContext &C, QualType T) {
+  if (const auto *DT = dyn_cast<DeducedType>(T)) {
+    if (!DT->isDeduced())
+      return T;
+    return C.getQualifiedType(DT->getDeducedType(), T.getLocalQualifiers());
+  }
+  // A placeholder buried under a reference or pointer ('auto&&' deduced as
+  // 'int&'): only the canonical type is free of it.
+  if (const DeducedType *DT = T->getContainedDeducedType();
+      DT && DT->isDeduced())
+    return C.getCanonicalType(T);
+  return T;
+}
+
 unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO) {
   const auto *It = llvm::find(MetaOperatorOrder, OO);
   return It == std::end(MetaOperatorOrder) ? 0 : It - MetaOperatorOrder;

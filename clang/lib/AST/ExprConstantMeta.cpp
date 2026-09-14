@@ -2658,6 +2658,9 @@ bool type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
       QT = ME->getMemberDecl()->getType();
     else
       QT = C.getReferenceQualifiedType(E);
+    // A variable declared with 'auto' has its declared type in terms of the
+    // placeholder; report the type it was deduced to.
+    QT = stripDeducedTypeSugar(C, QT);
     QT = desugarType(QT, /*UnwrapAliases=*/true, /*DropCV=*/false,
                      /*DropRefs=*/false);
     return SetAndSucceed(Result, makeReflection(QT));

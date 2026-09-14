@@ -18,7 +18,8 @@
 //
 //   id!    - typed parameter, grouping of the argument is preserved
 //   fwd!   - type_of(param) is decltype of the argument as written
-//   check! - decomposition of a comparison, evaluate-once, source text
+//   check! - decomposition of a comparison, evaluate-once, source text,
+//            and macros composing (its expansion invokes fwd!)
 //   λ!     - raw token_sequence parameter (anaphoric placeholders)
 
 #include <meta>
@@ -118,8 +119,7 @@ __macro check(T&& cond) {
     return ^^{ do {
       auto&& l = \(ops[0]);
       auto&& r = \(ops[1]);
-      if (!(static_cast<decltype(l)>(l) \(std::meta::operator_of(cond))
-            static_cast<decltype(r)>(r)))
+      if (!(fwd!(l) \(std::meta::operator_of(cond)) fwd!(r)))
         ::test::fail(\(text), \(line), l, r);
     } };
   }

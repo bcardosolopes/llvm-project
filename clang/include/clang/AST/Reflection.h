@@ -145,6 +145,11 @@ struct TokenSequenceData : public ArrayRef<Token> {
 OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index);
 unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO);
 
+/// Remove deduced placeholder sugar ('auto', 'decltype(auto)', deduced class
+/// template names) from \p T so it can be spelled as a concrete type. The
+/// deduced type's own sugar is kept when the placeholder is at the top level.
+QualType stripDeducedTypeSugar(const ASTContext &C, QualType T);
+
 TokenSequenceData CreateTokenSequenceData(ASTContext &Ctx,
                                           ArrayRef<Token> Tokens);
 

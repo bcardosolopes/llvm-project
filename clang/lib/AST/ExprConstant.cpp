@@ -22502,9 +22502,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
 
               // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
               // so the injected type is the concrete type, not 'auto'.
-              if (const auto *AT = dyn_cast<AutoType>(QT))
-                if (AT->isDeduced())
-                  QT = AT->getDeducedType();
+              QT = stripDeducedTypeSugar(Info.Ctx, QT);
 
               // Create an annot_typename token carrying the type.
               Token Tok = SrcTok;

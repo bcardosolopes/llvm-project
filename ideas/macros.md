@@ -287,8 +287,7 @@ __macro check(T&& cond) {
         return ^^{ do {
             auto&& l = \(ops[0]);
             auto&& r = \(ops[1]);
-            if (!(static_cast<decltype(l)>(l) \(operator_of(cond))
-                  static_cast<decltype(r)>(r)))
+            if (!(fwd!(l) \(operator_of(cond)) fwd!(r)))
                 ::test::fail(\(text), \(loc), l, r);
         } };
     }
@@ -301,8 +300,9 @@ __macro check(T&& cond) {
 
 `check!(x == y)` reports `"x == y"` with both values; `check!(a == b && c)`
 falls through to the whole-expression form instead of failing to compile, as
-it does in Catch2. The `static_cast<decltype(l)>(l)` restores the operand's
-value category so `check!(std::move(s) == t)` still moves. This is what Catch2
+it does in Catch2. `fwd!(l)` restores the operand's value category so
+`check!(std::move(s) == t)` still moves; macros compose, since an expansion is
+parsed like any other code and `fwd!` is just a name in it. This is what Catch2
 builds with `Decomposer <= a == b` and a page of operator overloads.
 
 ### `λ!`
