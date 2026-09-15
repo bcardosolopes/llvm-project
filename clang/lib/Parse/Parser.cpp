@@ -90,6 +90,8 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
   Actions.SetTokenInjectionCallback(&Parser::TokenInjectionCallback);
   Actions.SetExpressionMacroExpansionCallback(
       &Parser::ExpressionMacroExpansionCallback);
+  Actions.SetSpeculativeExpressionCallback(
+      &Parser::SpeculativeExpressionCallback);
   Actions.SetDeferredInjectedDefsCallback(&Parser::DeferredInjectedDefsCallback);
 }
 

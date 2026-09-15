@@ -790,6 +790,12 @@ static bool is_constant_expression(APValue &Result, ASTContext &C,
                                    ArrayRef<Expr *> Args,
                                    Decl *ContainingDecl);
 
+static bool test_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
+                            EvalFn Evaluator, DiagFn Diagnoser,
+                            bool AllowInjection, QualType ResultTy,
+                            SourceRange Range, ArrayRef<Expr *> Args,
+                            Decl *ContainingDecl);
+
 static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -937,6 +943,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_metaInfo, 1, 1, identifier_of_token },
   { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
   { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
+  { Metafunction::MFRK_metaInfo, 1, 1, test_expression },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3173,6 +3180,31 @@ bool is_constant_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
     IsConstant = !E->isValueDependent() && E->isCXX11ConstantExpr(C);
   }
   return SetAndSucceed(Result, makeBool(C, IsConstant));
+}
+
+// Speculatively parse a token sequence as a single expression at the
+// expansion site (diagnostics suppressed). Returns a reflection of the
+// parsed expression, or the null reflection if the tokens do not form a
+// valid expression there. This is what lets a macro implement a
+// ranges::begin-style ladder: probe "auto(\(e).begin())", inspect the
+// result's type, and interpolate the already-parsed expression on success.
+bool test_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
+                     EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                     QualType ResultTy, SourceRange Range,
+                     ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  assert(ResultTy == C.MetaInfoTy);
+
+  APValue TS;
+  if (!Evaluator(TS, Args[0], true))
+    return true;
+  if (!TS.isTokenSequence())
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
+        << 2 << "a value that is not a token sequence" << Range;
+
+  Expr *E = Meta.TestExpression(TS.getTokenSequence(), Range.getBegin());
+  if (!E)
+    return SetAndSucceed(Result, makeReflection(nullptr));
+  return SetAndSucceed(Result, APValue(ReflectionKind::Expression, E));
 }
 
 bool template_of(APValue &Result, ASTContext &C, MetaActions &Meta,

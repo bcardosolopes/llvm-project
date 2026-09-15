@@ -368,6 +368,55 @@ are. `std::constexpr_warning_str` and `std::constexpr_print_str` work in
 macro bodies too (a warning does not suppress the expansion), which gives
 macros user-authored warnings under `-Wconstexpr-messages`.
 
+### Probing validity
+
+The other half of a spec ladder is "if *E* is a valid expression":
+
+```cpp
+test_expression(token_sequence) -> optional<info>
+```
+
+speculatively parses the tokens as a single expression at the expansion
+site, with all diagnostics suppressed. On failure it returns `nullopt`; on
+success, a reflection of the *already-parsed* expression, so the macro can
+inspect it (`type_of` gives its decltype) and interpolate it — reusing the
+parse rather than re-emitting the tokens, and evaluating the interpolated
+arguments inside it exactly once. The evaluate-once analysis sees through
+the probed expression, so probing an argument and also interpolating it
+directly is still diagnosed.
+
+[range.access.begin] then reads off the page:
+
+```cpp
+inline constexpr struct begin_fn {
+  template <class Self, class R>
+  __macro operator()(this Self, R&& r) {
+    if constexpr (std::is_array_v<std::remove_reference_t<R>>) {
+      return ^^{ (\(r) + 0) };
+    } else {
+      if (auto m = test_expression(^^{ (\(r).begin()) });
+          m && extract<bool>(substitute(^^iterish, {type_of(*m)})))
+        return ^^{ \(*m) };
+      if (auto f = test_expression(^^{ (::rng::impl::adl_begin(\(r))) });
+          f && extract<bool>(substitute(^^iterish, {type_of(*f)})))
+        return ^^{ \(*f) };
+      std::constexpr_error_str("no-begin", "no viable begin for this type");
+    }
+  }
+} begin{};
+```
+
+Two notes on that shape. Probing is SFINAE-flavored: template
+instantiations it triggers are permanent, and an error outside the probed
+expression's immediate context is (deliberately) swallowed rather than
+diagnosed — validity means "parsed and type-checked", the same contract as
+`requires`. And the ADL rung is spelled through a qualified helper
+(`adl_begin` in a namespace with the `void begin(auto&) = delete` poison
+pill) rather than a bare `begin(...)`: expansion tokens are looked up at the
+call site, where the CPO object itself is what a bare `begin` would find.
+The usual hygiene idiom — refer to your own things by qualification or
+reflection, not by spelling — is load-bearing here.
+
 ## Name lookup and hygiene
 
 Expression parameters give most of hygiene for free, in both directions:

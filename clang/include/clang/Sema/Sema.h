@@ -1405,6 +1405,23 @@ public:
       return ExpressionMacroExpansionCallback(OpaqueParser, TSD, Loc);
     }
 
+    // Speculatively parse a token sequence as an expression with diagnostics
+    // suppressed (std::meta::test_expression).
+    void setSpeculativeExpressionCallback(ExpressionMacroExpansionCB *CB) {
+      SpeculativeExpressionCallback = CB;
+    }
+
+    bool canParseSpeculativeExpression() const {
+      return SpeculativeExpressionCallback && OpaqueParser;
+    }
+
+    ExprResult parseSpeculativeExpression(TokenSequenceData TSD,
+                                          SourceLocation Loc) const {
+      assert(SpeculativeExpressionCallback && OpaqueParser &&
+             "speculative expression parse requested without a parser bridge");
+      return SpeculativeExpressionCallback(OpaqueParser, TSD, Loc);
+    }
+
     bool hasLateTemplateParser() const { return LateTemplateParser; }
 
     void parseLateTemplate(LateParsedTemplate &LPT) const {
@@ -1446,6 +1463,7 @@ public:
     TokenInjectionCB *TokenInjectionCallback = nullptr;
     DeferredInjectedDefsCB *DeferredInjectedDefsCallback = nullptr;
     ExpressionMacroExpansionCB *ExpressionMacroExpansionCallback = nullptr;
+    ExpressionMacroExpansionCB *SpeculativeExpressionCallback = nullptr;
     void *OpaqueParser = nullptr;
   };
 
@@ -1472,6 +1490,17 @@ public:
   ExprResult ParseExpressionMacroExpansionFromParserBridge(
       TokenSequenceData TSD, SourceLocation Loc) {
     return ParserBridge.parseExpressionMacroExpansion(TSD, Loc);
+  }
+  void SetSpeculativeExpressionCallback(
+      SemaParserBridge::ExpressionMacroExpansionCB *CB) {
+    ParserBridge.setSpeculativeExpressionCallback(CB);
+  }
+  bool CanParseSpeculativeExpression() const {
+    return ParserBridge.canParseSpeculativeExpression();
+  }
+  ExprResult ParseSpeculativeExpressionFromParserBridge(TokenSequenceData TSD,
+                                                        SourceLocation Loc) {
+    return ParserBridge.parseSpeculativeExpression(TSD, Loc);
   }
   bool HasLateTemplateParser() const {
     return ParserBridge.hasLateTemplateParser();

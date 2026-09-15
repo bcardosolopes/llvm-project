@@ -571,6 +571,7 @@ enum : unsigned {
   __metafn_identifier_of_token,
   __metafn_operator_of_token,
   __metafn_is_constant_expression,
+  __metafn_test_expression,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3218,6 +3219,21 @@ consteval auto operator_of(token_sequence tok) -> operators {
 // between a compile-time and a run-time expansion for an operand.
 consteval auto is_constant_expression(info r) -> bool {
   return __metafunction(detail::__metafn_is_constant_expression, r);
+}
+
+// Speculatively parses the token sequence as a single expression at the
+// expansion site of the macro being evaluated, with all diagnostics
+// suppressed. Returns a reflection of the parsed expression if the tokens
+// form a valid one, and nullopt otherwise. On success the reflection can be
+// queried (type_of) and interpolated, reusing the parse:
+//
+//   if (auto r = test_expression(^^{ (\(e).begin()) }))
+//     return ^^{ \(*r) };
+consteval auto test_expression(token_sequence tokens) -> optional<info> {
+  info __r = __metafunction(detail::__metafn_test_expression, tokens);
+  if (__r == info{})
+    return nullopt;
+  return __r;
 }
 
 // Each token of the sequence as its own single-token sequence.

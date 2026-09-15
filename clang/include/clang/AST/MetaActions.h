@@ -17,6 +17,7 @@
 #ifndef LLVM_CLANG_AST_METAACTIONS_H
 #define LLVM_CLANG_AST_METAACTIONS_H
 
+#include <clang/AST/Reflection.h>
 #include <clang/AST/TemplateBase.h>
 #include <clang/AST/Type.h>
 #include <clang/Basic/SourceLocation.h>
@@ -139,6 +140,11 @@ public:
 
   // Synthesizes a call expression for 'Fn(Args...)'.
   virtual Expr *SynthesizeCallExpr(Expr *Fn, MutableArrayRef<Expr *> Args) = 0;
+
+  // Speculatively parses 'TSD' as a single expression at the expansion site,
+  // with all diagnostics suppressed. Returns the parsed expression if it is
+  // valid, and null otherwise (std::meta::test_expression).
+  virtual Expr *TestExpression(TokenSequenceData TSD, SourceLocation Loc) = 0;
 
                            // =======================
                            // Class Synthesis Support

@@ -535,10 +535,36 @@ ExprResult Parser::ExpressionMacroExpansionCallback(void *P,
   return static_cast<Parser *>(P)->ParseExpressionMacroExpansion(TSD, Loc);
 }
 
-/// Parse the token sequence produced by an expression macro as a single
-/// expression, in place of the invocation.
-ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
+ExprResult Parser::SpeculativeExpressionCallback(void *P,
+                                                 TokenSequenceData TSD,
                                                  SourceLocation Loc) {
+  return static_cast<Parser *>(P)->ParseExpressionMacroExpansion(
+      TSD, Loc, /*Speculative=*/true);
+}
+
+/// Parse the token sequence produced by an expression macro as a single
+/// expression, in place of the invocation. In speculative mode
+/// (std::meta::test_expression) all diagnostics are suppressed and validity
+/// is reported only through the result.
+ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
+                                                 SourceLocation Loc,
+                                                 bool Speculative) {
+  // The probe must not commit Sema to anything diagnostic-visible: parser
+  // and Sema errors are suppressed wholesale (the SFINAETrap additionally
+  // keeps Sema's error bookkeeping balanced), and failure is reported by an
+  // invalid or error-containing result.
+  std::optional<Sema::SFINAETrap> Trap;
+  DiagnosticsEngine &Diags = Actions.getDiagnostics();
+  bool OldSuppress = Diags.getSuppressAllDiagnostics();
+  if (Speculative) {
+    Trap.emplace(Actions);
+    Diags.setSuppressAllDiagnostics(true);
+  }
+  auto RestoreDiags = llvm::make_scope_exit([&] {
+    if (Speculative)
+      Diags.setSuppressAllDiagnostics(OldSuppress);
+  });
+
   SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
   Token Eof;
   Eof.startToken();

@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <debugging>
 #include <format>
 #include <memory>
 #include <optional>
@@ -534,6 +535,92 @@ void test_member() {
 
 }  // namespace ops
 
+// --------------------------------------- test_expression: ranges::begin ----
+
+// The [range.access.begin] ladder as a macro: each rung probes whether an
+// expression would be valid at the expansion site (test_expression), checks
+// its type, and either interpolates the already-parsed expression or falls
+// through. The "ill-formed" rungs are a constexpr_error, which for a macro
+// means "no expansion": requires-expressions observe them as false.
+
+namespace rng {
+
+template <class I>
+inline constexpr bool iterish = requires(I i) { *i; ++i; };
+
+namespace impl {
+// Poison pill: ADL-only lookup for begin, as for the real CPO.
+void begin(auto&) = delete;
+template <class R>
+constexpr auto adl_begin(R&& r) -> decltype(begin(r)) {
+  return begin(r);
+}
+} // namespace impl
+
+inline constexpr struct begin_fn {
+  template <class Self, class R>
+  __macro operator()(this Self, R&& r) {
+    if constexpr (std::is_array_v<std::remove_reference_t<R>>) {
+      return ^^{ (\(r) + 0) };
+    } else {
+      if (auto m = test_expression(^^{ (\(r).begin()) });
+          m && extract<bool>(substitute(^^iterish, {type_of(*m)})))
+        return ^^{ \(*m) };
+      // The ADL probe is spelled through a qualified helper: a bare
+      // 'begin(...)' would be looked up at the expansion site, where this
+      // very object is visible.
+      if (auto f = test_expression(^^{ (::rng::impl::adl_begin(\(r))) });
+          f && extract<bool>(substitute(^^iterish, {type_of(*f)})))
+        return ^^{ \(*f) };
+      std::constexpr_error_str("no-begin", "no viable begin for this type");
+      return ^^{};  // unreachable: the error produces no expansion
+    }
+  }
+} begin{};
+
+} // namespace rng
+
+// The range types live outside rng: a hidden friend 'begin' would otherwise
+// collide with the CPO object (as it would with std::ranges::begin).
+namespace rng_test {
+
+struct HasMember {
+  int store[3] = {1, 2, 3};
+  constexpr int* begin() { return store; }
+};
+struct AdlOnly {
+  int store[2] = {4, 5};
+  friend constexpr int* begin(AdlOnly& a) { return a.store; }
+};
+struct BadBegin {
+  int begin() const { return 0; }  // valid, but not an iterator
+};
+struct NoBegin {};
+
+template <class T>
+concept can_begin = requires(T& t) { rng::begin(t); };
+
+void test() {
+  HasMember m;
+  assert(rng::begin(m) == m.store);
+  static_assert(std::is_same_v<decltype(rng::begin(m)), int*>);
+
+  AdlOnly a;
+  assert(rng::begin(a) == a.store);
+
+  int arr[4] = {};
+  assert(rng::begin(arr) == &arr[0]);
+
+  static_assert(can_begin<HasMember>);
+  static_assert(can_begin<AdlOnly>);
+  static_assert(can_begin<int[4]>);
+  static_assert(!can_begin<NoBegin>);   // the constexpr_error rung
+  static_assert(!can_begin<BadBegin>);  // member begin() fails the type check
+  static_assert(!can_begin<int>);
+}
+
+} // namespace rng_test
+
 int main(int, char**) {
   assert(add_two(40) == 42);
   test_fwd();
@@ -545,5 +632,6 @@ int main(int, char**) {
   ops::test_lazy_and();
   ops::test_rewritten();
   ops::test_member();
+  rng_test::test();
   return 0;
 }

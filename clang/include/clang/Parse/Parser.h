@@ -8609,10 +8609,14 @@ private:
                            BalancedDelimiterTracker &T, ExprVector &Args);
   ExprResult ParseMacroRawArgument(bool Greedy);
   ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,
-                                           SourceLocation Loc);
+                                           SourceLocation Loc,
+                                           bool Speculative = false);
   static ExprResult ExpressionMacroExpansionCallback(void *P,
                                                      TokenSequenceData TSD,
                                                      SourceLocation Loc);
+  static ExprResult SpeculativeExpressionCallback(void *P,
+                                                  TokenSequenceData TSD,
+                                                  SourceLocation Loc);
 
   bool ParseSpliceSpecifier(bool TryParseSpecialization = false);
 
