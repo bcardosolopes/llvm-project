@@ -8612,9 +8612,11 @@ private:
   /// expansion as declarations in place. At class scope the members are
   /// added to the current class (with access \p AS); at namespace scope the
   /// parsed declarations are returned.
-  DeclGroupPtrTy ParseDeclMacroInvocation(AccessSpecifier AS,
-                                          DeclSpec::TST TagType,
-                                          Decl *TagDecl);
+  DeclGroupPtrTy ParseDeclMacroInvocation(AccessSpecifier AS, Decl *TagDecl);
+  /// Parse an injected token stream (already entered, delimited by eof) as
+  /// member declarations of \p TagDecl, starting from access \p AS.
+  /// Guarantees progress on malformed tokens.
+  void ParseTokensAsClassMembers(AccessSpecifier AS, Decl *TagDecl);
   ExprResult ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
                                         tok::TokenKind OpKind,
                                         const IdentifierInfo *II,

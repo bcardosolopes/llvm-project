@@ -464,7 +464,6 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
 /// must not be dependent (a dependent context uses a consteval block with
 /// queue_injection).
 Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
-                                                        DeclSpec::TST TagType,
                                                         Decl *TagDecl) {
   assert(Tok.is(tok::identifier) && NextToken().is(tok::exclaim) &&
          GetLookAheadToken(2).is(tok::l_paren));
@@ -529,25 +528,24 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   if (Actions.CurContext->isRecord()) {
     // Members of the class being parsed, under the current access specifier
     // (the expansion may change it; the change does not leak out).
-    AccessSpecifier ExpansionAS = AS;
-    ParsedAttributes AccessAttrs(AttrFactory);
-    while (Tok.isNot(tok::eof))
-      ParseCXXClassMemberDeclarationWithPragmas(ExpansionAS, AccessAttrs,
-                                                TagType, TagDecl);
+    ParseTokensAsClassMembers(AS, TagDecl);
   } else {
     while (Tok.isNot(tok::eof)) {
+      SourceLocation Before = Tok.getLocation();
       ParsedAttributes DeclAttrs(AttrFactory);
       ParsedAttributes DeclSpecAttrs(AttrFactory);
       DeclGroupPtrTy G = ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
       if (G)
         for (Decl *D : G.get())
           Decls.push_back(D);
+      // Guarantee progress on malformed tokens.
+      if (Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
+        Diag(Tok, diag::err_unexpected_token_in_injected_members)
+            << Tok.getKind();
+        ConsumeAnyToken();
+      }
     }
   }
-
-  // Drain what is left so the enclosing token stream resumes cleanly.
-  while (Tok.isNot(tok::eof))
-    ConsumeAnyToken();
   Tok = SavedTok;
 
   if (Decls.empty())

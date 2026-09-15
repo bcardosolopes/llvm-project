@@ -3313,6 +3313,9 @@ def err_macro_raw_member_dependent : Error<
 def note_macro_raw_member_dependent : Note<
   "invoke the macro on an object whose type is known at the point of "
   "invocation to pass raw tokens">;
+def err_annotation_inject_members_not_tokens : Error<
+  "'inject_members' callback of annotation type %0 must return a token "
+  "sequence">;
 def err_decl_macro_dependent : Error<
   "macro %0 cannot form declarations in a dependent context; use "
   "'consteval { queue_injection(...); }' to defer the injection to "

@@ -652,6 +652,8 @@ public:
       SourceLocation Loc;
       DeclContext *TargetDC = nullptr; // null = inject at current context
       TokenSequenceData TSD;
+      /// Starting access for members injected into a class.
+      AccessSpecifier AS = AS_public;
     };
 
     /// Token sequences pending injection from std::meta::queue_injection calls

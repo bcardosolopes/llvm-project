@@ -16557,6 +16557,15 @@ public:
   /// for an on_complete member function and call it with ^^TheType.
   void HandleAnnotationOnComplete(Decl *TagDecl);
 
+  /// Evaluate the inject_members callback of the \p Index'th annotation of
+  /// \p TagDecl, called right before the class is completed: the returned
+  /// tokens are parsed as additional members. Returns false once \p Index is
+  /// past the last annotation; an annotation without the callback yields an
+  /// empty sequence. The parser interleaves evaluation and parsing so each
+  /// callback sees the members injected by the previous ones.
+  bool EvaluateInjectMembersAnnotation(Decl *TagDecl, unsigned Index,
+                                       TokenSequenceData &Out);
+
 private:
   SemaParserBridge ParserBridge;
 

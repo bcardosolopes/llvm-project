@@ -586,6 +586,41 @@ form, both for dependent contexts and for loops
 (`for (auto m : members) queue_injection(gen(m))`). Declaration position is
 the one-shot sugar; the block is the general tool.
 
+## Annotation callbacks: `inject_members`
+
+Class annotations support three callbacks, split by phase:
+
+- `on_template_defined(info tmpl)` — after a class template's definition,
+  once, with the template; for namespace-scope injections that must precede
+  every specialization (`std::tuple_size` et al.).
+- `inject_members(info type) -> token_sequence` — **right before the class
+  is completed** (after all written members, before field completion and the
+  class checks). The returned tokens are parsed as additional members, which
+  participate fully in completion: layout, triviality, implicit members.
+- `on_complete(info type)` — after completion, with the complete type;
+  for measurement (layout asserts, registration) and external injection.
+
+The `inject_members` contract: callbacks of multiple annotations run once
+each, in annotation order, and each is interleaved with the parsing of its
+predecessor's tokens, so a later callback's members can name an earlier
+one's. Each callback's members start from the class's default access
+(`private` for `class`, `public` for `struct`), regardless of the access in
+force at the end of the written body; the tokens may contain their own
+access-specifier labels. For a class template the callback runs once, on the
+pattern, receiving a reflection of the pattern's own type (so `\(type)`
+spells the equivalent of the injected-class-name); if the annotation *value*
+is dependent, the callback instead runs for each specialization, right
+before that specialization's completion, injecting per-specialization
+members. Injections queued from inside the callback drain only after the
+class completes.
+
+Two rules of thumb: never evaluate completeness-sensitive predicates
+(concepts, `sizeof`) on the subject inside `inject_members` — satisfaction
+is cached, and asking early poisons the answer ([temp.constr.atomic]);
+inject the question or use `on_complete` instead. And the callback that owns
+a phase should do that phase's work: mutate in `inject_members`, measure in
+`on_complete`.
+
 ## Future directions
 
 - A lazy parameter kind for `log_if!`-style macros.

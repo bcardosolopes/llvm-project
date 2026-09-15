@@ -15,10 +15,12 @@
 // Push-based customization of structured bindings: an annotation whose
 // on_template_defined callback fires once, when the annotated class template's
 // definition completes, and injects partial specializations of std::tuple_size
-// and std::tuple_element (plus a get overload into the template's namespace)
-// covering every specialization. Unlike per-instantiation injection of
-// explicit specializations, the injected entities exist before any
-// specialization is instantiated, so the protocol is order-independent.
+// and std::tuple_element covering every specialization; its inject_members
+// callback fires right before the pattern is completed and injects get() as a
+// member (an explicit object function template), so no namespace-scope get,
+// no ADL, and no constraint machinery are needed. Unlike per-instantiation
+// injection of explicit specializations, the injected entities exist before
+// any specialization is instantiated, so the protocol is order-independent.
 
 #include <meta>
 #include <cassert>
@@ -31,9 +33,6 @@ using std::meta::info;
 
 // ------------------------- the library -------------------------
 namespace lib {
-    template <class T, template <class...> class Z>
-    concept specializes = has_template_arguments(^^T) && template_of(^^T) == ^^Z;
-
     struct inject_bindings_t {
         consteval auto on_template_defined(info tmpl) const -> void {
             queue_injection(^^std, ^^{
@@ -49,17 +48,18 @@ namespace lib {
                     using type = [: type_of(\(tmpl)<Ts...>::tuple_elements[I]) :];
                 };
             });
+        }
 
-            queue_injection(parent_of(tmpl), ^^{
-                template <size_t I, class Self>
-                    requires ::lib::specializes<std::remove_cvref_t<Self>, \(tmpl)>
-                constexpr auto get(Self&& self) -> decltype(auto) {
+        consteval auto inject_members(info) const -> std::meta::token_sequence {
+            return ^^{
+               public:
+                template <std::size_t I, class Self>
+                constexpr auto get(this Self&& self) -> decltype(auto) {
                     // Parenthesized: decltype(auto) must deduce a reference,
                     // not the member's declared type.
-                    return (((Self&&)self).
-                        [: std::remove_cvref_t<Self>::tuple_elements[I] :]);
+                    return (((Self&&)self).[: tuple_elements[I] :]);
                 }
-            });
+            };
         }
     };
     inline constexpr inject_bindings_t inject_bindings{};
@@ -123,8 +123,8 @@ int main(int, char**) {
     auto wr = wide_result<int>(1, 2);
     auto& [h2, l2] = wr;
     h2 = 10;
-    assert(get<0>(wr) == 10);
-    assert(get<1>(std::move(wr)) == 2);
+    assert(wr.get<0>() == 10);
+    assert(std::move(wr).get<1>() == 2);
 
     auto [a, b] = app::pair_ish<int, char>(7, 'x');
     assert(a == 7);

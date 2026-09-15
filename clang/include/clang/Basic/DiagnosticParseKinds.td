@@ -231,6 +231,10 @@ def err_expected_expression : Error<"expected expression">;
 def err_expected_type : Error<"expected a type">;
 def err_expected_external_declaration : Error<"expected external declaration">;
 def err_extraneous_closing_brace : Error<"extraneous closing brace ('}')">;
+def err_unexpected_token_in_injected_members : Error<
+  "unexpected %0 in injected member declarations">;
+def note_injected_members_here : Note<
+  "in member declarations injected into %0">;
 def err_expected_semi_declaration : Error<
   "expected ';' at end of declaration">;
 def err_expected_semi_decl_list : Error<

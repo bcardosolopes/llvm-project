@@ -1231,6 +1231,55 @@ static void collectInjectedLocalDeclsForLookup(
   }
 }
 
+/// Parse an injected token stream (already entered, delimited by its eof
+/// sentinel) as member declarations of \p TagDecl, starting from access
+/// \p AS. Malformed tokens cannot stall the loop: a stray '}' is diagnosed
+/// and consumed, and any member-parse that fails to advance skips a token.
+void Parser::ParseTokensAsClassMembers(AccessSpecifier AS, Decl *TagDecl) {
+  Decl *Templated = TagDecl;
+  if (auto *CTD = dyn_cast_or_null<ClassTemplateDecl>(Templated))
+    Templated = CTD->getTemplatedDecl();
+  auto *RD = dyn_cast_or_null<CXXRecordDecl>(Templated);
+
+  DeclSpec::TST TagType = DeclSpec::TST_struct;
+  if (RD)
+    switch (RD->getTagKind()) {
+    case TagTypeKind::Class:
+      TagType = DeclSpec::TST_class;
+      break;
+    case TagTypeKind::Union:
+      TagType = DeclSpec::TST_union;
+      break;
+    case TagTypeKind::Interface:
+      TagType = DeclSpec::TST_interface;
+      break;
+    default:
+      break;
+    }
+
+  DiagnosticErrorTrap Trap(Diags);
+  ParsedAttributes AccessAttrs(AttrFactory);
+  AccessSpecifier CurAS = AS;
+  while (Tok.isNot(tok::eof)) {
+    if (Tok.is(tok::r_brace)) {
+      Diag(Tok, diag::err_extraneous_closing_brace);
+      ConsumeBrace();
+      continue;
+    }
+    SourceLocation Before = Tok.getLocation();
+    ParseCXXClassMemberDeclarationWithPragmas(CurAS, AccessAttrs, TagType,
+                                              TagDecl);
+    MaybeDestroyTemplateIds();
+    if (Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
+      Diag(Tok, diag::err_unexpected_token_in_injected_members)
+          << Tok.getKind();
+      ConsumeAnyToken();
+    }
+  }
+  if (Trap.hasErrorOccurred() && RD)
+    Diag(Tok.getLocation(), diag::note_injected_members_here) << RD;
+}
+
 void Parser::ProcessTokenInjections(
     SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
   for (auto &Inj : Injections) {
@@ -1380,11 +1429,7 @@ void Parser::ProcessTokenInjections(
         // be an active scope.
         Actions.FieldCollector->StartClass();
       }
-      while (Tok.isNot(tok::eof)) {
-        ParsedAttributes DeclAttrs(AttrFactory);
-        ParsedTemplateInfo TemplateInfo;
-        ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
-      }
+      ParseTokensAsClassMembers(Inj.AS, TagDecl);
       if (!HasActiveClassParsing) {
         // If we are injecting into a class that is still being defined (a class
         // template specialization currently being instantiated), late-parsed
@@ -3814,7 +3859,7 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
   // A declaration-position macro invocation: 'name!(args);' expands to a
   // sequence of member declarations parsed in place.
   if (isStartOfDeclMacroInvocation())
-    return ParseDeclMacroInvocation(AS, TagType, TagDecl);
+    return ParseDeclMacroInvocation(AS, TagDecl);
 
   switch (Tok.getKind()) {
   case tok::kw___if_exists:
@@ -4124,6 +4169,37 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
           CurAS, AccessAttrs, static_cast<DeclSpec::TST>(TagType), TagDecl);
       MaybeDestroyTemplateIds();
     }
+
+    // Run the annotations' inject_members callbacks: each returns member
+    // tokens parsed here, before the class is completed, so a later
+    // callback sees the members injected by an earlier one. Injected
+    // members start from the class's default access.
+    if (getLangOpts().Reflection) {
+      TokenSequenceData TSD;
+      for (unsigned I = 0;
+           Actions.EvaluateInjectMembersAnnotation(TagDecl, I, TSD); ++I) {
+        if (TSD.empty())
+          continue;
+        SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
+        Token Eof;
+        Eof.startToken();
+        Eof.setKind(tok::eof);
+        Eof.setLocation(Tok.getLocation());
+        Toks.push_back(Eof);
+
+        Token SavedTok = Tok;
+        PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                            /*IsReinject=*/true);
+        ConsumeAnyToken();
+
+        AccessSpecifier InjectedAS =
+            TagType == DeclSpec::TST_class && !getLangOpts().HLSL ? AS_private
+                                                                  : AS_public;
+        ParseTokensAsClassMembers(InjectedAS, TagDecl);
+        Tok = SavedTok;
+      }
+    }
+
     T.consumeClose();
   } else {
     SkipUntil(tok::r_brace);

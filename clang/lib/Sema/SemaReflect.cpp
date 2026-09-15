@@ -2795,6 +2795,100 @@ void Sema::ProcessPendingTokenInjections() {
   ProcessTokenInjectionsFromParserBridge(Injections);
 }
 
+bool Sema::EvaluateInjectMembersAnnotation(Decl *TagDecl, unsigned Index,
+                                           TokenSequenceData &Out) {
+  Out = TokenSequenceData();
+
+  // For a class template, the parser hands us the ClassTemplateDecl; the
+  // members are injected into the pattern, once, and instantiation
+  // distributes them.
+  if (auto *CT = dyn_cast_or_null<ClassTemplateDecl>(TagDecl))
+    TagDecl = CT->getTemplatedDecl();
+  auto *RD = dyn_cast_or_null<CXXRecordDecl>(TagDecl);
+  if (!RD)
+    return false;
+
+  // Find the Index'th annotation.
+  CXX26AnnotationAttr *A = nullptr;
+  unsigned Seen = 0;
+  for (auto *Attr : RD->attrs())
+    if (auto *AA = dyn_cast<CXX26AnnotationAttr>(Attr))
+      if (Seen++ == Index) {
+        A = AA;
+        break;
+      }
+  if (!A)
+    return false;
+
+  // A dependent annotation cannot be evaluated at definition time.
+  if (A->getArg()->isTypeDependent() || A->getArg()->isValueDependent())
+    return true;
+
+  QualType AnnotTy = A->getArg()->getType();
+  auto *AnnotRD = AnnotTy->getAsCXXRecordDecl();
+  if (!AnnotRD)
+    return true;
+
+  IdentifierInfo *II = &Context.Idents.get("inject_members");
+  SourceLocation Loc = RD->getEndLoc();
+  DeclarationNameInfo DNI(II, Loc);
+  LookupResult R(*this, DNI, LookupMemberName);
+  if (!LookupQualifiedName(R, AnnotRD))
+    return true;
+
+  // Build and evaluate: annotation_value.inject_members(^^RD). The class is
+  // not yet complete; the returned tokens are parsed as members before it
+  // becomes so.
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+
+  Expr *ObjExpr = const_cast<Expr *>(A->getArg());
+
+  // The reflection of the class's type. For a class template pattern that
+  // type is dependent (it is the type the members themselves see), so a
+  // ^^-expression for it could not be constant-evaluated; hand the callback
+  // a pre-evaluated reflection constant instead.
+  QualType ClassTy = Context.getCanonicalTagType(RD);
+  APValue ReflVal(ReflectionKind::Type, ClassTy.getAsOpaquePtr());
+  Expr *OVE = new (Context)
+      OpaqueValueExpr(Loc, Context.MetaInfoTy, VK_PRValue);
+  Expr *ReflArg = ConstantExpr::Create(Context, OVE, ReflVal);
+
+  CXXScopeSpec SS;
+  ExprResult MemberRef = BuildMemberReferenceExpr(
+      ObjExpr, AnnotTy, Loc, /*IsArrow=*/false, SS, SourceLocation(), nullptr,
+      R, nullptr, nullptr);
+  if (MemberRef.isInvalid())
+    return true;
+
+  Expr *Args[] = {ReflArg};
+  ExprResult Call = BuildCallExpr(nullptr, MemberRef.get(), Loc, Args, Loc);
+  if (Call.isInvalid())
+    return true;
+
+  SmallVector<PartialDiagnosticAt, 4> Diags;
+  Expr::EvalResult ER;
+  ER.Diag = &Diags;
+  ConstantExprKind Kind = ConstantExprKind::PlainlyConstantEvaluated;
+  if (!Call.get()->EvaluateAsConstantExpr(ER, Context, Kind, RD)) {
+    Diag(Loc, diag::err_consteval_block_not_constexpr);
+    for (auto &PD : Diags)
+      Diag(PD.first, PD.second);
+    return true;
+  }
+  if (!ER.Val.isTokenSequence()) {
+    Diag(Loc, diag::err_annotation_inject_members_not_tokens) << AnnotTy;
+    return true;
+  }
+  Out = ER.Val.getTokenSequence();
+
+  // Injections queued by the callback target scopes outside the class; they
+  // drain after the class completes, like on_complete's.
+  PendingInjections.append(ER.PendingInjections.begin(),
+                           ER.PendingInjections.end());
+  return true;
+}
+
 void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
   // For a class template, the parser hands us the ClassTemplateDecl.
   if (auto *CT = dyn_cast_or_null<ClassTemplateDecl>(TagDecl))

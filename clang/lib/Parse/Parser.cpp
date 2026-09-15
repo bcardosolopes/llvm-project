@@ -764,8 +764,7 @@ Parser::ParseExternalDeclaration(ParsedAttributes &Attrs,
   // A declaration-position macro invocation: 'name!(args);' expands to a
   // sequence of declarations parsed in place.
   if (isStartOfDeclMacroInvocation())
-    return ParseDeclMacroInvocation(AS_none, DeclSpec::TST_unspecified,
-                                    /*TagDecl=*/nullptr);
+    return ParseDeclMacroInvocation(AS_none, /*TagDecl=*/nullptr);
 
   Decl *SingleDecl = nullptr;
   switch (Tok.getKind()) {
