@@ -559,3 +559,70 @@ struct Holder {
 static_assert(Holder<int>{}.go() == 5);
 
 }  // namespace N16
+
+namespace N17 {
+
+// Declaration-position invocation: 'name!(args);' at namespace or class
+// scope parses the expansion as a sequence of declarations in place. No
+// consteval block, no queue_injection.
+__macro gen_var(token_sequence name, int init) {
+  return ^^{ constexpr int \(name) = \(init); };
+}
+
+gen_var!(seven, 7);
+static_assert(seven == 7);
+
+// Multiple declarations, and an empty expansion.
+__macro two_vars() {
+  return ^^{
+    constexpr int one = 1;
+    constexpr long two = 2;
+  };
+}
+two_vars!();
+static_assert(one + two == 3);
+
+__macro nothing() { return ^^{}; }
+nothing!();
+
+// The expansion may itself invoke a declaration-position macro.
+__macro outer_gen() { return ^^{ gen_var!(nested, 3); }; }
+outer_gen!();
+static_assert(nested == 3);
+
+// Class scope: members are injected under the current access specifier;
+// access changes inside the expansion do not leak past the invocation.
+__macro members() {
+  return ^^{
+    int a = 1;
+   private:
+    int b = 2;  // expected-note {{declared private here}}
+   public:
+    constexpr int f() const { return a + b; }
+  };
+}
+
+struct S {
+  members!();
+  int after = 3;  // still public: the expansion's 'private:' does not leak
+};
+static_assert(S{}.f() == 3);
+constexpr int use_after = S{}.after;
+constexpr int use_b = S{}.b;  // expected-error {{'b' is a private member of 'N17::S'}}
+
+class C {
+  members!();  // injected under the class's default 'private'
+};
+
+// A dependent context cannot form declarations from a macro; that is what
+// consteval blocks with queue_injection are for.
+template <class T>
+struct DT {
+  gen_var!(x, 1);  // expected-error {{macro 'gen_var' cannot form declarations in a dependent context; use 'consteval { queue_injection(...); }' to defer the injection to instantiation}}
+};
+
+// The expansion must consist of declarations.
+__macro not_decls() { return ^^{ 1 + 2 }; }  // expected-error {{expected unqualified-id}}
+not_decls!();
+
+}  // namespace N17

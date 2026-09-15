@@ -8601,6 +8601,20 @@ private:
   // Expression macros: 'name!(args)' and 'obj.name!(args)'.
   ExprResult ParseMacroInvocation(CXXScopeSpec &SS, const IdentifierInfo *II,
                                   SourceLocation NameLoc);
+  /// True if the current token starts a declaration-position macro
+  /// invocation, 'identifier ! ('.
+  bool isStartOfDeclMacroInvocation() {
+    return getLangOpts().Reflection && Tok.is(tok::identifier) &&
+           NextToken().is(tok::exclaim) &&
+           GetLookAheadToken(2).is(tok::l_paren);
+  }
+  /// Parse 'name!(args);' at namespace or class scope and parse the
+  /// expansion as declarations in place. At class scope the members are
+  /// added to the current class (with access \p AS); at namespace scope the
+  /// parsed declarations are returned.
+  DeclGroupPtrTy ParseDeclMacroInvocation(AccessSpecifier AS,
+                                          DeclSpec::TST TagType,
+                                          Decl *TagDecl);
   ExprResult ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
                                         tok::TokenKind OpKind,
                                         const IdentifierInfo *II,

@@ -3313,6 +3313,10 @@ def err_macro_raw_member_dependent : Error<
 def note_macro_raw_member_dependent : Note<
   "invoke the macro on an object whose type is known at the point of "
   "invocation to pass raw tokens">;
+def err_decl_macro_dependent : Error<
+  "macro %0 cannot form declarations in a dependent context; use "
+  "'consteval { queue_injection(...); }' to defer the injection to "
+  "instantiation">;
 def err_operator_macro_requires_operator : Error<
   "%0 is an expression macro and can only be invoked with operator syntax">;
 def err_macro_parameter_pack : Error<

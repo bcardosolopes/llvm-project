@@ -16362,6 +16362,29 @@ public:
                                            ArrayRef<Expr *> Args,
                                            SourceLocation RParenLoc,
                                            CallExpr::ADLCallKind UsesADL);
+  /// Overload resolution for a macro invocation. Returns true on (diagnosed)
+  /// error.
+  bool ResolveMacroCallee(Scope *S, UnresolvedLookupExpr *Callee,
+                          MultiExprArg Args, SourceLocation LParenLoc,
+                          SourceLocation RParenLoc, ExprResult &FnOut,
+                          FunctionDecl *&MacroOut,
+                          CallExpr::ADLCallKind &UsesADLOut);
+  /// Bind the arguments, evaluate the macro's body, and produce the expansion
+  /// token sequence. Returns true on (diagnosed) error.
+  bool EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
+                              SourceLocation LParenLoc, ArrayRef<Expr *> Args,
+                              SourceLocation RParenLoc,
+                              CallExpr::ADLCallKind UsesADL,
+                              TokenSequenceData &Expansion);
+  /// A declaration-position macro invocation ('name!(args);' at namespace or
+  /// class scope): resolve and evaluate; the parser parses \p Expansion as
+  /// declarations in place. Returns true on (diagnosed) error.
+  bool ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
+                                SourceLocation NameLoc,
+                                SourceLocation ExclaimLoc,
+                                SourceLocation LParenLoc, MultiExprArg Args,
+                                SourceLocation RParenLoc,
+                                TokenSequenceData &Expansion);
 
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,

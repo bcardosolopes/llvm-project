@@ -21,8 +21,9 @@
 //   check!     - decomposition of a comparison, evaluate-once, source text,
 //                and macros composing (its expansion invokes fwd!)
 //   λ!         - raw token_sequence parameter (anaphoric placeholders)
-//   define_op! - a declaration macro: expansion is a queue_injection, and the
+//   define_op! - a declaration-position macro invoked at namespace scope; the
 //                pattern is classified with token_kind_of
+//   observable! - a declaration-position macro invoked at class scope
 //
 // Operator/member macros and the ranges::begin ladder live in
 // operator-macros.pass.cpp and ranges-begin-macro.pass.cpp.
@@ -302,24 +303,25 @@ void test_lambda() {
 
 // ------------------------------------------------------- define_op! --------
 
-// A *declaration* macro: the expansion is a queue_injection, so invoking it in
-// a consteval block injects a declaration instead of producing an expression.
-// The pattern is one of `x op y` (binary), `op x` (prefix), or `x op`
-// (postfix); which one it is falls out of token_kind_of on the first token.
+// A *declaration* macro: invoked at namespace scope, its expansion is parsed
+// as a sequence of declarations in place -- no consteval block and no
+// queue_injection wrapping. The pattern is one of `x op y` (binary), `op x`
+// (prefix), or `x op` (postfix); which one it is falls out of token_kind_of
+// on the first token.
 __macro define_op(std::meta::token_sequence name,
                   std::meta::token_sequence pattern) {
   auto toks = tokens_of(pattern);
 
   if (toks.size() == 3) {  // id op id
     auto body = ^^{ fwd!(l) } + toks[1] + ^^{ fwd!(r) };
-    return ^^{ queue_injection(^^{
+    return ^^{
       struct \(name) {
         template <class L, class R>
         constexpr decltype(auto) operator()(L&& l, R&& r) const {
           return (\(body));
         }
       };
-    }) };
+    };
   }
 
   std::meta::token_sequence body =
@@ -327,21 +329,26 @@ __macro define_op(std::meta::token_sequence name,
           ? ^^{ fwd!(t) } + toks[1]   // id op  (postfix)
           : toks[0] + ^^{ fwd!(t) };  // op id  (prefix)
 
-  return ^^{ queue_injection(^^{
+  return ^^{
     struct \(name) {
       template <class T>
       constexpr decltype(auto) operator()(T&& t) const {
         return (\(body));
       }
     };
-  }) };
+  };
 }
 
+define_op!(left_shift, x << y);
+define_op!(negate, -x);
+define_op!(post_inc, x++);
+
+// The consteval-block + queue_injection form remains the loop-friendly way
+// to inject programmatically.
 consteval {
-  define_op!(left_shift, x << y);
-  define_op!(negate, -x);
-  define_op!(post_inc, x++);
+  queue_injection(^^{ constexpr int via_queue = 1; });
 }
+static_assert(via_queue == 1);
 
 void test_define_op() {
   static_assert(left_shift{}(1, 4) == 16);
@@ -352,6 +359,34 @@ void test_define_op() {
   assert(n == 4);
 }
 
+// A declaration macro invoked at class scope injects members, with full
+// control over access; the access specifier in force before the invocation
+// is restored afterwards.
+__macro observable(std::meta::token_sequence counter) {
+  return ^^{
+   private:
+    int \(counter) = 0;
+
+   public:
+    constexpr void observe() { ++\(counter); }
+    constexpr int watchers() const { return \(counter); }
+  };
+}
+
+struct Subject {
+  observable!(watchers_);
+  int visible = 1;  // still public
+};
+
+void test_class_scope_macro() {
+  Subject s;
+  s.observe();
+  s.observe();
+  assert(s.watchers() == 2);
+  assert(s.visible == 1);
+  // (that watchers_ is private is checked in the Reflection lang test)
+}
+
 int main(int, char**) {
   assert(add_two(40) == 42);
   test_fwd();
@@ -359,5 +394,6 @@ int main(int, char**) {
   prvalue_operand::test();
   test_lambda();
   test_define_op();
+  test_class_scope_macro();
   return 0;
 }

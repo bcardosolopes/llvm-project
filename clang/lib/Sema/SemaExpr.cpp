@@ -7374,30 +7374,11 @@ ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
     return CXXMacroInvocationExpr::Create(Context, Callee, Args, ExclaimLoc,
                                           LParenLoc, RParenLoc);
 
-  // Overload resolution as for a call, but the result is never a call.
-  OverloadCandidateSet CandidateSet(Callee->getNameLoc(),
-                                    OverloadCandidateSet::CSK_Normal);
-  ExprResult Result;
-  if (buildOverloadedCallSet(S, Callee, Callee, Args, RParenLoc, &CandidateSet,
-                             &Result))
-    return ExprError();
-
-  OverloadCandidateSet::iterator Best;
-  OverloadingResult OR =
-      CandidateSet.BestViableFunction(*this, Callee->getBeginLoc(), Best);
-  if (OR != OR_Success) {
-    // Let the call machinery produce the usual overload diagnostics.
-    (void)BuildOverloadedCallExpr(S, Callee, Callee, LParenLoc, Args,
-                                  RParenLoc, /*ExecConfig=*/nullptr);
-    return ExprError();
-  }
-
-  FunctionDecl *Macro = Best->Function;
-  CheckUnresolvedLookupAccess(Callee, Best->FoundDecl);
-  if (DiagnoseUseOfDecl(Macro, Callee->getNameLoc()))
-    return ExprError();
-  ExprResult Fn = FixOverloadedFunctionReference(Callee, Best->FoundDecl, Macro);
-  if (Fn.isInvalid())
+  FunctionDecl *Macro = nullptr;
+  ExprResult Fn;
+  CallExpr::ADLCallKind UsesADL;
+  if (ResolveMacroCallee(S, Callee, Args, LParenLoc, RParenLoc, Fn, Macro,
+                         UsesADL))
     return ExprError();
 
   // During instantiation the parser has no scope for the function being
@@ -7412,9 +7393,89 @@ ExprResult Sema::BuildMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
     CollectInstantiatedLocalDeclsForLookup(InstantiationPattern,
                                            MacroExpansionLocalScopes);
 
-  return BuildExpressionMacroExpansion(
-      Fn.get(), Macro, LParenLoc, Args, RParenLoc,
-      static_cast<CallExpr::ADLCallKind>(Best->IsADLCandidate));
+  return BuildExpressionMacroExpansion(Fn.get(), Macro, LParenLoc, Args,
+                                       RParenLoc, UsesADL);
+}
+
+/// Overload resolution for a macro invocation: as for a call, but the result
+/// is never a call.
+bool Sema::ResolveMacroCallee(Scope *S, UnresolvedLookupExpr *Callee,
+                              MultiExprArg Args, SourceLocation LParenLoc,
+                              SourceLocation RParenLoc, ExprResult &FnOut,
+                              FunctionDecl *&MacroOut,
+                              CallExpr::ADLCallKind &UsesADLOut) {
+  OverloadCandidateSet CandidateSet(Callee->getNameLoc(),
+                                    OverloadCandidateSet::CSK_Normal);
+  ExprResult Result;
+  if (buildOverloadedCallSet(S, Callee, Callee, Args, RParenLoc, &CandidateSet,
+                             &Result))
+    return true;
+
+  OverloadCandidateSet::iterator Best;
+  OverloadingResult OR =
+      CandidateSet.BestViableFunction(*this, Callee->getBeginLoc(), Best);
+  if (OR != OR_Success) {
+    // Let the call machinery produce the usual overload diagnostics.
+    (void)BuildOverloadedCallExpr(S, Callee, Callee, LParenLoc, Args,
+                                  RParenLoc, /*ExecConfig=*/nullptr);
+    return true;
+  }
+
+  MacroOut = Best->Function;
+  CheckUnresolvedLookupAccess(Callee, Best->FoundDecl);
+  if (DiagnoseUseOfDecl(MacroOut, Callee->getNameLoc()))
+    return true;
+  FnOut = FixOverloadedFunctionReference(Callee, Best->FoundDecl, MacroOut);
+  if (FnOut.isInvalid())
+    return true;
+  UsesADLOut = static_cast<CallExpr::ADLCallKind>(Best->IsADLCandidate);
+  return false;
+}
+
+/// A declaration-position macro invocation, 'name!(args);' at namespace or
+/// class scope: resolve and evaluate the macro; the caller parses the
+/// resulting tokens as declarations in place. Never deferred: a dependent
+/// context uses 'consteval { queue_injection(...) }' instead.
+bool Sema::ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
+                                    SourceLocation NameLoc,
+                                    SourceLocation ExclaimLoc,
+                                    SourceLocation LParenLoc,
+                                    MultiExprArg Args,
+                                    SourceLocation RParenLoc,
+                                    TokenSequenceData &Expansion) {
+  bool Dependent = CurContext->isDependentContext();
+  for (Expr *Arg : Args)
+    Dependent |= Arg->isInstantiationDependent() ||
+                 Arg->containsUnexpandedParameterPack();
+  if (Dependent) {
+    Diag(NameLoc, diag::err_decl_macro_dependent) << II;
+    return true;
+  }
+
+  LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
+  LookupParsedName(R, S, /*SS=*/nullptr, /*ObjectType=*/QualType());
+  SmallVector<bool, 4> RawParams;
+  if (GetMacroParameterShape(R, RawParams))
+    return true;
+
+  UnresolvedSet<8> Macros;
+  for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
+    Macros.addDecl(*I, I.getAccess());
+  ExprResult Callee = CreateUnresolvedLookupExpr(
+      /*NamingClass=*/nullptr, NestedNameSpecifierLoc(),
+      R.getLookupNameInfo(), Macros, /*PerformADL=*/false);
+  if (Callee.isInvalid())
+    return true;
+
+  FunctionDecl *Macro = nullptr;
+  ExprResult Fn;
+  CallExpr::ADLCallKind UsesADL;
+  if (ResolveMacroCallee(S, cast<UnresolvedLookupExpr>(Callee.get()), Args,
+                         LParenLoc, RParenLoc, Fn, Macro, UsesADL))
+    return true;
+
+  return EvaluateMacroExpansion(Fn.get(), Macro, LParenLoc, Args, RParenLoc,
+                                UsesADL, Expansion);
 }
 
 bool Sema::GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
@@ -7664,11 +7725,12 @@ static bool CheckMacroArgumentEvaluation(Sema &S, Expr *Expansion,
   return false;
 }
 
-ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
-                                               SourceLocation LParenLoc,
-                                               ArrayRef<Expr *> Args,
-                                               SourceLocation RParenLoc,
-                                               CallExpr::ADLCallKind UsesADL) {
+bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
+                                  SourceLocation LParenLoc,
+                                  ArrayRef<Expr *> Args,
+                                  SourceLocation RParenLoc,
+                                  CallExpr::ADLCallKind UsesADL,
+                                  TokenSequenceData &Expansion) {
   // The invocation never becomes a call to the (consteval) macro, so the
   // reference to it must not be reported as an escaped immediate function.
   if (auto *DRE = dyn_cast<DeclRefExpr>(Fn->IgnoreParenImpCasts()))
@@ -7681,17 +7743,17 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
       Context, Fn, Args, Context.TokenSequenceTy, VK_PRValue, RParenLoc,
       CurFPFeatureOverrides(), Proto->getNumParams(), UsesADL);
   if (ConvertArgumentsForCall(TheCall, Fn, Macro, Proto, Args, RParenLoc))
-    return ExprError();
+    return true;
 
   if (!Macro->getBody() && Macro->getTemplateInstantiationPattern())
     InstantiateFunctionDefinition(LParenLoc, Macro, /*Recursive=*/true,
                                   /*DefinitionRequired=*/true);
   if (Macro->isInvalidDecl())
-    return ExprError();
+    return true;
   if (!Macro->getBody()) {
     Diag(LParenLoc, diag::err_macro_undefined) << Macro;
     Diag(Macro->getLocation(), diag::note_declared_at);
-    return ExprError();
+    return true;
   }
 
   SmallVector<APValue, 4> ParamValues;
@@ -7706,7 +7768,7 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
         Diag(Arg->getExprLoc(), diag::err_macro_token_argument_not_constant);
         for (const PartialDiagnosticAt &PD : Notes)
           Diag(PD.first, PD.second);
-        return ExprError();
+        return true;
       }
       ParamValues.push_back(ER.Val);
       continue;
@@ -7733,9 +7795,21 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
         << Macro;
     for (const PartialDiagnosticAt &PD : Notes)
       Diag(PD.first, PD.second);
-    return ExprError();
+    return true;
   }
-  TokenSequenceData Expansion = Result.getTokenSequence();
+  Expansion = Result.getTokenSequence();
+  return false;
+}
+
+ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
+                                               SourceLocation LParenLoc,
+                                               ArrayRef<Expr *> Args,
+                                               SourceLocation RParenLoc,
+                                               CallExpr::ADLCallKind UsesADL) {
+  TokenSequenceData Expansion;
+  if (EvaluateMacroExpansion(Fn, Macro, LParenLoc, Args, RParenLoc, UsesADL,
+                             Expansion))
+    return ExprError();
 
   // Interpolated argument expressions were materialized as bare opaque
   // values; remember them for the evaluate-once check below.

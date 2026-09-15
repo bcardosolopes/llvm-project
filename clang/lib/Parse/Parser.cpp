@@ -761,6 +761,12 @@ Parser::ParseExternalDeclaration(ParsedAttributes &Attrs,
     return nullptr;
   }
 
+  // A declaration-position macro invocation: 'name!(args);' expands to a
+  // sequence of declarations parsed in place.
+  if (isStartOfDeclMacroInvocation())
+    return ParseDeclMacroInvocation(AS_none, DeclSpec::TST_unspecified,
+                                    /*TagDecl=*/nullptr);
+
   Decl *SingleDecl = nullptr;
   switch (Tok.getKind()) {
   case tok::annot_pragma_vis:

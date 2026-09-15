@@ -552,12 +552,42 @@ Interpolated expressions materialize as unique `OpaqueValueExpr`s (source
 expression attached, emitted in place), which is how the once-evaluation rule
 is realized in the AST and what makes `decltype(\(t))` report value category.
 
+## Declaration-position invocation
+
+`name!(args);` may also appear where a declaration can: at namespace scope
+and at class scope. There the expansion is parsed as a *sequence of
+declarations* in place of the invocation — the invocation context decides how
+the expansion is parsed, exactly as the expression form's single-expression
+rule does. This is what makes `define_op` read the way it means:
+
+```cpp
+__macro define_op(std::meta::token_sequence name,
+                  std::meta::token_sequence pattern) {
+  ...
+  return ^^{
+    struct \(name) { ... };
+  };
+}
+
+define_op!(left_shift, x << y);   // at namespace scope; no consteval block,
+                                  // no queue_injection wrapping
+```
+
+At class scope the members are injected under the access specifier in force
+at the invocation; the expansion may contain its own access-specifier labels,
+and those do not leak past the invocation. An expansion may itself contain
+declaration-position invocations, and an empty expansion injects nothing
+(useful for conditional injection). The trailing `;` is required.
+
+There is no deferral: a declaration-position invocation in a dependent
+context (a class template, most commonly) is an error. That is what
+`consteval { queue_injection(...); }` is for — it remains the programmable
+form, both for dependent contexts and for loops
+(`for (auto m : members) queue_injection(gen(m))`). Declaration position is
+the one-shot sugar; the block is the general tool.
+
 ## Future directions
 
-- Declaration-position macros (`define_op!` expanding to a struct); the
-  declaration form is identical, only the expansion context differs. In the
-  meantime `consteval { queue_injection(define_op(^^{name}, ^^{x << y})); }`
-  works with a plain consteval function.
 - A lazy parameter kind for `log_if!`-style macros.
 - `parse_expression(ts)` to turn raw tokens into a bound expression on demand.
 - Richer expression reflection: value category queries, unary operators,

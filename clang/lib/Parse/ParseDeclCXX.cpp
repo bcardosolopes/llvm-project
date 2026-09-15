@@ -3811,6 +3811,11 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
     Decl *TagDecl) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
 
+  // A declaration-position macro invocation: 'name!(args);' expands to a
+  // sequence of member declarations parsed in place.
+  if (isStartOfDeclMacroInvocation())
+    return ParseDeclMacroInvocation(AS, TagType, TagDecl);
+
   switch (Tok.getKind()) {
   case tok::kw___if_exists:
   case tok::kw___if_not_exists:

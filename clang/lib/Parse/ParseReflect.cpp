@@ -458,6 +458,104 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
       T.getOpenLocation(), Args, T.getCloseLocation());
 }
 
+/// Parse a declaration-position macro invocation, 'name!(args);', at
+/// namespace or class scope, then parse the macro's expansion as a sequence
+/// of declarations in place. There is no deferral: the invocation context
+/// must not be dependent (a dependent context uses a consteval block with
+/// queue_injection).
+Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
+                                                        DeclSpec::TST TagType,
+                                                        Decl *TagDecl) {
+  assert(Tok.is(tok::identifier) && NextToken().is(tok::exclaim) &&
+         GetLookAheadToken(2).is(tok::l_paren));
+
+  IdentifierInfo *II = Tok.getIdentifierInfo();
+  SourceLocation NameLoc = ConsumeToken();
+
+  // The arguments are constant expressions (or raw tokens).
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+
+  // The macro's parameter shape decides how each argument is parsed.
+  SmallVector<bool, 4> RawParams;
+  bool ShapeError;
+  {
+    LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
+    Actions.LookupParsedName(R, getCurScope(), /*SS=*/nullptr,
+                             /*ObjectType=*/QualType());
+    ShapeError = Actions.GetMacroParameterShape(R, RawParams);
+  }
+
+  SourceLocation ExclaimLoc = ConsumeToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  if (ShapeError) {
+    T.skipToEnd();
+    TryConsumeToken(tok::semi);
+    return nullptr;
+  }
+
+  ExprVector Args;
+  if (ParseMacroArguments(RawParams, T, Args)) {
+    TryConsumeToken(tok::semi);
+    return nullptr;
+  }
+  if (T.consumeClose())
+    return nullptr;
+  ExpectAndConsumeSemi(diag::err_expected_semi_declaration);
+
+  TokenSequenceData Expansion;
+  if (Actions.ActOnDeclMacroInvocation(getCurScope(), II, NameLoc, ExclaimLoc,
+                                       T.getOpenLocation(), Args,
+                                       T.getCloseLocation(), Expansion))
+    return nullptr;
+
+  // Parse the expansion as declarations at the current position, delimited
+  // by its own eof.
+  SmallVector<Token, 16> Toks(Expansion.begin(), Expansion.end());
+  Token Eof;
+  Eof.startToken();
+  Eof.setKind(tok::eof);
+  Eof.setLocation(T.getCloseLocation());
+  Toks.push_back(Eof);
+
+  Token SavedTok = Tok;
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                      /*IsReinject=*/true);
+  ConsumeAnyToken();
+
+  SmallVector<Decl *, 4> Decls;
+  if (Actions.CurContext->isRecord()) {
+    // Members of the class being parsed, under the current access specifier
+    // (the expansion may change it; the change does not leak out).
+    AccessSpecifier ExpansionAS = AS;
+    ParsedAttributes AccessAttrs(AttrFactory);
+    while (Tok.isNot(tok::eof))
+      ParseCXXClassMemberDeclarationWithPragmas(ExpansionAS, AccessAttrs,
+                                                TagType, TagDecl);
+  } else {
+    while (Tok.isNot(tok::eof)) {
+      ParsedAttributes DeclAttrs(AttrFactory);
+      ParsedAttributes DeclSpecAttrs(AttrFactory);
+      DeclGroupPtrTy G = ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+      if (G)
+        for (Decl *D : G.get())
+          Decls.push_back(D);
+    }
+  }
+
+  // Drain what is left so the enclosing token stream resumes cleanly.
+  while (Tok.isNot(tok::eof))
+    ConsumeAnyToken();
+  Tok = SavedTok;
+
+  if (Decls.empty())
+    return nullptr;
+  return DeclGroupPtrTy::make(
+      DeclGroupRef::Create(Actions.Context, Decls.data(), Decls.size()));
+}
+
 /// Parse the arguments of a macro invocation up to (not including) the
 /// closing paren; raw parameters take their arguments as token sequences.
 /// Skips to the closing paren and returns true on error.
