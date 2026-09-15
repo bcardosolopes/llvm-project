@@ -3306,6 +3306,13 @@ def err_macro_defaulted_deleted : Error<
   "an expression macro cannot be %select{defaulted|deleted}0">;
 def err_macro_static_member_via_object : Error<
   "static member expression macro %0 must be invoked as %1">;
+def err_macro_raw_member_dependent : Error<
+  "member expression macro %0 has a token sequence parameter, but the "
+  "object's type was not known when the invocation was parsed, so the "
+  "argument was parsed as an expression">;
+def note_macro_raw_member_dependent : Note<
+  "invoke the macro on an object whose type is known at the point of "
+  "invocation to pass raw tokens">;
 def err_operator_macro_requires_operator : Error<
   "%0 is an expression macro and can only be invoked with operator syntax">;
 def err_macro_parameter_pack : Error<

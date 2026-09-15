@@ -551,18 +551,24 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
                                                  bool Speculative) {
   // The probe must not commit Sema to anything diagnostic-visible: parser
   // and Sema errors are suppressed wholesale (the SFINAETrap additionally
-  // keeps Sema's error bookkeeping balanced), and failure is reported by an
-  // invalid or error-containing result.
+  // keeps Sema's error bookkeeping balanced), typo correction is disabled
+  // (a "corrected" expression is not the expression that was asked about),
+  // and failure is reported by an invalid or error-containing result or by
+  // the trap having fired.
   std::optional<Sema::SFINAETrap> Trap;
   DiagnosticsEngine &Diags = Actions.getDiagnostics();
   bool OldSuppress = Diags.getSuppressAllDiagnostics();
+  bool OldDisableTypo = Actions.DisableTypoCorrection;
   if (Speculative) {
-    Trap.emplace(Actions);
+    Trap.emplace(Actions, /*ForValidityCheck=*/true);
+    Actions.DisableTypoCorrection = true;
     Diags.setSuppressAllDiagnostics(true);
   }
   auto RestoreDiags = llvm::make_scope_exit([&] {
-    if (Speculative)
+    if (Speculative) {
       Diags.setSuppressAllDiagnostics(OldSuppress);
+      Actions.DisableTypoCorrection = OldDisableTypo;
+    }
   });
 
   SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
@@ -648,6 +654,10 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
     Diag(Tok, diag::err_macro_expansion_not_single_expression);
     Result = ExprError();
   }
+  // Any error the trap absorbed invalidates the probe, even if Sema
+  // recovered a superficially usable expression.
+  if (Speculative && Trap->hasErrorOccurred())
+    Result = ExprError();
   // Drain what is left so the enclosing token stream resumes cleanly.
   while (Tok.isNot(tok::eof))
     ConsumeAnyToken();

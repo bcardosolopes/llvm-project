@@ -96,6 +96,22 @@ static bool containsConstevalBlockDecl(const Stmt *S,
 
 using LocalDeclLevels = SmallVector<SmallVector<const NamedDecl *, 4>, 4>;
 
+/// Case labels, ordinary labels, and statement attributes do not introduce a
+/// scope: a declaration in their substatement is declared directly in the
+/// enclosing block.
+static const Stmt *skipLabelsAndAttributes(const Stmt *S) {
+  while (true) {
+    if (const auto *SC = dyn_cast_or_null<SwitchCase>(S))
+      S = SC->getSubStmt();
+    else if (const auto *LS = dyn_cast_or_null<LabelStmt>(S))
+      S = LS->getSubStmt();
+    else if (const auto *AS = dyn_cast_or_null<AttributedStmt>(S))
+      S = AS->getSubStmt();
+    else
+      return S;
+  }
+}
+
 /// Collect the local declarations visible before the statement matched by
 /// \p Contains, one inner vector per lexical scope, outermost first. New
 /// levels start when descending into a nested scope, so a caller can
@@ -106,41 +122,51 @@ static bool collectVisibleLocalDeclsBefore(
   if (!S)
     return false;
 
-  if (auto *DS = dyn_cast<DeclStmt>(S)) {
-    if (Contains(DS)) {
-      collectLocalDeclsUpToTarget(DS, Contains, Levels.back());
+  // Descend into a nested scope: everything below this statement is a new
+  // shadowing level.
+  auto DescendInto = [&](const Stmt *Child) {
+    Levels.emplace_back();
+    return collectVisibleLocalDeclsBefore(Child, Contains, Levels);
+  };
+  // Handle a statement that shares the current scope (a declaration, or the
+  // statement holding the target). Returns true if the walk is done, with
+  // \p Found as the result.
+  auto InCurrentScope = [&](const Stmt *Child, bool &Found) {
+    Child = skipLabelsAndAttributes(Child);
+    if (const auto *DS = dyn_cast_or_null<DeclStmt>(Child)) {
+      if (Contains(DS)) {
+        collectLocalDeclsUpToTarget(DS, Contains, Levels.back());
+        Found = true;
+        return true;
+      }
+      collectLocalDeclsForLookup(DS, Levels.back());
+      return false;
+    }
+    if (Child && Contains(Child)) {
+      Found = DescendInto(Child);
       return true;
     }
-    collectLocalDeclsForLookup(DS, Levels.back());
     return false;
+  };
+
+  if (isa<DeclStmt>(S)) {
+    bool Found = false;
+    InCurrentScope(S, Found);
+    return Found;
   }
 
   if (auto *CS = dyn_cast<CompoundStmt>(S)) {
     for (const Stmt *Child : CS->body()) {
-      if (auto *DS = dyn_cast<DeclStmt>(Child)) {
-        if (Contains(DS)) {
-          collectLocalDeclsUpToTarget(DS, Contains, Levels.back());
-          return true;
-        }
-        collectLocalDeclsForLookup(DS, Levels.back());
-        continue;
-      }
-
-      if (Contains(Child))
-        {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(Child, Contains, Levels);
-    }
+      bool Found = false;
+      if (InCurrentScope(Child, Found))
+        return Found;
     }
     return false;
   }
 
   if (auto *IS = dyn_cast<IfStmt>(S)) {
     if (Contains(IS->getInit()))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Levels);
-    }
+      return DescendInto(IS->getInit());
     collectVisibleLocalDeclsBefore(IS->getInit(), Contains, Levels);
 
     auto AddCondDecls = [&] {
@@ -150,36 +176,24 @@ static bool collectVisibleLocalDeclsBefore(
 
     if (Contains(IS->getThen())) {
       AddCondDecls();
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(IS->getThen(), Contains, Levels);
-    }
+      return DescendInto(IS->getThen());
     }
     if (Contains(IS->getElse())) {
       AddCondDecls();
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(IS->getElse(), Contains, Levels);
-    }
+      return DescendInto(IS->getElse());
     }
     return false;
   }
 
   if (auto *SS = dyn_cast<SwitchStmt>(S)) {
     if (Contains(SS->getInit()))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Levels);
-    }
+      return DescendInto(SS->getInit());
     collectVisibleLocalDeclsBefore(SS->getInit(), Contains, Levels);
 
     if (Contains(SS->getBody())) {
       if (const DeclStmt *Cond = SS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Levels.back());
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(SS->getBody(), Contains, Levels);
-    }
+      return DescendInto(SS->getBody());
     }
     return false;
   }
@@ -188,62 +202,41 @@ static bool collectVisibleLocalDeclsBefore(
     if (Contains(WS->getBody())) {
       if (const DeclStmt *Cond = WS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Levels.back());
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(WS->getBody(), Contains, Levels);
-    }
+      return DescendInto(WS->getBody());
     }
     return false;
   }
 
   if (auto *FS = dyn_cast<ForStmt>(S)) {
     if (Contains(FS->getInit()))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Levels);
-    }
+      return DescendInto(FS->getInit());
     collectVisibleLocalDeclsBefore(FS->getInit(), Contains, Levels);
 
     if (Contains(FS->getBody())) {
       if (const DeclStmt *Cond = FS->getConditionVariableDeclStmt())
         collectLocalDeclsForLookup(Cond, Levels.back());
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(FS->getBody(), Contains, Levels);
-    }
+      return DescendInto(FS->getBody());
     }
     return false;
   }
 
   if (auto *FRS = dyn_cast<CXXForRangeStmt>(S)) {
     if (Contains(FRS->getInit()))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Levels);
-    }
+      return DescendInto(FRS->getInit());
     collectVisibleLocalDeclsBefore(FRS->getInit(), Contains, Levels);
 
     if (Contains(FRS->getLoopVarStmt()))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(FRS->getLoopVarStmt(), Contains, Levels);
-    }
+      return DescendInto(FRS->getLoopVarStmt());
     collectVisibleLocalDeclsBefore(FRS->getLoopVarStmt(), Contains, Levels);
 
     if (Contains(FRS->getBody()))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(FRS->getBody(), Contains, Levels);
-    }
+      return DescendInto(FRS->getBody());
     return false;
   }
 
   if (auto *TS = dyn_cast<CXXTryStmt>(S)) {
-    if (Contains(TS->getTryBlock())) {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(TS->getTryBlock(), Contains,
-                                            Levels);
-    }
+    if (Contains(TS->getTryBlock()))
+      return DescendInto(TS->getTryBlock());
     for (unsigned I = 0, N = TS->getNumHandlers(); I != N; ++I) {
       const CXXCatchStmt *H = TS->getHandler(I);
       if (!Contains(H))
@@ -251,19 +244,14 @@ static bool collectVisibleLocalDeclsBefore(
       Levels.emplace_back();
       if (const VarDecl *Ex = H->getExceptionDecl())
         addLocalDeclForLookup(Ex, Levels.back());
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(H->getHandlerBlock(), Contains,
-                                            Levels);
+      return DescendInto(H->getHandlerBlock());
     }
     return false;
   }
 
   for (const Stmt *Child : S->children())
     if (Contains(Child))
-      {
-      Levels.emplace_back();
-      return collectVisibleLocalDeclsBefore(Child, Contains, Levels);
-    }
+      return DescendInto(Child);
   return false;
 }
 

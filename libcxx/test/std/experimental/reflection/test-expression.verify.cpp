@@ -39,6 +39,18 @@ __macro probe_and_use(T&& e) {
 }
 int bad = probe_and_use!(next()); // expected-error {{expansion of expression macro would evaluate this argument more than once}}
 
+// Typo correction must not resurrect a probe: 'existin' is not a valid
+// expression even though 'existing' is.
+constexpr int existing() { return 7; }
+
+template <class T>
+__macro typo(T&&) {
+  if (auto e = test_expression(^^{ existin() }))
+    return ^^{ \(*e) };
+  return ^^{ 0 };
+}
+static_assert(typo!(0) == 0);
+
 // A failed probe reports nullopt and emits no diagnostics, even for wildly
 // invalid token soup.
 template <class T>

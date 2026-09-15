@@ -572,6 +572,7 @@ enum : unsigned {
   __metafn_operator_of_token,
   __metafn_is_constant_expression,
   __metafn_test_expression,
+  __metafn_as_lvalue,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3234,6 +3235,18 @@ consteval auto test_expression(token_sequence tokens) -> optional<info> {
   if (__r == info{})
     return nullopt;
   return __r;
+}
+
+// Views a reflected expression as an lvalue, as if it had been bound to
+// `auto&& tmp` and then named: identity for an lvalue, a change of view for
+// an xvalue, a materialized temporary (living until the end of the enclosing
+// full-expression) for a prvalue. This is how a macro's expansion reproduces
+// the semantics of a function's named parameter for an operand it received
+// unevaluated -- e.g. the `t` of [range.access.begin]:
+//
+//   return ^^{ auto(\(as_lvalue(r)).begin()) };
+consteval auto as_lvalue(info r) -> info {
+  return __metafunction(detail::__metafn_as_lvalue, r);
 }
 
 // Each token of the sequence as its own single-token sequence.

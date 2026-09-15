@@ -7489,6 +7489,19 @@ ExprResult Sema::BuildMemberMacroInvocation(
   if (GetMacroParameterShape(R, RawParams))
     return ExprError();
 
+  // If the invocation was parsed with the object's type unknown, every
+  // argument was parsed as an expression; raw tokens cannot be recovered
+  // from it now. (An argument that already has token-sequence type was
+  // captured raw when the shape was known, e.g. within the class itself.)
+  for (unsigned I = 0, N = RawParams.size(); I != N; ++I)
+    if (RawParams[I] && I < Args.size() && Args[I] &&
+        !Args[I]->getType()->isTokenSequenceType()) {
+      Diag(NameInfo.getLoc(), diag::err_macro_raw_member_dependent)
+          << R.getLookupName();
+      Diag(Args[I]->getExprLoc(), diag::note_macro_raw_member_dependent);
+      return ExprError();
+    }
+
   // The object expression binds to the explicit object parameter.
   Expr *Object = Base;
   if (IsArrow) {

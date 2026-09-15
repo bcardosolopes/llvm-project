@@ -368,54 +368,80 @@ are. `std::constexpr_warning_str` and `std::constexpr_print_str` work in
 macro bodies too (a warning does not suppress the expansion), which gives
 macros user-authored warnings under `-Wconstexpr-messages`.
 
-### Probing validity
+### Reproducing named-parameter semantics: `as_lvalue`
 
-The other half of a spec ladder is "if *E* is a valid expression":
+A specification like [range.access.begin] speaks about a *named parameter*
+`t` — a named forwarding reference, hence an lvalue no matter how the
+argument was passed. A macro's `\(r)` preserves the argument's original
+value category instead, so an expansion that writes `\(r).begin()` on an
+rvalue argument would select `begin() &&` where the CPO selects `begin() &`.
+The primitive that restores the function's semantics is
 
 ```cpp
-test_expression(token_sequence) -> optional<info>
+as_lvalue(info) -> info
 ```
 
-speculatively parses the tokens as a single expression at the expansion
-site, with all diagnostics suppressed. On failure it returns `nullopt`; on
-success, a reflection of the *already-parsed* expression, so the macro can
-inspect it (`type_of` gives its decltype) and interpolate it — reusing the
-parse rather than re-emitting the tokens, and evaluating the interpolated
-arguments inside it exactly once. The evaluate-once analysis sees through
-the probed expression, so probing an argument and also interpolating it
-directly is still diagnosed.
+a reflection of the expression viewed as if it had been bound to
+`auto&& tmp` and then named: identity for an lvalue, a change of view for an
+xvalue, a materialized temporary (living to the end of the enclosing
+full-expression) for a prvalue. It preserves the source-expression chain, so
+the evaluate-once analysis still counts one evaluation.
 
-[range.access.begin] then reads off the page:
+With that, [range.access.begin] reads off the page — every rung's validity
+is expressible from `R`, so ordinary requires-expressions ask the questions
+and the expansion answers them:
 
 ```cpp
 inline constexpr struct begin_fn {
   template <class Self, class R>
   __macro operator()(this Self, R&& r) {
     if constexpr (std::is_array_v<std::remove_reference_t<R>>) {
-      return ^^{ (\(r) + 0) };
+      return ^^{ (\(as_lvalue(r)) + 0) };
+    } else if constexpr (requires(R&& t) {
+                           { auto(t.begin()) } -> std::input_or_output_iterator;
+                         }) {
+      return ^^{ auto(\(as_lvalue(r)).begin()) };
+    } else if constexpr (requires(R&& t) {
+                           { impl::adl_begin(t) } -> std::input_or_output_iterator;
+                         }) {
+      return ^^{ ::rng::impl::adl_begin(\(as_lvalue(r))) };
     } else {
-      if (auto m = test_expression(^^{ (\(r).begin()) });
-          m && extract<bool>(substitute(^^iterish, {type_of(*m)})))
-        return ^^{ \(*m) };
-      if (auto f = test_expression(^^{ (::rng::impl::adl_begin(\(r))) });
-          f && extract<bool>(substitute(^^iterish, {type_of(*f)})))
-        return ^^{ \(*f) };
       std::constexpr_error_str("no-begin", "no viable begin for this type");
     }
   }
 } begin{};
 ```
 
-Two notes on that shape. Probing is SFINAE-flavored: template
-instantiations it triggers are permanent, and an error outside the probed
-expression's immediate context is (deliberately) swallowed rather than
-diagnosed — validity means "parsed and type-checked", the same contract as
-`requires`. And the ADL rung is spelled through a qualified helper
-(`adl_begin` in a namespace with the `void begin(auto&) = delete` poison
-pill) rather than a bare `begin(...)`: expansion tokens are looked up at the
-call site, where the CPO object itself is what a bare `begin` would find.
-The usual hygiene idiom — refer to your own things by qualification or
-reflection, not by spelling — is load-bearing here.
+`auto(...)` is the spec's decay-copy; the ADL rung is spelled through a
+qualified helper (`adl_begin`, next to the `void begin(auto&) = delete`
+poison pill) rather than a bare `begin(...)`, because expansion tokens are
+looked up at the call site, where a bare `begin` would find the CPO object
+itself. The usual hygiene idiom — refer to your own things by qualification
+or reflection, not by spelling — is load-bearing here.
+
+### Probing validity
+
+When validity genuinely depends on the exact expansion-site expression — on
+names or scopes that cannot be represented from the macro's template
+arguments — requires-expressions cannot ask the question. For those cases:
+
+```cpp
+test_expression(token_sequence) -> optional<info>
+```
+
+speculatively parses the tokens as a single expression at the expansion
+site, with all diagnostics suppressed and typo correction disabled. On
+failure it returns `nullopt`; on success, a reflection of the
+*already-parsed* expression, so the macro can inspect it (`type_of` gives
+its decltype) and interpolate it — reusing the parse rather than re-emitting
+the tokens, and evaluating the interpolated arguments inside it exactly
+once. The evaluate-once analysis sees through the probed expression, so
+probing an argument and also interpolating it directly is still diagnosed.
+
+Probing is SFINAE-flavored: template instantiations it triggers are
+permanent, and an error outside the probed expression's immediate context is
+(deliberately) swallowed rather than diagnosed — validity means "parsed and
+type-checked", the same contract as `requires`.
 
 ## Name lookup and hygiene
 

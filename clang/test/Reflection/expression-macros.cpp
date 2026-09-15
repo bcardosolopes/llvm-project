@@ -504,3 +504,58 @@ __macro warned(int x) {
 int d = warned!(4);
 
 }  // namespace N15
+
+namespace N16 {
+
+// Case and ordinary labels do not introduce scopes: locals declared under
+// them are visible to a deferred expansion in the same block.
+__macro use(auto&& x) { return ^^{ local + \(x) }; }
+
+template <class T>
+constexpr int in_case(T t) {
+  switch (0) {
+  case 0:
+    int local = 4;
+    return use!(t);
+  }
+  return 0;
+}
+static_assert(in_case(3) == 7);
+
+template <class T>
+constexpr int in_label(T t) {
+here:
+  int local = 10;
+  return use!(t);
+}
+static_assert(in_label(3) == 13);
+
+// A raw member macro cannot be invoked through an object of unknown
+// dependent type: the argument tokens were already parsed as an expression.
+struct Raw {
+  __macro raw(this Raw const&, token_sequence t) { return ^^{ (\(t)) }; }
+  __macro expr(this Raw const&, int x) { return ^^{ \(x) }; }
+};
+
+template <class T>
+constexpr int call_raw(T const& t) {
+  return t.raw!(1 + 2);  // expected-error {{member expression macro 'raw' has a token sequence parameter, but the object's type was not known when the invocation was parsed, so the argument was parsed as an expression}} \
+                         // expected-note {{invoke the macro on an object whose type is known at the point of invocation to pass raw tokens}}
+}
+constexpr int bad = call_raw(Raw{});  // expected-note {{in instantiation of function template specialization 'N16::call_raw<N16::Raw>' requested here}} \
+                                      // expected-error {{constexpr variable 'bad' must be initialized by a constant expression}}
+
+// An expression-parameter member macro through the same dependent path is
+// fine, as is a raw member macro on a known (current-instantiation) type.
+template <class T>
+constexpr int call_expr(T const& t) { return t.expr!(5); }
+static_assert(call_expr(Raw{}) == 5);
+
+template <class T>
+struct Holder {
+  Raw r;
+  constexpr int go() const { return r.raw!(2 + 3); }
+};
+static_assert(Holder<int>{}.go() == 5);
+
+}  // namespace N16

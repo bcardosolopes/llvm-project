@@ -21904,6 +21904,13 @@ static bool readConstexprDiagString(EvalInfo &Info, const Expr *PtrE,
   APSInt Len;
   if (!EvaluateInteger(LenE, Len, Info))
     return false;
+  // Reject negative and absurd lengths outright rather than walking with a
+  // wrapped count (the library facade always passes a size_t, but the
+  // builtin is callable directly).
+  if (Len.isNegative() || Len.getActiveBits() > 20) {
+    Info.FFDiag(LenE);
+    return false;
+  }
   uint64_t N = Len.getZExtValue();
   LValue Ptr;
   if (!EvaluatePointer(PtrE, Ptr, Info))

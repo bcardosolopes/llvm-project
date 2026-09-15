@@ -796,6 +796,11 @@ static bool test_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
                             SourceRange Range, ArrayRef<Expr *> Args,
                             Decl *ContainingDecl);
 
+static bool as_lvalue(APValue &Result, ASTContext &C, MetaActions &Meta,
+                      EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                      QualType ResultTy, SourceRange Range,
+                      ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
 static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -944,6 +949,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
   { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
   { Metafunction::MFRK_metaInfo, 1, 1, test_expression },
+  { Metafunction::MFRK_metaInfo, 1, 1, as_lvalue },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3205,6 +3211,45 @@ bool test_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
   if (!E)
     return SetAndSucceed(Result, makeReflection(nullptr));
   return SetAndSucceed(Result, APValue(ReflectionKind::Expression, E));
+}
+
+// View a reflected expression as an lvalue, as if it had been bound to
+// 'auto&& tmp' and then named: identity for an lvalue, an lvalue view for an
+// xvalue, and a materialized temporary (living until the end of the
+// enclosing full-expression) for a prvalue. This is how a macro reproduces
+// the semantics of a function's named parameter -- e.g. the 't' of
+// [range.access.begin] -- for an operand it received unevaluated.
+bool as_lvalue(APValue &Result, ASTContext &C, MetaActions &Meta,
+               EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+               QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+               Decl *ContainingDecl) {
+  assert(ResultTy == C.MetaInfoTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  if (RV.getReflectionKind() != ReflectionKind::Expression)
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
+        << 2 << DescriptionOf(RV) << Range;
+
+  Expr *E = RV.getReflectedExpression();
+  if (E->isLValue())
+    return SetAndSucceed(Result, RV);
+
+  Expr *View;
+  if (E->isXValue()) {
+    // The object already exists; only the view changes. A unique opaque
+    // value keeps the source-expression chain intact for the evaluate-once
+    // analysis and is emitted in place.
+    auto *OVE = new (C) OpaqueValueExpr(E->getExprLoc(), E->getType(),
+                                        VK_LValue, OK_Ordinary, E);
+    OVE->setIsUnique(true);
+    View = OVE;
+  } else {
+    View = new (C) MaterializeTemporaryExpr(E->getType(), E,
+                                            /*BoundToLvalueReference=*/true);
+  }
+  return SetAndSucceed(Result, APValue(ReflectionKind::Expression, View));
 }
 
 bool template_of(APValue &Result, ASTContext &C, MetaActions &Meta,
