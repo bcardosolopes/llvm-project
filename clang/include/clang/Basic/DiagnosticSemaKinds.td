@@ -3285,6 +3285,11 @@ def err_macro_token_argument_not_constant : Error<
   "token sequence argument of expression macro is not a constant expression">;
 def err_macro_evaluation_failed : Error<
   "expression macro %0 did not produce a token sequence">;
+def err_macro_reported_error : Error<
+  "expression macro %0 reported an error">;
+def err_builtin_constexpr_diag_arg : Error<
+  "argument %0 of '%1' must be %select{an integer|a pointer to 'char'|"
+  "a pointer to 'char' or 'char8_t'}2">;
 def err_macro_argument_evaluated_twice : Error<
   "expansion of expression macro would evaluate this argument more than once">;
 def note_macro_expanded_here : Note<"in expansion of expression macro %0">;

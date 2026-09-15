@@ -461,3 +461,46 @@ constexpr bool lazy() {
 static_assert(lazy());
 
 }  // namespace N14
+
+namespace N15 {
+
+// P2758 in a macro body: a constexpr_error is the macro explicitly declining
+// to produce an expansion. In a plain context that is an error carrying the
+// macro's message; during substitution it makes the invocation an invalid
+// expression, so a requires-expression evaluates to false instead.
+// (The message note points at the __builtin_constexpr_diag call.)
+
+__macro nope(int x) {  // expected-note {{in call to 'nope(^^(expression))'}}
+  __builtin_constexpr_diag(2, "", 0, "nope cannot be invoked", 22);  // expected-note {{constexpr message: nope cannot be invoked}}
+  return ^^{ \(x) };
+}
+
+int a = nope!(1);  // expected-error {{expression macro 'nope' reported an error}}
+
+template <class T>
+__macro sometimes(T&& x) {  // expected-note {{in call to 'sometimes<long>(^^(expression))'}}
+  if constexpr (!__is_same(__remove_cvref(T), int))
+    __builtin_constexpr_diag(2, "", 0, "only int is supported", 21);  // expected-note {{constexpr message: only int is supported}}
+  return ^^{ \(x) };
+}
+
+int b = sometimes!(2);
+long c = sometimes!(3L);  // expected-error {{expression macro 'sometimes<long>' reported an error}}
+
+template <class T>
+concept can_nope = requires(T t) { nope!(t); };
+template <class T>
+concept can_sometimes = requires(T t) { sometimes!(t); };
+
+static_assert(!can_nope<int>);        // explicit failure -> unsatisfied
+static_assert(can_sometimes<int>);
+static_assert(!can_sometimes<long>);  // ...not a hard error
+
+// A macro body can also emit a warning; the expansion is still produced.
+__macro warned(int x) {
+  __builtin_constexpr_diag(1, "macro-warn", 10, "think twice", 11);  // expected-warning {{constexpr message with tag 'macro-warn': think twice}}
+  return ^^{ \(x) };
+}
+int d = warned!(4);
+
+}  // namespace N15

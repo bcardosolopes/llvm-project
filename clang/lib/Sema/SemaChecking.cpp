@@ -217,6 +217,57 @@ static bool convertArgumentToType(Sema &S, Expr *&Value, QualType Ty) {
 
 /// Check that the first argument to __builtin_annotation is an integer
 /// and the second argument is a non-wide string literal.
+/// __builtin_constexpr_diag(kind, tag, tag_len, msg, msg_len): the engine
+/// behind std::constexpr_print_str / constexpr_warning_str /
+/// constexpr_error_str (P2758). The strings arrive flattened as pointer and
+/// length; the message may be char or char8_t.
+static bool BuiltinConstexprDiag(Sema &S, CallExpr *TheCall) {
+  if (S.checkArgCount(TheCall, 5))
+    return true;
+
+  // Custom type checking suppresses the default argument conversions; apply
+  // them so string literals decay to pointers.
+  for (unsigned I = 0; I != 5; ++I) {
+    ExprResult Conv =
+        S.DefaultFunctionArrayLvalueConversion(TheCall->getArg(I));
+    if (Conv.isInvalid())
+      return true;
+    TheCall->setArg(I, Conv.get());
+  }
+
+  auto CheckInt = [&](unsigned I) {
+    Expr *Arg = TheCall->getArg(I);
+    if (Arg->isTypeDependent() || Arg->getType()->isIntegerType())
+      return false;
+    S.Diag(Arg->getBeginLoc(), diag::err_builtin_constexpr_diag_arg)
+        << (I + 1) << "__builtin_constexpr_diag" << 0 << Arg->getSourceRange();
+    return true;
+  };
+  auto CheckCharPtr = [&](unsigned I, bool AllowChar8) {
+    Expr *Arg = TheCall->getArg(I);
+    if (Arg->isTypeDependent())
+      return false;
+    QualType T = Arg->getType();
+    if (const auto *PT = T->getAs<PointerType>()) {
+      QualType Elt = PT->getPointeeType();
+      if (Elt->isCharType() ||
+          (AllowChar8 && Elt->isChar8Type()))
+        return false;
+    }
+    S.Diag(Arg->getBeginLoc(), diag::err_builtin_constexpr_diag_arg)
+        << (I + 1) << "__builtin_constexpr_diag" << (AllowChar8 ? 2 : 1)
+        << Arg->getSourceRange();
+    return true;
+  };
+
+  if (CheckInt(0) || CheckCharPtr(1, /*AllowChar8=*/false) || CheckInt(2) ||
+      CheckCharPtr(3, /*AllowChar8=*/true) || CheckInt(4))
+    return true;
+
+  TheCall->setType(S.Context.VoidTy);
+  return false;
+}
+
 static bool BuiltinAnnotation(Sema &S, CallExpr *TheCall) {
   if (S.checkArgCount(TheCall, 2))
     return true;
@@ -3346,6 +3397,10 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
   }
   case Builtin::BI__builtin_annotation:
     if (BuiltinAnnotation(*this, TheCall))
+      return ExprError();
+    break;
+  case Builtin::BI__builtin_constexpr_diag:
+    if (BuiltinConstexprDiag(*this, TheCall))
       return ExprError();
     break;
   case Builtin::BI__builtin_addressof:

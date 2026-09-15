@@ -76,6 +76,8 @@ def ObjCBoolConstantConversion : DiagGroup<"objc-bool-constant-conversion">;
 def ConstantConversion : DiagGroup<"constant-conversion",
                                    [BitFieldConstantConversion,
                                     ObjCBoolConstantConversion]>;
+// P2758: user-authored warnings from std::constexpr_warning_str.
+def ConstexprMessages : DiagGroup<"constexpr-messages">;
 def LiteralConversion : DiagGroup<"literal-conversion">;
 def StringConversion : DiagGroup<"string-conversion">;
 def SignConversion : DiagGroup<"sign-conversion">;

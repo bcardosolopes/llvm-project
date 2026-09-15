@@ -1,0 +1,111 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Copyright 2026 Bloomberg Finance L.P.
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef _LIBCPP_DEBUGGING
+#define _LIBCPP_DEBUGGING
+
+/*
+    debugging synopsis  (P2758: emitting messages at compile time)
+
+namespace std {
+  // exposition-only
+  struct tag-string;
+
+  constexpr void constexpr_print_str(string_view) noexcept;
+  constexpr void constexpr_print_str(u8string_view) noexcept;
+  constexpr void constexpr_print_str(tag-string, string_view) noexcept;
+  constexpr void constexpr_print_str(tag-string, u8string_view) noexcept;
+  constexpr void constexpr_warning_str(tag-string, string_view) noexcept;
+  constexpr void constexpr_warning_str(tag-string, u8string_view) noexcept;
+  constexpr void constexpr_error_str(tag-string, string_view) noexcept;
+  constexpr void constexpr_error_str(tag-string, u8string_view) noexcept;
+}
+
+*/
+
+#include <__config>
+#include <string_view>
+#include <type_traits>
+
+#if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
+#  pragma GCC system_header
+#endif
+
+#if _LIBCPP_STD_VER >= 26 && __has_builtin(__builtin_constexpr_diag)
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+// The exposition-only tag-string: a compile-time string restricted to
+// characters that are safe to expose as a diagnostic control (letters,
+// digits, '_', '-', '=').
+struct __tag_string {
+  string_view __str_;
+
+  template <class _Tp>
+    requires is_convertible_v<const _Tp&, string_view>
+  consteval __tag_string(const _Tp& __s) : __str_(__s) {
+    for (char __c : __str_)
+      if (!((__c >= 'a' && __c <= 'z') || (__c >= 'A' && __c <= 'Z') ||
+            (__c >= '0' && __c <= '9') || __c == '_' || __c == '-' ||
+            __c == '=')) {
+        // The builtin rejects the malformed tag, so this consteval
+        // constructor is not a constant expression -- diagnosed here, at the
+        // construction of the tag, rather than at its eventual use.
+        __builtin_constexpr_diag(2, __str_.data(), __str_.size(), "", 0);
+        break;
+      }
+  }
+};
+
+inline constexpr void constexpr_print_str(string_view __msg) noexcept {
+  __builtin_constexpr_diag(0, "", 0, __msg.data(), __msg.size());
+}
+inline constexpr void constexpr_print_str(u8string_view __msg) noexcept {
+  __builtin_constexpr_diag(0, "", 0, __msg.data(), __msg.size());
+}
+inline constexpr void constexpr_print_str(__tag_string __tag,
+                                          string_view __msg) noexcept {
+  __builtin_constexpr_diag(0, __tag.__str_.data(), __tag.__str_.size(),
+                           __msg.data(), __msg.size());
+}
+inline constexpr void constexpr_print_str(__tag_string __tag,
+                                          u8string_view __msg) noexcept {
+  __builtin_constexpr_diag(0, __tag.__str_.data(), __tag.__str_.size(),
+                           __msg.data(), __msg.size());
+}
+
+inline constexpr void constexpr_warning_str(__tag_string __tag,
+                                            string_view __msg) noexcept {
+  __builtin_constexpr_diag(1, __tag.__str_.data(), __tag.__str_.size(),
+                           __msg.data(), __msg.size());
+}
+inline constexpr void constexpr_warning_str(__tag_string __tag,
+                                            u8string_view __msg) noexcept {
+  __builtin_constexpr_diag(1, __tag.__str_.data(), __tag.__str_.size(),
+                           __msg.data(), __msg.size());
+}
+
+inline constexpr void constexpr_error_str(__tag_string __tag,
+                                          string_view __msg) noexcept {
+  __builtin_constexpr_diag(2, __tag.__str_.data(), __tag.__str_.size(),
+                           __msg.data(), __msg.size());
+}
+inline constexpr void constexpr_error_str(__tag_string __tag,
+                                          u8string_view __msg) noexcept {
+  __builtin_constexpr_diag(2, __tag.__str_.data(), __tag.__str_.size(),
+                           __msg.data(), __msg.size());
+}
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif // _LIBCPP_STD_VER >= 26 && __has_builtin(__builtin_constexpr_diag)
+
+#endif // _LIBCPP_DEBUGGING

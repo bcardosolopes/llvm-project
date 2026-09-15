@@ -7709,7 +7709,15 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
   SmallVector<PartialDiagnosticAt, 8> Notes;
   if (!Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context, Notes) ||
       !Result.isTokenSequence()) {
-    Diag(LParenLoc, diag::err_macro_evaluation_failed) << Macro;
+    // A std::constexpr_error_str in the body is the macro explicitly
+    // declining to produce an expansion, not a bug in it.
+    bool Explicit = llvm::any_of(Notes, [](const PartialDiagnosticAt &PD) {
+      return PD.second.getDiagID() == diag::note_constexpr_message ||
+             PD.second.getDiagID() == diag::note_constexpr_message_tag;
+    });
+    Diag(LParenLoc, Explicit ? diag::err_macro_reported_error
+                             : diag::err_macro_evaluation_failed)
+        << Macro;
     for (const PartialDiagnosticAt &PD : Notes)
       Diag(PD.first, PD.second);
     return ExprError();

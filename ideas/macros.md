@@ -343,9 +343,30 @@ and `,` that is the point — an `operator&&` macro can be lazy, which no
 overloaded `operator&&` can — and for the rest it is on the macro's author.
 
 Calling an operator macro with function-call syntax (`operator+(a, b)`) is an
-error, as is naming any macro; and satisfaction checking expands macros like
-any other use, so a macro whose body or expansion fails inside a
-requires-expression is a hard error, as a function body's would be.
+error, as is naming any macro.
+
+### Explicit failure
+
+A macro can decline to produce an expansion by calling
+`std::constexpr_error_str` (P2758, `<debugging>`) in its body. Everywhere
+else `constexpr_error_str` follows the paper: the message is emitted, the
+program is ill-formed, and the evaluation *remains constant* — but a macro
+body evaluation that reports an error produces no expansion, so the
+invocation is an **invalid expression**. During substitution that is a
+substitution failure: `requires { v[i]; }` is `false` rather than an error.
+In a plain context the invocation reports the macro's message:
+
+```
+error: expression macro 'operator[]' reported an error
+note: constexpr message: index must be a constant expression
+```
+
+This is what lets `ranges::begin`-style ladders be written as literal
+if-else: the "ill-formed" rungs are `constexpr_error_str` calls, observable
+through `requires` exactly as the CPO machinery's constrained overload sets
+are. `std::constexpr_warning_str` and `std::constexpr_print_str` work in
+macro bodies too (a warning does not suppress the expansion), which gives
+macros user-authored warnings under `-Wconstexpr-messages`.
 
 ## Name lookup and hygiene
 

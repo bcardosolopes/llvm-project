@@ -933,6 +933,12 @@ namespace {
     llvm::SmallPtrSet<const VarDecl *, 8> DoExprInitVarDecls;
     bool EvaluatingSyntheticDoExprFrame = false;
 
+    /// Whether this evaluation is of an expression macro's body. A
+    /// std::constexpr_error_str reached here fails the evaluation (so the
+    /// invocation produces no expansion, making the macro invocation an
+    /// invalid expression) instead of emitting the error directly.
+    bool EvaluatingMacroBody = false;
+
     struct EvaluatingConstructorRAII {
       EvalInfo &EI;
       ObjectUnderConstruction Object;
@@ -21889,6 +21895,120 @@ static bool EvaluateAtomic(const Expr *E, const LValue *This, APValue &Result,
 //===----------------------------------------------------------------------===//
 
 namespace {
+/// Read a (pointer, length) string argument pair of __builtin_constexpr_diag
+/// through the evaluator's memory model, so string literals and constexpr
+/// arrays (including char8_t ones) work uniformly.
+static bool readConstexprDiagString(EvalInfo &Info, const Expr *PtrE,
+                                    const Expr *LenE,
+                                    SmallVectorImpl<char> &Out) {
+  APSInt Len;
+  if (!EvaluateInteger(LenE, Len, Info))
+    return false;
+  uint64_t N = Len.getZExtValue();
+  LValue Ptr;
+  if (!EvaluatePointer(PtrE, Ptr, Info))
+    return false;
+  QualType CharTy = PtrE->getType()->getPointeeType();
+  for (uint64_t I = 0; I != N; ++I) {
+    APValue Char;
+    if (!handleLValueToRValueConversion(Info, PtrE, CharTy, Ptr, Char))
+      return false;
+    Out.push_back(static_cast<char>(Char.getInt().getExtValue()));
+    if (!HandleLValueArrayAdjustment(Info, PtrE, Ptr, CharTy, 1))
+      return false;
+  }
+  return true;
+}
+
+/// P2758 (std::constexpr_print_str / constexpr_warning_str /
+/// constexpr_error_str): emit a message during constant evaluation.
+/// Kinds: 0 = print (note), 1 = warning, 2 = error. A kind-2 call emits the
+/// error but remains a constant expression (the *program* is ill-formed) --
+/// except inside an expression-macro body, where it fails the evaluation so
+/// that the invocation produces no expansion and the macro invocation is an
+/// invalid expression (observable through a requires-expression during
+/// substitution).
+static bool EvaluateBuiltinConstexprDiag(EvalInfo &Info, const CallExpr *E) {
+  assert(E->getNumArgs() == 5 && "Sema checks the arity");
+
+  APSInt KindVal;
+  if (!EvaluateInteger(E->getArg(0), KindVal, Info))
+    return false;
+  SmallString<32> Tag;
+  SmallString<128> Msg;
+  if (!readConstexprDiagString(Info, E->getArg(1), E->getArg(2), Tag) ||
+      !readConstexprDiagString(Info, E->getArg(3), E->getArg(4), Msg))
+    return false;
+
+  uint64_t Kind = KindVal.getZExtValue();
+  if (KindVal.isNegative() || Kind > 2) {
+    Info.FFDiag(E);
+    return false;
+  }
+  for (char C : Tag)
+    if (!isAsciiIdentifierContinue(C) && C != '-' && C != '=') {
+      Info.FFDiag(E, diag::note_constexpr_diag_bad_tag);
+      return false;
+    }
+
+  // Explicit failure of an expression macro: record the message as the
+  // reason the evaluation failed and produce no expansion.
+  if (Kind == 2 && Info.EvaluatingMacroBody) {
+    if (Tag.empty())
+      Info.FFDiag(E, diag::note_constexpr_message) << Msg.str();
+    else
+      Info.FFDiag(E, diag::note_constexpr_message_tag) << Tag.str()
+                                                       << Msg.str();
+    return false;
+  }
+
+  // Only a manifestly constant evaluation reports; speculative evaluations,
+  // constant folding of runtime expressions, and the potential-constant
+  // check of a constexpr function's definition all stay silent (and stay
+  // constant).
+  if (!Info.InConstantContext || Info.checkingPotentialConstantExpression() ||
+      Info.SpeculativeEvaluationDepth != 0)
+    return true;
+
+  DiagnosticsEngine &Diags = Info.Ctx.getDiagnostics();
+  // Report at the innermost frame that is in user code: the builtin call
+  // itself typically sits inside the library facade in a system header,
+  // where warnings would be suppressed and the location would be useless.
+  SourceLocation Loc = E->getExprLoc();
+  const SourceManager &SM = Info.Ctx.getSourceManager();
+  for (const CallStackFrame *F = Info.CurrentCall;
+       F && Loc.isValid() && SM.isInSystemHeader(Loc); F = F->Caller)
+    Loc = F->getCallRange().getBegin();
+  // A print is a free-standing note; make sure it is not suppressed as a
+  // note trailing an ignored diagnostic.
+  if (Kind == 0)
+    Diags.setLastDiagnosticIgnored(false);
+  switch (Kind) {
+  case 0:
+    if (Tag.empty())
+      Diags.Report(Loc, diag::note_constexpr_message) << Msg.str();
+    else
+      Diags.Report(Loc, diag::note_constexpr_message_tag) << Tag.str()
+                                                          << Msg.str();
+    break;
+  case 1:
+    if (Tag.empty())
+      Diags.Report(Loc, diag::warn_constexpr_message) << Msg.str();
+    else
+      Diags.Report(Loc, diag::warn_constexpr_message_tag) << Tag.str()
+                                                          << Msg.str();
+    break;
+  case 2:
+    if (Tag.empty())
+      Diags.Report(Loc, diag::err_constexpr_message) << Msg.str();
+    else
+      Diags.Report(Loc, diag::err_constexpr_message_tag) << Tag.str()
+                                                         << Msg.str();
+    break;
+  }
+  return true;
+}
+
 class VoidExprEvaluator
   : public ExprEvaluatorBase<VoidExprEvaluator> {
 public:
@@ -21920,6 +22040,9 @@ public:
 
     case Builtin::BI__builtin_operator_delete:
       return HandleOperatorDeleteCall(Info, E);
+
+    case Builtin::BI__builtin_constexpr_diag:
+      return EvaluateBuiltinConstexprDiag(Info, E);
 
     default:
       return false;
@@ -24549,6 +24672,7 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
   Status.Diag = &Diags;
   EvalInfo Info(Ctx, Status, EvaluationMode::ConstantExpression);
   Info.InConstantContext = true;
+  Info.EvaluatingMacroBody = true;
 
   // The parameters hold reflections and token sequences rather than values of
   // their declared types; nothing about them is evaluated from an argument.
