@@ -620,10 +620,14 @@ void ASTStmtReader::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
   unsigned NumArgs = Record.readInt();
   assert(NumArgs == E->getNumArgs() && "wrong number of arguments");
   (void)NumArgs;
+  E->setIsArrow(Record.readInt());
+  E->setMemberNameInfo(Record.readDeclarationNameInfo());
+  E->setOperatorLoc(Record.readSourceLocation());
   E->setExclaimLoc(Record.readSourceLocation());
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());
-  E->setCallee(cast<UnresolvedLookupExpr>(Record.readSubExpr()));
+  E->setCallee(cast_or_null<UnresolvedLookupExpr>(Record.readSubExpr()));
+  E->setBase(Record.readSubExpr());
   for (unsigned I = 0, N = E->getNumArgs(); I != N; ++I)
     E->setArg(I, Record.readSubExpr());
 }

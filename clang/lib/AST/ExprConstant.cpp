@@ -2888,6 +2888,7 @@ static bool HandleConversionToBool(const APValue &Val, bool &Result) {
   case APValue::Union:
   case APValue::AddrLabelDiff:
   case APValue::Reflection:
+  case APValue::TokenSequence:
     return false;
   }
 
@@ -22524,6 +22525,26 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
               Tok.setLocation(Arg->getBeginLoc());
               Tok.setAnnotationEndLoc(Arg->getEndLoc());
               Tok.setAnnotationValue(static_cast<void *>(OVE));
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedValue() || Val.isReflectedObject()) {
+              // A value (e.g. from constant_of) or object reflection:
+              // interpolate as a constant of the reflected type, so it can
+              // appear anywhere a constant can - a template argument in
+              // particular.
+              QualType QT = Val.getTypeOfReflectedResult(Info.Ctx);
+              APValue Underlying = Val.isReflectedValue()
+                                       ? Val.getReflectedValue()
+                                       : Val.getReflectedObject();
+              ExprValueKind VK =
+                  Val.isReflectedObject() ? VK_LValue : VK_PRValue;
+              OpaqueValueExpr *OVE = new (Info.Ctx)
+                  OpaqueValueExpr(SubExpr->getExprLoc(), QT, VK);
+              ConstantExpr *CE =
+                  ConstantExpr::Create(Info.Ctx, OVE, Underlying);
+
+              Token Tok = SrcTok;
+              Tok.setKind(tok::annot_primary_expr);
+              Tok.setAnnotationValue(static_cast<void *>(CE));
               NewTokens.push_back(Tok);
             } else if (Val.isReflectedIdentifier()) {
               IdentifierInfo *II = Val.getReflectedIdentifier();

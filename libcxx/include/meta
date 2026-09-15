@@ -570,6 +570,7 @@ enum : unsigned {
   __metafn_token_kind_of,
   __metafn_identifier_of_token,
   __metafn_operator_of_token,
+  __metafn_is_constant_expression,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3210,6 +3211,13 @@ consteval auto identifier_of(token_sequence tok) -> info {
 
 consteval auto operator_of(token_sequence tok) -> operators {
   return operators(__metafunction(detail::__metafn_operator_of_token, tok));
+}
+
+// Whether a reflected macro argument is a constant expression, i.e. whether
+// constant_of(r) would yield its value. This is how an operator macro decides
+// between a compile-time and a run-time expansion for an operand.
+consteval auto is_constant_expression(info r) -> bool {
+  return __metafunction(detail::__metafn_is_constant_expression, r);
 }
 
 // Each token of the sequence as its own single-token sequence.

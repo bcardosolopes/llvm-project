@@ -413,6 +413,57 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   }
 
   ExprVector Args;
+  if (ParseMacroArguments(RawParams, T, Args))
+    return ExprError();
+  if (T.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnMacroInvocation(getCurScope(), SS, II, NameLoc,
+                                      ExclaimLoc, T.getOpenLocation(), Args,
+                                      T.getCloseLocation());
+}
+
+/// Parse 'obj.name!(args)' / 'obj->name!(args)'. The member name has been
+/// consumed; the current token is '!'. The object expression binds to the
+/// macro's explicit object parameter.
+ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
+                                              tok::TokenKind OpKind,
+                                              const IdentifierInfo *II,
+                                              SourceLocation NameLoc) {
+  assert(Tok.is(tok::exclaim) && NextToken().is(tok::l_paren));
+
+  // If the object's class is not known yet (a dependent object expression),
+  // every argument is parsed as an expression.
+  SmallVector<bool, 4> RawParams;
+  bool ShapeError =
+      Actions.GetMemberMacroParameterShape(Base, OpKind, II, NameLoc, RawParams);
+
+  SourceLocation ExclaimLoc = ConsumeToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  if (ShapeError) {
+    T.skipToEnd();
+    return ExprError();
+  }
+
+  ExprVector Args;
+  if (ParseMacroArguments(RawParams, T, Args))
+    return ExprError();
+  if (T.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnMemberMacroInvocation(
+      getCurScope(), Base, OpLoc, OpKind, II, NameLoc, ExclaimLoc,
+      T.getOpenLocation(), Args, T.getCloseLocation());
+}
+
+/// Parse the arguments of a macro invocation up to (not including) the
+/// closing paren; raw parameters take their arguments as token sequences.
+/// Skips to the closing paren and returns true on error.
+bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
+                                 BalancedDelimiterTracker &T,
+                                 ExprVector &Args) {
   if (Tok.isNot(tok::r_paren)) {
     while (true) {
       unsigned Idx = Args.size();
@@ -426,7 +477,7 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
         Arg = ParseAssignmentExpression();
       if (Arg.isInvalid()) {
         T.skipToEnd();
-        return ExprError();
+        return true;
       }
       Args.push_back(Arg.get());
       if (!TryConsumeToken(tok::comma))
@@ -436,13 +487,7 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   // name!() is an empty argument list, never a single empty token sequence;
   // a raw parameter that wants to permit an empty invocation declares a
   // default argument.
-
-  if (T.consumeClose())
-    return ExprError();
-
-  return Actions.ActOnMacroInvocation(getCurScope(), SS, II, NameLoc,
-                                      ExclaimLoc, T.getOpenLocation(), Args,
-                                      T.getCloseLocation());
+  return false;
 }
 
 /// Capture the tokens of a raw (token_sequence) macro argument: balanced

@@ -3288,7 +3288,21 @@ def err_macro_evaluation_failed : Error<
 def err_macro_argument_evaluated_twice : Error<
   "expansion of expression macro would evaluate this argument more than once">;
 def note_macro_expanded_here : Note<"in expansion of expression macro %0">;
-def err_macro_member : Error<"an expression macro cannot be a class member">;
+def err_macro_member : Error<
+  "a non-static member expression macro must have an explicit object "
+  "parameter">;
+def err_macro_virtual : Error<"an expression macro cannot be virtual">;
+def err_macro_operator_kind : Error<
+  "%select{a conversion function|a literal operator|an allocation or "
+  "deallocation function|operator co_await}0 cannot be an expression macro">;
+def err_macro_operator_raw_parameter : Error<
+  "an operator expression macro cannot have a token sequence parameter">;
+def err_macro_defaulted_deleted : Error<
+  "an expression macro cannot be %select{defaulted|deleted}0">;
+def err_macro_static_member_via_object : Error<
+  "static member expression macro %0 must be invoked as %1">;
+def err_operator_macro_requires_operator : Error<
+  "%0 is an expression macro and can only be invoked with operator syntax">;
 def err_macro_parameter_pack : Error<
   "an expression macro cannot have a parameter pack">;
 def err_macro_argument_in_lambda : Error<

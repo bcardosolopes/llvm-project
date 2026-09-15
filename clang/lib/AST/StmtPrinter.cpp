@@ -2944,7 +2944,13 @@ void StmtPrinter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *S) {
 }
 
 void StmtPrinter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *S) {
-  PrintExpr(S->getCallee());
+  if (S->isMemberInvocation()) {
+    PrintExpr(S->getBase());
+    OS << (S->isArrow() ? "->" : ".");
+    S->getMemberNameInfo().printName(OS, Policy);
+  } else {
+    PrintExpr(S->getCallee());
+  }
   OS << "!(";
   for (unsigned I = 0, N = S->getNumArgs(); I != N; ++I) {
     if (I)

@@ -9359,6 +9359,22 @@ TreeTransform<Derived>::TransformCXXBuiltinTokenizeExpr(
 template <typename Derived>
 ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     CXXMacroInvocationExpr *E) {
+  // A member invocation looks its macros up in the (now known) class of the
+  // object expression.
+  if (E->isMemberInvocation()) {
+    ExprResult Base = getDerived().TransformExpr(E->getBase());
+    if (Base.isInvalid())
+      return ExprError();
+    SmallVector<Expr *, 4> Args;
+    if (getDerived().TransformExprs(E->getArgs().data(), E->getNumArgs(),
+                                    /*IsCall=*/true, Args))
+      return ExprError();
+    return getSema().BuildMemberMacroInvocation(
+        Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
+        E->getExclaimLoc(), E->getLParenLoc(), Args, E->getRParenLoc(),
+        /*InstantiationPattern=*/E);
+  }
+
   // The macros were found by ordinary lookup when the template was parsed;
   // only the declarations themselves may need transforming.
   UnresolvedLookupExpr *Old = E->getCallee();

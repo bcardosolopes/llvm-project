@@ -1421,6 +1421,15 @@ namespace {
   public:
     typedef TreeTransform<TemplateInstantiator> inherited;
 
+    /// Remember the pattern expression being instantiated: an operator or
+    /// member-access rebuild that selects an expression macro uses it to
+    /// reconstruct the locals visible at the invocation.
+    ExprResult TransformExpr(Expr *E) {
+      llvm::SaveAndRestore<const Stmt *> SavedPattern(
+          SemaRef.MacroInstantiationPattern, E);
+      return inherited::TransformExpr(E);
+    }
+
     TemplateInstantiator(Sema &SemaRef,
                          const MultiLevelTemplateArgumentList &TemplateArgs,
                          SourceLocation Loc, DeclarationName Entity,

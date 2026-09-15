@@ -37,15 +37,18 @@ template <class T>
 __macro trace(T&& value) { ... }
 ```
 
-Macros are only ever found by ordinary unqualified or qualified lookup, never
-by argument-dependent lookup. A macro name may only appear as the callee of a
-macro invocation (below); using it anywhere else is ill-formed, including
-inside a token sequence produced by another macro. Both rules follow from the
-invocation syntax: the parser has to find the macro before it parses the
-arguments.
+Macros invoked by name are only ever found by ordinary unqualified or qualified
+lookup, never by argument-dependent lookup. A macro name may only appear as the
+callee of a macro invocation (below); using it anywhere else is ill-formed,
+including inside a token sequence produced by another macro. Both rules follow
+from the invocation syntax: the parser has to find the macro before it parses
+the arguments. (Operator macros are the exception on both counts: they have no
+name at the use site and are found however operator functions are found; see
+[Member macros and operator macros](#member-macros-and-operator-macros).)
 
-A macro cannot be a class member, and cannot declare a parameter pack (both
-are diagnosed). Default arguments are allowed: `id!()` binds the default
+A macro cannot declare a parameter pack, cannot be virtual, defaulted or
+deleted, and a non-static member macro must have an explicit object parameter
+(all diagnosed). Default arguments are allowed: `id!()` binds the default
 argument expression exactly as a call would. `name!()` is an empty argument
 list — never a single empty token sequence — so a sole raw parameter needs a
 default argument (`token_sequence body = ^^{}`) for an empty invocation to be
@@ -252,6 +255,97 @@ parameters and with the instantiations of the locals visible before the
 invocation, so unqualified names in the macro's tokens resolve as they would
 have at the invocation site. This is the case that matters most, because
 `fwd!(x)` lives in generic code.
+
+## Member macros and operator macros
+
+A macro can be a class member. A non-static member macro must take its object
+through an explicit object parameter; there is no implicit-`this` form, because
+the expansion is parsed at the call site (where `this` means the *caller's*
+`this`, if any) and the only way the macro can refer to the object is as an
+expression it was handed:
+
+```cpp
+struct counter {
+  int n = 0;
+  template <class Self>
+  __macro bump(this Self&& self, int by) { return ^^{ (\(self).n += \(by)) }; }
+  static __macro make(int n) { return ^^{ counter{\(n)} }; }
+};
+c.bump!(2);   p->bump!(3);   counter::make!(1)
+```
+
+`obj.name!(args)` and `obj->name!(args)` look `name` up in the object's class
+(so a base class's macro is found through a derived object, and `->` follows
+an `operator->` chain first), bind the object expression to the explicit
+object parameter, and expand as usual; the object expression is evaluated once
+like any other argument. An unqualified `name!(args)` inside a member function
+that finds non-static member macros is an implicit member access on `*this`,
+as it would be for a function. A static member macro is a namespace-scope
+macro with a different scope, invoked as `C::name!(args)`; `obj.make!()` is
+rejected rather than given the evaluate-and-discard semantics of
+`obj.staticfn()`.
+
+Forwarding the object is `fwd!(\(self))` — the same `fwd!` as everywhere
+else, composed with interpolation. This works because two rules line up: the
+nested invocation binds not to the caller's object expression itself but to
+the opaque value that `\(self)` interpolates, and `type_of` on anything that
+is not an id-expression or member access is reference-qualified by value
+category (decltype semantics). So an lvalue object yields `counter&`, an
+rvalue `counter&&`, exactly what `static_cast<\(^^Self)&&>(\(self))` would
+produce (also valid, with `Self` interpolated as a reflection since the
+macro's template parameters are not in scope at the expansion site). The two
+`type_of` regimes agree by construction: for a named forwarding reference the
+declared type already encodes the deduced category; for an interpolated
+expression the opaque value preserves the category directly.
+
+### Operators
+
+Any overloadable operator can be a macro, except conversion functions (an
+implicit conversion sequence cannot expand a macro), allocation and
+deallocation functions and literal operators (their "arguments" are not
+operands of an expression), and `co_await` (not yet). Operator macros have
+only expression parameters, since operator syntax supplies expressions.
+
+An operator macro participates in overload resolution exactly as an operator
+function would — member and non-member candidates, argument-dependent lookup,
+built-in candidates, and (for `==` and `<=>`) reversed and rewritten
+candidates. There is no tie-breaker between a macro and a function: a class
+may provide both, and if they tie the operator is ambiguous. The only
+difference is what happens once a macro is selected: the operands are bound to
+its parameters unevaluated and the expansion replaces the operator expression.
+For a rewritten candidate the rewrite applies to the expansion (`a != b` is
+`!(expansion)`), and the requirement that a rewritten `operator==` yield
+`bool` is checked on the expansion's type, which is only known then.
+
+There is no `!` at an operator use site, and for the motivating case that is
+semantically free. `elems[0]` on a tuple:
+
+```cpp
+template <class Self, class I>
+__macro operator[](this Self&& self, I&& i) {
+  if (!is_constant_expression(i))
+    return ^^{ runtime_get(\(self), \(i)) };
+  return ^^{ get<\(constant_of(i))>(fwd!(\(self))) };
+}
+```
+
+If `constant_of(i)` succeeds, `i` is a constant expression and not evaluating
+it at run time is unobservable; otherwise the macro interpolates it and it is
+evaluated once, like a function argument. Either way the caller cannot tell it
+from a function — which is also why this beats constexpr function parameters
+for this problem: the value-dependent return type is simply the type of the
+expansion, with no new kind of function to invent.
+
+The one operator where the missing `!` hides something is sequencing. `<<`,
+`=`, `[]` and `->*` guarantee left-before-right even when overloaded; a macro
+evaluates its operands in whatever order it interpolates them. For `&&`, `||`
+and `,` that is the point — an `operator&&` macro can be lazy, which no
+overloaded `operator&&` can — and for the rest it is on the macro's author.
+
+Calling an operator macro with function-call syntax (`operator+(a, b)`) is an
+error, as is naming any macro; and satisfaction checking expands macros like
+any other use, so a macro whose body or expansion fails inside a
+requires-expression is a hard error, as a function body's would be.
 
 ## Name lookup and hygiene
 

@@ -6283,23 +6283,33 @@ public:
   }
 };
 
-/// An expression-macro invocation, 'name!(args)', whose expansion is deferred
-/// to instantiation because an argument is dependent. A non-dependent
-/// invocation is replaced by its expansion outright and never becomes a node.
+/// An expression-macro invocation, 'name!(args)' or 'obj.name!(args)', whose
+/// expansion is deferred to instantiation because an argument (or the object
+/// expression) is dependent. A non-dependent invocation is replaced by its
+/// expansion outright and never becomes a node.
 class CXXMacroInvocationExpr : public Expr {
   friend class ASTStmtReader;
 
   /// The callee (an UnresolvedLookupExpr naming the macros found by ordinary
-  /// lookup) followed by the arguments.
+  /// lookup; null for a member invocation, whose lookup awaits the object
+  /// type), the object expression of a member invocation (null otherwise),
+  /// then the arguments.
   Stmt **SubExprs;
   unsigned NumArgs;
+  bool IsArrow = false;
+  /// The member name of a member invocation.
+  DeclarationNameInfo MemberNameInfo;
+  SourceLocation OperatorLoc;
   SourceLocation ExclaimLoc;
   SourceLocation LParenLoc;
   SourceLocation RParenLoc;
 
   CXXMacroInvocationExpr(ASTContext &C, UnresolvedLookupExpr *Callee,
-                         ArrayRef<Expr *> Args, SourceLocation ExclaimLoc,
-                         SourceLocation LParenLoc, SourceLocation RParenLoc);
+                         Expr *Base, bool IsArrow,
+                         const DeclarationNameInfo &MemberNameInfo,
+                         SourceLocation OperatorLoc, ArrayRef<Expr *> Args,
+                         SourceLocation ExclaimLoc, SourceLocation LParenLoc,
+                         SourceLocation RParenLoc);
   CXXMacroInvocationExpr(ASTContext &C, EmptyShell Empty, unsigned NumArgs);
 
 public:
@@ -6309,20 +6319,41 @@ public:
                                         SourceLocation ExclaimLoc,
                                         SourceLocation LParenLoc,
                                         SourceLocation RParenLoc);
+  /// A member invocation 'base.name!(args)' or 'base->name!(args)'.
+  static CXXMacroInvocationExpr *
+  CreateMember(ASTContext &C, Expr *Base, bool IsArrow,
+               SourceLocation OperatorLoc,
+               const DeclarationNameInfo &MemberNameInfo, ArrayRef<Expr *> Args,
+               SourceLocation ExclaimLoc, SourceLocation LParenLoc,
+               SourceLocation RParenLoc);
   static CXXMacroInvocationExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
 
   UnresolvedLookupExpr *getCallee() const {
-    return cast<UnresolvedLookupExpr>(SubExprs[0]);
+    return cast_or_null<UnresolvedLookupExpr>(SubExprs[0]);
   }
   void setCallee(UnresolvedLookupExpr *E) { SubExprs[0] = E; }
 
-  unsigned getNumArgs() const { return NumArgs; }
-  Expr *getArg(unsigned I) const { return cast<Expr>(SubExprs[I + 1]); }
-  void setArg(unsigned I, Expr *E) { SubExprs[I + 1] = E; }
-  ArrayRef<Expr *> getArgs() const {
-    return ArrayRef(reinterpret_cast<Expr *const *>(SubExprs + 1), NumArgs);
+  bool isMemberInvocation() const { return SubExprs[1] != nullptr; }
+  Expr *getBase() const { return cast_or_null<Expr>(SubExprs[1]); }
+  void setBase(Expr *E) { SubExprs[1] = E; }
+  bool isArrow() const { return IsArrow; }
+  void setIsArrow(bool A) { IsArrow = A; }
+  const DeclarationNameInfo &getMemberNameInfo() const {
+    return MemberNameInfo;
+  }
+  void setMemberNameInfo(const DeclarationNameInfo &NI) {
+    MemberNameInfo = NI;
   }
 
+  unsigned getNumArgs() const { return NumArgs; }
+  Expr *getArg(unsigned I) const { return cast<Expr>(SubExprs[I + 2]); }
+  void setArg(unsigned I, Expr *E) { SubExprs[I + 2] = E; }
+  ArrayRef<Expr *> getArgs() const {
+    return ArrayRef(reinterpret_cast<Expr *const *>(SubExprs + 2), NumArgs);
+  }
+
+  SourceLocation getOperatorLoc() const { return OperatorLoc; }
+  void setOperatorLoc(SourceLocation Loc) { OperatorLoc = Loc; }
   SourceLocation getExclaimLoc() const { return ExclaimLoc; }
   void setExclaimLoc(SourceLocation Loc) { ExclaimLoc = Loc; }
   SourceLocation getLParenLoc() const { return LParenLoc; }
@@ -6331,15 +6362,16 @@ public:
   void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
-    return getCallee()->getBeginLoc();
+    return isMemberInvocation() ? getBase()->getBeginLoc()
+                                : getCallee()->getBeginLoc();
   }
   SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
 
   child_range children() {
-    return child_range(SubExprs, SubExprs + 1 + NumArgs);
+    return child_range(SubExprs, SubExprs + 2 + NumArgs);
   }
   const_child_range children() const {
-    return const_child_range(SubExprs, SubExprs + 1 + NumArgs);
+    return const_child_range(SubExprs, SubExprs + 2 + NumArgs);
   }
 
   static bool classof(const Stmt *T) {

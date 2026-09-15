@@ -16279,6 +16279,46 @@ public:
                                   SourceLocation LParenLoc, MultiExprArg Args,
                                   SourceLocation RParenLoc,
                                   const Stmt *InstantiationPattern = nullptr);
+  /// Determine the parameter shape of the member macros 'base.name' (or
+  /// 'base->name') would find. Leaves \p RawParams empty (every argument is
+  /// an expression) if the class is not yet known; diagnoses and returns true
+  /// if the name does not denote macros of that class.
+  bool GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
+                                    const IdentifierInfo *II,
+                                    SourceLocation NameLoc,
+                                    SmallVectorImpl<bool> &RawParams);
+  ExprResult ActOnMemberMacroInvocation(Scope *S, Expr *Base,
+                                        SourceLocation OpLoc,
+                                        tok::TokenKind OpKind,
+                                        const IdentifierInfo *II,
+                                        SourceLocation NameLoc,
+                                        SourceLocation ExclaimLoc,
+                                        SourceLocation LParenLoc,
+                                        MultiExprArg Args,
+                                        SourceLocation RParenLoc);
+  /// Resolve and expand 'base.name!(args)', binding the object expression to
+  /// the macro's explicit object parameter, or defer it if anything about it
+  /// is dependent.
+  ExprResult BuildMemberMacroInvocation(
+      Expr *Base, bool IsArrow, SourceLocation OpLoc,
+      const DeclarationNameInfo &NameInfo, SourceLocation ExclaimLoc,
+      SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
+      const Stmt *InstantiationPattern = nullptr);
+  /// Expand the macro that overload resolution selected for an operator
+  /// expression or a member invocation. \p Args are the operands as written
+  /// (the object expression first, for a member macro).
+  ExprResult BuildMacroCandidateExpansion(const OverloadCandidate &Best,
+                                          ArrayRef<Expr *> Args,
+                                          SourceLocation Loc,
+                                          SourceLocation RParenLoc,
+                                          bool HadMultipleCandidates,
+                                          const Stmt *InstantiationPattern =
+                                              nullptr);
+  /// The pattern expression currently being transformed by template
+  /// instantiation. An operator or member-access rebuild that selects a macro
+  /// has no deferred node of its own to name; this is what it uses to
+  /// reconstruct the locals visible at the invocation.
+  const Stmt *MacroInstantiationPattern = nullptr;
   /// Collect the instantiations of the local declarations that are visible
   /// before \p PatternStmt in the function template being instantiated, one
   /// inner vector per lexical scope, outermost first.

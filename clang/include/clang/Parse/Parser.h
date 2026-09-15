@@ -8598,9 +8598,15 @@ private:
   ExprResult ParseCXXReflectExpression(SourceLocation OpLoc);
   ExprResult ParseCXXMetafunctionExpression();
 
-  // Expression macros: 'name!(args)'.
+  // Expression macros: 'name!(args)' and 'obj.name!(args)'.
   ExprResult ParseMacroInvocation(CXXScopeSpec &SS, const IdentifierInfo *II,
                                   SourceLocation NameLoc);
+  ExprResult ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
+                                        tok::TokenKind OpKind,
+                                        const IdentifierInfo *II,
+                                        SourceLocation NameLoc);
+  bool ParseMacroArguments(ArrayRef<bool> RawParams,
+                           BalancedDelimiterTracker &T, ExprVector &Args);
   ExprResult ParseMacroRawArgument(bool Greedy);
   ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,
                                            SourceLocation Loc);

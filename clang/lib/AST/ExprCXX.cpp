@@ -2414,33 +2414,50 @@ CXXBuiltinStringizeExpr *CXXBuiltinStringizeExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXBuiltinStringizeExpr(EmptyShell());
 }
 
-CXXMacroInvocationExpr::CXXMacroInvocationExpr(ASTContext &C,
-                                               UnresolvedLookupExpr *Callee,
-                                               ArrayRef<Expr *> Args,
-                                               SourceLocation ExclaimLoc,
-                                               SourceLocation LParenLoc,
-                                               SourceLocation RParenLoc)
+CXXMacroInvocationExpr::CXXMacroInvocationExpr(
+    ASTContext &C, UnresolvedLookupExpr *Callee, Expr *Base, bool IsArrow,
+    const DeclarationNameInfo &MemberNameInfo, SourceLocation OperatorLoc,
+    ArrayRef<Expr *> Args, SourceLocation ExclaimLoc, SourceLocation LParenLoc,
+    SourceLocation RParenLoc)
     : Expr(CXXMacroInvocationExprClass, C.DependentTy, VK_PRValue,
            OK_Ordinary),
-      SubExprs(new (C) Stmt *[Args.size() + 1]), NumArgs(Args.size()),
-      ExclaimLoc(ExclaimLoc), LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
+      SubExprs(new (C) Stmt *[Args.size() + 2]), NumArgs(Args.size()),
+      IsArrow(IsArrow), MemberNameInfo(MemberNameInfo),
+      OperatorLoc(OperatorLoc), ExclaimLoc(ExclaimLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  assert((Callee != nullptr) != (Base != nullptr) &&
+         "either a looked-up callee or an object expression");
   SubExprs[0] = Callee;
+  SubExprs[1] = Base;
   for (unsigned I = 0; I != NumArgs; ++I)
-    SubExprs[I + 1] = Args[I];
+    SubExprs[I + 2] = Args[I];
   setDependence(computeDependence(this));
 }
 
 CXXMacroInvocationExpr::CXXMacroInvocationExpr(ASTContext &C, EmptyShell Empty,
                                                unsigned NumArgs)
     : Expr(CXXMacroInvocationExprClass, Empty),
-      SubExprs(new (C) Stmt *[NumArgs + 1]), NumArgs(NumArgs) {}
+      SubExprs(new (C) Stmt *[NumArgs + 2]), NumArgs(NumArgs) {
+  SubExprs[0] = SubExprs[1] = nullptr;
+}
 
 CXXMacroInvocationExpr *CXXMacroInvocationExpr::Create(
     ASTContext &C, UnresolvedLookupExpr *Callee, ArrayRef<Expr *> Args,
     SourceLocation ExclaimLoc, SourceLocation LParenLoc,
     SourceLocation RParenLoc) {
-  return new (C) CXXMacroInvocationExpr(C, Callee, Args, ExclaimLoc, LParenLoc,
-                                        RParenLoc);
+  return new (C) CXXMacroInvocationExpr(
+      C, Callee, /*Base=*/nullptr, /*IsArrow=*/false, DeclarationNameInfo(),
+      SourceLocation(), Args, ExclaimLoc, LParenLoc, RParenLoc);
+}
+
+CXXMacroInvocationExpr *CXXMacroInvocationExpr::CreateMember(
+    ASTContext &C, Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
+    const DeclarationNameInfo &MemberNameInfo, ArrayRef<Expr *> Args,
+    SourceLocation ExclaimLoc, SourceLocation LParenLoc,
+    SourceLocation RParenLoc) {
+  return new (C) CXXMacroInvocationExpr(C, /*Callee=*/nullptr, Base, IsArrow,
+                                        MemberNameInfo, OperatorLoc, Args,
+                                        ExclaimLoc, LParenLoc, RParenLoc);
 }
 
 CXXMacroInvocationExpr *CXXMacroInvocationExpr::CreateEmpty(ASTContext &C,

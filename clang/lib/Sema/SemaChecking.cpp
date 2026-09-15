@@ -12031,9 +12031,11 @@ static std::optional<IntRange> TryGetExprRange(ASTContext &C, const Expr *E,
     }
   }
 
+  // An opaque value without a source expression (e.g. an interpolated
+  // constant in a macro expansion) gets the range of its type, below.
   if (const auto *OVE = dyn_cast<OpaqueValueExpr>(E))
-    return TryGetExprRange(C, OVE->getSourceExpr(), MaxWidth, InConstantContext,
-                           Approximate);
+    if (const Expr *Src = OVE->getSourceExpr())
+      return TryGetExprRange(C, Src, MaxWidth, InConstantContext, Approximate);
 
   if (const auto *BitField = E->getSourceBitField())
     return IntRange(BitField->getBitWidthValue(),

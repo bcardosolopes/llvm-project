@@ -15202,6 +15202,89 @@ ExprResult Sema::BuildCXXMemberCallExpr(Expr *E, NamedDecl *FoundDecl,
   return CheckForImmediateInvocation(CE, CE->getDirectCallee());
 }
 
+ExprResult Sema::BuildMacroCandidateExpansion(const OverloadCandidate &Best,
+                                              ArrayRef<Expr *> Args,
+                                              SourceLocation Loc,
+                                              SourceLocation RParenLoc,
+                                              bool HadMultipleCandidates,
+                                              const Stmt *InstantiationPattern) {
+  FunctionDecl *Macro = Best.Function;
+  if (Macro->isInvalidDecl())
+    return ExprError();
+
+  const Expr *Base = nullptr;
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(Macro); MD && !MD->isStatic())
+    Base = Args[0];
+  ExprResult Fn = CreateFunctionRefExpr(*this, Macro, Best.FoundDecl, Base,
+                                        HadMultipleCandidates, Loc);
+  if (Fn.isInvalid())
+    return ExprError();
+
+  // An operator or member-access rebuild during instantiation has no deferred
+  // node of its own; the pattern expression being transformed stands in for
+  // it. (See BuildMacroInvocation for why the expansion needs the locals.)
+  if (!InstantiationPattern && inTemplateInstantiation())
+    InstantiationPattern = MacroInstantiationPattern;
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> SavedScopes;
+  SavedScopes.swap(MacroExpansionLocalScopes);
+  auto RestoreScopes = llvm::make_scope_exit(
+      [&] { SavedScopes.swap(MacroExpansionLocalScopes); });
+  if (InstantiationPattern)
+    CollectInstantiatedLocalDeclsForLookup(InstantiationPattern,
+                                           MacroExpansionLocalScopes);
+
+  return BuildExpressionMacroExpansion(
+      Fn.get(), Macro, Loc, Args, RParenLoc,
+      static_cast<CallExpr::ADLCallKind>(Best.IsADLCandidate));
+}
+
+/// Finish a comparison for which overload resolution selected a rewritten or
+/// reversed candidate: negate the selected operator== for '!=', or compare
+/// the selected operator<=> against 0. \p R is the call to (or expansion of)
+/// the selected candidate, with its arguments already reversed if need be.
+static ExprResult finishRewrittenBinaryOperator(Sema &S, ExprResult R,
+                                                const OverloadCandidate &Best,
+                                                OverloadedOperatorKind Op,
+                                                BinaryOperatorKind Opc,
+                                                const UnresolvedSetImpl &Fns,
+                                                SourceLocation OpLoc) {
+  FunctionDecl *FnDecl = Best.Function;
+  bool IsReversed = Best.isReversed();
+  OverloadedOperatorKind ChosenOp =
+      FnDecl->getDeclName().getCXXOverloadedOperator();
+  (void)ChosenOp;
+
+  if ((Best.RewriteKind & CRK_DifferentOperator) ||
+      (Op == OO_Spaceship && IsReversed)) {
+    if (Op == OO_ExclaimEqual) {
+      assert(ChosenOp == OO_EqualEqual && "unexpected operator name");
+      R = S.CreateBuiltinUnaryOp(OpLoc, UO_LNot, R.get());
+    } else {
+      assert(ChosenOp == OO_Spaceship && "unexpected operator name");
+      llvm::APSInt Zero(S.Context.getTypeSize(S.Context.IntTy), false);
+      Expr *ZeroLiteral =
+          IntegerLiteral::Create(S.Context, Zero, S.Context.IntTy, OpLoc);
+
+      Sema::CodeSynthesisContext Ctx;
+      Ctx.Kind = Sema::CodeSynthesisContext::RewritingOperatorAsSpaceship;
+      Ctx.Entity = FnDecl;
+      S.pushCodeSynthesisContext(Ctx);
+
+      R = S.CreateOverloadedBinOp(
+          OpLoc, Opc, Fns, IsReversed ? ZeroLiteral : R.get(),
+          IsReversed ? R.get() : ZeroLiteral, /*PerformADL=*/true,
+          /*AllowRewrittenCandidates=*/false);
+
+      S.popCodeSynthesisContext();
+    }
+    if (R.isInvalid())
+      return ExprError();
+  } else {
+    assert(ChosenOp == Op && "unexpected operator name");
+  }
+  return R;
+}
+
 ExprResult
 Sema::CreateOverloadedUnaryOp(SourceLocation OpLoc, UnaryOperatorKind Opc,
                               const UnresolvedSetImpl &Fns,
@@ -15282,6 +15365,14 @@ Sema::CreateOverloadedUnaryOp(SourceLocation OpLoc, UnaryOperatorKind Opc,
     FunctionDecl *FnDecl = Best->Function;
 
     if (FnDecl) {
+      // A macro expands in place of the call.
+      if (IsExpressionMacro(FnDecl)) {
+        if (isa<CXXMethodDecl>(FnDecl))
+          CheckMemberOperatorAccess(OpLoc, Input, nullptr, Best->FoundDecl);
+        return BuildMacroCandidateExpansion(*Best, ArgsArray, OpLoc, OpLoc,
+                                            HadMultipleCandidates);
+      }
+
       Expr *Base = nullptr;
       // We matched an overloaded operator. Build a call to that
       // operator.
@@ -15584,7 +15675,9 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
         // C++2a [over.match.oper]p9:
         //   If a rewritten operator== candidate is selected by overload
         //   resolution for an operator@, its return type shall be cv bool
+        // (A macro's result type is known only once it is expanded, below.)
         if (Best->RewriteKind && ChosenOp == OO_EqualEqual &&
+            !IsExpressionMacro(FnDecl) &&
             !FnDecl->getReturnType()->isBooleanType()) {
           bool IsExtension =
               FnDecl->getReturnType()->isIntegralOrUnscopedEnumerationType();
@@ -15665,6 +15758,28 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
         if (Op == OO_Equal)
           diagnoseNullableToNonnullConversion(Args[0]->getType(),
                                               Args[1]->getType(), OpLoc);
+
+        // A macro expands in place of the call; a rewrite then applies to
+        // the expansion, whose type is only known now.
+        if (IsExpressionMacro(FnDecl)) {
+          if (isa<CXXMethodDecl>(FnDecl))
+            CheckMemberOperatorAccess(OpLoc, Args[0], Args[1],
+                                      Best->FoundDecl);
+          ExprResult R = BuildMacroCandidateExpansion(
+              *Best, Args, OpLoc, OpLoc, HadMultipleCandidates);
+          if (R.isInvalid())
+            return ExprError();
+          if (Best->RewriteKind && ChosenOp == OO_EqualEqual &&
+              !R.get()->getType()->isBooleanType()) {
+            Diag(OpLoc, diag::err_ovl_rewrite_equalequal_not_bool)
+                << R.get()->getType() << BinaryOperator::getOpcodeStr(Opc)
+                << Args[0]->getSourceRange() << Args[1]->getSourceRange();
+            Diag(FnDecl->getLocation(), diag::note_declared_at);
+            return ExprError();
+          }
+          return finishRewrittenBinaryOperator(*this, R, *Best, Op, Opc, Fns,
+                                               OpLoc);
+        }
 
         // Convert the arguments.
         if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(FnDecl)) {
@@ -15775,34 +15890,10 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
 
         // For a rewritten candidate, we've already reversed the arguments
         // if needed. Perform the rest of the rewrite now.
-        if ((Best->RewriteKind & CRK_DifferentOperator) ||
-            (Op == OO_Spaceship && IsReversed)) {
-          if (Op == OO_ExclaimEqual) {
-            assert(ChosenOp == OO_EqualEqual && "unexpected operator name");
-            R = CreateBuiltinUnaryOp(OpLoc, UO_LNot, R.get());
-          } else {
-            assert(ChosenOp == OO_Spaceship && "unexpected operator name");
-            llvm::APSInt Zero(Context.getTypeSize(Context.IntTy), false);
-            Expr *ZeroLiteral =
-                IntegerLiteral::Create(Context, Zero, Context.IntTy, OpLoc);
-
-            Sema::CodeSynthesisContext Ctx;
-            Ctx.Kind = Sema::CodeSynthesisContext::RewritingOperatorAsSpaceship;
-            Ctx.Entity = FnDecl;
-            pushCodeSynthesisContext(Ctx);
-
-            R = CreateOverloadedBinOp(
-                OpLoc, Opc, Fns, IsReversed ? ZeroLiteral : R.get(),
-                IsReversed ? R.get() : ZeroLiteral, /*PerformADL=*/true,
-                /*AllowRewrittenCandidates=*/false);
-
-            popCodeSynthesisContext();
-          }
-          if (R.isInvalid())
-            return ExprError();
-        } else {
-          assert(ChosenOp == Op && "unexpected operator name");
-        }
+        R = finishRewrittenBinaryOperator(*this, R, *Best, Op, Opc, Fns,
+                                          OpLoc);
+        if (R.isInvalid())
+          return ExprError();
 
         // Make a note in the AST if we did any rewriting.
         if (Best->RewriteKind != CRK_None)
@@ -16134,6 +16225,11 @@ ExprResult Sema::CreateOverloadedArraySubscriptExpr(SourceLocation LLoc,
         // operator.
 
         CheckMemberOperatorAccess(LLoc, Args[0], ArgExpr, Best->FoundDecl);
+
+        // A macro expands in place of the call.
+        if (IsExpressionMacro(FnDecl))
+          return BuildMacroCandidateExpansion(*Best, Args, LLoc, RLoc,
+                                              HadMultipleCandidates);
 
         // Convert the arguments.
         CXXMethodDecl *Method = cast<CXXMethodDecl>(FnDecl);
@@ -16786,6 +16882,16 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
   if (Method->isInvalidDecl())
     return ExprError();
 
+  // A macro operator() expands in place of the call, with the object
+  // expression as its first argument.
+  if (IsExpressionMacro(Method)) {
+    SmallVector<Expr *, 8> MacroArgs;
+    MacroArgs.push_back(Object.get());
+    MacroArgs.append(Args.begin(), Args.end());
+    return BuildMacroCandidateExpansion(*Best, MacroArgs, LParenLoc, RParenLoc,
+                                        HadMultipleCandidates);
+  }
+
   const auto *Proto = Method->getType()->castAs<FunctionProtoType>();
   unsigned NumParams = Proto->getNumParams();
 
@@ -16947,6 +17053,11 @@ ExprResult Sema::BuildOverloadedArrowExpr(Scope *S, Expr *Base,
 
   // Convert the object parameter.
   CXXMethodDecl *Method = cast<CXXMethodDecl>(Best->Function);
+
+  // A macro expands in place of the call; '->' then applies to the expansion.
+  if (IsExpressionMacro(Method))
+    return BuildMacroCandidateExpansion(*Best, Base, OpLoc, OpLoc,
+                                        HadMultipleCandidates);
 
   if (Method->isExplicitObjectMemberFunction()) {
     ExprResult R = InitializeExplicitObjectArgument(*this, Base, Method);

@@ -2185,6 +2185,17 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         LHS = ExprError();
       }
 
+      // obj.name!(args) is an expression-macro invocation whose object
+      // expression binds to the macro's explicit object parameter.
+      if (getLangOpts().Reflection && !LHS.isInvalid() && SS.isEmpty() &&
+          !TemplateKWLoc.isValid() &&
+          Name.getKind() == UnqualifiedIdKind::IK_Identifier &&
+          Tok.is(tok::exclaim) && NextToken().is(tok::l_paren)) {
+        LHS = ParseMemberMacroInvocation(LHS.get(), OpLoc, OpKind,
+                                         Name.Identifier, Name.StartLocation);
+        break;
+      }
+
       if (!LHS.isInvalid())
         LHS = Actions.ActOnMemberAccessExpr(getCurScope(), LHS.get(), OpLoc,
                                             OpKind, SS, TemplateKWLoc, Name,

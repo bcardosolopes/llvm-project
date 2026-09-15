@@ -783,6 +783,13 @@ static bool operator_of_token(APValue &Result, ASTContext &C,
                               QualType ResultTy, SourceRange Range,
                               ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
+static bool is_constant_expression(APValue &Result, ASTContext &C,
+                                   MetaActions &Meta, EvalFn Evaluator,
+                                   DiagFn Diagnoser, bool AllowInjection,
+                                   QualType ResultTy, SourceRange Range,
+                                   ArrayRef<Expr *> Args,
+                                   Decl *ContainingDecl);
+
 static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -929,6 +936,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_sizeT, 1, 1, token_kind_of },
   { Metafunction::MFRK_metaInfo, 1, 1, identifier_of_token },
   { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
+  { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3112,6 +3120,25 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     }
     return SetAndSucceed(Result, Constant.Lift(ConstantTy));
   }
+  case ReflectionKind::Expression: {
+    // The argument of an expression macro: the value it has as a constant
+    // expression, which is how a macro turns an operand into a template
+    // argument (e.g. 'elems[0]' expanding to 'get<0>(elems)').
+    const Expr *E = RV.getReflectedExpression();
+    APValue Constant;
+    if (E->isValueDependent() || !E->isCXX11ConstantExpr(C, &Constant))
+      return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
+          << 2 << "an expression that is not a constant expression" << Range;
+
+    QualType ConstantTy = ComputeResultType(E->getType(), Constant);
+    if (ConstantTy->isRecordType()) {
+      auto *TPO = C.getTemplateParamObjectDecl(ConstantTy, Constant);
+      Constant = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
+                    false);
+      ConstantTy = QualType{};
+    }
+    return SetAndSucceed(Result, Constant.Lift(ConstantTy));
+  }
   case ReflectionKind::Null:
   case ReflectionKind::Type:
   case ReflectionKind::Template:
@@ -3124,6 +3151,28 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
         << 2 << DescriptionOf(RV) << Range;
   }
   llvm_unreachable("unknown reflection kind");
+}
+
+// Whether the reflected macro argument is a constant expression, i.e. whether
+// constant_of would succeed on it. Any other reflection kind is 'false'.
+bool is_constant_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
+                            EvalFn Evaluator, DiagFn Diagnoser,
+                            bool AllowInjection, QualType ResultTy,
+                            SourceRange Range, ArrayRef<Expr *> Args,
+                            Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.BoolTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  bool IsConstant = false;
+  if (RV.getReflectionKind() == ReflectionKind::Expression) {
+    const Expr *E = RV.getReflectedExpression();
+    IsConstant = !E->isValueDependent() && E->isCXX11ConstantExpr(C);
+  }
+  return SetAndSucceed(Result, makeBool(C, IsConstant));
 }
 
 bool template_of(APValue &Result, ASTContext &C, MetaActions &Meta,

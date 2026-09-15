@@ -1113,7 +1113,10 @@ ExprDependence clang::computeDependence(CXXMacroInvocationExpr *E) {
   // The node only exists while the expansion is deferred, so it is always
   // dependent; the operands contribute unexpanded packs and the like.
   auto D = ExprDependence::TypeValueInstantiation;
-  D |= E->getCallee()->getDependence();
+  if (Expr *Callee = E->getCallee())
+    D |= Callee->getDependence();
+  if (Expr *Base = E->getBase())
+    D |= Base->getDependence();
   for (Expr *Arg : E->getArgs())
     D |= Arg->getDependence();
   return D;

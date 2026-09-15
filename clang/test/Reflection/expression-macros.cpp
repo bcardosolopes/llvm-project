@@ -196,7 +196,7 @@ static_assert(dflt!() == 10);
 static_assert(dflt!(4) == 8);
 
 struct S {
-  __macro member(int x) { return ^^{ \(x) }; }  // expected-error {{an expression macro cannot be a class member}}
+  __macro member(int x) { return ^^{ \(x) }; }  // expected-error {{a non-static member expression macro must have an explicit object parameter}}
 };
 
 __macro pack(auto&&... xs) { return ^^{ 0 }; }  // expected-error {{an expression macro cannot have a parameter pack}}
@@ -283,3 +283,181 @@ __macro rawreq(token_sequence x) { return x; }  // expected-note {{candidate fun
 int c = rawreq!();  // expected-error {{no matching function for call to 'rawreq'}}
 
 }  // namespace N11
+
+namespace N12 {
+
+// A member macro binds the object expression to its explicit object
+// parameter: obj.name!(args), obj->name!(args), or name!(args) within a
+// member function (an implicit member access, as for a function).
+struct S {
+  int v;  // expected-note {{declared here}}
+  template <class Self>
+  __macro get(this Self&& self) { return ^^{ \(self).v }; }
+  __macro set(this S& self, int n) { return ^^{ (\(self).v = \(n)) }; }
+  __macro plus(this S const& self, token_sequence t) {
+    return ^^{ \(self).v + \(t) };
+  }
+  static __macro make(int n) { return ^^{ S{\(n)} }; }
+
+  constexpr int via_this() { return set!(v + 1), get!(); }
+};
+
+constexpr int f() {
+  S s{1};
+  s.set!(2);
+  S* p = &s;
+  int a = p->get!();         // 2
+  int b = s.plus!(3 * 4);    // 2 + 12
+  int c = s.via_this();      // 3
+  return a + b + c + S::make!(5).v;
+}
+static_assert(f() == 2 + 14 + 3 + 5);
+
+// A dependent object expression defers the invocation to instantiation.
+template <class T>
+constexpr int g(T t) {
+  int a = t.get!();
+  t.set!(9);
+  return a + t.get!();
+}
+static_assert(g(S{4}) == 13);
+
+// Within a class template the class is the current instantiation, so the
+// parameter shape (here, a raw parameter) is known even though 'this' is
+// dependent.
+template <class T>
+struct CT {
+  T v;
+  __macro raw(this CT const& self, token_sequence t) {
+    return ^^{ \(self).v + \(t) };
+  }
+  constexpr T go() const { return this->raw!(1 + 1) + raw!(1); }
+};
+static_assert(CT<int>{5}.go() == 7 + 6);
+
+int bad1 = S{1}.make!(1);  // expected-error {{static member expression macro 'make' must be invoked as S::make!(...)}}
+int bad2 = S{1}.v!(1);     // expected-error {{'v' is not an expression macro}}
+int bad3 = S{1}.nope!(1);  // expected-error {{use of undeclared expression macro 'nope'}}
+
+}  // namespace N12
+
+namespace N13 {
+
+using size_t = decltype(sizeof(0));
+
+struct D {
+  __macro implicit_this(int n) { return ^^{ \(n) }; }  // expected-error {{a non-static member expression macro must have an explicit object parameter}}
+  __macro operator[](this D& self, token_sequence t) { return t; }  // expected-error {{an operator expression macro cannot have a token sequence parameter}}
+  __macro operator=(this D& self, const D&) = default;  // expected-error {{an expression macro cannot be defaulted}}
+  __macro operator=(this D& self, D&&) = delete;  // expected-error {{an expression macro cannot be deleted}}
+  __macro operator co_await(this D& self) { return ^^{ 0 }; }  // expected-error {{operator co_await cannot be an expression macro}}
+};
+
+__macro operator""_x(unsigned long long) { return ^^{ 0 }; }  // expected-error {{a literal operator cannot be an expression macro}}
+__macro operator new(size_t) { return ^^{ 0 }; }  // expected-error {{an allocation or deallocation function cannot be an expression macro}} \
+                                                  // expected-error {{'operator new' cannot be declared consteval}}
+
+}  // namespace N13
+
+namespace N14 {
+
+struct V { int x; };
+
+// Non-member operator macros are found as operator functions are, including
+// by argument-dependent lookup.
+__macro operator+(V const& l, V const& r) { return ^^{ V{\(l).x + \(r).x} }; }
+constexpr V a{1}, b{2};
+static_assert((a + b).x == 3);
+
+int oc = operator+(a, b);  // expected-error {{'operator+' is an expression macro and can only be invoked with operator syntax}}
+
+// Every overloadable operator, as a member.
+struct W {
+  int x;
+  template <class Self>
+  __macro operator[](this Self&& self, int i) { return ^^{ \(self).x * \(i) }; }
+  __macro operator()(this W const& self, int i, int j) {
+    return ^^{ \(self).x + \(i) + \(j) };
+  }
+  __macro operator-(this W const& self) { return ^^{ W{-\(self).x} }; }
+  __macro operator++(this W& self, int) { return ^^{ (\(self).x++) }; }
+  __macro operator->(this W const& self) { return ^^{ &\(self) }; }
+  __macro operator==(this W const& self, W const& o) {
+    return ^^{ \(self).x == \(o).x };
+  }
+};
+
+constexpr int t1() {
+  W w{5};
+  int r = w[2] + w(1, 1);  // 10 + 7
+  r += (-w).x;             // - 5
+  r += w++;                // + 5, w.x is now 6
+  r += w->x;               // + 6
+  if (!(w == W{6})) return -1;
+  if (w != W{7}) r += 100;  // rewritten from the macro operator==
+  return r;
+}
+static_assert(t1() == 10 + 7 - 5 + 5 + 6 + 100);
+
+// Dependent operands defer the operator to instantiation.
+template <class T>
+constexpr auto sub(T const& t, int i) { return t[i]; }
+static_assert(sub(W{5}, 3) == 15);
+
+// Reversed and rewritten candidates.
+struct X {
+  int x;
+  __macro operator==(this X const& self, int i) { return ^^{ \(self).x == \(i) }; }
+};
+static_assert(X{3} == 3);
+static_assert(3 == X{3});
+static_assert(X{3} != 4);
+static_assert(4 != X{3});
+
+// A rewritten operator== must expand to bool; that is only known after
+// expansion.
+struct Y {
+  __macro operator==(this Y const&, Y const&) { return ^^{ 1 }; }  // expected-note {{declared here}}
+};
+int y1 = Y{} == Y{};
+bool y2 = Y{} != Y{};  // expected-error {{return type 'int' of selected 'operator==' function for rewritten '!=' comparison is not 'bool'}}
+
+// A macro and a function may overload; there is no tie-breaker between them.
+struct M {
+  int x;
+  constexpr int operator[](int i) const { return x + i; }
+  template <class Self>
+  __macro operator[](this Self&& self, long i) { return ^^{ \(self).x * \(i) }; }
+};
+constexpr M m{2};
+static_assert(m[1] == 3);   // int: the function
+static_assert(m[1L] == 2);  // long: the macro
+
+// With identical parameter types they are not even an overload set: the
+// macro's declared return type is token_sequence, so this is two functions
+// differing only in return type.
+struct A0 {
+  int operator[](int) const;  // expected-note {{previous declaration is here}}
+  __macro operator[](this A0 const& self, int i) { return ^^{ 1 }; }  // expected-error {{functions that differ only in their return type cannot be overloaded}}
+};
+
+struct A {
+  int operator[](long) const { return 0; }  // expected-note {{candidate function}}
+  __macro operator[](this A const& self, long long i) { return ^^{ 1 }; }  // expected-note {{candidate function}}
+};
+int amb = A{}[0];  // expected-error {{use of overloaded operator '[]' is ambiguous (with operand types 'A' and 'int')}}
+
+// A binary operator macro sees its operands unevaluated, so it can be lazy.
+struct B { bool b; };
+template <class R>
+__macro operator&&(B const& l, R&& r) {
+  return ^^{ (\(l).b ? static_cast<bool>(\(r)) : false) };
+}
+constexpr bool lazy() {
+  int n = 0;
+  bool r = B{false} && (++n, true);
+  return !r && n == 0;
+}
+static_assert(lazy());
+
+}  // namespace N14

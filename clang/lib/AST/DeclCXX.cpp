@@ -2741,7 +2741,9 @@ bool CXXMethodDecl::isCopyAssignmentOperator() const {
       /*non-static*/ isStatic() ||
 
       /*non-template*/ getPrimaryTemplate() || getDescribedFunctionTemplate() ||
-      getNumExplicitParams() != 1)
+      getNumExplicitParams() != 1 ||
+      // An expression macro is never a special member function.
+      hasAttr<ExpressionMacroAttr>())
     return false;
 
   QualType ParamType = getNonObjectParameter(0)->getType();
@@ -2760,7 +2762,7 @@ bool CXXMethodDecl::isMoveAssignmentOperator() const {
   //  X&&, const X&&, volatile X&&, or const volatile X&&.
   if (getOverloadedOperator() != OO_Equal || isStatic() ||
       getPrimaryTemplate() || getDescribedFunctionTemplate() ||
-      getNumExplicitParams() != 1)
+      getNumExplicitParams() != 1 || hasAttr<ExpressionMacroAttr>())
     return false;
 
   QualType ParamType = getNonObjectParameter(0)->getType();
