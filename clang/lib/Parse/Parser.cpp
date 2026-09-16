@@ -1910,7 +1910,11 @@ bool Parser::TryAnnotateTypeOrScopeToken(
           Tok.is(tok::kw___super) || Tok.is(tok::kw_auto) ||
           Tok.is(tok::l_splice) || Tok.is(tok::annot_splice) ||
           Tok.is(tok::kw_template) || Tok.is(tok::annot_pack_indexing_type) ||
-          Tok.is(tok::annot_template_name)) &&
+          Tok.is(tok::annot_template_name) ||
+          // An already-annotated type (e.g. a type reflection interpolated
+          // into an injected token sequence) is a scope token when followed
+          // by '::'.
+          (Tok.is(tok::annot_typename) && NextToken().is(tok::coloncolon))) &&
          "Cannot be a type or scope token!");
 
   if (Tok.is(tok::annot_template_name)) {

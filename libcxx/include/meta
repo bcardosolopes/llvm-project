@@ -573,6 +573,7 @@ enum : unsigned {
   __metafn_is_constant_expression,
   __metafn_test_expression,
   __metafn_as_lvalue,
+  __metafn_macro_expansion_context,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3247,6 +3248,23 @@ consteval auto test_expression(token_sequence tokens) -> optional<info> {
 //   return ^^{ auto(\(as_lvalue(r)).begin()) };
 consteval auto as_lvalue(info r) -> info {
   return __metafunction(detail::__metafn_as_lvalue, r);
+}
+
+// Reflects the context the macro being expanded is expanding *into*: the
+// enclosing function for an invocation in expression position (or in
+// declaration position inside a function body), the class for a member
+// declaration, otherwise the enclosing namespace.
+//
+// This is how a macro body queries its invocation site at translation time --
+// e.g. a `try_`-style macro asks for the enclosing function's return type via
+// return_type_of -- without injecting anything into the expansion to recompute
+// it there. A macro that only makes sense in one kind of context should check
+// the kind it got and decline (std::constexpr_error_str) otherwise.
+//
+// Only meaningful inside an expression macro body; evaluating it in an
+// ordinary constant expression is an error.
+consteval auto macro_expansion_context() -> info {
+  return __metafunction(detail::__metafn_macro_expansion_context);
 }
 
 // Each token of the sequence as its own single-token sequence.

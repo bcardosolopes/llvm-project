@@ -1482,6 +1482,17 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
 
   case tok::annot_typename:
   case_typename:
+    // An already-annotated type followed by '::' -- e.g. a type reflection
+    // interpolated into an injected token sequence -- begins a
+    // nested-name-specifier, not a decl-specifier by itself. Annotate the
+    // scope and whatever follows it, then reconsider.
+    if (Tok.is(tok::annot_typename) && NextToken().is(tok::coloncolon)) {
+      if (TryAnnotateTypeOrScopeToken(AllowImplicitTypename))
+        return TPResult::Error;
+      return isCXXDeclarationSpecifier(AllowImplicitTypename, BracedCastResult,
+                                       InvalidAsDeclSpec);
+    }
+
     // In Objective-C, we might have a protocol-qualified type.
     if (getLangOpts().ObjC && NextToken().is(tok::less)) {
       // Tentatively parse the protocol qualifiers.

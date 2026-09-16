@@ -889,6 +889,31 @@ bool Sema::ActOnCXXNestedNameSpecifierIndexedPack(CXXScopeSpec &SS,
   return false;
 }
 
+bool Sema::ActOnCXXNestedNameSpecifierTypeAnnotation(
+    CXXScopeSpec &SS, ParsedType Type, SourceLocation TypeNameLoc,
+    SourceLocation ColonColonLoc) {
+  if (SS.isInvalid())
+    return true;
+
+  TypeSourceInfo *TSI = nullptr;
+  QualType T = GetTypeFromParser(Type, &TSI);
+  if (T.isNull())
+    return true;
+
+  if (!T->isDependentType() && !isa<TagType>(T.getCanonicalType())) {
+    Diag(TypeNameLoc, diag::err_expected_class_or_namespace)
+        << T << getLangOpts().CPlusPlus;
+    return true;
+  }
+
+  assert(SS.isEmpty());
+
+  if (!TSI)
+    TSI = Context.getTrivialTypeSourceInfo(T, TypeNameLoc);
+  SS.Make(Context, TSI->getTypeLoc(), ColonColonLoc);
+  return false;
+}
+
 bool Sema::IsInvalidUnlessNestedName(Scope *S, CXXScopeSpec &SS,
                                      NestedNameSpecInfo &IdInfo,
                                      bool EnteringContext) {

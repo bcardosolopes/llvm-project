@@ -3620,6 +3620,14 @@ public:
                                               SourceLocation ColonColonLoc,
                                               QualType Type);
 
+  /// The parser has seen an already-annotated type (e.g. a type reflection
+  /// interpolated into an injected token sequence) followed by '::', forming
+  /// a nested-name-specifier.
+  bool ActOnCXXNestedNameSpecifierTypeAnnotation(CXXScopeSpec &SS,
+                                                 ParsedType Type,
+                                                 SourceLocation TypeNameLoc,
+                                                 SourceLocation ColonColonLoc);
+
   /// IsInvalidUnlessNestedName - This method is used for error recovery
   /// purposes to determine whether the specified identifier is only valid as
   /// a nested name specifier, for example a namespace name.  It is

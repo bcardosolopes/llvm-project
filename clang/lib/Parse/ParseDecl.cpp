@@ -3886,6 +3886,32 @@ void Parser::ParseDeclarationSpecifiers(
       if (DS.hasTypeSpecifier() && DS.hasTagDefinition())
         goto DoneWithDeclSpec;
 
+      // An already-annotated type followed by '::' -- e.g. a type reflection
+      // interpolated into an injected token sequence -- begins a
+      // nested-name-specifier: either qualifying the type to come (no type
+      // specifier yet) or a qualified declarator-id (leave it for the
+      // declarator, which parses the scope itself).
+      if (NextToken().is(tok::coloncolon)) {
+        if (DS.hasTypeSpecifier())
+          goto DoneWithDeclSpec;
+
+        TypeResult T = getTypeAnnotation(Tok);
+        SourceLocation TypeNameLoc = Tok.getLocation();
+        ConsumeAnnotationToken();
+
+        CXXScopeSpec SS;
+        if (T.isInvalid() ||
+            Actions.ActOnCXXNestedNameSpecifierTypeAnnotation(
+                SS, T.get(), TypeNameLoc, Tok.getLocation())) {
+          ConsumeToken();
+          DS.SetTypeSpecError();
+          goto DoneWithDeclSpec;
+        }
+        ConsumeToken();
+        AnnotateScopeToken(SS, /*IsNewAnnotation=*/true);
+        continue;
+      }
+
       TypeResult T = getTypeAnnotation(Tok);
       isInvalid = DS.SetTypeSpecType(DeclSpec::TST_typename, Loc, PrevSpec,
                                      DiagID, T, Policy);

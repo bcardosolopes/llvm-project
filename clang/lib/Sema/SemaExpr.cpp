@@ -7782,7 +7782,20 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
 
   APValue Result;
   SmallVector<PartialDiagnosticAt, 8> Notes;
-  if (!Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context, Notes) ||
+  // The macro conceptually expands at the invocation, so
+  // macro_expansion_context() in its body must describe where the expansion
+  // lands, not where the macro was defined. Walk out of contexts that are not
+  // nameable entities (blocks, linkage specs, ...) to the enclosing function,
+  // class, or namespace.
+  Decl *InvocationContext = nullptr;
+  for (DeclContext *DC = CurContext; DC; DC = DC->getParent())
+    if (isa<FunctionDecl, CXXRecordDecl, NamespaceDecl, TranslationUnitDecl>(
+            DC)) {
+      InvocationContext = cast<Decl>(DC);
+      break;
+    }
+  if (!Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context, Notes,
+                               InvocationContext) ||
       !Result.isTokenSequence()) {
     // A std::constexpr_error_str in the body is the macro explicitly
     // declining to produce an expansion, not a bug in it.

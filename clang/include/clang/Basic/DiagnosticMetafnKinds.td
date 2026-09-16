@@ -119,4 +119,8 @@ def metafn_builtin_inject_target_not_namespace : Note<
 def metafn_interpolation_not_type_reflection : Note<
   "interpolated reflection is not a type reflection">;
 
+def metafn_no_macro_expansion_context : Note<
+  "std::meta::macro_expansion_context() is only available while expanding an "
+  "expression macro">;
+
 }  // end of metafn component

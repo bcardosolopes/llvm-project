@@ -768,11 +768,15 @@ public:
   /// Evaluate the body of an expression macro with its parameters bound to
   /// \p ParamValues (reflections of the argument expressions, or token
   /// sequences for raw parameters). On success \p Result holds the returned
-  /// token sequence.
+  /// token sequence. \p InvocationContext is the declaration enclosing the
+  /// macro invocation (e.g. the function it appears in), so that reflection
+  /// queries such as std::meta::current_function() resolve against the call
+  /// site rather than the macro definition.
   static bool EvaluateMacroBody(const FunctionDecl *Macro,
                                 ArrayRef<APValue> ParamValues, APValue &Result,
                                 const ASTContext &Ctx,
-                                SmallVectorImpl<PartialDiagnosticAt> &Diags);
+                                SmallVectorImpl<PartialDiagnosticAt> &Diags,
+                                Decl *InvocationContext = nullptr);
 
   /// EvaluateWithSubstitution - Evaluate an expression as if from the context
   /// of a call to the given function with the given arguments, inside an

@@ -226,7 +226,13 @@ evaluation of the outer argument, and still cannot land it inside a lambda.
 Other interpolations behave as they already do for token injection:
 `token_sequence` values are concatenated in place, reflections of types,
 templates, namespaces and declarations materialize as the corresponding
-tokens, and constant values become literals. Additionally, a value of type
+tokens, and constant values become literals. An interpolated type works in
+every position a named type would, including as a nested-name-specifier:
+`\(CT)::should_continue(r)` qualifies into the reflected class directly, with
+no `[: :]` wrapper — in expressions, statements (the declaration/expression
+disambiguator understands it), declared types (`\(CT)::Inner x;`,
+`typename \(CT)::type`), and qualified declarator-ids
+(`int \(CT)::member() { ... }` in a declaration-position expansion). Additionally, a value of type
 `std::meta::operators` interpolates as the operator's token, so a decomposed
 comparison can be re-applied with `\(operator_of(cond))`. Only operators that
 are a single token can be interpolated this way; `()`, `[]`, `new`, `delete`
@@ -442,6 +448,87 @@ Probing is SFINAE-flavored: template instantiations it triggers are
 permanent, and an error outside the probed expression's immediate context is
 (deliberately) swallowed rather than diagnosed — validity means "parsed and
 type-checked", the same contract as `requires`.
+
+### Seeing the invocation site: `macro_expansion_context`
+
+A macro conceptually expands where it is invoked, so its body should be able
+to ask about that context, not just about its arguments. Swift gives macros a
+`MacroExpansionContext` parameter; the reflection spelling of the same idea is
+a getter:
+
+```cpp
+consteval auto macro_expansion_context() -> info;
+```
+
+It reflects the context the expansion lands *in*: the enclosing function for
+an invocation in expression position, the class for a member declaration,
+otherwise the enclosing namespace. A macro that only makes sense in one of
+those checks the kind it got and declines otherwise — which is a better
+contract than a narrower query like `current_function()` that has no answer
+in two of the three positions.
+
+`try_!` is the motivating case. The C-macro spelling had to inject
+
+```cpp
+using RT = try_traits<typename [: return_type_of(std::meta::current_function()) :]>;
+```
+
+into the expansion, because textual expansion is the only way a C macro can
+observe its caller. As an expression macro, both trait specializations are
+just values in the body:
+
+```cpp
+template <class T>
+__macro try_(T&& e) {
+  info where = macro_expansion_context();
+  if (!is_function(where))
+    std::constexpr_error_str("bad-try-context",
+                             "try_ must be invoked inside a function");
+
+  info CT = substitute(^^try_traits, {remove_cvref(type_of(e))});
+  info RT = substitute(^^try_traits, {return_type_of(where)});
+
+  // \(CT) and \(RT) interpolate as the concrete specializations, usable
+  // directly as nested-name-specifiers.
+  return ^^{
+    do -> decltype(auto) {
+      auto&& __r = \(e);
+      if (not \(CT)::should_continue(__r)) [[unlikely]] {
+        return \(RT)::from_break(
+            \(CT)::extract_break(static_cast<decltype(__r)&&>(__r)));
+      }
+      do_return \(CT)::extract_continue(static_cast<decltype(__r)&&>(__r));
+    }
+  };
+}
+```
+
+The expansion carries no `using` declarations and no reflection calls — only
+spliced concrete types. It also gets hygiene for free: `__r` is the macro's
+own local, and `\(e)` is an already-bound expression that cannot see it.
+
+Two properties worth naming, both verified:
+
+- A plain `return` inside a `do`-expression body returns from the *enclosing
+  function*, which is exactly the control flow `try_` needs; `do_return`
+  yields the do-expression's value. This is what replaces the C macro's
+  `match`/`case`.
+- The context tracks the invocation, not the definition: one macro definition
+  invoked from functions returning `void`, `int`, `double`, `Widget`, and a
+  member returning `bool` reports each of those in turn; the same definition
+  invoked in declaration position at namespace scope, in a class, and in a
+  default member initializer reports namespace, class, and class.
+
+Implementation: `EvaluateMacroBody` records the invocation's enclosing
+function/class/namespace (walked out of `Sema::CurContext`) in a dedicated
+`EvalInfo::MacroExpansionContext`. Metafunctions opt into receiving it with
+`Metafunction::wantsMacroExpansionContext` — the existing `ContainingDecl`
+channel could not be reused, because it carries the injection target that
+`define_aggregate` and `annotate` depend on, and is separately set to the
+`VarDecl` being initialized during ordinary constant evaluation.
+
+Evaluating it outside a macro expansion is an error rather than a guess,
+since there is no expansion whose context could be described.
 
 ## Name lookup and hygiene
 

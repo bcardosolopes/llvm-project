@@ -1315,6 +1315,25 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     break;
 
   case tok::annot_typename:
+    // An already-annotated type followed by '::' -- e.g. a type reflection
+    // interpolated into an injected token sequence -- begins a qualified-id.
+    if (getLangOpts().CPlusPlus && NextToken().is(tok::coloncolon)) {
+      TypeResult T = getTypeAnnotation(Tok);
+      SourceLocation TypeNameLoc = Tok.getLocation();
+      ConsumeAnnotationToken();
+
+      CXXScopeSpec SS;
+      if (T.isInvalid() ||
+          Actions.ActOnCXXNestedNameSpecifierTypeAnnotation(
+              SS, T.get(), TypeNameLoc, Tok.getLocation()))
+        return ExprError();
+      ConsumeToken();
+      AnnotateScopeToken(SS, /*IsNewAnnotation=*/true);
+
+      return ParseCastExpression(ParseKind, isAddressOfOperand, NotCastExpr,
+                                 CorrectionBehavior, isVectorLiteral,
+                                 NotPrimaryExpression);
+    }
     if (isStartOfObjCClassMessageMissingOpenBracket()) {
       TypeResult Type = getTypeAnnotation(Tok);
 

@@ -637,3 +637,84 @@ __macro not_decls() { return ^^{ 1 + 2 }; }  // expected-error {{expected unqual
 not_decls!();
 
 }  // namespace N17
+
+namespace N18 {
+
+// An interpolated type reflection followed by '::' is a nested-name-specifier
+// in every position: qualified-ids in expressions and statements, the scope of
+// a type in declarations, and qualified declarator-ids.
+
+struct Traits {
+  static constexpr int v = 7;
+  static inline int counter = 0;
+  using type = long;
+  struct Inner { static constexpr int w = 9; };
+  static constexpr int f(int x) { return x + 1; }
+  template <int N> static constexpr int g() { return N; }
+  static int out_of_line();
+};
+
+enum class Color { red, green };
+
+// Expression position: member access, call, nested qualification, template
+// member, scoped enumerator.
+__macro exprs() {
+  auto R = ^^Traits;
+  return ^^{
+    \(R)::v + \(R)::f(10) + \(R)::Inner::w + \(R)::template g<3>()
+  };
+}
+static_assert(exprs!() == 7 + 11 + 9 + 3);
+
+__macro hue() { return ^^{ \(^^Color)::green }; }
+static_assert(hue!() == Color::green);
+
+// Statement position: the disambiguator must classify a leading interpolated
+// type followed by '::' and a non-type member as an expression-statement, not
+// a declaration.
+__macro poke() {
+  auto R = ^^Traits;
+  return ^^{
+    [] {
+      \(R)::counter = 41;
+      \(R)::f(0);
+      ++\(R)::counter;
+      return \(R)::counter;
+    }()
+  };
+}
+int use_poke() { return poke!(); }
+
+// Declaration-statement position: the interpolated type as the scope of the
+// declared type, with and without 'typename'.
+__macro decls() {
+  auto R = ^^Traits;
+  return ^^{
+    [] {
+      typename \(R)::type a = 5;
+      \(R)::Inner b;
+      return a + b.w;
+    }()
+  };
+}
+static_assert(decls!() == 14);
+
+// Declaration position (namespace scope): leading scope for the type, and a
+// qualified declarator-id after a decl-specifier.
+__macro make_inner() { return ^^{ \(^^Traits)::Inner global_inner; }; }
+make_inner!();
+constexpr int use_global = decltype(global_inner)::w;
+
+__macro define_out_of_line() {
+  return ^^{ int \(^^Traits)::out_of_line() { return 55; } };
+}
+define_out_of_line!();
+
+// A non-class, non-enum type cannot be a nested-name-specifier; the error
+// says so instead of misparsing a function-style cast.
+__macro bad() {
+  return ^^{ \(^^int)::v };  // expected-error {{'int' is not a class, namespace, or enumeration}}
+}
+constexpr int use_bad = bad!();  // expected-note {{in expansion of expression macro 'bad'}}
+
+}  // namespace N18

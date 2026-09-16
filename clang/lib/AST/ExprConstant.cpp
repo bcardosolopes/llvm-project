@@ -50,6 +50,7 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/InferAlloc.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/Metafunction.h"
 #include "clang/AST/OSLog.h"
 #include "clang/AST/OptionalDiagnostic.h"
 #include "clang/AST/RecordLayout.h"
@@ -850,6 +851,13 @@ namespace {
     /// under evaluation appears. Used to verify rules around injected
     /// declarations that may be produced by plainly constant evaluations.
     Decl *ContainingDecl = nullptr;
+
+    /// MacroExpansionContext - When evaluating an expression macro's body,
+    /// the function, class, or namespace the expansion lands in (i.e. the
+    /// context of the invocation, not of the macro's definition). Only
+    /// metafunctions that ask for it observe this; see
+    /// Metafunction::wantsMacroExpansionContext.
+    Decl *MacroExpansionContext = nullptr;
 
     enum class EvaluatingDeclKind {
       None,
@@ -9905,12 +9913,21 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
       (Info.EvalMode ==
        EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
 
+  // A metafunction that asks about the macro expansion context gets that
+  // instead of the declaration being evaluated; the two are unrelated, and
+  // ContainingDecl carries the injection target the others rely on.
+  Decl *ContextDecl = Info.ContainingDecl;
+  if (const Metafunction *Metafn;
+      !Metafunction::Lookup(E->getMetaFnID(), Metafn) &&
+      Metafn->wantsMacroExpansionContext())
+    ContextDecl = Info.MacroExpansionContext;
+
   // Evaluate the metafunction.
   APValue Result;
   const CXXMetafunctionExpr::ImplFn &Implementation = E->getImpl();
   if (Implementation(Result, Evaluator, Diagnoser, AllowInjection,
                      E->getResultType(), Info.CurrentCall->CallRange, Args,
-                     Info.ContainingDecl)) {
+                     ContextDecl)) {
     bool Result = Error(E);
     Info.addNotes(Diagnostics);
 
@@ -24674,12 +24691,16 @@ bool Expr::EvaluateWithSubstitution(APValue &Value, ASTContext &Ctx,
 bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
                              ArrayRef<APValue> ParamValues, APValue &Result,
                              const ASTContext &Ctx,
-                             SmallVectorImpl<PartialDiagnosticAt> &Diags) {
+                             SmallVectorImpl<PartialDiagnosticAt> &Diags,
+                             Decl *InvocationContext) {
   Expr::EvalStatus Status;
   Status.Diag = &Diags;
   EvalInfo Info(Ctx, Status, EvaluationMode::ConstantExpression);
   Info.InConstantContext = true;
   Info.EvaluatingMacroBody = true;
+  // macro_expansion_context() in the body sees where the expansion lands, not
+  // where the macro was defined.
+  Info.MacroExpansionContext = InvocationContext;
 
   // The parameters hold reflections and token sequences rather than values of
   // their declared types; nothing about them is evaluated from an argument.

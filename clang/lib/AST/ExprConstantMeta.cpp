@@ -801,6 +801,13 @@ static bool as_lvalue(APValue &Result, ASTContext &C, MetaActions &Meta,
                       QualType ResultTy, SourceRange Range,
                       ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
+static bool macro_expansion_context(APValue &Result, ASTContext &C,
+                                    MetaActions &Meta, EvalFn Evaluator,
+                                    DiagFn Diagnoser, bool AllowInjection,
+                                    QualType ResultTy, SourceRange Range,
+                                    ArrayRef<Expr *> Args,
+                                    Decl *ContainingDecl);
+
 static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -950,6 +957,8 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
   { Metafunction::MFRK_metaInfo, 1, 1, test_expression },
   { Metafunction::MFRK_metaInfo, 1, 1, as_lvalue },
+  { Metafunction::MFRK_metaInfo, 0, 0, macro_expansion_context,
+    /*WantsMacroExpansionContext=*/true },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3250,6 +3259,28 @@ bool as_lvalue(APValue &Result, ASTContext &C, MetaActions &Meta,
                                             /*BoundToLvalueReference=*/true);
   }
   return SetAndSucceed(Result, APValue(ReflectionKind::Expression, View));
+}
+
+bool macro_expansion_context(APValue &Result, ASTContext &C, MetaActions &Meta,
+                             EvalFn Evaluator, DiagFn Diagnoser,
+                             bool AllowInjection, QualType ResultTy,
+                             SourceRange Range, ArrayRef<Expr *> Args,
+                             Decl *ContainingDecl) {
+  assert(ResultTy == C.MetaInfoTy);
+
+  // ContainingDecl is threaded from the macro invocation's enclosing context,
+  // so this reflects where the expansion lands rather than where the macro was
+  // defined. Every expansion position has one: a function (expression
+  // position, or declaration position inside a function), a class (a member
+  // declaration), or a namespace.
+  if (!ContainingDecl)
+    return Diagnoser(Range.getBegin(), diag::metafn_no_macro_expansion_context)
+        << Range;
+
+  if (auto *RD = dyn_cast<CXXRecordDecl>(ContainingDecl))
+    return SetAndSucceed(Result, makeReflection(C.getCanonicalTagType(RD)));
+
+  return SetAndSucceed(Result, makeReflection(ContainingDecl));
 }
 
 bool template_of(APValue &Result, ASTContext &C, MetaActions &Meta,

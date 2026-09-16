@@ -271,6 +271,21 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       return true;
     }
     HasScopeSpecifier = true;
+  } else if (!HasScopeSpecifier && Tok.is(tok::annot_typename) &&
+             NextToken().is(tok::coloncolon)) {
+    // An already-annotated type followed by '::' -- e.g. a type reflection
+    // interpolated into an injected token sequence -- begins a
+    // nested-name-specifier.
+    TypeResult T = getTypeAnnotation(Tok);
+    SourceLocation TypeNameLoc = Tok.getLocation();
+    ConsumeAnnotationToken();
+    SourceLocation CCLoc = ConsumeToken();
+    if (T.isInvalid() ||
+        Actions.ActOnCXXNestedNameSpecifierTypeAnnotation(SS, T.get(),
+                                                          TypeNameLoc, CCLoc))
+      SS.SetInvalid(SourceRange(TypeNameLoc, CCLoc));
+
+    HasScopeSpecifier = true;
   } else if (!HasScopeSpecifier && Tok.is(tok::identifier) &&
            GetLookAheadToken(1).is(tok::ellipsis) &&
            GetLookAheadToken(2).is(tok::l_square) &&
