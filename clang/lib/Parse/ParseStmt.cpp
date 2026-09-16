@@ -2845,6 +2845,12 @@ ExprResult Parser::ParseDoExpression() {
 
       if (Tok.isNot(tok::identifier)) {
         Diag(Tok, diag::err_expected) << tok::identifier;
+        // `[&x]`, `[=]`, `[this]`, `[*this]` and `[...xs]` are lambda-capture
+        // spellings. A do-expression has no captures, so say so once instead
+        // of leaving the user to guess what the identifier was wanted for.
+        if (Tok.isOneOf(tok::amp, tok::equal, tok::kw_this, tok::star,
+                        tok::ellipsis))
+          Diag(Tok, diag::note_do_expr_init_hoist_not_a_capture);
         SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
         Actions.ActOnDoExprError();
         return ExprError();
@@ -2854,6 +2860,12 @@ ExprResult Parser::ParseDoExpression() {
 
       if (!TryConsumeToken(tok::equal)) {
         Diag(Tok, diag::err_expected) << tok::equal;
+        // `do [x] { ... }` is what a user migrating from `[x] { ... }()`
+        // writes first. The hoist that copies `x` is what they meant.
+        if (Tok.isOneOf(tok::comma, tok::r_square))
+          Diag(IdLoc, diag::note_do_expr_init_hoist_not_a_capture)
+              << FixItHint::CreateInsertion(
+                     Tok.getLocation(), (Twine(" = ") + Id->getName()).str());
         SkipUntil(tok::r_square, StopAtSemi | StopBeforeMatch);
         Actions.ActOnDoExprError();
         return ExprError();
