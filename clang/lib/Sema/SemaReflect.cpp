@@ -2799,13 +2799,15 @@ bool Sema::EvaluateInjectMembersAnnotation(Decl *TagDecl, unsigned Index,
                                            TokenSequenceData &Out) {
   Out = TokenSequenceData();
 
-  // For a class template, the parser hands us the ClassTemplateDecl; the
-  // members are injected into the pattern, once, and instantiation
-  // distributes them.
+  // inject_members always runs on a non-dependent, being-completed class:
+  // at parse time for ordinary classes, and per specialization during
+  // instantiation for class templates. It never runs on a dependent pattern
+  // -- there the member types are dependent (and the member walk sees
+  // nothing), so any decision computed from them would be garbage.
   if (auto *CT = dyn_cast_or_null<ClassTemplateDecl>(TagDecl))
     TagDecl = CT->getTemplatedDecl();
   auto *RD = dyn_cast_or_null<CXXRecordDecl>(TagDecl);
-  if (!RD)
+  if (!RD || RD->isDependentType())
     return false;
 
   // Find the Index'th annotation.

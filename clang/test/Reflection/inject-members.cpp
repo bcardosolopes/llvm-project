@@ -86,12 +86,17 @@ int ok = D{}.secret;  // public in a struct
 
 namespace N4 {
 
-// On a class template the callback fires once, for the pattern; the injected
-// member is part of the pattern and can use the template parameters.
+// On a class template the callback fires per specialization, with the
+// concrete type -- never on the dependent pattern, where the member types
+// would be dependent and any decision computed from them garbage. The
+// subject's template parameter names are not in scope in the injected
+// tokens (deduce, or interpolate reflections of the template arguments);
+// an annotation's own template parameters are substituted into its token
+// literals as usual (see N7).
 struct add_first {
   consteval auto inject_members(info) const -> token_sequence {
     return ^^{
-      constexpr T first() const { return value[0]; }
+      constexpr auto first() const { return value[0]; }
     };
   }
 };

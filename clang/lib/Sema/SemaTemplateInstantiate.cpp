@@ -3960,45 +3960,32 @@ bool Sema::InstantiateClassImpl(
     }
   }
 
-  // Fire inject_members for annotations whose value was dependent at
-  // definition time: they could not run on the pattern, so their members are
-  // per-specialization, injected here before the fields are finished.
-  // (Annotations that were evaluable on the pattern already injected into
-  // it; their members arrived through ordinary member instantiation above.)
+  // Fire inject_members annotations for this specialization, before the
+  // fields are finished. inject_members never runs on a dependent pattern
+  // (the member types there are dependent, so the callback's decisions
+  // would be computed from garbage): for class templates it runs here, per
+  // specialization, with the concrete type.
   if (!Instantiation->isInvalidDecl() && CanProcessTokenInjections()) {
-    SmallVector<unsigned, 2> DependentAnnots;
-    unsigned K = 0;
-    for (auto *Attr : Pattern->attrs())
-      if (auto *AA = dyn_cast<CXX26AnnotationAttr>(Attr)) {
-        if (AA->getArg()->isTypeDependent() ||
-            AA->getArg()->isValueDependent())
-          DependentAnnots.push_back(K);
-        ++K;
-      }
-
-    if (!DependentAnnots.empty()) {
-      AccessSpecifier DefaultAS =
-          Instantiation->getTagKind() == TagTypeKind::Class ? AS_private
-                                                            : AS_public;
-      bool Injected = false;
-      TokenSequenceData TSD;
-      for (unsigned I : DependentAnnots) {
-        if (!EvaluateInjectMembersAnnotation(Instantiation, I, TSD))
-          break;
-        if (TSD.empty())
-          continue;
-        SmallVector<Expr::EvalStatus::TokenInjection, 1> Injs;
-        Injs.push_back({PointOfInstantiation, Instantiation, TSD, DefaultAS});
-        ProcessTokenInjectionsFromParserBridge(Injs);
-        Injected = true;
-      }
-      // Newly injected fields must participate in field completion; the
-      // record's field list is authoritative.
-      if (Injected) {
-        Fields.clear();
-        for (FieldDecl *FD : Instantiation->fields())
-          Fields.push_back(FD);
-      }
+    AccessSpecifier DefaultAS =
+        Instantiation->getTagKind() == TagTypeKind::Class ? AS_private
+                                                          : AS_public;
+    bool Injected = false;
+    TokenSequenceData TSD;
+    for (unsigned I = 0;
+         EvaluateInjectMembersAnnotation(Instantiation, I, TSD); ++I) {
+      if (TSD.empty())
+        continue;
+      SmallVector<Expr::EvalStatus::TokenInjection, 1> Injs;
+      Injs.push_back({PointOfInstantiation, Instantiation, TSD, DefaultAS});
+      ProcessTokenInjectionsFromParserBridge(Injs);
+      Injected = true;
+    }
+    // Newly injected fields must participate in field completion; the
+    // record's field list is authoritative.
+    if (Injected) {
+      Fields.clear();
+      for (FieldDecl *FD : Instantiation->fields())
+        Fields.push_back(FD);
     }
   }
 

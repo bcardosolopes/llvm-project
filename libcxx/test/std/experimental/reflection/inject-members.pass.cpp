@@ -69,8 +69,8 @@ struct [[=derive_eq{}]] Point {
 static_assert(Point{1, 2} == Point{1, 2});
 static_assert(Point{1, 2} != Point{2, 1});
 
-// On a class template the callback receives (a reflection of) the pattern's
-// own type, so \(r) spells the injected-class-name-equivalent.
+// On a class template the callback fires per specialization, receiving the
+// concrete type, so \(r) spells e.g. Pair<int>.
 template <class T>
 struct [[=derive_eq{}]] Pair {
   T first;
@@ -178,6 +178,21 @@ struct [[=Eq]] Bad {
 };
 static_assert(!eq_comparable_v<Bad>);
 static_assert(!ne_comparable_v<Bad>);
+
+// On a class template, Eq fires per specialization with the concrete
+// member types -- so one Wrap gets a real memberwise ==, another the
+// deleted pair. (Firing on the dependent pattern would see no subobjects
+// and inject a vacuous 'return true' comparison for everybody.)
+template <class T>
+struct [[=Eq]] Wrap {
+  T t;
+};
+struct NotCmp2 {};
+
+static_assert(Wrap<int>{1} == Wrap<int>{1});
+static_assert(Wrap<int>{1} != Wrap<int>{2});  // not vacuously true!
+static_assert(!eq_comparable_v<Wrap<NotCmp2>>);
+static_assert(!ne_comparable_v<Wrap<NotCmp2>>);
 
 // Private members are fine: the injected operators are friends, and the
 // walk uses an unchecked access context.

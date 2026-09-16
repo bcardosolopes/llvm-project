@@ -606,13 +606,16 @@ predecessor's tokens, so a later callback's members can name an earlier
 one's. Each callback's members start from the class's default access
 (`private` for `class`, `public` for `struct`), regardless of the access in
 force at the end of the written body; the tokens may contain their own
-access-specifier labels. For a class template the callback runs once, on the
-pattern, receiving a reflection of the pattern's own type (so `\(type)`
-spells the equivalent of the injected-class-name); if the annotation *value*
-is dependent, the callback instead runs for each specialization, right
-before that specialization's completion, injecting per-specialization
-members. Injections queued from inside the callback drain only after the
-class completes.
+access-specifier labels. `inject_members` always receives a **non-dependent,
+being-completed type**: for a class template it fires per specialization,
+right before that specialization's completion — never on the dependent
+pattern, whose member types are dependent (and whose member walk sees
+nothing), so any decision computed from them would be garbage. A consequence
+is that the subject's template parameter names are not spellable in the
+returned tokens: deduce (`auto`), or interpolate reflections computed from
+the concrete type (`template_arguments_of`); an annotation's *own* template
+parameters are substituted into its token literals as usual. Injections
+queued from inside the callback drain only after the class completes.
 
 Two rules of thumb: never evaluate completeness-sensitive predicates
 (concepts, `sizeof`) on the subject inside `inject_members` — satisfaction
