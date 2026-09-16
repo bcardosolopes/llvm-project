@@ -1594,6 +1594,18 @@ private:
   };
   SmallVector<DoExprEmitInfo, 4> DoExprStack;
 
+  /// The variables entered into LocalDeclMap while emitting a do-expression,
+  /// one frame per do-expression currently being emitted (see EmitDoExpr).
+  ///
+  /// Unlike every other expression that can declare a variable, a
+  /// do-expression can appear in an expression tree that CodeGen emits more
+  /// than once in the same function: a default member initializer, or a
+  /// default argument, is one AST shared by every use. The second emission
+  /// needs its own storage, so the first emission's entries have to be taken
+  /// back out of LocalDeclMap when its scope closes -- they are unreachable by
+  /// then in any case, since nothing outside the body can name them.
+  SmallVector<SmallVector<const VarDecl *, 4>, 2> DoExprEmittedLocals;
+
   /// Handles cancellation exit points in OpenMP-related constructs.
   class OpenMPCancelExitStack {
     /// Tracks cancellation exit point and join point for cancel-related exit
@@ -5493,6 +5505,8 @@ private:
   void setAddrOfLocalVar(const VarDecl *VD, Address Addr) {
     assert(!LocalDeclMap.count(VD) && "Decl already exists in LocalDeclMap!");
     LocalDeclMap.insert({VD, Addr});
+    if (!DoExprEmittedLocals.empty())
+      DoExprEmittedLocals.back().push_back(VD);
   }
 
   /// ExpandTypeFromArgs - Reconstruct a structure of type \arg Ty

@@ -28,6 +28,7 @@
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Assumptions.h"
@@ -1818,6 +1819,18 @@ void CodeGenFunction::EmitDoReturnStmt(const DoReturnStmt &S) {
 }
 
 Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
+  // Everything this do-expression declares -- init-captures and body locals
+  // alike -- has to come back out of LocalDeclMap on the way out, so that a
+  // second emission of the same AST gets its own storage. See
+  // DoExprEmittedLocals. Covers the init-captures too, so it is entered before
+  // they are emitted.
+  DoExprEmittedLocals.emplace_back();
+  auto ForgetEmittedLocals = llvm::make_scope_exit([&] {
+    for (const VarDecl *VD : DoExprEmittedLocals.back())
+      LocalDeclMap.erase(VD);
+    DoExprEmittedLocals.pop_back();
+  });
+
   QualType Ty = E.getType();
   bool IsVoid = Ty->isVoidType();
   bool IsReference = E.isGLValue();
