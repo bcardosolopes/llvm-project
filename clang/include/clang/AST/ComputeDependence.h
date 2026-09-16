@@ -147,7 +147,8 @@ ExprDependence computeDependence(BinaryOperator *E);
 ExprDependence computeDependence(ConditionalOperator *E);
 ExprDependence computeDependence(BinaryConditionalOperator *E);
 ExprDependence computeDependence(StmtExpr *E, unsigned TemplateDepth);
-ExprDependence computeDependence(DoExpr *E, unsigned TemplateDepth);
+ExprDependence computeDependence(DoExpr *E, unsigned TemplateDepth,
+                                 bool ContainsUnexpandedParameterPack);
 ExprDependence computeDependence(ConvertVectorExpr *E);
 ExprDependence computeDependence(VAArgExpr *E);
 ExprDependence computeDependence(ChooseExpr *E);

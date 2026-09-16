@@ -461,8 +461,9 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
   if (InitStmt)
     Cleanup.setExprNeedsCleanups(true);
 
-  return new (Context) DoExpr(InitStmt, Compound, ResultType, VK, ExplicitType,
-                              DoLoc, LBraceLoc, RBraceLoc, TemplateDepth);
+  return new (Context)
+      DoExpr(InitStmt, Compound, ResultType, VK, ExplicitType, DoLoc, LBraceLoc,
+             RBraceLoc, TemplateDepth, Entry.ContainsUnexpandedParameterPack);
 }
 
 StmtResult Sema::ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
@@ -483,6 +484,14 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
     Diag(DoReturnLoc, diag::err_do_return_crosses_function_scope);
     return StmtError();
   }
+
+  // A pack named by the operand is either expanded by an expansion enclosing
+  // the do-expression -- in which case this records the fact on the
+  // do-expression, the way a lambda body does -- or it is genuinely unexpanded
+  // and has to be diagnosed here, since no later step looks at the operand as a
+  // whole. `return ts;` gets the same treatment from BuildReturnStmt.
+  if (Operand && DiagnoseUnexpandedParameterPack(Operand, UPPC_Expression))
+    return StmtError();
 
   // C++17: do_return statements in discarded statements are not considered when
   // deducing a do-expression's result type.

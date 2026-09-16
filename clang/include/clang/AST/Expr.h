@@ -4707,11 +4707,12 @@ public:
   DoExpr(Stmt *InitStmt, CompoundStmt *Body, QualType T, ExprValueKind VK,
          TypeSourceInfo *ExplicitType, SourceLocation DoLoc,
          SourceLocation LBraceLoc, SourceLocation RBraceLoc,
-         unsigned TemplateDepth)
+         unsigned TemplateDepth, bool ContainsUnexpandedParameterPack = false)
       : Expr(DoExprClass, T, VK, OK_Ordinary), SubStmts{InitStmt, Body},
         ExplicitType(ExplicitType), DoLoc(DoLoc), LBraceLoc(LBraceLoc),
         RBraceLoc(RBraceLoc), TemplateDepth(TemplateDepth) {
-    setDependence(computeDependence(this, TemplateDepth));
+    setDependence(computeDependence(this, TemplateDepth,
+                                    ContainsUnexpandedParameterPack));
   }
 
   explicit DoExpr(EmptyShell Empty) : Expr(DoExprClass, Empty) {}
