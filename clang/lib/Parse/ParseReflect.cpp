@@ -538,8 +538,10 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
       if (G)
         for (Decl *D : G.get())
           Decls.push_back(D);
-      // Guarantee progress on malformed tokens.
-      if (Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
+      // Guarantee progress on malformed tokens. (Location equality alone is
+      // not proof: repeated evaluations of one token sequence share
+      // locations, so only a parse that also produced nothing counts.)
+      if (!G && Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
         Diag(Tok, diag::err_unexpected_token_in_injected_members)
             << Tok.getKind();
         ConsumeAnyToken();

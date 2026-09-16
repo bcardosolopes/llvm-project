@@ -1266,11 +1266,15 @@ void Parser::ParseTokensAsClassMembers(AccessSpecifier AS, Decl *TagDecl) {
       ConsumeBrace();
       continue;
     }
+    // Progress detection cannot rely on source locations alone: a token
+    // sequence evaluated repeatedly (in a loop) injects several copies of
+    // tokens with identical locations. Treat the parse as stuck only if it
+    // also produced no declaration.
     SourceLocation Before = Tok.getLocation();
-    ParseCXXClassMemberDeclarationWithPragmas(CurAS, AccessAttrs, TagType,
-                                              TagDecl);
+    DeclGroupPtrTy G = ParseCXXClassMemberDeclarationWithPragmas(
+        CurAS, AccessAttrs, TagType, TagDecl);
     MaybeDestroyTemplateIds();
-    if (Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
+    if (!G && Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
       Diag(Tok, diag::err_unexpected_token_in_injected_members)
           << Tok.getKind();
       ConsumeAnyToken();

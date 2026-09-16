@@ -13,6 +13,9 @@ namespace std::meta {
 
     template <class... Ts>
     consteval auto tokenize(Ts const&...) -> token_sequence;
+
+    template <class... Ts>
+    consteval auto id(Ts const&...) -> info;
 }
 using std::meta::info;
 using std::meta::token_sequence;
@@ -185,3 +188,29 @@ struct bad {
 struct [[=bad{}]] Y {};  // expected-note {{in member declarations injected into 'Y'}}
 
 }  // namespace N8
+
+namespace N9 {
+
+// One token-sequence literal evaluated repeatedly injects several copies of
+// tokens with identical source locations; the parser's progress detection
+// must not mistake the second copy for a stuck parse (it treats a parse as
+// stuck only if it also produced no declaration).
+struct add_pair {
+  consteval auto inject_members(info) const -> token_sequence {
+    token_sequence out = ^^{};
+    for (int i = 0; i < 2; ++i) {
+      // the same literal, evaluated twice -- member templates, the hard case
+      out += ^^{
+        template <class X>
+        constexpr X \(std::meta::id("m", i))(X x) const { return x + \(i); }
+      };
+    }
+    return out;
+  }
+};
+
+struct [[=add_pair{}]] Twice {};
+static_assert(Twice{}.m0(5) == 5);
+static_assert(Twice{}.m1(5) == 6);
+
+}  // namespace N9

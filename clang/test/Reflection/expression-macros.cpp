@@ -585,6 +585,17 @@ static_assert(one + two == 3);
 __macro nothing() { return ^^{}; }
 nothing!();
 
+// The same token-sequence literal evaluated in a loop yields declarations
+// whose tokens share source locations; the expansion parser's progress
+// guard must not mistake the repeats for a stuck parse.
+__macro assert_twice() {
+  token_sequence out = ^^{};
+  for (int i = 0; i < 2; ++i)
+    out += ^^{ static_assert(true); };
+  return out;
+}
+assert_twice!();
+
 // The expansion may itself invoke a declaration-position macro.
 __macro outer_gen() { return ^^{ gen_var!(nested, 3); }; }
 outer_gen!();
