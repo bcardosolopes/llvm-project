@@ -59,7 +59,9 @@ bool FunctionDeclSpec::operator==(FunctionDeclSpec const &Rhs) const {
   return (Source == Rhs.Source &&
           Name == Rhs.Name &&
           TemplateParameterPrefix == Rhs.TemplateParameterPrefix &&
-          ParameterPrefix == Rhs.ParameterPrefix);
+          ParameterPrefix == Rhs.ParameterPrefix &&
+          MarkOverride == Rhs.MarkOverride &&
+          MarkNoexcept == Rhs.MarkNoexcept);
 }
 
 bool FunctionDeclSpec::operator!=(FunctionDeclSpec const &Rhs) const {

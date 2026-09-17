@@ -32,7 +32,7 @@ what we have is the sell:
 |---|---|---|
 | `CHECK(a == b)` / `ASSERT` / `LOG` | expression macro with stringify + location + value decomposition | **expression macros** |
 | `REQUIRE` / `TEST_CASE` (Catch2, gtest) | same, plus injected static registration | expression macros + injection |
-| `MOCK_METHOD(int, Foo, (int), (override))` | `mock<Interface>` | injection (already demoed: type-erasure test) |
+| `MOCK_METHOD(int, Foo, (int), (override))` | `mock<Interface>` | **DONE**: mock-interface.pass.cpp (declaration_of + forwarding into per-method handlers; overrides are implicit, no `virtual` spelling needed) |
 | X-macros / enum tables | reflection + `derive`-style annotations | P2996 + annotations |
 | operator/ctor/forwarder boilerplate, pimpl | injection | injection + `on_complete` / `on_template_defined` |
 | `#if PLATFORM` | nothing — that's fine, that's what the preprocessor is for | — |

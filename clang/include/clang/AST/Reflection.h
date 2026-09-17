@@ -212,6 +212,12 @@ struct FunctionDeclSpec {
   std::string TemplateParameterPrefix;
   std::string ParameterPrefix;
 
+  /// Transformations applied to the description
+  /// (std::meta::make_override / make_noexcept): declare the clone
+  /// 'override', and/or declare it noexcept.
+  bool MarkOverride = false;
+  bool MarkNoexcept = false;
+
   bool operator==(FunctionDeclSpec const &Rhs) const;
   bool operator!=(FunctionDeclSpec const &Rhs) const;
 };

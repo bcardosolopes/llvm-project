@@ -826,6 +826,18 @@ static bool is_declaration_spec(APValue &Result, ASTContext &C,
                                 QualType ResultTy, SourceRange Range,
                                 ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
+static bool make_override(APValue &Result, ASTContext &C, MetaActions &Meta,
+                          EvalFn Evaluator, DiagFn Diagnoser,
+                          bool AllowInjection, QualType ResultTy,
+                          SourceRange Range, ArrayRef<Expr *> Args,
+                          Decl *ContainingDecl);
+
+static bool make_noexcept(APValue &Result, ASTContext &C, MetaActions &Meta,
+                          EvalFn Evaluator, DiagFn Diagnoser,
+                          bool AllowInjection, QualType ResultTy,
+                          SourceRange Range, ArrayRef<Expr *> Args,
+                          Decl *ContainingDecl);
+
 static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -980,6 +992,8 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_metaInfo, 6, 6, declaration_of },
   { Metafunction::MFRK_tokenSequence, 2, 2, forwarding_call_for },
   { Metafunction::MFRK_bool, 1, 1, is_declaration_spec },
+  { Metafunction::MFRK_metaInfo, 1, 1, make_override },
+  { Metafunction::MFRK_metaInfo, 1, 1, make_noexcept },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3444,9 +3458,11 @@ static CXXMethodDecl *resolveCloneSource(APValue &RV, NamedDecl *&Source,
              "supported";
     return nullptr;
   }
-  if (MD->isDeleted() || MD->isDefaulted() || MD->isPureVirtual()) {
-    WhyNot = "deleted, defaulted, and pure virtual functions cannot receive "
-             "a new body";
+  // Note that a *pure virtual* source is fine: the clone is a fresh
+  // declaration in another class, not a redeclaration, so it can have a
+  // body -- that is exactly how a mock implements an abstract interface.
+  if (MD->isDeleted() || MD->isDefaulted()) {
+    WhyNot = "deleted and defaulted functions cannot be cloned";
     return nullptr;
   }
   if (MD->getParent()->isDependentContext()) {
@@ -3530,6 +3546,57 @@ bool is_declaration_spec(APValue &Result, ASTContext &C, MetaActions &Meta,
     return true;
   return SetAndSucceed(
       Result, makeBool(C, RV.isReflectedFunctionDeclSpec()));
+}
+
+// Shared helper for the declaration transformations: evaluate a description
+// operand and produce a modified copy.
+static bool transformDeclSpec(APValue &Result, ASTContext &C, EvalFn Evaluator,
+                              DiagFn Diagnoser, SourceRange Range, Expr *Arg,
+                              llvm::function_ref<bool(FunctionDeclSpec &,
+                                                      const char *&)> Apply) {
+  APValue RV;
+  if (!Evaluator(RV, Arg, true))
+    return true;
+  if (!RV.isReflectedFunctionDeclSpec())
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_clone_declaration)
+        << "a declaration transformation requires a declaration description"
+        << Range;
+
+  FunctionDeclSpec *NewFDS =
+      new (C) FunctionDeclSpec(*RV.getReflectedFunctionDeclSpec());
+  const char *WhyNot = nullptr;
+  if (!Apply(*NewFDS, WhyNot))
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_clone_declaration)
+        << WhyNot << Range;
+  return SetAndSucceed(Result, makeReflection(NewFDS));
+}
+
+bool make_override(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl) {
+  return transformDeclSpec(
+      Result, C, Evaluator, Diagnoser, Range, Args[0],
+      [](FunctionDeclSpec &FDS, const char *&WhyNot) {
+        if (isa<FunctionTemplateDecl>(FDS.Source)) {
+          WhyNot = "a member function template cannot be declared override";
+          return false;
+        }
+        FDS.MarkOverride = true;
+        return true;
+      });
+}
+
+bool make_noexcept(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl) {
+  return transformDeclSpec(
+      Result, C, Evaluator, Diagnoser, Range, Args[0],
+      [](FunctionDeclSpec &FDS, const char *&WhyNot) {
+        FDS.MarkNoexcept = true;
+        return true;
+      });
 }
 
 bool forwarding_call_for(APValue &Result, ASTContext &C, MetaActions &Meta,

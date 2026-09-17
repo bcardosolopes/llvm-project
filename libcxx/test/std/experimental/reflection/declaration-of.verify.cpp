@@ -78,3 +78,24 @@ constexpr auto f3 = std::meta::forwarding_call_for(
 constexpr auto f4 = std::meta::forwarding_call_for(^^S::ok, ^^{ impl });
 // expected-error@-1 {{constexpr variable 'f4' must be initialized by a constant expression}}
 // expected-note@*:* {{cannot generate a forwarding call: operand is not a declaration description}}
+
+// Declaration transformation refusals.
+constexpr auto t1 = std::meta::make_override(
+    std::meta::declaration_of(^^S::nonterminal_pack));
+// expected-error@-2 {{constexpr variable 't1' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a member function template cannot be declared override}}
+
+constexpr auto t2 = std::meta::make_override(^^S::ok);
+// expected-error@-1 {{constexpr variable 't2' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a declaration transformation requires a declaration description}}
+
+constexpr auto t3 = std::meta::make_noexcept(^^S);
+// expected-error@-1 {{constexpr variable 't3' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a declaration transformation requires a declaration description}}
+
+// A well-formed transformation composes and is a new description.
+constexpr auto t4 =
+    std::meta::make_noexcept(std::meta::make_override(
+        std::meta::declaration_of(^^S::ok)));
+static_assert(std::meta::is_declaration_spec(t4));
+static_assert(t4 != std::meta::declaration_of(^^S::ok));

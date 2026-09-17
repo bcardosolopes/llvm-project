@@ -35,6 +35,43 @@ and constrained-parameter constraints (with correct *named* viability in
 forwarding recipe), overload sets, renaming, and the real
 `std::vector<int>` `push_back`/`emplace_back`/`emplace`/`size`.
 
+**[v1] Declaration transformations** (added 2026-09-17): descriptions
+compose through transformation functions, each returning a *new*
+description:
+
+```cpp
+auto d = declaration_of(m);
+d = make_override(d);              // inject '... override'
+if (is_noexcept(type_of(m)))
+  d = make_noexcept(d);            // inject '... noexcept'
+```
+
+`make_override` makes the injected clone behave exactly like a written
+`override` specifier (enforced through the ordinary override-control
+checks at the destination; refused on member-template descriptions, which
+can never be virtual). `make_noexcept` declares the clone `noexcept` —
+the explicit opt-in that decision 1 below anticipated, since
+`declaration_of` deliberately never clones exception specifications. This
+transformation shape (immutable description in, new description out) is
+the intended home for future knobs: conditional noexcept, constexpr-ness
+policy, virtual-ness, attributes.
+
+**[v1] mock\<Interface\>** (added 2026-09-17, see
+[mock-interface.pass.cpp](../libcxx/test/std/experimental/reflection/mock-interface.pass.cpp)):
+the `MOCK_METHOD` replacement works *without* `virtual`/`override` syntax
+support, because a clone with the same name, signature, and cv/ref-qualifiers
+as an inherited virtual implicitly overrides it — the injection path
+registers overrides exactly as a hand-written declaration would
+(`AddOverriddenMethods`), so `mock<I>` is observably non-abstract. Two
+consequences of that route: **pure virtual sources are clonable** (a clone
+is a fresh declaration, not a redeclaration, so it can have a body — only
+deleted/defaulted sources refuse now), and interfaces with `noexcept`
+virtuals mock via `make_noexcept` (see the transformations above; the
+generator mirrors the source's noexcept, and the mock now applies
+`make_override` to every clone so interface drift is a loud error).
+Overloaded virtuals still need a handler-naming scheme in the mock
+generator itself.
+
 **[v1] Not yet**: namespace-scope injection of `\(d)`; `virtual` prefix /
 `= 0` / `override` around the interpolation (blocks the type-erasure sketch
 below); operator *renames* (cloning an operator keeping its name works);

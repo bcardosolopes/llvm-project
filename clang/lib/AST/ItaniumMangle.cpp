@@ -5089,6 +5089,10 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
       Out << "N$" << *FDS->Name << '$';
     Out << "T$" << FDS->TemplateParameterPrefix << '$';
     Out << "P$" << FDS->ParameterPrefix << '$';
+    if (FDS->MarkOverride)
+      Out << 'O';
+    if (FDS->MarkNoexcept)
+      Out << 'X';
     break;
   }
   case ReflectionKind::Identifier:

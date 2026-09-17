@@ -577,6 +577,8 @@ enum : unsigned {
   __metafn_declaration_of,
   __metafn_forwarding_call_for,
   __metafn_is_declaration_spec,
+  __metafn_make_override,
+  __metafn_make_noexcept,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3307,6 +3309,30 @@ consteval auto declaration_of(info fn, clone_naming naming = {}) -> info {
 // declaration_of.
 consteval auto is_declaration_spec(info r) -> bool {
   return __metafunction(detail::__metafn_is_declaration_spec, r);
+}
+
+// Declaration transformations: each takes a declaration description and
+// returns a new description with the transformation applied; the original
+// is unchanged. They compose:
+//
+//   auto d = declaration_of(m);
+//   d = make_override(d);          // inject '... override'
+//
+// make_override: the injected clone is declared 'override' -- it must
+// override an inherited virtual, diagnosed at the destination class the
+// same way a written 'override' would be. Refused for member function
+// template descriptions (a template cannot be virtual).
+consteval auto make_override(info d) -> info {
+  return __metafunction(detail::__metafn_make_override, d);
+}
+
+// make_noexcept: the injected clone is declared noexcept. declaration_of
+// deliberately does not clone the source's exception specification (the
+// new body has its own exception behavior); this asks for noexcept
+// explicitly -- e.g. a mock mirroring an interface whose virtuals are
+// noexcept, where a looser override would be ill-formed.
+consteval auto make_noexcept(info d) -> info {
+  return __metafunction(detail::__metafn_make_noexcept, d);
 }
 
 // Returns tokens for a call forwarding the parameters of the description 'd'

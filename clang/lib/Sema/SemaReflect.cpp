@@ -1937,6 +1937,9 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   // behavior, and silently cloning noexcept would be a correctness trap.
   FunctionProtoType::ExtProtoInfo EPI = SrcProto->getExtProtoInfo();
   EPI.ExceptionSpec = FunctionProtoType::ExceptionSpecInfo();
+  // ... unless the description was transformed with make_noexcept.
+  if (Spec->MarkNoexcept)
+    EPI.ExceptionSpec = FunctionProtoType::ExceptionSpecInfo(EST_BasicNoexcept);
   QualType NewFT = Context.getFunctionType(NewRet, NewParamTys, EPI);
   TypeSourceInfo *NewFTSI = Context.getTrivialTypeSourceInfo(NewFT, Loc);
   if (auto ProtoLoc =
@@ -1972,6 +1975,18 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   Method->setParams(NewParms);
   Method->setAccess(AS);
   Method->setLexicalDeclContext(CurContext);
+
+  // A clone with the same name and signature as an inherited virtual
+  // implicitly overrides it (that is how mock<Interface> implements an
+  // abstract base). Register the overrides as an ordinary declaration
+  // would, and enforce a make_override transformation like a written
+  // 'override' specifier.
+  if (!SrcFTD) {
+    AddOverriddenMethods(RD, Method);
+    if (Spec->MarkOverride)
+      Method->addAttr(OverrideAttr::Create(Context, Loc));
+    CheckOverrideControl(Method);
+  }
 
   NamedDecl *Introduced = Method;
   if (SrcFTD) {
