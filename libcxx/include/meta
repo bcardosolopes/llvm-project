@@ -3319,10 +3319,13 @@ consteval auto is_declaration_spec(info r) -> bool {
 // The generated call names the *source* member on the receiver (found by
 // ordinary member lookup there; a renamed clone still forwards to the member
 // it was cloned from), passes every cloned template parameter explicitly,
-// and forwards each parameter as static_cast<decltype(p)&&>(p). Refused
-// (constexpr_error) for descriptions this recipe cannot forward faithfully:
-// explicit-object members, C-style variadics, and template heads where a
-// parameter pack is followed by more parameters.
+// and forwards each parameter as static_cast<decltype(p)&&>(p). The receiver
+// is grouped (so '*ptr' works) and cast to carry the described member's
+// cv- and ref-qualifiers, so a const clone calls the const overload even
+// through a mutable member, and an rvalue-qualified clone moves its
+// receiver. Refused (constexpr_error) for descriptions this recipe cannot
+// forward faithfully: explicit-object members, C-style variadics, and
+// template heads where a parameter pack is followed by more parameters.
 consteval auto forwarding_call_for(info d, token_sequence receiver)
     -> token_sequence {
   return __metafunction(detail::__metafn_forwarding_call_for, d, receiver);

@@ -5074,9 +5074,17 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
   case ReflectionKind::DeclarationSpec: {
     Out << "sfd";
 
+    // The source member's identity -- enclosing (specialized) class, member
+    // name, signature, and template head arity -- followed by the naming
+    // policy. Distinct sources must mangle distinctly.
     FunctionDeclSpec *FDS = R.getReflectedFunctionDeclSpec();
+    auto *MD = cast<CXXMethodDecl>(FDS->Source->getAsFunction());
     Context.mangleCanonicalTypeName(
-        cast<ValueDecl>(FDS->Source->getAsFunction())->getType(), Out, false);
+        getASTContext().getCanonicalTagType(MD->getParent()), Out, false);
+    Out << "M$" << MD->getDeclName().getAsString() << '$';
+    Context.mangleCanonicalTypeName(MD->getType(), Out, false);
+    if (auto *FTD = dyn_cast<FunctionTemplateDecl>(FDS->Source))
+      Out << 'H' << FTD->getTemplateParameters()->size();
     if (FDS->Name)
       Out << "N$" << *FDS->Name << '$';
     Out << "T$" << FDS->TemplateParameterPrefix << '$';

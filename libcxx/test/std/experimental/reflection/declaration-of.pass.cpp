@@ -258,8 +258,182 @@ constexpr int use_vec() {
 }
 static_assert(use_vec() == 1);
 
+// ----------------------------------------------------------------------------
+// Uninstantiated defaults: a member template of a specialization keeps its
+// default as the *pattern's* expression, which can reference the enclosing
+// class's parameters; the clone must resolve those against the source
+// specialization while keeping the member-parameter-dependent parts lazy.
+// ----------------------------------------------------------------------------
+namespace defaults {
+
+template <class T>
+struct Outer {
+  template <class V>
+  constexpr int f(int n = sizeof(T) + sizeof(V)) const {
+    return n;
+  }
+  // A default that is invalid when instantiated; depends only on the
+  // member's own parameter, so cloning must not instantiate it.
+  template <class V>
+  constexpr int g(int x, [[maybe_unused]] int bad = V::missing()) const {
+    return x;
+  }
+};
+
+struct W {
+  Outer<long> impl;
+
+  consteval {
+    auto fd = std::meta::declaration_of(^^Outer<long>::template f);
+    auto gd = std::meta::declaration_of(^^Outer<long>::template g);
+    queue_injection(^^{
+      \(fd) { return \(std::meta::forwarding_call_for(fd, ^^{ impl })); }
+      \(gd) { return \(std::meta::forwarding_call_for(gd, ^^{ impl })); }
+    });
+  }
+};
+
+// T resolves against the source specialization (long), V stays the clone's.
+static_assert(W{}.f<int>() == sizeof(long) + sizeof(int));
+static_assert(W{}.f<char[3]>() == sizeof(long) + 3);
+static_assert(W{}.f<int>(7) == 7);
+
+// The bad default was cloned, not instantiated; supplying the argument
+// never touches it.
+static_assert(W{}.g<int>(11, 0) == 11);
+
+}  // namespace defaults
+
+// ----------------------------------------------------------------------------
+// Array and function parameters adjust to pointers in the clone, exactly as
+// in the source; references to arrays stay references.
+// ----------------------------------------------------------------------------
+namespace adjust {
+
+struct U {
+  constexpr int arr(int values[2]) const { return values ? values[0] : 7; }
+  constexpr int fn(int callback()) const { return callback ? callback() : 7; }
+  constexpr int ref(int (&values)[2]) const { return values[1]; }
+};
+
+struct W {
+  U impl;
+  consteval {
+    for (std::string_view n : {"arr", "fn", "ref"})
+      for (std::meta::info m :
+           members_of(^^U, std::meta::access_context::current()))
+        if (is_function(m) && has_identifier(m) && identifier_of(m) == n) {
+          auto d = std::meta::declaration_of(m);
+          auto call = std::meta::forwarding_call_for(d, ^^{ impl });
+          queue_injection(^^{ \(d) { return \(call); } });
+        }
+  }
+};
+
+static_assert(W{}.arr(nullptr) == 7);
+static_assert(W{}.fn(nullptr) == 7);
+static_assert([] {
+  int two[2] = {5, 6};
+  int arg[2] = {8, 9};
+  CHECK(W{}.arr(arg) == 8);
+  CHECK(W{}.ref(two) == 6);
+  return 1;
+}());
+
+}  // namespace adjust
+
+// ----------------------------------------------------------------------------
+// Receiver handling: grouping survives a '*ptr' receiver, a const clone
+// dispatches to the const overload even through a mutable member, and an
+// rvalue-qualified clone moves its receiver even when it is a dereference.
+// ----------------------------------------------------------------------------
+namespace receivers {
+
+struct U {
+  constexpr int f() { return 1; }
+  constexpr int f() const { return 2; }
+  constexpr int rv() && { return 3; }
+};
+
+consteval std::meta::info pick_f(bool want_const) {
+  for (std::meta::info m :
+       members_of(^^U, std::meta::access_context::current()))
+    if (is_function(m) && has_identifier(m) && identifier_of(m) == "f" &&
+        is_const(type_of(m)) == want_const)
+      return m;
+  return {};
+}
+
+struct ThroughPointer {
+  U* ptr;
+  consteval {
+    auto d = std::meta::declaration_of(pick_f(false));
+    queue_injection(^^{
+      \(d) { return \(std::meta::forwarding_call_for(d, ^^{ *ptr })); }
+    });
+    auto rd = std::meta::declaration_of(^^U::rv);
+    queue_injection(^^{
+      \(rd) { return \(std::meta::forwarding_call_for(rd, ^^{ *ptr })); }
+    });
+  }
+};
+
+struct ThroughMutable {
+  mutable U impl;
+  consteval {
+    // Only the const overload is cloned; it must call the const overload
+    // even though 'impl' is mutable (and so non-const here).
+    auto d = std::meta::declaration_of(pick_f(true));
+    queue_injection(^^{
+      \(d) { return \(std::meta::forwarding_call_for(d, ^^{ impl })); }
+    });
+  }
+};
+
+static_assert([] {
+  U u;
+  ThroughPointer tp{&u};
+  CHECK(tp.f() == 1);
+  CHECK(std::move(tp).rv() == 3);  // dereferenced receiver still moves
+  CHECK(ThroughMutable{}.f() == 2);
+  return 1;
+}());
+
+}  // namespace receivers
+
+// ----------------------------------------------------------------------------
+// Distinct descriptions mangle distinctly (usable as template arguments in
+// code generation, not just constant evaluation).
+// ----------------------------------------------------------------------------
+namespace mangling {
+
+struct U {
+  int a();
+  int b();
+};
+
+constexpr auto da = std::meta::declaration_of(^^U::a);
+constexpr auto db = std::meta::declaration_of(^^U::b);
+static_assert(da != db);
+
+template <std::meta::info D>
+int tag() {
+  if constexpr (D == da)
+    return 1;
+  else
+    return 2;
+}
+
+int use_mangling() { return tag<da>() + 10 * tag<db>(); }
+
+}  // namespace mangling
+
 int main() {
-  CHECK(use_all() == 1);
-  CHECK(use_vec() == 1);
+  if (use_all() != 1)
+    return 1;
+  if (use_vec() != 1)
+    return 2;
+  if (mangling::use_mangling() != 21)
+    return 3;
   return 0;
 }

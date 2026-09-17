@@ -1874,8 +1874,11 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     }
     IdentifierInfo *NewName =
         &Context.Idents.get(Spec->ParameterPrefix + std::to_string(I));
+    // Arrays and functions adjust to pointers, as for any declared parameter;
+    // the written form is preserved in the type source info.
+    QualType AdjustedTy = Context.getAdjustedParameterType(NewTSI->getType());
     auto *NewParm = ParmVarDecl::Create(Context, CurContext, Loc, Loc, NewName,
-                                        NewTSI->getType(), NewTSI, SC_None,
+                                        AdjustedTy, NewTSI, SC_None,
                                         /*DefArg=*/nullptr);
     NewParm->setScopeInfo(0, I);
 
@@ -1887,7 +1890,26 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     else if (OldParm->hasDefaultArg())
       OldDefault = OldParm->getDefaultArg();
     if (OldDefault) {
-      if (SrcFTD) {
+      if (OldParm->hasUninstantiatedDefaultArg()) {
+        // An uninstantiated default is the *pattern's* expression: it can
+        // reference the enclosing class template's parameters (at their
+        // pattern depths) in addition to the member's own. Substitute with
+        // the source specialization's arguments plus the rewrite mapping
+        // for the member's own head. Substitution of the parts that depend
+        // only on the member's own parameters stays lazy (Rewrite maps
+        // parameter to parameter); parts depending on the enclosing class
+        // are resolved now, as any use would resolve them.
+        MultiLevelTemplateArgumentList DefArgs = getTemplateInstantiationArgs(
+            SrcMD, /*DC=*/nullptr, /*Final=*/false,
+            SrcFTD ? std::optional<ArrayRef<TemplateArgument>>(NewParamArgs)
+                   : std::nullopt);
+        if (SrcFTD)
+          DefArgs.setKind(TemplateSubstitutionKind::Rewrite);
+        ExprResult R = SubstExpr(OldDefault, DefArgs);
+        if (R.isInvalid())
+          return Fail();
+        NewParm->setDefaultArg(R.get());
+      } else if (SrcFTD) {
         ExprResult R = SubstExpr(OldDefault, Args);
         if (R.isInvalid())
           return Fail();
@@ -1899,7 +1921,7 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
 
     CurrentInstantiationScope->InstantiatedLocal(OldParm, NewParm);
     NewParms.push_back(NewParm);
-    NewParamTys.push_back(NewTSI->getType());
+    NewParamTys.push_back(AdjustedTy);
   }
 
   // The return type, remapped for the new head.

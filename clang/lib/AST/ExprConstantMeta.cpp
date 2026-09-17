@@ -3592,20 +3592,39 @@ bool forwarding_call_for(APValue &Result, ASTContext &C, MetaActions &Meta,
   SmallVector<Token, 32> Toks;
   SourceLocation Loc = Range.getBegin();
 
-  // Receiver, adjusted for the member's ref-qualifier. decltype of an
-  // unparenthesized member access is the member's declared type, so the cast
-  // moves an rvalue-qualified receiver; a parenthesized or dereferenced
-  // receiver spelling yields a reference type and the cast collapses to an
-  // lvalue, in which case an &&-qualified inner member fails to compile
-  // (loudly) rather than silently copying.
-  if (Proto->getRefQualifier() == RQ_RValue) {
-    appendLexedTokens(C, "static_cast<decltype(", Loc, Toks);
+  // Receiver, adjusted for the member's cv- and ref-qualifiers so the call
+  // dispatches to the *described* member: a const clone must call the const
+  // overload even when the receiver expression is non-const there (mutable
+  // member, pointer to mutable storage), and an rvalue-qualified clone must
+  // move its receiver. The receiver is always parenthesized so its grouping
+  // survives the member access (e.g. a '*ptr' receiver), and is evaluated
+  // exactly once (the decltype operand is unevaluated).
+  //
+  // The cast spells ::std::remove_reference_t, so a translation unit
+  // expanding a forwarding call with a qualified member needs <type_traits>
+  // (which <meta> already provides).
+  Qualifiers MethodQuals = Proto->getMethodQuals();
+  RefQualifierKind RQ = Proto->getRefQualifier();
+  bool NeedsCast =
+      MethodQuals.hasConst() || MethodQuals.hasVolatile() || RQ != RQ_None;
+  if (NeedsCast) {
+    appendLexedTokens(C, "static_cast<::std::remove_reference_t<decltype((",
+                      Loc, Toks);
     Toks.append(Recv.begin(), Recv.end());
-    appendLexedTokens(C, ")&&>(", Loc, Toks);
+    std::string Tail = "))>";
+    if (MethodQuals.hasConst())
+      Tail += " const";
+    if (MethodQuals.hasVolatile())
+      Tail += " volatile";
+    Tail += (RQ == RQ_RValue) ? "&&" : "&";
+    Tail += ">((";
+    appendLexedTokens(C, Tail, Loc, Toks);
+    Toks.append(Recv.begin(), Recv.end());
+    appendLexedTokens(C, "))", Loc, Toks);
+  } else {
+    appendLexedTokens(C, "(", Loc, Toks);
     Toks.append(Recv.begin(), Recv.end());
     appendLexedTokens(C, ")", Loc, Toks);
-  } else {
-    Toks.append(Recv.begin(), Recv.end());
   }
 
   std::string CallText = ".";

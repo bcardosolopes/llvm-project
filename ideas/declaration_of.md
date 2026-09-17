@@ -231,11 +231,15 @@ is still needed for fallback-choosing generators.
 *source* member on the receiver (a renamed clone still forwards to the
 member it was cloned from); every cloned template parameter is passed
 explicitly (refusing nonterminal packs); each parameter transfers as
-`static_cast<decltype(p)&&>(p)` (the by-value caveats below accepted); an
-`&&`-qualified member's receiver is cast via unparenthesized
-`decltype(receiver)&&`, which moves a member-name receiver like `impl` and
-fails loudly (rather than silently copying) for receiver spellings that
-yield reference types, such as `*ptr`.
+`static_cast<decltype(p)&&>(p)` (the by-value caveats below accepted). The
+receiver is parenthesized (so `*ptr` and conditional receivers group
+correctly) and, when the described member is cv- or ref-qualified, cast to
+`::std::remove_reference_t<decltype((receiver))>` with the member's
+qualifiers applied — so a const clone dispatches to the const overload even
+through a `mutable` member, and an rvalue-qualified clone moves its receiver
+even when spelled `*ptr`. (This is the "apply the described member's cv/ref
+requirements to the receiver" contract from the forwarding section below;
+the expansion site needs `<type_traits>`, which `<meta>` provides.)
 
 ### Usage: LoggingVector generation, schematically
 
