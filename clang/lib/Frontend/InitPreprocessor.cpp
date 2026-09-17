@@ -738,6 +738,14 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_auto_cast", "202110L");
     Builder.defineMacro("__cpp_explicit_this_parameter", "202110L");
   }
+  // C++29 features.
+  if (LangOpts.DoExpressions) {
+    // P2806 asks for `__cpp_do_expressions`, but the paper is not adopted yet,
+    // so there is no plenary date to use as the value. Define it as 1, the way
+    // __cpp_modules above is defined, so that `#if __cpp_do_expressions` works
+    // today and the value can be set once WG21 fixes it.
+    Builder.defineMacro("__cpp_do_expressions", "1");
+  }
 
   // We provide those C++23 features as extensions in earlier language modes, so
   // we also define their feature test macros.
