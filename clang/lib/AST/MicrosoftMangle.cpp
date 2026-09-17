@@ -2209,6 +2209,7 @@ void MicrosoftCXXNameMangler::mangleReflection(const APValue &R) {
   case ReflectionKind::Parameter:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::Identifier:
   case ReflectionKind::Expression:

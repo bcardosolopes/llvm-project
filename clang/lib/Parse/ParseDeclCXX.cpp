@@ -3107,11 +3107,68 @@ void Parser::MaybeParseAndDiagnoseDeclSpecAfterCXX11VirtSpecifierSeq(
   }
 }
 
+// An interpolated declaration description (std::meta::declaration_of) in
+// member-declaration position: declare the described clone in the current
+// class, then treat a following '{ body }' exactly like a hand-written
+// inline member function body (cached and late-parsed at class completion).
+Parser::DeclGroupPtrTy Parser::ParseInjectedDeclarationSpec(AccessSpecifier AS) {
+  assert(Tok.is(tok::annot_decl_spec));
+  auto *Spec = static_cast<FunctionDeclSpec *>(Tok.getAnnotationValue());
+  SourceLocation Loc = Tok.getLocation();
+  ConsumeAnnotationToken();
+
+  NamedDecl *FnD =
+      Actions.ActOnInjectedFunctionDeclSpec(getCurScope(), Spec, AS, Loc);
+
+  if (TryConsumeToken(tok::semi)) {
+    if (!FnD)
+      return nullptr;
+    return DeclGroupPtrTy::make(DeclGroupRef(FnD));
+  }
+
+  if (Tok.isNot(tok::l_brace)) {
+    Diag(Tok, diag::err_expected_body_after_decl_spec);
+    SkipUntil(tok::r_brace, tok::semi, StopAtSemi | StopBeforeMatch);
+    TryConsumeToken(tok::semi);
+    return FnD ? DeclGroupPtrTy::make(DeclGroupRef(FnD)) : nullptr;
+  }
+
+  if (!FnD) {
+    // Skip the body; the error was already diagnosed.
+    ConsumeBrace();
+    SkipUntil(tok::r_brace);
+    return nullptr;
+  }
+
+  LexedMethod *LM = new LexedMethod(this, FnD);
+  getCurrentClass().LateParsedDeclarations.push_back(LM);
+  CachedTokens &Toks = LM->Toks;
+
+  if (ConsumeAndStoreFunctionPrologue(Toks)) {
+    SkipMalformedDecl();
+    delete getCurrentClass().LateParsedDeclarations.back();
+    getCurrentClass().LateParsedDeclarations.pop_back();
+    return DeclGroupPtrTy::make(DeclGroupRef(FnD));
+  }
+  ConsumeAndStoreUntil(tok::r_brace, Toks, /*StopAtSemi=*/false);
+
+  FunctionDecl *FD = FnD->getAsFunction();
+  Actions.CheckForFunctionRedefinition(FD);
+  FD->setWillHaveBody(true);
+
+  return DeclGroupPtrTy::make(DeclGroupRef(FnD));
+}
+
 Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
     AccessSpecifier AS, ParsedAttributes &AccessAttrs,
     ParsedTemplateInfo &TemplateInfo, ParsingDeclRAIIObject *TemplateDiags) {
   assert(getLangOpts().CPlusPlus &&
          "ParseCXXClassMemberDeclaration should only be called in C++ mode");
+
+  if (Tok.is(tok::annot_decl_spec) &&
+      TemplateInfo.Kind == ParsedTemplateKind::NonTemplate)
+    return ParseInjectedDeclarationSpec(AS);
+
   if (Tok.is(tok::at)) {
     if (getLangOpts().ObjC && NextToken().isObjCAtKeyword(tok::objc_defs))
       Diag(Tok, diag::err_at_defs_cxx);

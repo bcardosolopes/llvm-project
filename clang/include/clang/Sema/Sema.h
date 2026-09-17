@@ -16467,6 +16467,15 @@ public:
   Decl *ActOnConstevalBlockDeclaration(SourceLocation ConstevalLoc,
                                        Expr *EvaluatingExpr);
 
+  /// The parser encountered an interpolated declaration description
+  /// (std::meta::declaration_of) in member-declaration position. Clones the
+  /// described member function into the current class with the description's
+  /// naming policy and returns the introduced declaration (the
+  /// FunctionTemplateDecl for a member template), or null on error.
+  NamedDecl *ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
+                                           AccessSpecifier AS,
+                                           SourceLocation Loc);
+
   // Reflection of non-expression operands.
   ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                  SourceLocation OperandLoc, QualType T);

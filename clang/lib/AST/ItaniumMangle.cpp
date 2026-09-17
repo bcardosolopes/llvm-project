@@ -5071,6 +5071,18 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     mangleExpression(R.getReflectedAnnotation()->getArg());
     break;
   }
+  case ReflectionKind::DeclarationSpec: {
+    Out << "sfd";
+
+    FunctionDeclSpec *FDS = R.getReflectedFunctionDeclSpec();
+    Context.mangleCanonicalTypeName(
+        cast<ValueDecl>(FDS->Source->getAsFunction())->getType(), Out, false);
+    if (FDS->Name)
+      Out << "N$" << *FDS->Name << '$';
+    Out << "T$" << FDS->TemplateParameterPrefix << '$';
+    Out << "P$" << FDS->ParameterPrefix << '$';
+    break;
+  }
   case ReflectionKind::Identifier:
   case ReflectionKind::Expression:
     llvm_unreachable("token sequences and identifiers cannot be mangled");

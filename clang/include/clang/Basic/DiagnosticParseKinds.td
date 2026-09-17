@@ -238,6 +238,8 @@ def err_unexpected_token_in_injected_members : Error<
   "unexpected %0 in injected member declarations">;
 def note_injected_members_here : Note<
   "in member declarations injected into %0">;
+def err_expected_body_after_decl_spec : Error<
+  "expected '{' or ';' after an interpolated declaration description">;
 def err_expected_semi_declaration : Error<
   "expected ';' at end of declaration">;
 def err_expected_semi_decl_list : Error<

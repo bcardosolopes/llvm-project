@@ -123,4 +123,10 @@ def metafn_no_macro_expansion_context : Note<
   "std::meta::macro_expansion_context() is only available while expanding an "
   "expression macro">;
 
+def metafn_cannot_clone_declaration : Note<
+  "cannot produce a declaration description: %0">;
+
+def metafn_cannot_forward_declaration : Note<
+  "cannot generate a forwarding call: %0">;
+
 }  // end of metafn component

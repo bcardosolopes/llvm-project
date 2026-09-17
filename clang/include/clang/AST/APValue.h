@@ -606,6 +606,10 @@ public:
     return isReflection() &&
            getReflectionKind() == ReflectionKind::DataMemberSpec;
   }
+  bool isReflectedFunctionDeclSpec() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::DeclarationSpec;
+  }
   bool isReflectedAnnotation() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Annotation;
   }
@@ -839,6 +843,7 @@ public:
   ParmVarDecl *getReflectedParameter() const;
   CXXBaseSpecifier *getReflectedBaseSpecifier() const;
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
+  FunctionDeclSpec *getReflectedFunctionDeclSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
   TokenSequenceData getTokenSequence() const {
     assert(isTokenSequence() && "Invalid accessor");

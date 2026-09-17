@@ -8613,6 +8613,10 @@ private:
   /// added to the current class (with access \p AS); at namespace scope the
   /// parsed declarations are returned.
   DeclGroupPtrTy ParseDeclMacroInvocation(AccessSpecifier AS, Decl *TagDecl);
+  /// Parse an interpolated declaration description (annot_decl_spec) in
+  /// member-declaration position: declares the described clone in the
+  /// current class and caches a following body for late parsing.
+  DeclGroupPtrTy ParseInjectedDeclarationSpec(AccessSpecifier AS);
   /// Parse an injected token stream (already entered, delimited by eof) as
   /// member declarations of \p TagDecl, starting from access \p AS.
   /// Guarantees progress on malformed tokens.

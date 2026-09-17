@@ -14,17 +14,18 @@
 // RUN: %{build}
 // RUN: %{exec} %t.exe
 
-// The forwarding-wrapper metaclass: LoggingVector<T> grows a logging
-// forwarder for every public member function *name* of std::vector<T> --
-// including the member function templates (emplace_back's variadic pack,
-// append_range's constraint, emplace's mixed concrete/pack parameters),
-// whose signatures reflection cannot introspect and does not need to.
+// The forwarding-wrapper metaclass: LoggingVector<T> grows a logging clone
+// of every public member function *declaration* of std::vector<T>, via
+// std::meta::declaration_of + forwarding_call_for -- including the member
+// function templates (emplace_back's variadic pack, append_range's
+// constraint, emplace's mixed concrete/pack parameters), whose heads are
+// cloned by substitution rather than introspected.
 //
-// One deducing-this forwarder per name reproduces the behavior of the whole
-// overload set: the inner call performs the real overload resolution, the
-// decltype return type mirrors the constraints' extension (SFINAE) and the
-// alias-typed returns (reference, iterator) without ever spelling them, and
-// ((Self&&)self).impl propagates the object's cv/value category.
+// Per-declaration clones preserve the wrapped interface exactly where the
+// earlier per-name deducing-this forwarder (see git history) approximated
+// it: real parameter types (so braced-init-list arguments work), cloned
+// default arguments, per-clone cv/ref-qualifiers, and *named* constraints
+// rather than substitution-failure mirrors.
 //
 // The annotation value logged<std::vector<T>>{} is dependent, so
 // inject_members fires per specialization, where std::vector<T> is concrete
@@ -44,7 +45,8 @@ template <class U>
 struct logged {
   consteval auto inject_members(std::meta::info) const
       -> std::meta::token_sequence {
-    std::vector<std::string_view> names;
+    std::meta::list_builder out;
+    out += ^^{ public: };  // injected members default to the class's default access
     for (std::meta::info m :
          members_of(^^U, std::meta::access_context::unchecked())) {
       if (!is_public(m) || is_static_member(m))
@@ -65,24 +67,15 @@ struct logged {
       // would make the *wrapper* a (malformed) customization.
       if (name == "reflect_constant")
         continue;
-      if (std::find(names.begin(), names.end(), name) != names.end())
-        continue;
-      names.push_back(name);
-    }
 
-    std::meta::list_builder out;
-    out += ^^{ public: };  // injected members default to the class's default access
-    for (std::string_view name : names) {
+      // One clone per declaration: overload sets are reproduced member by
+      // member, each with its real head, parameters, and constraints.
+      auto d = std::meta::declaration_of(m);
+      auto call = std::meta::forwarding_call_for(d, ^^{ impl });
       out += ^^{
-        template <class Self, class... Args>
-        constexpr auto \(std::meta::id(name))(this Self&& self,
-                                              Args&&... args)
-            noexcept(noexcept(
-                ((Self&&)self).impl.\(std::meta::id(name))((Args&&)args...)))
-            -> decltype(
-                ((Self&&)self).impl.\(std::meta::id(name))((Args&&)args...)) {
+        \(d) {
           ::log_call(\(std::meta::str_lit(name)));
-          return ((Self&&)self).impl.\(std::meta::id(name))((Args&&)args...);
+          return \(call);
         }
       };
     }
@@ -127,12 +120,12 @@ int main(int, char**) {
   int more[] = {8, 9};
   lv.append_range(more);
 
-  // deducing-this propagates constness: const begin() is const_iterator
+  // the const overloads are their own clones: const begin() is const_iterator
   const LoggingVector<int>& clv = lv;
   static_assert(
       !std::is_same_v<decltype(lv.begin()), decltype(clv.begin())>);
 
-  // plain members ride the same forwarders
+  // plain members are cloned too
   assert(lv.size() == 8);
   assert(lv.front() == 7);
   assert(lv.back() == 9);
@@ -141,5 +134,12 @@ int main(int, char**) {
   assert(calls.size() >= 9);
   assert(calls[0] == "emplace_back");
   assert(calls[2] == "emplace");  // calls[1] is the begin() argument
+
+  // A braced-init-list argument deduces against the clone's *real* parameter
+  // type (initializer_list<int>) -- the per-name deducing-this forwarder
+  // could not do this at all.
+  lv.assign({5, 6});
+  assert(calls.back() == "assign");
+  assert(lv.size() == 2 && lv.front() == 5 && lv.back() == 6);
   return 0;
 }

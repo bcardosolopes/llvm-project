@@ -29,11 +29,13 @@ namespace clang {
 class APValue;
 class ASTContext;
 class CXXBaseSpecifier;
+class NamedDecl;
 class NamespaceDecl;
 class Token;
 class ValueDecl;
 
 struct TagDataMemberSpec;
+struct FunctionDeclSpec;
 
 /// \brief The kind of construct reflected.
 enum class ReflectionKind {
@@ -114,6 +116,13 @@ enum class ReflectionKind {
   /// but the current design seems tolerable for now.
   DataMemberSpec,
 
+  /// \brief A reflection of a description of a function declaration to be
+  /// introduced into a class, cloned from an existing member function
+  /// (std::meta::declaration_of).
+  ///
+  /// Corresponds to a FunctionDeclSpec.
+  DeclarationSpec,
+
   /// \brief A reflection of an annotation (P2996 ext).
   Annotation,
 
@@ -181,6 +190,30 @@ struct TagDataMemberSpec {
 
   bool operator==(TagDataMemberSpec const& Rhs) const;
   bool operator!=(TagDataMemberSpec const& Rhs) const;
+};
+
+/// \brief Description of a function declaration to be introduced into a
+/// class, cloned from an existing member function or member function
+/// template (std::meta::declaration_of).
+///
+/// The description retains the *source* declaration and the naming policy;
+/// the actual clone is produced at each injection site, so reusing the
+/// description creates fresh declarations each time.
+struct FunctionDeclSpec {
+  /// The source: a CXXMethodDecl or a FunctionTemplateDecl whose templated
+  /// declaration is a CXXMethodDecl.
+  NamedDecl *Source;
+
+  /// Replacement declaration name; empty means keep the source's name.
+  std::optional<std::string> Name;
+
+  /// Prefixes for renaming template parameters (-> T0, T1, ...) and function
+  /// parameters (-> p0, p1, ...).
+  std::string TemplateParameterPrefix;
+  std::string ParameterPrefix;
+
+  bool operator==(FunctionDeclSpec const &Rhs) const;
+  bool operator!=(FunctionDeclSpec const &Rhs) const;
 };
 } // namespace clang
 

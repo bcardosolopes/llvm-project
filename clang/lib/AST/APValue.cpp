@@ -595,6 +595,16 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
       ID.AddInteger(TDMS->BitWidth.value());
     return;
   }
+  case ReflectionKind::DeclarationSpec: {
+    FunctionDeclSpec *FDS = V.getReflectedFunctionDeclSpec();
+    ID.AddPointer(FDS->Source);
+    ID.AddBoolean(FDS->Name.has_value());
+    if (FDS->Name)
+      ID.AddString(*FDS->Name);
+    ID.AddString(FDS->TemplateParameterPrefix);
+    ID.AddString(FDS->ParameterPrefix);
+    return;
+  }
   case ReflectionKind::Object:
   case ReflectionKind::Value:
     llvm_unreachable("lowered value should never represent a value or object");
@@ -776,7 +786,11 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
         } else {
           ID.AddPointer(Tok.getAnnotationValue());
         }
-      } else if (const auto *II = Tok.getIdentifierInfo())
+      } else if (Tok.isAnnotation())
+        // Other annotation tokens (annot_decl_spec, annot_primary_expr, ...)
+        // compare by annotation identity.
+        ID.AddPointer(Tok.getAnnotationValue());
+      else if (const auto *II = Tok.getIdentifierInfo())
         ID.AddString(II->getName());
       else if (Tok.isLiteral() && Tok.getLiteralData())
         ID.AddString(StringRef(Tok.getLiteralData(), Tok.getLength()));
@@ -1005,6 +1019,13 @@ CXXBaseSpecifier *APValue::getReflectedBaseSpecifier() const {
          "not a reflection of a base specifier");
   return reinterpret_cast<CXXBaseSpecifier *>(
           const_cast<void *>(getOpaqueReflectionData()));
+}
+
+FunctionDeclSpec *APValue::getReflectedFunctionDeclSpec() const {
+  assert(getReflectionKind() == ReflectionKind::DeclarationSpec &&
+         "not a reflection of a declaration description");
+  return reinterpret_cast<FunctionDeclSpec *>(
+      const_cast<void *>(getOpaqueReflectionData()));
 }
 
 TagDataMemberSpec *APValue::getReflectedDataMemberSpec() const {
@@ -1412,6 +1433,9 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::DataMemberSpec:
       Repr = "data-member-spec";
       break;
+    case ReflectionKind::DeclarationSpec:
+      Repr = "declaration-spec";
+      break;
     case ReflectionKind::Annotation:
       Repr = "annotation";
       break;
@@ -1756,6 +1780,7 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::Parameter:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::Identifier:
   case ReflectionKind::Expression:

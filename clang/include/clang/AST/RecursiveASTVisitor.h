@@ -3211,6 +3211,7 @@ DEF_TRAVERSE_STMT(CXXReflectExpr, {
     case ReflectionKind::Namespace:
     case ReflectionKind::BaseSpecifier:
     case ReflectionKind::DataMemberSpec:
+    case ReflectionKind::DeclarationSpec:
     case ReflectionKind::Identifier:
     case ReflectionKind::Expression:
       break;

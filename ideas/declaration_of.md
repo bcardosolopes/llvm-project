@@ -1,9 +1,48 @@
 # `declaration_of`: cloning declarations wholesale
 
-Status: design sketch, not implemented. API spellings below are provisional.
-Grew out of the `LoggingVector` exercise (2026-09-15); see
+Status: **v1 implemented** (2026-09-16, uncommitted): `declaration_of`,
+`is_declaration_spec`, `forwarding_call_for`, and `\(d)`-interpolation into
+class member-declaration position. See
+[declaration-of.pass.cpp](../libcxx/test/std/experimental/reflection/declaration-of.pass.cpp)
+and [declaration-of.verify.cpp](../libcxx/test/std/experimental/reflection/declaration-of.verify.cpp).
+The v1 scope and its refusals are marked inline below with **[v1]** notes;
+API spellings for what v1 does not cover remain provisional.
+Grew out of the `LoggingVector` exercise (2026-09-15).
 [logging-vector.pass.cpp](../libcxx/test/std/experimental/reflection/logging-vector.pass.cpp)
-for the current state of the art it improves on.
+now uses this facility: one clone per public member *declaration* of
+`std::vector<T>` (the per-name deducing-this forwarder it replaced is in git
+history and in the "What works without any new features" section below).
+Every member of `vector<int>` clones and forwards — including the
+enable_if-defaulted iterator-pair heads and the `_ContainerCompatibleRange`
+constrained heads — and `lv.assign({5, 6})` works, which the per-name
+forwarder could not express.
+
+**[v1] What landed.** A new reflection kind (declaration description,
+`FunctionDeclSpec` payload) holding the *source* member + naming policy; the
+clone happens fresh at each injection, per the contract below. `\(d)`
+interpolates as one annotation token; the member-declaration parser hands it
+to Sema, which performs a CTAD-style substitution clone (fresh renamed
+template parameter lists via Rewrite-kind substitution, renamed function
+parameters, cloned constraints/type-constraints/defaults, cv/ref-qualifiers,
+constexpr-ness; **noexcept dropped** per decision 1) into the destination
+class; a following `{ body }` late-parses through the same `LexedMethod`
+machinery as a hand-written inline member (so complete-class semantics hold),
+and a bare `;` declares without a body. Verified working: concrete members,
+default arguments, braced-init-list arguments, variadic member templates,
+`get<2>()` explicit NTTPs, `scale<double, 3>` mixed kinds, trailing-requires
+and constrained-parameter constraints (with correct *named* viability in
+`requires` probes), ref-qualifiers (including `&&` receivers moved by the
+forwarding recipe), overload sets, renaming, and the real
+`std::vector<int>` `push_back`/`emplace_back`/`emplace`/`size`.
+
+**[v1] Not yet**: namespace-scope injection of `\(d)`; `virtual` prefix /
+`= 0` / `override` around the interpolation (blocks the type-erasure sketch
+below); operator *renames* (cloning an operator keeping its name works);
+explicit-object members and C-variadics forward-refused (cloning allowed);
+the access/ADL binding questions below are untested and unresolved;
+redeclaration/overload checking against existing members is not performed;
+descriptions do not serialize to PCH (round-trip as null with the usual
+writer-side diagnostic).
 
 ## The problem
 
@@ -182,6 +221,21 @@ Failure reporting is open: use a result carrying a refusal reason, or a
 capability query plus a throwing operation. A generator needs to distinguish
 unsupported cloning from unsupported forwarding before choosing a fallback.
 The usage below assumes both operations support the selected member.
+**[v1]** refusals are constant-evaluation errors with a reason note
+("cannot produce a declaration description: ..." / "cannot generate a
+forwarding call: ..."); cloning and forwarding refuse separately, so the
+distinction is observable, but not yet *recoverable* — a capability query
+is still needed for fallback-choosing generators.
+
+**[v1] forwarding recipe** (each per the sections below): the call names the
+*source* member on the receiver (a renamed clone still forwards to the
+member it was cloned from); every cloned template parameter is passed
+explicitly (refusing nonterminal packs); each parameter transfers as
+`static_cast<decltype(p)&&>(p)` (the by-value caveats below accepted); an
+`&&`-qualified member's receiver is cast via unparenthesized
+`decltype(receiver)&&`, which moves a member-name receiver like `impl` and
+fails loudly (rather than silently copying) for receiver spellings that
+yield reference types, such as `*ptr`.
 
 ### Usage: LoggingVector generation, schematically
 

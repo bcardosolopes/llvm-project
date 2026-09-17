@@ -1700,6 +1700,271 @@ Decl *Sema::ActOnConstevalBlockDeclaration(SourceLocation ConstevalLoc,
   return BuildConstevalBlockDeclaration(ConstevalLoc, EvaluatingExpr);
 }
 
+// Clones one template parameter for an injected declaration description
+// (std::meta::declaration_of), renaming it per the description's naming
+// policy and remapping references to earlier parameters through 'Args'
+// (a Rewrite-kind substitution built from the already-cloned parameters).
+// Follows the recipe of CTAD deduction-guide synthesis.
+static NamedDecl *transformClonedTemplateParam(
+    Sema &SemaRef, DeclContext *DC, NamedDecl *Param,
+    MultiLevelTemplateArgumentList &Args, unsigned NewIndex,
+    IdentifierInfo *NewName, SourceLocation Loc) {
+  ASTContext &C = SemaRef.Context;
+
+  if (auto *TTP = dyn_cast<TemplateTypeParmDecl>(Param)) {
+    auto *NewTTP = TemplateTypeParmDecl::Create(
+        C, DC, Loc, Loc, /*Depth=*/0, NewIndex, NewName,
+        TTP->wasDeclaredWithTypename(), TTP->isParameterPack(),
+        TTP->hasTypeConstraint(), TTP->getNumExpansionParameters());
+    if (const auto *TC = TTP->getTypeConstraint())
+      SemaRef.SubstTypeConstraint(NewTTP, TC, Args,
+                                  /*EvaluateConstraint=*/false);
+    if (TTP->hasDefaultArgument()) {
+      TemplateArgumentLoc InstantiatedDefaultArg;
+      if (!SemaRef.SubstTemplateArgument(
+              TTP->getDefaultArgument(), Args, InstantiatedDefaultArg,
+              TTP->getDefaultArgumentLoc(), TTP->getDeclName()))
+        NewTTP->setDefaultArgument(C, InstantiatedDefaultArg);
+    }
+    SemaRef.CurrentInstantiationScope->InstantiatedLocal(TTP, NewTTP);
+    return NewTTP;
+  }
+
+  if (auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(Param)) {
+    if (NTTP->isExpandedParameterPack())
+      return nullptr;
+
+    TypeSourceInfo *NewTSI = SemaRef.SubstType(
+        NTTP->getTypeSourceInfo(), Args, NTTP->getLocation(),
+        NTTP->getDeclName());
+    if (!NewTSI)
+      return nullptr;
+    QualType NewT =
+        SemaRef.CheckNonTypeTemplateParameterType(NewTSI, NTTP->getLocation());
+    if (NewT.isNull())
+      return nullptr;
+
+    auto *NewNTTP = NonTypeTemplateParmDecl::Create(
+        C, DC, Loc, Loc, /*Depth=*/0, NewIndex, NewName, NewT,
+        NTTP->isParameterPack(), NewTSI);
+
+    if (AutoTypeLoc AutoLoc =
+            NewTSI->getTypeLoc().getContainedAutoTypeLoc();
+        AutoLoc && AutoLoc.isConstrained()) {
+      SourceLocation EllipsisLoc;
+      if (auto *Constraint = dyn_cast_if_present<CXXFoldExpr>(
+              NTTP->getPlaceholderTypeConstraint()))
+        EllipsisLoc = Constraint->getEllipsisLoc();
+      if (SemaRef.AttachTypeConstraint(AutoLoc, /*NewConstrainedParm=*/NewNTTP,
+                                       /*OrigConstrainedParm=*/NTTP,
+                                       EllipsisLoc))
+        return nullptr;
+    }
+
+    if (NTTP->hasDefaultArgument()) {
+      TemplateArgumentLoc InstantiatedDefaultArg;
+      if (!SemaRef.SubstTemplateArgument(
+              NTTP->getDefaultArgument(), Args, InstantiatedDefaultArg,
+              NTTP->getDefaultArgumentLoc(), NTTP->getDeclName()))
+        NewNTTP->setDefaultArgument(C, InstantiatedDefaultArg);
+    }
+    SemaRef.CurrentInstantiationScope->InstantiatedLocal(NTTP, NewNTTP);
+    return NewNTTP;
+  }
+
+  // Template template parameters: keep the nested parameter list as-is (its
+  // names are a separate scope and do not participate in forwarding), but
+  // still rename the parameter itself.
+  if (auto *TTPD = dyn_cast<TemplateTemplateParmDecl>(Param)) {
+    if (TTPD->isExpandedParameterPack())
+      return nullptr;
+
+    auto *NewTTPD = TemplateTemplateParmDecl::Create(
+        C, DC, Loc, /*Depth=*/0, NewIndex, TTPD->isParameterPack(), NewName,
+        TTPD->templateParameterKind(), TTPD->wasDeclaredWithTypename(),
+        TTPD->getTemplateParameters());
+    if (TTPD->hasDefaultArgument()) {
+      TemplateArgumentLoc InstantiatedDefaultArg;
+      if (!SemaRef.SubstTemplateArgument(
+              TTPD->getDefaultArgument(), Args, InstantiatedDefaultArg,
+              TTPD->getDefaultArgumentLoc(), TTPD->getDeclName()))
+        NewTTPD->setDefaultArgument(C, InstantiatedDefaultArg);
+    }
+    SemaRef.CurrentInstantiationScope->InstantiatedLocal(TTPD, NewTTPD);
+    return NewTTPD;
+  }
+
+  return nullptr;
+}
+
+NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
+                                               AccessSpecifier AS,
+                                               SourceLocation Loc) {
+  auto *RD = dyn_cast<CXXRecordDecl>(CurContext);
+  if (!RD || !RD->isBeingDefined()) {
+    Diag(Loc, diag::err_decl_spec_wrong_context);
+    return nullptr;
+  }
+
+  auto *SrcFTD = dyn_cast<FunctionTemplateDecl>(Spec->Source);
+  auto *SrcMD = cast<CXXMethodDecl>(Spec->Source->getAsFunction());
+  const auto *SrcProto = SrcMD->getType()->castAs<FunctionProtoType>();
+
+  auto Fail = [&]() -> NamedDecl * {
+    Diag(Loc, diag::err_decl_spec_clone_failed) << SrcMD;
+    return nullptr;
+  };
+
+  LocalInstantiationScope InstScope(*this);
+  std::optional<InstantiatingTemplate> BDG;
+  if (SrcFTD) {
+    BDG.emplace(*this, Loc, SrcFTD,
+                InstantiatingTemplate::BuildingDeductionGuidesTag{});
+    if (BDG->isInvalid())
+      return nullptr;
+  }
+
+  // Clone the template head, renaming each parameter and remapping
+  // references to earlier parameters (Rewrite-kind substitution, as CTAD
+  // deduction-guide synthesis does).
+  MultiLevelTemplateArgumentList Args;
+  Args.setKind(TemplateSubstitutionKind::Rewrite);
+  TemplateParameterList *NewTPL = nullptr;
+  // Referenced by 'Args' beyond the block below; must outlive it.
+  SmallVector<TemplateArgument, 8> NewParamArgs;
+  if (SrcFTD) {
+    TemplateParameterList *OldTPL = SrcFTD->getTemplateParameters();
+    SmallVector<NamedDecl *, 8> NewParams;
+    for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
+      MultiLevelTemplateArgumentList PartialArgs;
+      PartialArgs.setKind(TemplateSubstitutionKind::Rewrite);
+      PartialArgs.addOuterTemplateArguments(NewParamArgs);
+      IdentifierInfo *NewName = &Context.Idents.get(
+          Spec->TemplateParameterPrefix + std::to_string(I));
+      NamedDecl *NewParam = transformClonedTemplateParam(
+          *this, RD, OldTPL->getParam(I), PartialArgs, I, NewName, Loc);
+      if (!NewParam)
+        return Fail();
+      NewParamArgs.push_back(Context.getInjectedTemplateArg(NewParam));
+      NewParams.push_back(NewParam);
+    }
+    Args.addOuterTemplateArguments(NewParamArgs);
+
+    Expr *NewRC = nullptr;
+    if (Expr *OldRC = OldTPL->getRequiresClause()) {
+      ExprResult R = SubstConstraintExprWithoutSatisfaction(OldRC, Args);
+      if (R.isInvalid())
+        return Fail();
+      NewRC = R.get();
+    }
+    NewTPL = TemplateParameterList::Create(Context, Loc, Loc, NewParams, Loc,
+                                           NewRC);
+  }
+
+  // Clone the function parameters with new names.
+  SmallVector<ParmVarDecl *, 8> NewParms;
+  SmallVector<QualType, 8> NewParamTys;
+  for (unsigned I = 0, N = SrcMD->getNumParams(); I != N; ++I) {
+    ParmVarDecl *OldParm = SrcMD->getParamDecl(I);
+    TypeSourceInfo *NewTSI = OldParm->getTypeSourceInfo();
+    if (SrcFTD) {
+      NewTSI = SubstType(NewTSI, Args, Loc, OldParm->getDeclName());
+      if (!NewTSI)
+        return Fail();
+    }
+    IdentifierInfo *NewName =
+        &Context.Idents.get(Spec->ParameterPrefix + std::to_string(I));
+    auto *NewParm = ParmVarDecl::Create(Context, CurContext, Loc, Loc, NewName,
+                                        NewTSI->getType(), NewTSI, SC_None,
+                                        /*DefArg=*/nullptr);
+    NewParm->setScopeInfo(0, I);
+
+    Expr *OldDefault = nullptr;
+    if (OldParm->hasUninstantiatedDefaultArg())
+      OldDefault = OldParm->getUninstantiatedDefaultArg();
+    else if (OldParm->hasUnparsedDefaultArg())
+      return Fail();
+    else if (OldParm->hasDefaultArg())
+      OldDefault = OldParm->getDefaultArg();
+    if (OldDefault) {
+      if (SrcFTD) {
+        ExprResult R = SubstExpr(OldDefault, Args);
+        if (R.isInvalid())
+          return Fail();
+        NewParm->setDefaultArg(R.get());
+      } else {
+        NewParm->setDefaultArg(OldDefault);
+      }
+    }
+
+    CurrentInstantiationScope->InstantiatedLocal(OldParm, NewParm);
+    NewParms.push_back(NewParm);
+    NewParamTys.push_back(NewTSI->getType());
+  }
+
+  // The return type, remapped for the new head.
+  QualType NewRet = SrcProto->getReturnType();
+  if (SrcFTD) {
+    NewRet = SubstType(NewRet, Args, Loc, DeclarationName());
+    if (NewRet.isNull())
+      return Fail();
+  }
+
+  // The prototype keeps the source's cv/ref-qualifiers but deliberately not
+  // its exception specification: the new body has its own exception
+  // behavior, and silently cloning noexcept would be a correctness trap.
+  FunctionProtoType::ExtProtoInfo EPI = SrcProto->getExtProtoInfo();
+  EPI.ExceptionSpec = FunctionProtoType::ExceptionSpecInfo();
+  QualType NewFT = Context.getFunctionType(NewRet, NewParamTys, EPI);
+  TypeSourceInfo *NewFTSI = Context.getTrivialTypeSourceInfo(NewFT, Loc);
+  if (auto ProtoLoc =
+          NewFTSI->getTypeLoc().IgnoreParens().getAs<FunctionProtoTypeLoc>())
+    for (unsigned I = 0, N = NewParms.size(); I != N; ++I)
+      ProtoLoc.setParam(I, NewParms[I]);
+
+  // The trailing requires-clause; it may reference the (remapped) template
+  // and function parameters.
+  AssociatedConstraint NewTRC;
+  if (const AssociatedConstraint &OldTRC = SrcMD->getTrailingRequiresClause()) {
+    if (SrcFTD) {
+      ExprResult R = SubstConstraintExprWithoutSatisfaction(
+          const_cast<Expr *>(OldTRC.ConstraintExpr), Args);
+      if (R.isInvalid())
+        return Fail();
+      NewTRC = AssociatedConstraint(R.get(), OldTRC.ArgPackSubstIndex);
+    } else {
+      NewTRC = OldTRC;
+    }
+  }
+
+  DeclarationName Name = SrcMD->getDeclName();
+  if (Spec->Name)
+    Name = DeclarationName(&Context.Idents.get(*Spec->Name));
+
+  auto *Method = CXXMethodDecl::Create(
+      Context, RD, Loc, DeclarationNameInfo(Name, Loc), NewFT, NewFTSI,
+      SC_None, SrcMD->UsesFPIntrin(), /*isInline=*/true,
+      SrcMD->getConstexprKind(), Loc, NewTRC);
+  for (ParmVarDecl *P : NewParms)
+    P->setOwningFunction(Method);
+  Method->setParams(NewParms);
+  Method->setAccess(AS);
+  Method->setLexicalDeclContext(CurContext);
+
+  NamedDecl *Introduced = Method;
+  if (SrcFTD) {
+    auto *NewFTD = FunctionTemplateDecl::Create(Context, RD, Loc, Name, NewTPL,
+                                                Method);
+    Method->setDescribedFunctionTemplate(NewFTD);
+    NewFTD->setAccess(AS);
+    NewFTD->setLexicalDeclContext(CurContext);
+    Introduced = NewFTD;
+  }
+
+  PushOnScopeChains(Introduced, S, /*AddToContext=*/true);
+  return Introduced;
+}
+
 ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                      SourceLocation OperandLoc, QualType T) {
   if (auto *UT = dyn_cast<UsingType>(T)) {
@@ -2327,6 +2592,7 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
     case ReflectionKind::Namespace:
     case ReflectionKind::Parameter:
     case ReflectionKind::DataMemberSpec:
+    case ReflectionKind::DeclarationSpec:
     case ReflectionKind::Annotation:
     case ReflectionKind::Identifier:
     case ReflectionKind::Expression:
@@ -3057,6 +3323,7 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::Identifier:
   case ReflectionKind::Expression:

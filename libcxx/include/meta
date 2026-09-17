@@ -574,6 +574,9 @@ enum : unsigned {
   __metafn_test_expression,
   __metafn_as_lvalue,
   __metafn_macro_expansion_context,
+  __metafn_declaration_of,
+  __metafn_forwarding_call_for,
+  __metafn_is_declaration_spec,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3265,6 +3268,64 @@ consteval auto as_lvalue(info r) -> info {
 // ordinary constant expression is an error.
 consteval auto macro_expansion_context() -> info {
   return __metafunction(detail::__metafn_macro_expansion_context);
+}
+
+// Naming policy for declaration_of.
+struct clone_naming {
+  // Replacement declaration name; an empty sequence keeps the source's name
+  // (including operator names).
+  token_sequence name = ^^{ };
+
+  // Renaming prefixes: template parameters become T0, T1, ...; function
+  // parameters become p0, p1, ....
+  string_view template_parameter_prefix = "T";
+  string_view parameter_prefix = "p";
+};
+
+// Returns a reflection describing a clone of the member function (or member
+// function template) designated by 'fn': same template head, constraints,
+// parameters (with their default arguments), cv/ref-qualifiers, and return
+// type, with template and function parameters renamed per 'naming'. noexcept
+// is deliberately not cloned: the new body has its own exception behavior.
+//
+// The description does not yet declare anything. Interpolating it with \(d)
+// in member-declaration position of a class definition declares the described
+// function there, followed by its new body:
+//
+//   ^^{ \(d) { return \(call); } }
+//
+// Reusing the description in another class creates fresh declarations.
+consteval auto declaration_of(info fn, clone_naming naming = {}) -> info {
+  return __metafunction(detail::__metafn_declaration_of, fn, naming.name,
+                        naming.template_parameter_prefix.size(),
+                        naming.template_parameter_prefix.data(),
+                        naming.parameter_prefix.size(),
+                        naming.parameter_prefix.data());
+}
+
+// Returns true if 'r' is a declaration description produced by
+// declaration_of.
+consteval auto is_declaration_spec(info r) -> bool {
+  return __metafunction(detail::__metafn_is_declaration_spec, r);
+}
+
+// Returns tokens for a call forwarding the parameters of the description 'd'
+// to the same-named member of 'receiver', intended as the body of the
+// injected clone:
+//
+//   auto d = declaration_of(m);
+//   out += ^^{ \(d) { return \(forwarding_call_for(d, ^^{ impl })); } };
+//
+// The generated call names the *source* member on the receiver (found by
+// ordinary member lookup there; a renamed clone still forwards to the member
+// it was cloned from), passes every cloned template parameter explicitly,
+// and forwards each parameter as static_cast<decltype(p)&&>(p). Refused
+// (constexpr_error) for descriptions this recipe cannot forward faithfully:
+// explicit-object members, C-style variadics, and template heads where a
+// parameter pack is followed by more parameters.
+consteval auto forwarding_call_for(info d, token_sequence receiver)
+    -> token_sequence {
+  return __metafunction(detail::__metafn_forwarding_call_for, d, receiver);
 }
 
 // Each token of the sequence as its own single-token sequence.

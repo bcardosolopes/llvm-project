@@ -22693,6 +22693,16 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
               Tok.setKind(tok::annot_primary_expr);
               Tok.setAnnotationValue(static_cast<void *>(CE));
               NewTokens.push_back(Tok);
+            } else if (Val.isReflectedFunctionDeclSpec()) {
+              // A declaration description (std::meta::declaration_of):
+              // a single annotation token; in member-declaration position
+              // it declares the described function.
+              Token Tok = SrcTok;
+              Tok.setKind(tok::annot_decl_spec);
+              Tok.setAnnotationValue(
+                  static_cast<void *>(Val.getReflectedFunctionDeclSpec()));
+              Tok.setAnnotationEndLoc(SrcTok.getLocation());
+              NewTokens.push_back(Tok);
             } else if (Val.isReflectedIdentifier()) {
               IdentifierInfo *II = Val.getReflectedIdentifier();
 

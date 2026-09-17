@@ -1042,6 +1042,7 @@ ExprDependence clang::computeDependence(CXXReflectExpr *E,
   case ReflectionKind::Namespace:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Identifier:
     return ExprDependence::None;
   case ReflectionKind::EntityProxy:

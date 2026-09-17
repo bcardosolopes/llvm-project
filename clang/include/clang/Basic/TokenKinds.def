@@ -949,6 +949,12 @@ ANNOTATION(template_name)  // annotation for a template named by an
                            // is a TemplateName. Followed by '<' it forms a
                            // template-id like an identifier would.
                            // captured in a ^^{ ... } token sequence
+ANNOTATION(decl_spec)      // annotation for an interpolated declaration
+                           // description (std::meta::declaration_of); the
+                           // annotation value is a FunctionDeclSpec. In
+                           // member-declaration position it declares the
+                           // described function, optionally followed by a
+                           // body.
 
 // Annotation for #pragma unused(...)
 // For each argument inside the parentheses the pragma handler will produce
