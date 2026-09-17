@@ -461,9 +461,19 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
   if (InitStmt)
     Cleanup.setExprNeedsCleanups(true);
 
-  return new (Context)
+  auto *Result = new (Context)
       DoExpr(InitStmt, Compound, ResultType, VK, ExplicitType, DoLoc, LBraceLoc,
              RBraceLoc, TemplateDepth, Entry.ContainsUnexpandedParameterPack);
+
+  // Apply the named return value optimization if every value-yielding
+  // `do_return` in the body agreed on one candidate -- unless an outer-scope
+  // `return` in the body already claimed that variable for the enclosing
+  // function's return slot, which it cannot share with ours.
+  if (const VarDecl *NRVOCandidate = Entry.NRVOCandidate.value_or(nullptr))
+    if (!NRVOCandidate->isNRVOVariable())
+      Result->setNRVOCandidate(NRVOCandidate);
+
+  return Result;
 }
 
 StmtResult Sema::ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
@@ -562,7 +572,10 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   // a variable of the do-expression body itself
   // ([expr.prim.id.unqual]p15.4). Anything declared outside the body outlives
   // the do-expression and stays usable after it, so it is copied.
-  NamedReturnInfo NRInfo;
+  // NamedReturnInfo has no default member initializers -- every other user
+  // assigns it from getNamedReturnInfo unconditionally -- so value-initialize
+  // it here, where the operand may not be a body local at all.
+  NamedReturnInfo NRInfo = {};
   if (namesDoExprBodyLocal(Operand, Entry, getSourceManager()))
     NRInfo = getNamedReturnInfo(Operand);
 
@@ -627,6 +640,17 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   // do-expression are not "stack memory being returned": they outlive the
   // do-expression, and any dangle through them is diagnosed where the
   // completed do-expression is consumed.
+  // As in a function, the copy out of a named body local can be elided by
+  // building the local in the result slot to begin with. Record the candidate
+  // so BuildDoExpr can check that the whole body agrees on it; the call also
+  // brings NRInfo to its final state for the initialization below, exactly as
+  // BuildReturnStmt does.
+  const VarDecl *NRVOCandidate = getCopyElisionCandidate(NRInfo, ResultType);
+  if (!Entry.NRVOCandidate)
+    Entry.NRVOCandidate = NRVOCandidate;
+  else if (*Entry.NRVOCandidate != NRVOCandidate)
+    Entry.NRVOCandidate = nullptr;
+
   InitializedEntity InitEntity = InitializedEntity::InitializeDoExprResult(
       DoReturnLoc, ResultType, Entry.OuterScope);
   ExprResult Init =

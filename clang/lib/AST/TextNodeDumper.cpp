@@ -1534,6 +1534,14 @@ void clang::TextNodeDumper::VisitReturnStmt(const ReturnStmt *Node) {
   }
 }
 
+void clang::TextNodeDumper::VisitDoExpr(const DoExpr *Node) {
+  if (const VarDecl *Cand = Node->getNRVOCandidate()) {
+    OS << " nrvo_candidate(";
+    dumpBareDeclRef(Cand);
+    OS << ")";
+  }
+}
+
 void clang::TextNodeDumper::VisitCoawaitExpr(const CoawaitExpr *Node) {
   if (Node->isImplicit())
     OS << " implicit";
