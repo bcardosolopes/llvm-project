@@ -7970,6 +7970,13 @@ public:
     /// True if the body names a parameter pack that is expanded by an
     /// expansion enclosing the do-expression, as a lambda body may.
     bool ContainsUnexpandedParameterPack = false;
+    /// The copy-elision candidate shared by the value-yielding `do_return`
+    /// statements seen so far: unset before the first one, null once two of
+    /// them disagree (or one of them has no candidate at all), and the
+    /// variable itself while they all name it. A candidate survives to
+    /// BuildDoExpr only if it is the whole body's, since all of them would
+    /// otherwise have to share the one result slot.
+    std::optional<const VarDecl *> NRVOCandidate;
   };
 
   /// Stack of currently-open do-expressions.

@@ -1797,7 +1797,13 @@ void CodeGenFunction::EmitDoReturnStmt(const DoReturnStmt &S) {
 
   const DoExprEmitInfo &Info = DoExprStack.back();
   if (const Expr *Operand = S.getOperand()) {
-    if (Info.IsReference) {
+    if (Info.NRVOCandidate) {
+      // The named return value optimization applies: the operand names the
+      // candidate, which was already built in Info.Slot, so there is nothing
+      // to do but tell the cleanup not to destroy it.
+      if (llvm::Value *NRVOFlag = NRVOFlags[Info.NRVOCandidate])
+        Builder.CreateFlagStore(Builder.getTrue(), NRVOFlag);
+    } else if (Info.IsReference) {
       // Reference result: emit the operand as a glvalue and store its
       // address into the pointer slot. A `MaterializeTemporaryExpr`
       // inserted by Sema for a prvalue operand is itself a glvalue (the
@@ -1885,7 +1891,12 @@ Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
   LifetimeExtendedCleanupStack.resize(OldLifetimeExtendedSize);
 
   JumpDest EndBlock = getJumpDestInCurrentScope("doexpr.end");
-  DoExprStack.push_back({Slot, EndBlock, IsReference});
+  // The NRVO candidate is looked up out of this frame when its declaration is
+  // emitted, so a second emission of the same body aliases that emission's
+  // slot rather than a remembered one.
+  DoExprStack.push_back(
+      {Slot, EndBlock, IsReference,
+       getLangOpts().ElideConstructors ? E.getNRVOCandidate() : nullptr});
 
   // Emit the body inside its own lexical scope so locals declared in the body
   // get proper destruction on `do_return`.

@@ -118,6 +118,11 @@ void void_expr(int *p) {
 
 // `do_return` of a named local lvalue is move-eligible: the IR contains a
 // call to the move constructor (taking T &&), not the copy constructor.
+//
+// Both bodies below name a second local on the other path, which is what
+// makes the construction observable at all: with a single candidate the
+// do-expression elides it outright (see cxx29-do-expr-nrvo.cpp), and
+// move-eligibility would have nothing to show.
 struct Movable {
   int x;
   Movable();
@@ -125,22 +130,28 @@ struct Movable {
   Movable(Movable &&) noexcept;
   ~Movable();
 };
-// CHECK-LABEL: define {{.*}} @_Z9move_namev
+// CHECK-LABEL: define {{.*}} @_Z9move_nameb
 // CHECK: call {{.*}} @_ZN7MovableC{{[12]}}EOS_
 // CHECK-NOT: call {{.*}} @_ZN7MovableC{{[12]}}ERKS_
-Movable move_name() {
+Movable move_name(bool b) {
   return do {
     Movable r;
+    Movable other;
+    if (b)
+      do_return other;
     do_return r;  // implicit move from named local
   };
 }
 
 // A const named local can't be moved → falls back to copy.
-// CHECK-LABEL: define {{.*}} @_Z10const_namev
+// CHECK-LABEL: define {{.*}} @_Z10const_nameb
 // CHECK: call {{.*}} @_ZN7MovableC{{[12]}}ERKS_
-Movable const_name() {
+Movable const_name(bool b) {
   return do {
     const Movable r;
+    const Movable other;
+    if (b)
+      do_return other;
     do_return r;
   };
 }
