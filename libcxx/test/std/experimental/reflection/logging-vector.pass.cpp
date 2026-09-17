@@ -41,54 +41,38 @@
 std::vector<std::string_view> calls;
 void log_call(std::string_view name) { calls.push_back(name); }
 
-template <class U>
-struct logged {
-  consteval auto inject_members(std::meta::info) const
-      -> std::meta::token_sequence {
-    std::meta::list_builder out;
-    out += ^^{ public: };  // injected members default to the class's default access
-    for (std::meta::info m :
-         members_of(^^U, std::meta::access_context::unchecked())) {
-      if (!is_public(m) || is_static_member(m))
-        continue;
-      if (!is_function(m) && !is_function_template(m))
-        continue;
-      if (is_special_member_function(m) || is_constructor(m) ||
-          is_constructor_template(m) || is_destructor(m))
-        continue;
-      if (is_operator_function(m) || is_operator_function_template(m) ||
-          is_conversion_function(m) || is_conversion_function_template(m))
-        continue;
-      if (!has_identifier(m))
-        continue;
-
-      std::string_view name = identifier_of(m);
-      // Don't forward customization points: a member named reflect_constant
-      // would make the *wrapper* a (malformed) customization.
-      if (name == "reflect_constant")
-        continue;
-
-      // One clone per declaration: overload sets are reproduced member by
-      // member, each with its real head, parameters, and constraints.
-      auto d = std::meta::declaration_of(m);
-      auto call = std::meta::forwarding_call_for(d, ^^{ impl });
-      out += ^^{
-        \(d) {
-          ::log_call(\(std::meta::str_lit(name)));
-          return \(call);
-        }
-      };
-    }
-    return out;
-  }
-};
-
 template <class T>
-class [[=logged<std::vector<T>>{}]] LoggingVector {
+class LoggingVector {
   std::vector<T> impl;
 
 public:
   LoggingVector(std::vector<T> v) : impl(std::move(v)) {}
+
+  consteval {
+    for (std::meta::info m : members_of(^^std::vector<T>, std::meta::access_context::unprivileged())) {
+      if (is_static_member(m)
+          or is_special_member_function(m)
+          or is_constructor(m)
+          or is_constructor_template(m)
+          or is_operator_function(m) or is_operator_function_template(m)
+          or is_conversion_function(m) or is_conversion_function_template(m)
+          or not has_identifier(m)
+          or identifier_of(m) == "reflect_constant"
+          or (not is_function(m) and not is_function_template(m))) {
+        continue;
+      }
+
+      auto d = std::meta::declaration_of(m);
+      auto call = std::meta::forwarding_call_for(d, ^^{ impl });
+      queue_injection(^^{
+      public:
+        \(d) {
+          ::log_call(\(std::meta::str_lit(identifier_of(m))));
+          return \(call);
+        }
+      });
+    }
+  }
 };
 
 // The constraint's extension is mirrored through the forwarder.
