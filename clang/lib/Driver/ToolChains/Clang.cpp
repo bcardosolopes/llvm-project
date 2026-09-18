@@ -4173,6 +4173,8 @@ static void RenderCharacterOptions(const ArgList &Args, const llvm::Triple &T,
 
   // The default depends on the language standard.
   Args.AddLastArg(CmdArgs, options::OPT_fchar8__t, options::OPT_fno_char8__t);
+  Args.AddLastArg(CmdArgs, options::OPT_fdo_expressions,
+                  options::OPT_fno_do_expressions);
 
   if (const Arg *A = Args.getLastArg(options::OPT_fshort_wchar,
                                      options::OPT_fno_short_wchar)) {

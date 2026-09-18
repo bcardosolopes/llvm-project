@@ -11,7 +11,7 @@ int f() {
 #if __cplusplus > 202400L
   return do { do_return 42; };
 #else
-  int x = do { do_return 42; }; // precxx29-error {{do-expressions are only available in C++29; use '-std=c++2d' to enable them}}
+  int x = do { do_return 42; }; // precxx29-error {{do-expressions are only available in C++29; use '-std=c++2d', or '-fdo-expressions' to enable them as an extension}}
   return x;
 #endif
 }
