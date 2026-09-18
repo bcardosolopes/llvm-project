@@ -473,7 +473,13 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
     if (!NRVOCandidate->isNRVOVariable())
       Result->setNRVOCandidate(NRVOCandidate);
 
-  return Result;
+  // A do-expression yielding a class prvalue produces a temporary that nobody
+  // else owns, exactly like a function call does, so it needs the same
+  // CXXBindTemporaryExpr to get it destroyed at the end of the full-expression.
+  // Without it a discarded `(void)(do { do_return T{}; });` never runs ~T.
+  // MaybeBindToTemporary is a no-op for the glvalue, void, dependent and
+  // trivially-destructible cases.
+  return MaybeBindToTemporary(Result);
 }
 
 StmtResult Sema::ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
