@@ -618,7 +618,16 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
     if (Operand->getType()->isRecordType()) {
       // Don't apply lvalue-to-rvalue to class types — that would force a
       // copy/move and defeat NRVO/move-eligibility. Use the value type.
-      OperandType = Operand->getType().getNonReferenceType();
+      //
+      // Strip its top-level cv-qualification, though: [expr.prim.do] deduces
+      // by the rules in [dcl.spec.auto.general], i.e. as if by `auto x = e;`,
+      // and a by-value `auto` never deduces a cv-qualified type. Keeping it
+      // made `do_return *p;` for a `const S *p` deduce `const S`, which then
+      // conflicts with a later `do_return S{};` that a lambda unifies.
+      // Deducing the type is a separate question from how the operand is
+      // converted, so this costs the elision nothing.
+      OperandType =
+          Operand->getType().getNonReferenceType().getUnqualifiedType();
     } else {
       ExprResult Conv = DefaultFunctionArrayLvalueConversion(Operand);
       if (Conv.isInvalid())
