@@ -114,11 +114,15 @@ int s = shape!(1);  // expected-error {{overloads of expression macro 'shape' di
 
 namespace N5 {
 
-// The expansion must be a single expression.
+// The expansion must be a single expression. (A diagnostic inside an
+// expansion is reported at the invocation, as for a preprocessor macro,
+// with an "expanded from macro" note into the body -- which -verify does
+// not see, being rendered rather than emitted.)
 __macro broken(int x) {
-  return ^^{ \(x) ) };  // expected-error {{expansion of expression macro must form a single expression}}
+  return ^^{ \(x) ) };
 }
-int v = broken!(1);  // expected-note {{in expansion of expression macro 'broken'}}
+int v = broken!(1);  // expected-error {{expansion of expression macro must form a single expression}} \
+                     // expected-note {{in expansion of expression macro 'broken'}}
 
 }  // namespace N5
 
@@ -162,9 +166,10 @@ namespace N7 {
 // The bang is required in generated code as well.
 __macro id(int x) { return ^^{ \(x) }; }
 __macro outer(int x) {
-  return ^^{ id(\(x)) };  // expected-error {{'id' is an expression macro and must be invoked as id!(...)}}
+  return ^^{ id(\(x)) };
 }
-int a = outer!(7);  // expected-note {{in expansion of expression macro 'outer'}}
+int a = outer!(7);  // expected-error {{'id' is an expression macro and must be invoked as id!(...)}} \
+                    // expected-note {{in expansion of expression macro 'outer'}}
 
 __macro outer_ok(int x) { return ^^{ id!(\(x)) }; }
 static_assert(outer_ok!(7) == 7);
@@ -605,14 +610,14 @@ __macro members() {
   return ^^{
     int a = 1;
    private:
-    int b = 2;  // expected-note {{declared private here}}
+    int b = 2;
    public:
     constexpr int f() const { return a + b; }
   };
 }
 
 struct S {
-  members!();
+  members!();  // expected-note {{declared private here}}
   int after = 3;  // still public: the expansion's 'private:' does not leak
 };
 static_assert(S{}.f() == 3);
@@ -631,8 +636,8 @@ struct DT {
 };
 
 // The expansion must consist of declarations.
-__macro not_decls() { return ^^{ 1 + 2 }; }  // expected-error {{expected unqualified-id}}
-not_decls!();
+__macro not_decls() { return ^^{ 1 + 2 }; }
+not_decls!();  // expected-error {{expected unqualified-id}}
 
 }  // namespace N17
 
@@ -711,9 +716,10 @@ define_out_of_line!();
 // A non-class, non-enum type cannot be a nested-name-specifier; the error
 // says so instead of misparsing a function-style cast.
 __macro bad() {
-  return ^^{ \(^^int)::v };  // expected-error {{'int' is not a class, namespace, or enumeration}}
+  return ^^{ \(^^int)::v };
 }
-constexpr int use_bad = bad!();  // expected-note {{in expansion of expression macro 'bad'}}
+constexpr int use_bad = bad!();  // expected-error {{'int' is not a class, namespace, or enumeration}} \
+                                 // expected-note {{in expansion of expression macro 'bad'}}
 
 }  // namespace N18
 

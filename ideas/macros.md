@@ -289,6 +289,29 @@ Names spelled literally in the token sequence are looked up from the expansion
 context. Names local to the macro body are not visible to the expansion; to
 carry information from the body into the expansion, interpolate it.
 
+The expansion's tokens are located as *expanded at the invocation* and
+*spelled in the macro body* — the same two-level source location a
+preprocessor macro's tokens have, and through the same machinery. So a
+diagnostic that arises inside an expansion is reported at the invocation
+(the range `name!(...)`), followed by a `note: expanded from macro 'name'`
+pointing into the body, one note per level for nested macros:
+
+```
+trym.cxx:62:19: warning: temporary bound to local reference 'data' will be
+    destroyed at the end of the full-expression [-Wdangling]
+    auto&& data = try_!(get_data<int>());
+                  ^~~~~~~~~~~~~~~~~~~~~~
+trym.cxx:52:52: note: expanded from macro 'try_'
+            do_return \(CT)::extract_continue(fwd!(__r));
+                                                   ^~~
+```
+
+Tokens that came from the invocation itself — a raw token argument's, an
+interpolated argument expression — keep their own locations, so a diagnostic
+about an *argument* points at the argument. (The lifetime analysis behind
+that warning also looks through interpolated arguments to the expressions
+behind them, so `fwd!(x)` never hides `x` from `-Wdangling`.)
+
 If any argument is type-, value-, or otherwise instantiation-dependent, the
 invocation is kept as a `CXXMacroInvocationExpr` (callee, arguments, and
 locations) and overload resolution and expansion are deferred to instantiation,

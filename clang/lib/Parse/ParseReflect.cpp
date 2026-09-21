@@ -386,6 +386,10 @@ DeclResult Parser::ParseCXXSpliceAsNamespace() {
 // Expression macros: name!(args), name!{args}, name![args]
 //===----------------------------------------------------------------------===//
 
+static void relocateExpansionTokens(SourceManager &SM,
+                                    SmallVectorImpl<Token> &Toks,
+                                    SourceRange Invocation);
+
 /// Parse the argument list of an expression-macro invocation and hand it to
 /// Sema. The macro name has already been consumed; the current token is '!',
 /// followed by whichever bracket the invocation chose.
@@ -513,6 +517,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   // Parse the expansion as declarations at the current position, delimited
   // by its own eof.
   SmallVector<Token, 16> Toks(Expansion.begin(), Expansion.end());
+  relocateExpansionTokens(PP.getSourceManager(), Toks,
+                          SourceRange(NameLoc, T.getCloseLocation()));
   Token Eof;
   Eof.startToken();
   Eof.setKind(tok::eof);
@@ -635,15 +641,84 @@ ExprResult Parser::ParseMacroRawArgument(tok::TokenKind Close, bool Greedy) {
 
 ExprResult Parser::ExpressionMacroExpansionCallback(void *P,
                                                     TokenSequenceData TSD,
-                                                    SourceLocation Loc) {
-  return static_cast<Parser *>(P)->ParseExpressionMacroExpansion(TSD, Loc);
+                                                    SourceRange Invocation) {
+  return static_cast<Parser *>(P)->ParseExpressionMacroExpansion(TSD,
+                                                                 Invocation);
 }
 
 ExprResult Parser::SpeculativeExpressionCallback(void *P,
                                                  TokenSequenceData TSD,
-                                                 SourceLocation Loc) {
+                                                 SourceRange Invocation) {
   return static_cast<Parser *>(P)->ParseExpressionMacroExpansion(
-      TSD, Loc, /*Speculative=*/true);
+      TSD, Invocation, /*Speculative=*/true);
+}
+
+/// Locate a macro expansion's tokens as expanded at \p Invocation (the
+/// macro name through the closing bracket), spelled where the macro wrote
+/// them. A diagnostic inside the expansion then points at the invocation,
+/// with a "expanded from macro 'name'" note into the body -- exactly the
+/// presentation of a preprocessor macro, and via the same SourceManager
+/// machinery (the note's name is read from the expansion range's first
+/// token, which is why the range starts at the name). Tokens that already
+/// lie within the invocation -- a raw token argument's -- and interpolated
+/// argument expressions (located at the argument) are left where they are.
+static void relocateExpansionTokens(SourceManager &SM,
+                                    SmallVectorImpl<Token> &Toks,
+                                    SourceRange Invocation) {
+  if (Invocation.isInvalid())
+    return;
+  SourceLocation Begin = Invocation.getBegin(), End = Invocation.getEnd();
+  SourceLocation FileBegin = SM.getFileLoc(Begin), FileEnd = SM.getFileLoc(End);
+
+  auto Relocates = [&](const Token &Tok) {
+    SourceLocation Loc = Tok.getLocation();
+    return Loc.isValid() && Tok.isNot(tok::annot_primary_expr) &&
+           !SM.isPointWithin(SM.getFileLoc(Loc), FileBegin, FileEnd);
+  };
+  // A token's extent within its spelling buffer. (An annotation spans from
+  // its location to its end location; a different buffer for the end means
+  // it is treated as one character.)
+  auto Extent = [&](const Token &Tok) -> std::pair<unsigned, unsigned> {
+    auto [FID, Off] = SM.getDecomposedLoc(Tok.getLocation());
+    if (!Tok.isAnnotation())
+      return {Off, Off + Tok.getLength()};
+    if (SourceLocation EndLoc = Tok.getAnnotationEndLoc(); EndLoc.isValid()) {
+      auto [EndFID, EndOff] = SM.getDecomposedLoc(EndLoc);
+      if (EndFID == FID && EndOff >= Off)
+        return {Off, EndOff + 1};
+    }
+    return {Off, Off + 1};
+  };
+
+  // One expansion per spelling buffer, covering every relocated token in it
+  // (as the preprocessor makes one expansion of a macro's whole body), so
+  // consecutive tokens share an expansion context and each keeps its offset
+  // within the body. A token then maps to its spelling by offset.
+  struct Span {
+    unsigned MinOff = ~0u, MaxEnd = 0;
+    SourceLocation Base;
+  };
+  llvm::SmallDenseMap<FileID, Span, 4> Spans;
+  for (const Token &Tok : Toks) {
+    if (!Relocates(Tok))
+      continue;
+    Span &S = Spans[SM.getFileID(Tok.getLocation())];
+    auto [Off, EndOff] = Extent(Tok);
+    S.MinOff = std::min(S.MinOff, Off);
+    S.MaxEnd = std::max(S.MaxEnd, EndOff);
+  }
+  for (auto &[FID, S] : Spans)
+    S.Base = SM.createExpansionLoc(SM.getComposedLoc(FID, S.MinOff), Begin,
+                                   End, S.MaxEnd - S.MinOff);
+  for (Token &Tok : Toks) {
+    if (!Relocates(Tok))
+      continue;
+    const Span &S = Spans.find(SM.getFileID(Tok.getLocation()))->second;
+    auto [Off, EndOff] = Extent(Tok);
+    if (Tok.isAnnotation())
+      Tok.setAnnotationEndLoc(S.Base.getLocWithOffset(EndOff - 1 - S.MinOff));
+    Tok.setLocation(S.Base.getLocWithOffset(Off - S.MinOff));
+  }
 }
 
 /// Parse the token sequence produced by an expression macro as a single
@@ -651,8 +726,9 @@ ExprResult Parser::SpeculativeExpressionCallback(void *P,
 /// (std::meta::test_expression) all diagnostics are suppressed and validity
 /// is reported only through the result.
 ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
-                                                 SourceLocation Loc,
+                                                 SourceRange Invocation,
                                                  bool Speculative) {
+  SourceLocation Loc = Invocation.getEnd();
   // The probe must not commit Sema to anything diagnostic-visible: parser
   // and Sema errors are suppressed wholesale (the SFINAETrap additionally
   // keeps Sema's error bookkeeping balanced), typo correction is disabled
@@ -676,6 +752,10 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
   });
 
   SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
+  // A probe (test_expression) has no invocation of its own to be expanded
+  // at; its tokens keep their locations.
+  if (!Speculative)
+    relocateExpansionTokens(PP.getSourceManager(), Toks, Invocation);
   Token Eof;
   Eof.startToken();
   Eof.setKind(tok::eof);

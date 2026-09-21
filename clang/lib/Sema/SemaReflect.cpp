@@ -529,7 +529,8 @@ public:
   Expr *TestExpression(TokenSequenceData TSD, SourceLocation Loc) override {
     if (!S.CanParseSpeculativeExpression())
       return nullptr;
-    ExprResult R = S.ParseSpeculativeExpressionFromParserBridge(TSD, Loc);
+    ExprResult R =
+        S.ParseSpeculativeExpressionFromParserBridge(TSD, SourceRange(Loc, Loc));
     if (R.isInvalid() || !R.get() || R.get()->containsErrors())
       return nullptr;
     return R.get();

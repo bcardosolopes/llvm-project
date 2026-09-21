@@ -43,8 +43,13 @@ static bool doExprHasDeducedResultType(const Sema::DoExprStackEntry &Entry) {
 /// The test compares source positions rather than walking the parser's Scope
 /// chain because this also runs during template instantiation, where the body
 /// has no Scope but the instantiated declarations keep the pattern's
-/// locations. Expansion locations are used so that a body local introduced by
-/// a macro is still recognized as a body local.
+/// locations. The positions are compared as they are, not mapped to their
+/// expansion locations first: isBeforeInTranslationUnit already orders a
+/// location inside a macro expansion relative to one outside it (a body local
+/// introduced by a macro is after the `do`), and when the `do` and the
+/// variable come from the *same* expansion -- a do-expression written in a
+/// macro body -- only their offsets within that expansion tell them apart;
+/// their expansion locations are one and the same point.
 static bool namesDoExprBodyLocal(const Expr *E,
                                  const Sema::DoExprStackEntry &Entry,
                                  const SourceManager &SM) {
@@ -54,8 +59,7 @@ static bool namesDoExprBodyLocal(const Expr *E,
   const auto *VD = dyn_cast<VarDecl>(DR->getDecl());
   if (!VD || !VD->hasLocalStorage())
     return false;
-  return SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Entry.DoLoc),
-                                      SM.getExpansionLoc(VD->getLocation()));
+  return SM.isBeforeInTranslationUnit(Entry.DoLoc, VD->getLocation());
 }
 
 static bool isParsingExpansionStmtPattern(Sema &S) {

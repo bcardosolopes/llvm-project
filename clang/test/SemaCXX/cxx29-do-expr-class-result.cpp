@@ -60,6 +60,21 @@ struct Holder {
   constexpr Holder() : b(do -> Buf { do_return Buf(10); }) {}
 };
 
+// A do-expression written in a macro body: its `do` and its locals share one
+// expansion, and a local is still recognized as declared in the body (so the
+// do_return operand is move-eligible -- required here).
+struct MoveOnly {
+  int v;
+  constexpr MoveOnly(int v) : v(v) {}
+  MoveOnly(const MoveOnly &) = delete;
+  constexpr MoveOnly(MoveOnly &&) = default;
+};
+#define MAKE(n) do -> MoveOnly { MoveOnly m(n); do_return m; }
+constexpr int via_c_macro() {
+  auto m = MAKE(11);
+  return m.v;
+}
+
 static_assert(named() == 1);
 static_assert(moved() == 2);
 static_assert(prvalue() == 3);
@@ -69,3 +84,4 @@ static_assert(via_return(true).get() == 6);
 static_assert(via_return(false).get() == 7);
 static_assert(discarded() == 9);
 static_assert(Holder().b.get() == 10);
+static_assert(via_c_macro() == 11);

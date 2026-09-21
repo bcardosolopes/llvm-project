@@ -7856,8 +7856,11 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
         ArgOVEs.push_back(OVE);
 
   assert(CanParseExpressionMacroExpansion() && "no parser to expand into");
-  ExprResult Parsed =
-      ParseExpressionMacroExpansionFromParserBridge(Expansion, RParenLoc);
+  // The invocation, name through closing bracket: what the expansion's
+  // tokens are located as expanded at. (The name is Fn's expression
+  // location for a qualified or member callee too.)
+  ExprResult Parsed = ParseExpressionMacroExpansionFromParserBridge(
+      Expansion, SourceRange(Fn->getExprLoc(), RParenLoc));
   if (Parsed.isInvalid() || Parsed.get()->containsErrors()) {
     Diag(LParenLoc, diag::note_macro_expanded_here) << Macro;
     if (Parsed.isInvalid())

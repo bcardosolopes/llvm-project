@@ -8641,14 +8641,14 @@ private:
                            BalancedDelimiterTracker &T, ExprVector &Args);
   ExprResult ParseMacroRawArgument(tok::TokenKind Close, bool Greedy);
   ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,
-                                           SourceLocation Loc,
+                                           SourceRange Invocation,
                                            bool Speculative = false);
   static ExprResult ExpressionMacroExpansionCallback(void *P,
                                                      TokenSequenceData TSD,
-                                                     SourceLocation Loc);
+                                                     SourceRange Invocation);
   static ExprResult SpeculativeExpressionCallback(void *P,
                                                   TokenSequenceData TSD,
-                                                  SourceLocation Loc);
+                                                  SourceRange Invocation);
 
   bool ParseSpliceSpecifier(bool TryParseSpecialization = false);
 

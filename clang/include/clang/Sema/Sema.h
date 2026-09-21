@@ -1368,10 +1368,12 @@ public:
     // processing was deferred until their (being-defined) class was complete.
     typedef void DeferredInjectedDefsCB(void *P, const Decl *ForClass,
                                         bool ShouldParse);
-    // Parse an expression macro's token sequence as a single expression.
+    // Parse an expression macro's token sequence as a single expression, in
+    // place of the invocation \p Invocation (name through closing bracket);
+    // the expansion's tokens are located as expanded there.
     typedef ExprResult ExpressionMacroExpansionCB(void *P,
                                                   TokenSequenceData TSD,
-                                                  SourceLocation Loc);
+                                                  SourceRange Invocation);
 
     void setParser(void *P) { OpaqueParser = P; }
 
@@ -1399,10 +1401,10 @@ public:
     }
 
     ExprResult parseExpressionMacroExpansion(TokenSequenceData TSD,
-                                             SourceLocation Loc) const {
+                                             SourceRange Invocation) const {
       assert(ExpressionMacroExpansionCallback && OpaqueParser &&
              "expression macro expansion requested without a parser bridge");
-      return ExpressionMacroExpansionCallback(OpaqueParser, TSD, Loc);
+      return ExpressionMacroExpansionCallback(OpaqueParser, TSD, Invocation);
     }
 
     // Speculatively parse a token sequence as an expression with diagnostics
@@ -1416,10 +1418,10 @@ public:
     }
 
     ExprResult parseSpeculativeExpression(TokenSequenceData TSD,
-                                          SourceLocation Loc) const {
+                                          SourceRange Invocation) const {
       assert(SpeculativeExpressionCallback && OpaqueParser &&
              "speculative expression parse requested without a parser bridge");
-      return SpeculativeExpressionCallback(OpaqueParser, TSD, Loc);
+      return SpeculativeExpressionCallback(OpaqueParser, TSD, Invocation);
     }
 
     bool hasLateTemplateParser() const { return LateTemplateParser; }
@@ -1488,8 +1490,8 @@ public:
     return ParserBridge.canParseExpressionMacroExpansion();
   }
   ExprResult ParseExpressionMacroExpansionFromParserBridge(
-      TokenSequenceData TSD, SourceLocation Loc) {
-    return ParserBridge.parseExpressionMacroExpansion(TSD, Loc);
+      TokenSequenceData TSD, SourceRange Invocation) {
+    return ParserBridge.parseExpressionMacroExpansion(TSD, Invocation);
   }
   void SetSpeculativeExpressionCallback(
       SemaParserBridge::ExpressionMacroExpansionCB *CB) {
@@ -1499,8 +1501,8 @@ public:
     return ParserBridge.canParseSpeculativeExpression();
   }
   ExprResult ParseSpeculativeExpressionFromParserBridge(TokenSequenceData TSD,
-                                                        SourceLocation Loc) {
-    return ParserBridge.parseSpeculativeExpression(TSD, Loc);
+                                                        SourceRange Invocation) {
+    return ParserBridge.parseSpeculativeExpression(TSD, Invocation);
   }
   bool HasLateTemplateParser() const {
     return ParserBridge.hasLateTemplateParser();
