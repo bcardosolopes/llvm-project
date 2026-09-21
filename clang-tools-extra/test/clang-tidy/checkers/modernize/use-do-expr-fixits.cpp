@@ -94,6 +94,57 @@ void as_a_branch(int a) {
   // CHECK-FIXES: (void)(do { do_return g(a); });
 }
 
+// A lambda may be parenthesized before it is called. The `)` between the body
+// and the invocation belongs to the source; only the `()` goes away.
+int gg(int);
+void parenthesized_lambda(int a) {
+  int x = ([&] { return gg(a); })();
+  // CHECK-MESSAGES: :[[@LINE-1]]:12: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: int x = (do { do_return gg(a); });
+  ([&] { return gg(a); })();
+  // CHECK-MESSAGES: :[[@LINE-1]]:4: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: ((void)(do { do_return gg(a); }));
+  int y = (([&] { return gg(a); }))();
+  // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: int y = ((do { do_return gg(a); }));
+  (void)x;
+  (void)y;
+}
+
+// An explicit trailing return type is copied verbatim, qualifiers and all. The
+// return type's own source range begins at the type name, so taking the text
+// from there drops a leading `const` -- silently, and `-> const C *` becomes
+// `-> C *`.
+struct C {
+  int x;
+};
+const C *cg();
+void trailing_return_type_qualifiers() {
+  auto *a = [&]() -> const C * { return cg(); }();
+  // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: auto *a = do -> const C * { do_return cg(); };
+  const C &b = [&]() -> const C & { return *cg(); }();
+  // CHECK-MESSAGES: :[[@LINE-1]]:16: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: const C &b = do -> const C & { do_return *cg(); };
+  auto *c = [&]() -> C const * { return cg(); }();
+  // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: auto *c = do -> C const * { do_return cg(); };
+  (void)a;
+  (void)b;
+  (void)c;
+}
+
+// A qualified name survives the same way.
+template <typename T> struct W {
+  using type = const T *;
+};
+void trailing_return_type_qualified_name() {
+  auto *w = [&]() -> W<C>::type { return cg(); }();
+  // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
+  // CHECK-FIXES: auto *w = do -> W<C>::type { do_return cg(); };
+  (void)w;
+}
+
 // A statement whose *outermost* expression starts at the lambda still needs the
 // parentheses, even though the value is used and so no cast is wanted: a bare
 // `do {` there would still parse as a do-while loop.
@@ -144,6 +195,32 @@ void discarded_void() {
   // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
   // CHECK-FIXES: (do {});
 }
+
+// An `if constexpr` in a template: the rewrite has to come from the pattern,
+// because an instantiation's body does not contain the discarded branch and so
+// does not contain the `return` in it. Leaving that one behind is worse than a
+// missed rewrite -- a `return` inside a do-expression body returns from the
+// enclosing function.
+struct A {
+  A(int);
+};
+struct Holder {
+  template <bool L> A run(int n);
+};
+template <bool L> A Holder::run(int n) {
+  auto v = [&] {
+    if constexpr (L)
+      return A(n);
+    else
+      return A(n + 1);
+  }();
+  // CHECK-MESSAGES: :[[@LINE-6]]:12: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: control-flow-workaround) [modernize-use-do-expr]
+  // CHECK-FIXES: auto v = do {
+  // CHECK-FIXES: do_return A(n);
+  // CHECK-FIXES: do_return A(n + 1);
+  return v;
+}
+A instantiate_holder(Holder &h, int n) { return h.run<true>(n); }
 
 // Not statement position: no parentheses needed, and the value is used.
 int as_a_subexpression(int a) {
