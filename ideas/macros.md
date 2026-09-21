@@ -64,6 +64,15 @@ and is what distinguishes a macro invocation from a function call. It is
 grammatically free: `f!(x)` is not valid C++ today, and `f!=(x)` still lexes as
 `!=`.
 
+As in Rust, the argument list may be delimited by any bracket pair:
+`name!(args)`, `name!{args}` and `name![args]` are the same invocation, in
+every position (expression, member, declaration). The macro's author or user
+picks whichever reads best for the shape of the arguments — `vec![1, 2, 3]`,
+`define_op!{left_shift, x << y}`. The choice has no semantic effect; a raw
+argument simply ends at the closer matching the invocation's opener, with any
+other brackets nesting inside it as before. (Nothing is lost: `!` cannot
+follow a name in C++, so `f!{` and `f![` are as free as `f!(`.)
+
 The `!` is there for the reader as much as for the parser. It says: the
 arguments may be captured rather than evaluated, evaluated in rewritten form,
 inspected for their spelling, or (for raw parameters) not parsed as expressions

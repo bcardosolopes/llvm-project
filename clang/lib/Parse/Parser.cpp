@@ -1724,10 +1724,11 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC,
 
   Token Next = NextToken();
 
-  // Leave a macro invocation, name!(...), for the expression parser: the
-  // macro has to be found before its arguments can be parsed.
+  // Leave a macro invocation, name!(...) / name!{...} / name![...], for the
+  // expression parser: the macro has to be found before its arguments can be
+  // parsed.
   if (getLangOpts().Reflection && Next.is(tok::exclaim) &&
-      GetLookAheadToken(2).is(tok::l_paren)) {
+      isMacroArgumentListOpener(GetLookAheadToken(2).getKind())) {
     if (SS.isNotEmpty())
       AnnotateScopeToken(SS, !WasScopeAnnotation);
     return AnnotatedNameKind::Unresolved;

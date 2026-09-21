@@ -718,3 +718,64 @@ __macro bad() {
 constexpr int use_bad = bad!();  // expected-note {{in expansion of expression macro 'bad'}}
 
 }  // namespace N18
+
+namespace N19 {
+
+// Any bracket pair may delimit the argument list (as in Rust): name!(...),
+// name!{...} and name![...] are the same invocation.
+__macro two(int a, int b) { return ^^{ (\(a) * 10 + \(b)) }; }
+static_assert(two!(1, 2) == 12);
+static_assert(two!{1, 2} == 12);
+static_assert(two![1, 2] == 12);
+static_assert(N19::two![1, 2] == 12);
+static_assert(::N19::two!{1, 2} == 12);
+
+// A braced argument is still an argument, whichever bracket encloses the list.
+struct P { int x, y; };
+__macro second(P p) { return ^^{ \(p).y }; }
+static_assert(second!({3, 4}) == 4);
+static_assert(second!{{3, 4}} == 4);
+static_assert(second![{3, 4}] == 4);
+
+// A raw argument ends at the invocation's own closer; other brackets nest.
+struct Seq {
+  int v[3];
+  constexpr int operator[](int i) const { return v[i]; }
+};
+__macro seq(token_sequence t) { return ^^{ Seq{{\(t)}} }; }
+static_assert(seq![1, 2, 3][1] == 2);      // postfix on the expansion
+static_assert(seq!{(1), [] { return 2; }(), 3}[2] == 3);
+static_assert(seq!{1, 2, 3}.v[0] == 1);
+
+// Member and statement forms.
+struct S {
+  int v;
+  __macro get(this S const& self) { return ^^{ \(self).v }; }
+};
+constexpr S s{7};
+static_assert(s.get!{} == 7);
+static_assert(s.get![] == 7);
+
+__macro inc(int& x) { return ^^{ ++\(x) }; }
+constexpr int stmt() {
+  int r = 0;
+  inc!{r};
+  inc![r];
+  return r;
+}
+static_assert(stmt() == 2);
+
+// Declaration position, at namespace and class scope.
+__macro decl(token_sequence name, int n) {
+  return ^^{ static constexpr int \(name) = \(n); };
+}
+decl!{a, 1};
+decl![b, 2];
+struct C { decl!{m, 3}; };
+static_assert(a == 1 && b == 2 && C::m == 3);
+
+// The closer has to match the opener.
+constexpr int bad1 = two!(1, 2];  // expected-error {{expected ')'}} \
+                                  // expected-note {{to match this '('}}
+
+}  // namespace N19

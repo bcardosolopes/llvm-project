@@ -383,15 +383,16 @@ DeclResult Parser::ParseCXXSpliceAsNamespace() {
 }
 
 //===----------------------------------------------------------------------===//
-// Expression macros: name!(args)
+// Expression macros: name!(args), name!{args}, name![args]
 //===----------------------------------------------------------------------===//
 
 /// Parse the argument list of an expression-macro invocation and hand it to
-/// Sema. The macro name has already been consumed; the current token is '!'.
+/// Sema. The macro name has already been consumed; the current token is '!',
+/// followed by whichever bracket the invocation chose.
 ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
                                         const IdentifierInfo *II,
                                         SourceLocation NameLoc) {
-  assert(Tok.is(tok::exclaim) && NextToken().is(tok::l_paren));
+  assert(isMacroInvocationExclaim());
 
   // The macro's parameter shape decides how each argument is parsed, so the
   // macro has to be found before the arguments are read.
@@ -404,7 +405,7 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   }
 
   SourceLocation ExclaimLoc = ConsumeToken();
-  BalancedDelimiterTracker T(*this, tok::l_paren);
+  BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
   if (ShapeError) {
@@ -430,7 +431,7 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
                                               tok::TokenKind OpKind,
                                               const IdentifierInfo *II,
                                               SourceLocation NameLoc) {
-  assert(Tok.is(tok::exclaim) && NextToken().is(tok::l_paren));
+  assert(isMacroInvocationExclaim());
 
   // If the object's class is not known yet (a dependent object expression),
   // every argument is parsed as an expression.
@@ -439,7 +440,7 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
       Actions.GetMemberMacroParameterShape(Base, OpKind, II, NameLoc, RawParams);
 
   SourceLocation ExclaimLoc = ConsumeToken();
-  BalancedDelimiterTracker T(*this, tok::l_paren);
+  BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
   if (ShapeError) {
@@ -465,8 +466,7 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
 /// queue_injection).
 Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
                                                         Decl *TagDecl) {
-  assert(Tok.is(tok::identifier) && NextToken().is(tok::exclaim) &&
-         GetLookAheadToken(2).is(tok::l_paren));
+  assert(isStartOfDeclMacroInvocation());
 
   IdentifierInfo *II = Tok.getIdentifierInfo();
   SourceLocation NameLoc = ConsumeToken();
@@ -486,7 +486,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   }
 
   SourceLocation ExclaimLoc = ConsumeToken();
-  BalancedDelimiterTracker T(*this, tok::l_paren);
+  BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
   if (ShapeError) {
@@ -557,18 +557,21 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
 }
 
 /// Parse the arguments of a macro invocation up to (not including) the
-/// closing paren; raw parameters take their arguments as token sequences.
-/// Skips to the closing paren and returns true on error.
+/// closing bracket (the one matching the invocation's opener); raw parameters
+/// take their arguments as token sequences. Skips to the closing bracket and
+/// returns true on error.
 bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
                                  BalancedDelimiterTracker &T,
                                  ExprVector &Args) {
-  if (Tok.isNot(tok::r_paren)) {
+  tok::TokenKind Close = T.getCloseKind();
+  if (Tok.isNot(Close)) {
     while (true) {
       unsigned Idx = Args.size();
       bool Raw = Idx < RawParams.size() && RawParams[Idx];
       ExprResult Arg;
       if (Raw)
-        Arg = ParseMacroRawArgument(/*Greedy=*/Idx + 1 == RawParams.size());
+        Arg = ParseMacroRawArgument(Close,
+                                    /*Greedy=*/Idx + 1 == RawParams.size());
       else if (Tok.is(tok::l_brace))
         Arg = ParseBraceInitializer();
       else
@@ -590,8 +593,9 @@ bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
 
 /// Capture the tokens of a raw (token_sequence) macro argument: balanced
 /// parentheses, brackets and braces, ending at a top-level comma (unless the
-/// parameter is the last one and therefore greedy) or at the closing paren.
-ExprResult Parser::ParseMacroRawArgument(bool Greedy) {
+/// parameter is the last one and therefore greedy) or at \p Close, the
+/// bracket that closes the invocation's argument list.
+ExprResult Parser::ParseMacroRawArgument(tok::TokenKind Close, bool Greedy) {
   SmallVector<Token, 16> Tokens;
   SourceLocation StartLoc = Tok.getLocation();
   SourceLocation EndLoc = StartLoc;
@@ -599,11 +603,11 @@ ExprResult Parser::ParseMacroRawArgument(bool Greedy) {
   while (true) {
     if (Tok.is(tok::eof)) {
       Diag(Tok, diag::err_expected)
-          << (Closers.empty() ? tok::r_paren : Closers.back());
+          << (Closers.empty() ? Close : Closers.back());
       return ExprError();
     }
     if (Closers.empty() &&
-        (Tok.is(tok::r_paren) || (Tok.is(tok::comma) && !Greedy)))
+        (Tok.is(Close) || (Tok.is(tok::comma) && !Greedy)))
       break;
     if (Tok.is(tok::l_paren)) {
       Closers.push_back(tok::r_paren);
@@ -612,9 +616,11 @@ ExprResult Parser::ParseMacroRawArgument(bool Greedy) {
     } else if (Tok.is(tok::l_brace)) {
       Closers.push_back(tok::r_brace);
     } else if (Tok.isOneOf(tok::r_paren, tok::r_square, tok::r_brace)) {
+      // An unmatched closer of another kind is the wrong bracket for this
+      // invocation: 'id!(1]'.
       if (Closers.empty() || Tok.isNot(Closers.back())) {
         Diag(Tok, diag::err_expected)
-            << (Closers.empty() ? tok::r_paren : Closers.back());
+            << (Closers.empty() ? Close : Closers.back());
         return ExprError();
       }
       Closers.pop_back();

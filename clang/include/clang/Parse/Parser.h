@@ -8601,12 +8601,24 @@ private:
   // Expression macros: 'name!(args)' and 'obj.name!(args)'.
   ExprResult ParseMacroInvocation(CXXScopeSpec &SS, const IdentifierInfo *II,
                                   SourceLocation NameLoc);
+  /// True if \p K can open a macro argument list. As in Rust, an invocation
+  /// may bracket its arguments however reads best: 'name!(...)', 'name!{...}'
+  /// or 'name![...]' all mean the same thing.
+  static bool isMacroArgumentListOpener(tok::TokenKind K) {
+    return K == tok::l_paren || K == tok::l_brace || K == tok::l_square;
+  }
+  /// True if the current token is the '!' of a macro invocation: '!' followed
+  /// by an argument-list opener.
+  bool isMacroInvocationExclaim() {
+    return Tok.is(tok::exclaim) &&
+           isMacroArgumentListOpener(NextToken().getKind());
+  }
   /// True if the current token starts a declaration-position macro
-  /// invocation, 'identifier ! ('.
+  /// invocation, 'identifier ! opener'.
   bool isStartOfDeclMacroInvocation() {
     return getLangOpts().Reflection && Tok.is(tok::identifier) &&
            NextToken().is(tok::exclaim) &&
-           GetLookAheadToken(2).is(tok::l_paren);
+           isMacroArgumentListOpener(GetLookAheadToken(2).getKind());
   }
   /// Parse 'name!(args);' at namespace or class scope and parse the
   /// expansion as declarations in place. At class scope the members are
@@ -8627,7 +8639,7 @@ private:
                                         SourceLocation NameLoc);
   bool ParseMacroArguments(ArrayRef<bool> RawParams,
                            BalancedDelimiterTracker &T, ExprVector &Args);
-  ExprResult ParseMacroRawArgument(bool Greedy);
+  ExprResult ParseMacroRawArgument(tok::TokenKind Close, bool Greedy);
   ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,
                                            SourceLocation Loc,
                                            bool Speculative = false);

@@ -468,6 +468,7 @@ namespace clang {
       }
     }
 
+    tok::TokenKind getCloseKind() const { return Close; }
     SourceLocation getOpenLocation() const { return LOpen; }
     SourceLocation getCloseLocation() const { return LClose; }
     SourceRange getRange() const { return SourceRange(LOpen, LClose); }

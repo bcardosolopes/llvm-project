@@ -945,8 +945,7 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     SourceLocation ILoc = ConsumeToken();
 
     // name!( ... ) is an expression-macro invocation.
-    if (getLangOpts().Reflection && Tok.is(tok::exclaim) &&
-        NextToken().is(tok::l_paren)) {
+    if (getLangOpts().Reflection && isMacroInvocationExclaim()) {
       CXXScopeSpec MacroSS;
       Res = ParseMacroInvocation(MacroSS, &II, ILoc);
       break;
@@ -2209,7 +2208,7 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
       if (getLangOpts().Reflection && !LHS.isInvalid() && SS.isEmpty() &&
           !TemplateKWLoc.isValid() &&
           Name.getKind() == UnqualifiedIdKind::IK_Identifier &&
-          Tok.is(tok::exclaim) && NextToken().is(tok::l_paren)) {
+          isMacroInvocationExclaim()) {
         LHS = ParseMemberMacroInvocation(LHS.get(), OpLoc, OpKind,
                                          Name.Identifier, Name.StartLocation);
         break;
