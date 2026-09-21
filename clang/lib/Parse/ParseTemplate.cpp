@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/Reflection.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/ExprCXX.h"
@@ -356,7 +357,16 @@ Parser::ParseTemplateParameterList(const unsigned Depth,
                              SmallVectorImpl<NamedDecl*> &TemplateParams) {
   while (true) {
 
-    if (NamedDecl *TmpParam
+    if (Tok.is(tok::annot_template_param_spec)) {
+      // An interpolated std::meta::template_parameter_list_for fragment:
+      // materialize the description's cloned parameters here.
+      auto *TPS =
+          static_cast<TemplateParamListSpec *>(Tok.getAnnotationValue());
+      Actions.ActOnInjectedTemplateParameters(getCurScope(), TPS, Depth,
+                                              Tok.getLocation(),
+                                              TemplateParams);
+      ConsumeAnnotationToken();
+    } else if (NamedDecl *TmpParam
           = ParseTemplateParameter(Depth, TemplateParams.size())) {
       TemplateParams.push_back(TmpParam);
     } else {

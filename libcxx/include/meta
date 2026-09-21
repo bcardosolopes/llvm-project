@@ -580,6 +580,8 @@ enum : unsigned {
   __metafn_is_declaration_spec,
   __metafn_make_override,
   __metafn_make_noexcept,
+  __metafn_template_parameter_list_for,
+  __metafn_template_argument_list_for,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3334,6 +3336,60 @@ consteval auto make_override(info d) -> info {
 // noexcept, where a looser override would be ill-formed.
 consteval auto make_noexcept(info d) -> info {
   return __metafunction(detail::__metafn_make_noexcept, d);
+}
+
+// declaration_of also accepts a *class template*: the description then
+// describes only its template head, consumed by the two fragment accessors
+// below (interpolating such a description directly is an error -- there is
+// no whole-declaration meaning for it).
+//
+// The motivating use is generating partial specializations that "forward"
+// a template's own parameters -- the tuple protocol for an annotated class
+// template, say:
+//
+//   auto d    = declaration_of(tmpl);
+//   auto head = template_parameter_list_for(d, {.defaults = false});
+//   auto args = template_argument_list_for(d);
+//   queue_injection(^^std, ^^{
+//     template <\(head)>
+//     struct tuple_size<\(tmpl)<\(args)>> : ... { };
+//
+//     template <size_t I, \(head)>
+//     struct tuple_element<I, \(tmpl)<\(args)>> { ... };
+//   });
+//
+// The head is a *fragment* spelled inside a written template<...> list, so
+// it composes with extra written parameters (tuple_element's I above).
+
+struct template_list_options {
+  // Whether the cloned parameters keep their default template arguments.
+  // Pass false when the fragment parameterizes a partial specialization,
+  // where default arguments are not permitted.
+  bool defaults = true;
+};
+
+// The description's template parameters as a parameter-list fragment:
+// 'class T0, size_t T1, class... T2' (renamed per the description's
+// template_parameter_prefix, constraints preserved). The returned sequence
+// carries the parameters semantically (as an annotation), so constrained
+// parameters keep their meaning at the injection site; it is only usable
+// inside a template<...> parameter list. The source's own requires-clause
+// is not carried: any actual specialization the injected declaration can
+// match already satisfies it. Works for class template heads and for
+// member function template descriptions alike.
+consteval auto template_parameter_list_for(info d,
+                                           template_list_options opts = {})
+    -> token_sequence {
+  return __metafunction(detail::__metafn_template_parameter_list_for, d,
+                        opts.defaults);
+}
+
+// The matching argument list: 'T0, T1, T2...' (packs expanded). Refused for
+// a template parameter pack followed by more parameters -- such an argument
+// list is a non-deduced context, so a specialization written with it could
+// never be matched.
+consteval auto template_argument_list_for(info d) -> token_sequence {
+  return __metafunction(detail::__metafn_template_argument_list_for, d);
 }
 
 // Returns tokens for a call forwarding the parameters of the description 'd'

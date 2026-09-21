@@ -950,6 +950,8 @@ ANNOTATION(template_name)  // annotation for a template named by an
                            // template-id like an identifier would.
                            // captured in a ^^{ ... } token sequence
 ANNOTATION(decl_spec)      // annotation for an interpolated declaration
+ANNOTATION(template_param_spec) // annotation for interpolated cloned template
+                                // parameters inside a template<...> list
                            // description (std::meta::declaration_of); the
                            // annotation value is a FunctionDeclSpec. In
                            // member-declaration position it declares the

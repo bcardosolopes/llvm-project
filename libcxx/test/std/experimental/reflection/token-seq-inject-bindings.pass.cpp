@@ -21,6 +21,17 @@
 // no ADL, and no constraint machinery are needed. Unlike per-instantiation
 // injection of explicit specializations, the injected entities exist before
 // any specialization is instantiated, so the protocol is order-independent.
+//
+// The partial specializations use declaration_of on the annotated *template*
+// plus the fragment accessors: template_parameter_list_for clones the
+// primary's real head (any parameter kinds, constraints preserved, defaults
+// dropped for the partial-spec position) and template_argument_list_for
+// spells the matching 'T0, T1...' argument list. An earlier revision used a
+// 'template <class... Ts>' head with a requires-requires guard instead --
+// that only worked for all-type-parameter primaries (see buffer_ish below
+// for what it could not express) and needed the guard only because the
+// pack head was too greedy; a faithful head matches nothing but the
+// template's own specializations.
 
 #include <meta>
 #include <cassert>
@@ -35,17 +46,21 @@ using std::meta::info;
 namespace lib {
     struct inject_bindings_t {
         consteval auto on_template_defined(info tmpl) const -> void {
+            auto d = std::meta::declaration_of(tmpl);
+            auto head = std::meta::template_parameter_list_for(
+                d, {.defaults = false});
+            auto args = std::meta::template_argument_list_for(d);
             queue_injection(^^std, ^^{
-                template <class... Ts>
-                    requires requires { \(tmpl)<Ts...>::tuple_elements; }
-                struct tuple_size<\(tmpl)<Ts...>>
-                    : integral_constant<size_t, size(\(tmpl)<Ts...>::tuple_elements)>
+                template <\(head)>
+                struct tuple_size<\(tmpl)<\(args)>>
+                    : integral_constant<size_t,
+                                        size(\(tmpl)<\(args)>::tuple_elements)>
                 { };
 
-                template <size_t I, class... Ts>
-                    requires requires { \(tmpl)<Ts...>::tuple_elements; }
-                struct tuple_element<I, \(tmpl)<Ts...>> {
-                    using type = [: type_of(\(tmpl)<Ts...>::tuple_elements[I]) :];
+                template <size_t I, \(head)>
+                struct tuple_element<I, \(tmpl)<\(args)>> {
+                    using type =
+                        [: type_of(\(tmpl)<\(args)>::tuple_elements[I]) :];
                 };
             });
         }
@@ -100,11 +115,44 @@ namespace app {
         T only;
         static constexpr info tuple_elements[] = {^^only};
     };
+
+    // Mixed template parameter kinds: the pack-head trick this generator
+    // previously used ('template <class... Ts>') cannot express an NTTP
+    // primary at all; the cloned head is 'template <class T0, size_t T1>'.
+    template <class T, std::size_t N>
+    struct [[=lib::inject_bindings]] buffer_ish {
+        T a;
+        T b;
+        static constexpr std::size_t cap = N;
+        static constexpr info tuple_elements[] = {^^a, ^^b};
+    };
+
+    // A defaulted primary: {.defaults = false} is what makes the partial
+    // specialization legal (default arguments are not permitted there).
+    template <class T = int>
+    struct [[=lib::inject_bindings]] defaulted {
+        T v;
+        static constexpr info tuple_elements[] = {^^v};
+    };
+
+    // A constrained primary: the constraint rides along on the cloned head.
+    template <std::integral T>
+    struct [[=lib::inject_bindings]] whole {
+        T n;
+        static constexpr info tuple_elements[] = {^^n};
+    };
 }
 
 static_assert(std::tuple_size_v<app::pair_ish<int, char>> == 2);
 static_assert(std::same_as<std::tuple_element_t<1, app::pair_ish<int, char>>, char>);
 static_assert(std::tuple_size_v<app::single<double>> == 1);
+
+static_assert(std::tuple_size_v<app::buffer_ish<short, 16>> == 2);
+static_assert(std::same_as<
+    std::tuple_element_t<1, app::buffer_ish<short, 16>>, short>);
+static_assert(std::tuple_size_v<app::defaulted<>> == 1);
+static_assert(std::same_as<std::tuple_element_t<0, app::defaulted<>>, int>);
+static_assert(std::tuple_size_v<app::whole<long>> == 1);
 
 // A template that doesn't opt in is not tuple-like; no hard error from the
 // injected (constrained) bridges.
@@ -132,6 +180,9 @@ int main(int, char**) {
 
     auto [only] = app::single<double>{3.5};
     assert(only == 3.5);
+
+    auto [ba, bb] = app::buffer_ish<short, 4>{1, 2};
+    assert(ba == 1 && bb == 2);
 
     return 0;
 }

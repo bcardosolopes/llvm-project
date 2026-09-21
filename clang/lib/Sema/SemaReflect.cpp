@@ -1708,18 +1708,19 @@ Decl *Sema::ActOnConstevalBlockDeclaration(SourceLocation ConstevalLoc,
 static NamedDecl *transformClonedTemplateParam(
     Sema &SemaRef, DeclContext *DC, NamedDecl *Param,
     MultiLevelTemplateArgumentList &Args, unsigned NewIndex,
-    IdentifierInfo *NewName, SourceLocation Loc) {
+    IdentifierInfo *NewName, SourceLocation Loc, unsigned NewDepth = 0,
+    bool KeepDefaults = true) {
   ASTContext &C = SemaRef.Context;
 
   if (auto *TTP = dyn_cast<TemplateTypeParmDecl>(Param)) {
     auto *NewTTP = TemplateTypeParmDecl::Create(
-        C, DC, Loc, Loc, /*Depth=*/0, NewIndex, NewName,
+        C, DC, Loc, Loc, NewDepth, NewIndex, NewName,
         TTP->wasDeclaredWithTypename(), TTP->isParameterPack(),
         TTP->hasTypeConstraint(), TTP->getNumExpansionParameters());
     if (const auto *TC = TTP->getTypeConstraint())
       SemaRef.SubstTypeConstraint(NewTTP, TC, Args,
                                   /*EvaluateConstraint=*/false);
-    if (TTP->hasDefaultArgument()) {
+    if (KeepDefaults && TTP->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(
               TTP->getDefaultArgument(), Args, InstantiatedDefaultArg,
@@ -1745,7 +1746,7 @@ static NamedDecl *transformClonedTemplateParam(
       return nullptr;
 
     auto *NewNTTP = NonTypeTemplateParmDecl::Create(
-        C, DC, Loc, Loc, /*Depth=*/0, NewIndex, NewName, NewT,
+        C, DC, Loc, Loc, NewDepth, NewIndex, NewName, NewT,
         NTTP->isParameterPack(), NewTSI);
 
     if (AutoTypeLoc AutoLoc =
@@ -1761,7 +1762,7 @@ static NamedDecl *transformClonedTemplateParam(
         return nullptr;
     }
 
-    if (NTTP->hasDefaultArgument()) {
+    if (KeepDefaults && NTTP->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(
               NTTP->getDefaultArgument(), Args, InstantiatedDefaultArg,
@@ -1780,10 +1781,10 @@ static NamedDecl *transformClonedTemplateParam(
       return nullptr;
 
     auto *NewTTPD = TemplateTemplateParmDecl::Create(
-        C, DC, Loc, /*Depth=*/0, NewIndex, TTPD->isParameterPack(), NewName,
+        C, DC, Loc, NewDepth, NewIndex, TTPD->isParameterPack(), NewName,
         TTPD->templateParameterKind(), TTPD->wasDeclaredWithTypename(),
         TTPD->getTemplateParameters());
-    if (TTPD->hasDefaultArgument()) {
+    if (KeepDefaults && TTPD->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(
               TTPD->getDefaultArgument(), Args, InstantiatedDefaultArg,
@@ -1797,11 +1798,65 @@ static NamedDecl *transformClonedTemplateParam(
   return nullptr;
 }
 
+bool Sema::ActOnInjectedTemplateParameters(
+    Scope *S, TemplateParamListSpec *TPS, unsigned Depth, SourceLocation Loc,
+    SmallVectorImpl<NamedDecl *> &TemplateParams) {
+  FunctionDeclSpec *Spec = TPS->Spec;
+
+  TemplateParameterList *OldTPL = nullptr;
+  if (auto *CTD = dyn_cast<ClassTemplateDecl>(Spec->Source))
+    OldTPL = CTD->getTemplateParameters();
+  else if (auto *FTD = dyn_cast<FunctionTemplateDecl>(Spec->Source))
+    OldTPL = FTD->getTemplateParameters();
+  if (!OldTPL) {
+    Diag(Loc, diag::err_decl_spec_wrong_context);
+    return true;
+  }
+
+  // Clone the source's parameters at the *destination's* depth and starting
+  // position (the fragment can follow written parameters), renaming per the
+  // description and remapping references to earlier cloned parameters --
+  // the same Rewrite-substitution recipe as function-head cloning. Note the
+  // source's own requires-clause is not carried: it constrains the
+  // *primary's* arguments, and any actual specialization the injected
+  // declaration could match already satisfies it.
+  LocalInstantiationScope InstScope(*this);
+  SmallVector<TemplateArgument, 8> NewParamArgs;
+  unsigned StartIndex = TemplateParams.size();
+  for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
+    MultiLevelTemplateArgumentList PartialArgs;
+    PartialArgs.setKind(TemplateSubstitutionKind::Rewrite);
+    PartialArgs.addOuterTemplateArguments(NewParamArgs);
+    IdentifierInfo *NewName = &Context.Idents.get(
+        Spec->TemplateParameterPrefix + std::to_string(I));
+    NamedDecl *NewParam = transformClonedTemplateParam(
+        *this, CurContext, OldTPL->getParam(I), PartialArgs, StartIndex + I,
+        NewName, Loc, Depth, TPS->KeepDefaults);
+    if (!NewParam) {
+      Diag(Loc, diag::err_decl_spec_clone_failed)
+          << cast<NamedDecl>(Spec->Source);
+      return true;
+    }
+    NewParamArgs.push_back(Context.getInjectedTemplateArg(NewParam));
+    // Make the new parameter visible to the rest of the template
+    // declaration being parsed.
+    if (NewParam->getDeclName())
+      PushOnScopeChains(NewParam, S);
+    TemplateParams.push_back(NewParam);
+  }
+  return false;
+}
+
 NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
                                                AccessSpecifier AS,
                                                SourceLocation Loc) {
   auto *RD = dyn_cast<CXXRecordDecl>(CurContext);
   if (!RD || !RD->isBeingDefined()) {
+    Diag(Loc, diag::err_decl_spec_wrong_context);
+    return nullptr;
+  }
+
+  if (isa<ClassTemplateDecl>(Spec->Source)) {
     Diag(Loc, diag::err_decl_spec_wrong_context);
     return nullptr;
   }

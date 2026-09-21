@@ -16472,6 +16472,13 @@ public:
   /// described member function into the current class with the description's
   /// naming policy and returns the introduced declaration (the
   /// FunctionTemplateDecl for a member template), or null on error.
+  /// Materialize the cloned template parameters of a
+  /// std::meta::template_parameter_list_for fragment at the current position
+  /// inside a template parameter list being parsed. Returns true on error.
+  bool ActOnInjectedTemplateParameters(
+      Scope *S, TemplateParamListSpec *TPS, unsigned Depth, SourceLocation Loc,
+      SmallVectorImpl<NamedDecl *> &TemplateParams);
+
   NamedDecl *ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
                                            AccessSpecifier AS,
                                            SourceLocation Loc);

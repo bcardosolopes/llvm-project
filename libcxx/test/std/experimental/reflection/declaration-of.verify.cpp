@@ -99,3 +99,59 @@ constexpr auto t4 =
         std::meta::declaration_of(^^S::ok)));
 static_assert(std::meta::is_declaration_spec(t4));
 static_assert(t4 != std::meta::declaration_of(^^S::ok));
+
+// ----------------------------------------------------------------------------
+// Class template head descriptions.
+// ----------------------------------------------------------------------------
+template <class T> struct CT { };
+// (a class template head cannot even have a nonterminal pack; that refusal
+// is exercised through a member function template description below)
+template <class... Ts> struct PackCT { };
+
+constexpr auto h = std::meta::declaration_of(^^CT);
+static_assert(std::meta::is_declaration_spec(h));
+
+// Renaming a head description is meaningless.
+constexpr auto h1 = std::meta::declaration_of(^^CT, {.name = ^^{ renamed }});
+// expected-error@-1 {{constexpr variable 'h1' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a class template head description cannot be renamed}}
+
+// No forwarding call, no override, no noexcept for a head description.
+constexpr auto h2 = std::meta::forwarding_call_for(h, ^^{ impl });
+// expected-error@-1 {{constexpr variable 'h2' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot generate a forwarding call: a class template head description has no call to forward (use template_argument_list_for)}}
+
+constexpr auto h3 = std::meta::make_override(h);
+// expected-error@-1 {{constexpr variable 'h3' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a class template head description cannot be declared override}}
+
+constexpr auto h4 = std::meta::make_noexcept(h);
+// expected-error@-1 {{constexpr variable 'h4' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a class template head description cannot be declared noexcept}}
+
+// The fragment accessors need a template.
+constexpr auto h5 =
+    std::meta::template_parameter_list_for(std::meta::declaration_of(^^S::ok));
+// expected-error@-2 {{constexpr variable 'h5' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: the description's source is not a template}}
+
+// A nonterminal pack (member function template): the head fragment clones,
+// the argument list refuses.
+constexpr auto h6 = std::meta::template_parameter_list_for(
+    std::meta::declaration_of(^^S::template nonterminal_pack));
+static_assert(!empty(h6));
+constexpr auto h7 = std::meta::template_argument_list_for(
+    std::meta::declaration_of(^^S::template nonterminal_pack));
+// expected-error@-2 {{constexpr variable 'h7' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot generate a forwarding call: a template parameter pack followed by more template parameters cannot be forwarded as a deducible argument list}}
+
+// A trailing pack forwards fine ('T0...').
+constexpr auto h8 = std::meta::template_argument_list_for(
+    std::meta::declaration_of(^^PackCT));
+static_assert(h8 == ^^{ T0... });
+
+// The accessors also work on member function template descriptions,
+// exposing the low-level fragments forwarding_call_for is built from.
+constexpr auto h9 = std::meta::template_argument_list_for(
+    std::meta::declaration_of(^^S::template explicit_obj));
+static_assert(h9 == ^^{ T0 });

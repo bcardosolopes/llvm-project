@@ -5078,6 +5078,16 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     // name, signature, and template head arity -- followed by the naming
     // policy. Distinct sources must mangle distinctly.
     FunctionDeclSpec *FDS = R.getReflectedFunctionDeclSpec();
+    if (auto *CTD = dyn_cast<ClassTemplateDecl>(FDS->Source)) {
+      // A class template head description: the template's identity plus the
+      // naming policy.
+      Out << "H$";
+      ArrayRef<TemplateArgument> NoArgs;
+      mangleTemplateName(CTD, NoArgs);
+      Out << "T$" << FDS->TemplateParameterPrefix << '$';
+      Out << "P$" << FDS->ParameterPrefix << '$';
+      break;
+    }
     auto *MD = cast<CXXMethodDecl>(FDS->Source->getAsFunction());
     Context.mangleCanonicalTypeName(
         getASTContext().getCanonicalTagType(MD->getParent()), Out, false);

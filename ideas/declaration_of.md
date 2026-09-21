@@ -56,6 +56,44 @@ transformation shape (immutable description in, new description out) is
 the intended home for future knobs: conditional noexcept, constexpr-ness
 policy, virtual-ness, attributes.
 
+**[v1] Class template heads + fragment accessors** (added 2026-09-17,
+Barry's design): `declaration_of(^^tmpl)` on a *class template* returns a
+head-only description -- a pure handle, never interpolated directly -- and
+two accessors produce composable fragments:
+
+```cpp
+auto d    = declaration_of(tmpl);
+auto head = template_parameter_list_for(d, {.defaults = false}); // class T0
+auto args = template_argument_list_for(d);                       // T0
+
+queue_injection(^^std, ^^{
+  template <\(head)>
+  struct tuple_size<\(tmpl)<\(args)>> : ... { };
+
+  template <size_t I, \(head)>              // composes with written params
+  struct tuple_element<I, \(tmpl)<\(args)>> { ... };
+});
+```
+
+`head` is a token sequence carrying ONE annotation token; the parser
+materializes the cloned parameters (renamed, constraints preserved,
+semantic bindings intact) when it reaches it inside a written
+`template <...>` list -- so it splices anywhere in the list, at any scope,
+with no whole-declaration injection machinery. `.defaults = true` is the
+default; pass `false` for partial-specialization positions where default
+arguments are illegal. The primary's own requires-clause is deliberately
+not carried (any actual specialization the injected declaration can match
+already satisfies it). `args` refuses nonterminal packs -- the argument
+list would be a non-deduced context, same rule as forwarding_call_for's
+explicit arguments (only reachable via member function template
+descriptions; class template heads cannot have nonterminal packs at all).
+Both accessors also work on member function template descriptions,
+recovering the original declaration_parts.targ_list idea as low-level
+fragments beneath forwarding_call_for. This replaced the bindings demo's
+`template <class... Ts>` + requires-requires-guard cheat: the faithful
+head handles NTTP/mixed/constrained/defaulted primaries and needs no
+viability guard at all.
+
 **[v1] mock\<Interface\>** (added 2026-09-17, see
 [mock-interface.pass.cpp](../libcxx/test/std/experimental/reflection/mock-interface.pass.cpp)):
 the `MOCK_METHOD` replacement works *without* `virtual`/`override` syntax

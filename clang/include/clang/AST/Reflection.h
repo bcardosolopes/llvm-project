@@ -221,6 +221,17 @@ struct FunctionDeclSpec {
   bool operator==(FunctionDeclSpec const &Rhs) const;
   bool operator!=(FunctionDeclSpec const &Rhs) const;
 };
+
+/// \brief Annotation payload for std::meta::template_parameter_list_for.
+///
+/// Carried by a tok::annot_template_param_spec token inside a token
+/// sequence; when the parser reaches it inside a written template<...>
+/// parameter list, the description's cloned (renamed) template parameters
+/// are materialized at that position.
+struct TemplateParamListSpec {
+  FunctionDeclSpec *Spec;
+  bool KeepDefaults;
+};
 } // namespace clang
 
 #endif

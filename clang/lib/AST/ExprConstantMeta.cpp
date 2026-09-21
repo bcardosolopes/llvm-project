@@ -838,6 +838,20 @@ static bool make_noexcept(APValue &Result, ASTContext &C, MetaActions &Meta,
                           SourceRange Range, ArrayRef<Expr *> Args,
                           Decl *ContainingDecl);
 
+static bool template_parameter_list_for(APValue &Result, ASTContext &C,
+                                        MetaActions &Meta, EvalFn Evaluator,
+                                        DiagFn Diagnoser, bool AllowInjection,
+                                        QualType ResultTy, SourceRange Range,
+                                        ArrayRef<Expr *> Args,
+                                        Decl *ContainingDecl);
+
+static bool template_argument_list_for(APValue &Result, ASTContext &C,
+                                       MetaActions &Meta, EvalFn Evaluator,
+                                       DiagFn Diagnoser, bool AllowInjection,
+                                       QualType ResultTy, SourceRange Range,
+                                       ArrayRef<Expr *> Args,
+                                       Decl *ContainingDecl);
+
 static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -994,6 +1008,8 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_bool, 1, 1, is_declaration_spec },
   { Metafunction::MFRK_metaInfo, 1, 1, make_override },
   { Metafunction::MFRK_metaInfo, 1, 1, make_noexcept },
+  { Metafunction::MFRK_tokenSequence, 2, 2, template_parameter_list_for },
+  { Metafunction::MFRK_tokenSequence, 1, 1, template_argument_list_for },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3497,11 +3513,27 @@ bool declaration_of(APValue &Result, ASTContext &C, MetaActions &Meta,
 
   RV = MaybeUnproxy(C, RV, /*Dealias=*/false);
 
+  // A class template: the description describes only its *template head*
+  // (there is no whole-declaration meaning); it is consumed by
+  // template_parameter_list_for / template_argument_list_for rather than
+  // interpolated directly.
   NamedDecl *Source = nullptr;
-  const char *WhyNot = nullptr;
-  CXXMethodDecl *MD = resolveCloneSource(RV, Source, WhyNot);
-  if (!MD)
-    return Refuse(WhyNot);
+  CXXMethodDecl *MD = nullptr;
+  if (RV.getReflectionKind() == ReflectionKind::Template) {
+    if (auto *CTD = dyn_cast_or_null<ClassTemplateDecl>(
+            RV.getReflectedTemplate().getAsTemplateDecl())) {
+      if (CTD->getDeclContext()->isDependentContext())
+        return Refuse("the enclosing context of the template must be "
+                      "concrete");
+      Source = CTD;
+    }
+  }
+  if (!Source) {
+    const char *WhyNot = nullptr;
+    MD = resolveCloneSource(RV, Source, WhyNot);
+    if (!MD)
+      return Refuse(WhyNot);
+  }
 
   // The replacement name: an empty token sequence keeps the source's name;
   // otherwise a single identifier token.
@@ -3511,6 +3543,8 @@ bool declaration_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   std::optional<std::string> Name;
   TokenSequenceData NameTSD = NameTS.getTokenSequence();
   if (!NameTSD.empty()) {
+    if (!MD)
+      return Refuse("a class template head description cannot be renamed");
     if (NameTSD.size() != 1 || !NameTSD.front().is(tok::identifier))
       return Refuse("the replacement name must be a single identifier token");
     Name = NameTSD.front().getIdentifierInfo()->getName().str();
@@ -3582,6 +3616,11 @@ bool make_override(APValue &Result, ASTContext &C, MetaActions &Meta,
           WhyNot = "a member function template cannot be declared override";
           return false;
         }
+        if (isa<ClassTemplateDecl>(FDS.Source)) {
+          WhyNot = "a class template head description cannot be declared "
+                   "override";
+          return false;
+        }
         FDS.MarkOverride = true;
         return true;
       });
@@ -3594,9 +3633,113 @@ bool make_noexcept(APValue &Result, ASTContext &C, MetaActions &Meta,
   return transformDeclSpec(
       Result, C, Evaluator, Diagnoser, Range, Args[0],
       [](FunctionDeclSpec &FDS, const char *&WhyNot) {
+        if (isa<ClassTemplateDecl>(FDS.Source)) {
+          WhyNot = "a class template head description cannot be declared "
+                   "noexcept";
+          return false;
+        }
         FDS.MarkNoexcept = true;
         return true;
       });
+}
+
+// Resolve the template parameter list a description's source carries, for
+// the fragment accessors. Null with a reason if the source is not a
+// template.
+static TemplateParameterList *headParamsOf(FunctionDeclSpec *FDS,
+                                           const char *&WhyNot) {
+  if (auto *CTD = dyn_cast<ClassTemplateDecl>(FDS->Source))
+    return CTD->getTemplateParameters();
+  if (auto *FTD = dyn_cast<FunctionTemplateDecl>(FDS->Source))
+    return FTD->getTemplateParameters();
+  WhyNot = "the description's source is not a template";
+  return nullptr;
+}
+
+bool template_parameter_list_for(APValue &Result, ASTContext &C,
+                                 MetaActions &Meta, EvalFn Evaluator,
+                                 DiagFn Diagnoser, bool AllowInjection,
+                                 QualType ResultTy, SourceRange Range,
+                                 ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  auto Refuse = [&](const char *Why) {
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_clone_declaration)
+        << Why << Range;
+  };
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  if (!RV.isReflectedFunctionDeclSpec())
+    return Refuse("operand is not a declaration description");
+  FunctionDeclSpec *FDS = RV.getReflectedFunctionDeclSpec();
+
+  APValue KeepDefaults;
+  if (!Evaluator(KeepDefaults, Args[1], true))
+    return true;
+
+  const char *WhyNot = nullptr;
+  if (!headParamsOf(FDS, WhyNot))
+    return Refuse(WhyNot);
+
+  // One annotation token; the parser materializes the cloned parameters
+  // when it reaches it inside a written template<...> list, so constrained
+  // parameters keep their semantic bindings.
+  auto *TPS = new (C) TemplateParamListSpec{
+      FDS, KeepDefaults.getInt().getBoolValue()};
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::annot_template_param_spec);
+  Tok.setLocation(Range.getBegin());
+  Tok.setAnnotationEndLoc(Range.getBegin());
+  Tok.setAnnotationValue(static_cast<void *>(TPS));
+  Token Toks[] = {Tok};
+  return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
+}
+
+bool template_argument_list_for(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  auto Refuse = [&](const char *Why) {
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_forward_declaration)
+        << Why << Range;
+  };
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  if (!RV.isReflectedFunctionDeclSpec())
+    return Refuse("operand is not a declaration description");
+  FunctionDeclSpec *FDS = RV.getReflectedFunctionDeclSpec();
+
+  const char *WhyNot = nullptr;
+  TemplateParameterList *TPL = headParamsOf(FDS, WhyNot);
+  if (!TPL)
+    return Refuse(WhyNot);
+
+  // 'T0, T1...': the cloned parameters spelled by name, packs expanded. A
+  // pack anywhere but last makes the resulting template argument list a
+  // non-deduced context ([temp.deduct.type]), so a specialization written
+  // with it could never be matched; refuse, exactly as forwarding_call_for
+  // refuses the analogous explicit-argument list.
+  std::string List;
+  for (unsigned I = 0, N = TPL->size(); I != N; ++I) {
+    bool IsPack = TPL->getParam(I)->isTemplateParameterPack();
+    if (IsPack && I + 1 != N)
+      return Refuse("a template parameter pack followed by more template "
+                    "parameters cannot be forwarded as a deducible "
+                    "argument list");
+    if (I != 0)
+      List += ", ";
+    List += FDS->TemplateParameterPrefix + std::to_string(I);
+    if (IsPack)
+      List += "...";
+  }
+
+  SmallVector<Token, 16> Toks;
+  appendLexedTokens(C, List, Range.getBegin(), Toks);
+  return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
 }
 
 bool forwarding_call_for(APValue &Result, ASTContext &C, MetaActions &Meta,
@@ -3624,6 +3767,10 @@ bool forwarding_call_for(APValue &Result, ASTContext &C, MetaActions &Meta,
   TokenSequenceData Recv = RecvTS.getTokenSequence();
   if (Recv.empty())
     return Refuse("the receiver must not be empty");
+
+  if (isa<ClassTemplateDecl>(FDS->Source))
+    return Refuse("a class template head description has no call to forward "
+                  "(use template_argument_list_for)");
 
   auto *FTD = dyn_cast<FunctionTemplateDecl>(FDS->Source);
   auto *MD = cast<CXXMethodDecl>(FDS->Source->getAsFunction());
