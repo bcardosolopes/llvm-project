@@ -251,7 +251,9 @@ static_assert([] {
          token_kind_of(toks[1]) == token_kind::punctuator &&
          token_kind_of(toks[2]) == token_kind::literal &&
          operator_of(toks[1]) == std::meta::operators::op_less_less &&
-         toks[0] == std::meta::id("x");
+         toks[0] == std::meta::id("x") &&
+         identifier_of(toks[0]) == "x" &&
+         u8identifier_of(toks[0]) == u8"x";
 }());
 
 // A keyword is its own kind; alternative tokens are still punctuators; empty or
@@ -279,10 +281,13 @@ consteval std::optional<int> placeholder_index(std::string_view s) {
 }
 
 __macro λ(std::meta::token_sequence body) {
+  // The parameter is itself the range of its tokens; only identifiers can be
+  // placeholders, and identifier_of reads one's spelling.
   int arity = 0;
-  for (std::meta::token_sequence tok : tokens_of(body))
-    if (auto n = placeholder_index(stringize(tok)))
-      arity = std::max(arity, *n);
+  for (std::meta::token_sequence tok : body)
+    if (token_kind_of(tok) == std::meta::token_kind::identifier)
+      if (auto n = placeholder_index(identifier_of(tok)))
+        arity = std::max(arity, *n);
 
   std::meta::list_builder params(^^{ , });
   for (int i = 1; i <= arity; ++i)

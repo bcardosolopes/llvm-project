@@ -3341,6 +3341,18 @@ bool FunctionDecl::isImmediateEscalating() const {
   return false;
 }
 
+bool FunctionDecl::isExpressionMacro() const {
+  if (hasAttr<ExpressionMacroAttr>())
+    return true;
+  if (const FunctionDecl *Pattern =
+          getTemplateInstantiationPattern(/*ForDefinition=*/false))
+    if (Pattern->hasAttr<ExpressionMacroAttr>())
+      return true;
+  if (const FunctionTemplateDecl *Primary = getPrimaryTemplate())
+    return Primary->getTemplatedDecl()->hasAttr<ExpressionMacroAttr>();
+  return false;
+}
+
 bool FunctionDecl::isImmediateFunction() const {
   // C++23 [expr.const]/p18
   // An immediate function is a function or constructor that is

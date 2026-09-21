@@ -2574,6 +2574,10 @@ public:
   // function containing an immediate escalating expression.
   bool isImmediateFunction() const;
 
+  /// Whether this is an expression macro ('__macro'), directly or as the
+  /// specialization of a macro template.
+  bool isExpressionMacro() const;
+
   /// Whether the instantiation of this function is pending.
   /// This bit is set when the decision to instantiate this function is made
   /// and unset if and when the function body is created. That leaves out

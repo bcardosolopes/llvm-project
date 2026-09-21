@@ -777,6 +777,12 @@ static bool operator_of_token(APValue &Result, ASTContext &C,
                               QualType ResultTy, SourceRange Range,
                               ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
+static bool identifier_of_token(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
 static bool is_constant_expression(APValue &Result, ASTContext &C,
                                    MetaActions &Meta, EvalFn Evaluator,
                                    DiagFn Diagnoser, bool AllowInjection,
@@ -997,6 +1003,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_tokenSequence, 2, 2, get_ith_token },
   { Metafunction::MFRK_sizeT, 1, 1, token_kind_of },
   { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
+  { Metafunction::MFRK_spliceFromArg, 3, 3, identifier_of_token },
   { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
   { Metafunction::MFRK_metaInfo, 1, 1, test_expression },
   { Metafunction::MFRK_metaInfo, 1, 1, as_lvalue },
@@ -2395,6 +2402,36 @@ static bool getSingleToken(EvalFn Evaluator, Expr *Arg,
   if (TS.isTokenSequence() && TS.getTokenSequence().size() == 1)
     Tok = TS.getTokenSequence()[0];
   return true;
+}
+
+/// identifier_of(token_sequence): the spelling of a single identifier token,
+/// as a string literal of the requested character type (Args[0] is the
+/// result type, Args[2] selects UTF-8), like identifier_of(info).
+bool identifier_of_token(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                         QualType ResultTy, SourceRange Range,
+                         ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  std::optional<Token> Tok;
+  if (!getSingleToken(Evaluator, Args[1], Tok))
+    return true;
+
+  bool IsUtf8;
+  {
+    APValue Scratch;
+    if (!Evaluator(Scratch, Args[2], true))
+      return true;
+    IsUtf8 = Scratch.getInt().getBoolValue();
+  }
+
+  if (!Tok || !Tok->is(tok::identifier))
+    return DiagnoseReflectionKind(Diagnoser, Range,
+                                  "a single identifier token");
+
+  Expr *StrLit =
+      makeStrLiteral(Tok->getIdentifierInfo()->getName(), C, IsUtf8);
+  APValue::LValuePathEntry Path[1] = {APValue::LValuePathEntry::ArrayIndex(0)};
+  return SetAndSucceed(Result,
+                       APValue(StrLit, CharUnits::Zero(), Path, false));
 }
 
 // Ordinals must match std::meta::token_kind in <meta>.

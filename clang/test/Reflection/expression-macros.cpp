@@ -779,3 +779,23 @@ constexpr int bad1 = two!(1, 2];  // expected-error {{expected ')'}} \
                                   // expected-note {{to match this '('}}
 
 }  // namespace N19
+
+namespace N20 {
+
+// In the body a parameter is a prvalue naming what was bound to it, and its
+// classification says so. Contexts that classify the operand (reference
+// binding -- which is also what range-for's '__range' is -- and a
+// parenthesized decltype) therefore work on a parameter directly. (Binding
+// a reference to a parameter used to assert in ExprClassification.)
+__macro first_plus(token_sequence body, int x) {
+  static_assert(__is_same(decltype((body)), token_sequence));
+  static_assert(__is_same(decltype((x)), decltype(^^int)));
+  auto&& r = body;
+  auto const& cx = x;
+  token_sequence first = r[0];
+  return ^^{ (\(first) * 10 + \(cx)) };
+}
+constexpr int a = 3;
+static_assert(first_plus!(a b c, 7) == 37);
+
+}  // namespace N20

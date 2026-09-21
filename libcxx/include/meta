@@ -570,6 +570,7 @@ enum : unsigned {
   __metafn_get_ith_token,
   __metafn_token_kind_of,
   __metafn_operator_of_token,
+  __metafn_identifier_of_token,
   __metafn_is_constant_expression,
   __metafn_test_expression,
   __metafn_as_lvalue,
@@ -836,6 +837,20 @@ consteval auto identifier_of(info r) -> string_view {
 consteval auto u8identifier_of(info r) -> u8string_view {
   return __metafunction(detail::__metafn_identifier_of, ^^const char8_t *,
                         r, /*UTF8=*/true, /*EnforceConsistent=*/true);
+}
+
+// The spelling of a single identifier token. As for identifier_of(info), any
+// other operand -- a keyword, literal or punctuator, or an empty or
+// multi-token sequence -- is not a constant expression; test with
+// token_kind_of(tok) == token_kind::identifier first.
+consteval auto identifier_of(token_sequence tok) -> string_view {
+  return __metafunction(detail::__metafn_identifier_of_token, ^^const char *,
+                        tok, /*UTF8=*/false);
+}
+
+consteval auto u8identifier_of(token_sequence tok) -> u8string_view {
+  return __metafunction(detail::__metafn_identifier_of_token,
+                        ^^const char8_t *, tok, /*UTF8=*/true);
 }
 
 // Returns an implementation-defined name for the reflected entity.
@@ -3214,9 +3229,8 @@ enum class token_kind {
 };
 
 // Token classification. To match a specific identifier, compare the token
-// against id(...) directly: tok == id("name"). (An identifier_of(tok)
-// converter used to exist for that purpose, from before tokens were
-// directly comparable.)
+// against id(...) directly: tok == id("name"); to read its spelling, use
+// identifier_of(tok).
 consteval auto token_kind_of(token_sequence tok) -> token_kind {
   return token_kind(__metafunction(detail::__metafn_token_kind_of, tok));
 }

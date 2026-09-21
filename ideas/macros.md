@@ -193,7 +193,14 @@ To match a specific identifier, compare against `id(...)` directly
 (`tok == id("name")` — `id` produces a single-identifier-token
 `token_sequence`, the identifier sibling of `str_lit`; it originally
 returned an identifier *reflection*, a vestige removed once tokens became
-directly comparable). `operator_of(tok) -> operators` converts a token
+directly comparable). To *read* an identifier's spelling,
+`identifier_of(tok) -> string_view` (and `u8identifier_of`) is the token
+overload of P2996's accessor, with the same contract: anything other than a
+single identifier token is not a constant expression, so classify first.
+This is what `λ!` uses to find its `_1`/`_2` placeholders — `stringize` also
+spells a single token, but it is the whole-sequence renderer, not an
+accessor, and says nothing about what the author expected the token to be.
+`operator_of(tok) -> operators` converts a token
 spelling a complete operator (`(`, `[`, `new` do not qualify) into the
 interpolable `operators` vocabulary. Concatenation and
 interpolation of `token_sequence` values already exist. There are no grammar

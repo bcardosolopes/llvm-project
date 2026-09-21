@@ -3388,17 +3388,7 @@ static bool ShouldLookupResultBeMultiVersionOverload(const LookupResult &R) {
 //===----------------------------------------------------------------------===//
 
 static bool isExpressionMacro(const FunctionDecl *FD) {
-  if (!FD)
-    return false;
-  if (FD->hasAttr<ExpressionMacroAttr>())
-    return true;
-  if (const FunctionDecl *Pattern =
-          FD->getTemplateInstantiationPattern(/*ForDefinition=*/false))
-    if (Pattern->hasAttr<ExpressionMacroAttr>())
-      return true;
-  if (const FunctionTemplateDecl *Primary = FD->getPrimaryTemplate())
-    return Primary->getTemplatedDecl()->hasAttr<ExpressionMacroAttr>();
-  return false;
+  return FD && FD->isExpressionMacro();
 }
 
 bool Sema::IsExpressionMacro(const NamedDecl *D) {

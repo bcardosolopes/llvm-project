@@ -320,11 +320,19 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
 
     // C++ [expr.prim.general]p3: The result is an lvalue if the entity is a
     //   function or variable and a prvalue otherwise.
-  case Expr::DeclRefExprClass:
+  case Expr::DeclRefExprClass: {
+    const ValueDecl *D = cast<DeclRefExpr>(E)->getDecl();
     if (E->getType() == Ctx.UnknownAnyTy)
-      return isa<FunctionDecl>(cast<DeclRefExpr>(E)->getDecl())
-               ? Cl::CL_PRValue : Cl::CL_LValue;
-    return ClassifyDecl(Ctx, cast<DeclRefExpr>(E)->getDecl());
+      return isa<FunctionDecl>(D) ? Cl::CL_PRValue : Cl::CL_LValue;
+    // Inside an expression-macro body a parameter is not a variable: it names
+    // the reflection or token sequence bound to it, and Sema builds the
+    // reference as a prvalue of that type (see BuildDeclarationNameExpr).
+    if (const auto *PVD = dyn_cast<ParmVarDecl>(D))
+      if (const auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext());
+          FD && FD->isExpressionMacro())
+        return Cl::CL_PRValue;
+    return ClassifyDecl(Ctx, D);
+  }
 
     // Member access is complex.
   case Expr::MemberExprClass:
