@@ -814,6 +814,12 @@ static bool forwarding_call_for(APValue &Result, ASTContext &C,
                                 QualType ResultTy, SourceRange Range,
                                 ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
+static bool argument_list_for(APValue &Result, ASTContext &C,
+                              MetaActions &Meta, EvalFn Evaluator,
+                              DiagFn Diagnoser, bool AllowInjection,
+                              QualType ResultTy, SourceRange Range,
+                              ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
 static bool is_declaration_spec(APValue &Result, ASTContext &C,
                                 MetaActions &Meta, EvalFn Evaluator,
                                 DiagFn Diagnoser, bool AllowInjection,
@@ -997,12 +1003,13 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_metaInfo, 0, 0, macro_expansion_context,
     /*WantsMacroExpansionContext=*/true },
   { Metafunction::MFRK_metaInfo, 6, 6, declaration_of },
-  { Metafunction::MFRK_tokenSequence, 2, 2, forwarding_call_for },
+  { Metafunction::MFRK_tokenSequence, 3, 3, forwarding_call_for },
   { Metafunction::MFRK_bool, 1, 1, is_declaration_spec },
   { Metafunction::MFRK_metaInfo, 1, 1, make_override },
   { Metafunction::MFRK_metaInfo, 1, 1, make_noexcept },
   { Metafunction::MFRK_tokenSequence, 2, 2, template_parameter_list_for },
   { Metafunction::MFRK_tokenSequence, 1, 1, template_argument_list_for },
+  { Metafunction::MFRK_tokenSequence, 2, 2, argument_list_for },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3715,6 +3722,65 @@ bool template_argument_list_for(APValue &Result, ASTContext &C,
   return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
 }
 
+// The spelling of the description's parameters as call arguments:
+// 'static_cast<decltype(p0)&&>(p0), p1...' when forwarding, 'p0, p1...' as
+// lvalues. Packs expand positionally, so (unlike a template argument list)
+// a nonterminal pack is fine here.
+static std::string buildArgumentList(const FunctionDeclSpec *FDS,
+                                     const CXXMethodDecl *MD, bool Forward) {
+  std::string List;
+  for (unsigned I = 0, N = MD->getNumParams(); I != N; ++I) {
+    if (I)
+      List += ", ";
+    std::string PName = FDS->ParameterPrefix + std::to_string(I);
+    if (Forward)
+      List += "static_cast<decltype(" + PName + ")&&>(" + PName + ")";
+    else
+      List += PName;
+    if (MD->getParamDecl(I)->isParameterPack())
+      List += "...";
+  }
+  return List;
+}
+
+bool argument_list_for(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  auto Refuse = [&](const char *Why) {
+    return Diagnoser(Range.getBegin(), diag::metafn_cannot_forward_declaration)
+        << Why << Range;
+  };
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  if (!RV.isReflectedFunctionDeclSpec())
+    return Refuse("operand is not a declaration description");
+  FunctionDeclSpec *FDS = RV.getReflectedFunctionDeclSpec();
+
+  APValue Forward;
+  if (!Evaluator(Forward, Args[1], true))
+    return true;
+
+  if (isa<ClassTemplateDecl>(FDS->Source))
+    return Refuse("a class template head description has no function "
+                  "parameters");
+  auto *MD = cast<CXXMethodDecl>(FDS->Source->getAsFunction());
+
+  if (MD->isExplicitObjectMemberFunction())
+    return Refuse("explicit object member functions are not supported (the "
+                  "cloned object parameter deduces to the wrapper, not the "
+                  "wrapped object)");
+  if (MD->getType()->castAs<FunctionProtoType>()->isVariadic())
+    return Refuse("a C-style variadic parameter list cannot be forwarded");
+
+  SmallVector<Token, 32> Toks;
+  appendLexedTokens(C, buildArgumentList(FDS, MD, Forward.getInt().getBoolValue()),
+                    Range.getBegin(), Toks);
+  return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
+}
+
 bool forwarding_call_for(APValue &Result, ASTContext &C, MetaActions &Meta,
                          EvalFn Evaluator, DiagFn Diagnoser,
                          bool AllowInjection, QualType ResultTy,
@@ -3832,15 +3898,12 @@ bool forwarding_call_for(APValue &Result, ASTContext &C, MetaActions &Meta,
     CallText += ">";
   }
 
+  APValue Forward;
+  if (!Evaluator(Forward, Args[2], true))
+    return true;
+
   CallText += "(";
-  for (unsigned I = 0, N = MD->getNumParams(); I != N; ++I) {
-    if (I)
-      CallText += ", ";
-    std::string PName = FDS->ParameterPrefix + std::to_string(I);
-    CallText += "static_cast<decltype(" + PName + ")&&>(" + PName + ")";
-    if (MD->getParamDecl(I)->isParameterPack())
-      CallText += "...";
-  }
+  CallText += buildArgumentList(FDS, MD, Forward.getInt().getBoolValue());
   CallText += ")";
 
   appendLexedTokens(C, CallText, Loc, Toks);

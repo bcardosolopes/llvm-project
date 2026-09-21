@@ -402,6 +402,83 @@ static_assert([] {
 }  // namespace receivers
 
 // ----------------------------------------------------------------------------
+// argument_list_for: the fragment beneath forwarding_call_for, for calls
+// whose callee the generator spells itself; {.forward} chooses between
+// forwarding and passing lvalues.
+// ----------------------------------------------------------------------------
+namespace arglist {
+
+struct Tracer {
+  int copies = 0;
+  int moves = 0;
+  constexpr Tracer() = default;
+  constexpr Tracer(const Tracer& o) : copies(o.copies + 1), moves(o.moves) {}
+  constexpr Tracer(Tracer&& o) : copies(o.copies), moves(o.moves + 1) {}
+};
+
+struct U {
+  constexpr int take(Tracer t) const { return t.copies * 10 + t.moves; }
+
+  // A nonterminal template pack: forwarding_call_for must refuse this
+  // (explicit template arguments would be a non-deduced context), but a
+  // plain deduced call through argument_list_for forwards it fine.
+  template <class... Ts, class V>
+  constexpr int nonterminal(V v, Ts... ts) const {
+    return v + (0 + ... + ts);
+  }
+};
+
+struct W {
+  U impl;
+
+  consteval {
+    // Forwarded: the by-value Tracer is moved into the inner call.
+    auto fd = std::meta::declaration_of(^^U::take, {.name = ^^{ fwd }});
+    queue_injection(^^{
+      \(fd) { return \(std::meta::forwarding_call_for(fd, ^^{ impl })); }
+    });
+
+    // Lvalue mode: the same call copies, and the wrapper can still use the
+    // argument afterwards.
+    auto ld = std::meta::declaration_of(^^U::take, {.name = ^^{ lval }});
+    queue_injection(^^{
+      \(ld) {
+        int r = (impl).take(\(std::meta::argument_list_for(
+            ld, {.forward = false})));
+        return r + p0.copies;  // still valid: p0 was not moved from
+      }
+    });
+
+    // forwarding_call_for grew the same option.
+    auto cd = std::meta::declaration_of(^^U::take, {.name = ^^{ lcall }});
+    queue_injection(^^{
+      \(cd) {
+        return \(std::meta::forwarding_call_for(cd, ^^{ impl },
+                                                 {.forward = false}));
+      }
+    });
+
+    // The nonterminal-pack member, forwarded through the fragment with a
+    // deduced inner call.
+    auto nd = std::meta::declaration_of(^^U::template nonterminal);
+    queue_injection(^^{
+      \(nd) { return (impl).nonterminal(\(std::meta::argument_list_for(nd))); }
+    });
+  }
+};
+
+// A prvalue argument constructs p0 in place (guaranteed elision), so the
+// only copy/move observed is the transfer from p0 into take's parameter.
+static_assert(W{}.fwd(Tracer{}) == 1);    // forwarded: one move
+static_assert(W{}.lval(Tracer{}) == 10);  // lvalue mode: one copy, and
+                                          // p0 (never moved from) is still
+                                          // usable after the call
+static_assert(W{}.lcall(Tracer{}) == 10); // same, through forwarding_call_for
+static_assert(W{}.nonterminal(1, 2, 3) == 6); // pack forwarded positionally
+
+}  // namespace arglist
+
+// ----------------------------------------------------------------------------
 // Distinct descriptions mangle distinctly (usable as template arguments in
 // code generation, not just constant evaluation).
 // ----------------------------------------------------------------------------

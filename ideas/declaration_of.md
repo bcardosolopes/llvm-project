@@ -56,6 +56,28 @@ transformation shape (immutable description in, new description out) is
 the intended home for future knobs: conditional noexcept, constexpr-ness
 policy, virtual-ness, attributes.
 
+**[v1] argument_list_for** (added 2026-09-18, Barry's design): the
+fragment beneath `forwarding_call_for`, for calls whose *callee* the
+generator spells itself:
+
+```cpp
+\(handler)(\(argument_list_for(d)))          // mock: no member name
+args += ^^{ data }; args += argument_list_for(d);   // vtable: prepended arg
+```
+
+`{.forward = true}` (default) spells each parameter
+`static_cast<decltype(p0)&&>(p0)`; `{.forward = false}` names them as
+lvalues (callee should not consume, or the body reuses them after the
+call — `forwarding_call_for` grew the same `argument_list_options`).
+Packs expand positionally in a function argument list, so nonterminal
+packs are fine here (unlike the template-argument list and
+forwarding_call_for's explicit arguments): `f(V, Ts...)`-shaped members
+forward through a deduced inner call spelled with this fragment. Still
+refused: explicit-object members, C-variadics, head-only descriptions.
+Rejected alternative: modes on forwarding_call_for (a `call_receiver`
+bool would change the meaning of the receiver parameter); prepended
+arguments need no knob because list_builder handles the comma.
+
 **[v1] Class template heads + fragment accessors** (added 2026-09-17,
 Barry's design): `declaration_of(^^tmpl)` on a *class template* returns a
 head-only description -- a pure handle, never interpolated directly -- and

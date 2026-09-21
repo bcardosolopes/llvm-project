@@ -581,6 +581,7 @@ enum : unsigned {
   __metafn_make_noexcept,
   __metafn_template_parameter_list_for,
   __metafn_template_argument_list_for,
+  __metafn_argument_list_for,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3392,6 +3393,35 @@ consteval auto template_argument_list_for(info d) -> token_sequence {
   return __metafunction(detail::__metafn_template_argument_list_for, d);
 }
 
+struct argument_list_options {
+  // forward = true: each parameter passed as static_cast<decltype(p0)&&>(p0)
+  // (by-value and rvalue-reference parameters move). forward = false: each
+  // parameter named as an lvalue (p0) -- for callees that should not consume
+  // the arguments, or when the body uses them again after the call.
+  bool forward = true;
+};
+
+// The description's parameters spelled as call arguments:
+// 'static_cast<decltype(p0)&&>(p0), p1...' (packs expanded). The low-level
+// fragment beneath forwarding_call_for, for calls whose *callee* the
+// generator spells itself:
+//
+//   \(handler)(\(argument_list_for(d)))              // a mock's handler
+//
+//   auto args = list_builder(^^{ , });
+//   args += ^^{ data };
+//   args += argument_list_for(d);                    // vt->slot(data, args...)
+//
+// Packs expand positionally in a function argument list, so -- unlike
+// forwarding_call_for and template_argument_list_for -- a nonterminal pack
+// is fine here. The callee's own requirements remain the caller's problem
+// (a noexcept clone invoking a throwing callee terminates). Refused for
+// explicit-object members, C-style variadics, and head-only descriptions.
+consteval auto argument_list_for(info d, argument_list_options opts = {})
+    -> token_sequence {
+  return __metafunction(detail::__metafn_argument_list_for, d, opts.forward);
+}
+
 // Returns tokens for a call forwarding the parameters of the description 'd'
 // to the same-named member of 'receiver', intended as the body of the
 // injected clone:
@@ -3406,12 +3436,15 @@ consteval auto template_argument_list_for(info d) -> token_sequence {
 // is grouped (so '*ptr' works) and cast to carry the described member's
 // cv- and ref-qualifiers, so a const clone calls the const overload even
 // through a mutable member, and an rvalue-qualified clone moves its
-// receiver. Refused (constexpr_error) for descriptions this recipe cannot
+// receiver. Pass {.forward = false} to pass the parameters as lvalues
+// instead of forwarding them (e.g. to use them again after the call). Refused (constexpr_error) for descriptions this recipe cannot
 // forward faithfully: explicit-object members, C-style variadics, and
 // template heads where a parameter pack is followed by more parameters.
-consteval auto forwarding_call_for(info d, token_sequence receiver)
+consteval auto forwarding_call_for(info d, token_sequence receiver,
+                                   argument_list_options opts = {})
     -> token_sequence {
-  return __metafunction(detail::__metafn_forwarding_call_for, d, receiver);
+  return __metafunction(detail::__metafn_forwarding_call_for, d, receiver,
+                        opts.forward);
 }
 
 // A token_sequence is itself an iterable, indexable range: begin/end and

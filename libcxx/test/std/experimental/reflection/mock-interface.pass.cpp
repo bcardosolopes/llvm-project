@@ -140,11 +140,8 @@ struct mock : I {
       for (std::meta::info p : parameters_of(m))
         ptypes += ^^{ \(type_of(p)) };
 
-      // Forward the clone's parameters (p0, p1, ...) into the handler.
-      auto args = std::meta::list_builder(^^{ , });
-      for (size_t i = 0; i != parameters_of(m).size(); ++i)
-        args += ^^{ static_cast<decltype(\(std::meta::id("p", i)))&&>(
-                        \(std::meta::id("p", i))) };
+      // Forward the clone's parameters into the handler.
+      auto args = std::meta::argument_list_for(d);
 
       auto handler = std::meta::id(name, "_");
       queue_injection(^^{
