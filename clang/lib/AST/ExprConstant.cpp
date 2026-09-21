@@ -9717,6 +9717,36 @@ public:
                              /*Callee=*/nullptr, /*This=*/nullptr,
                              /*CallExpr=*/E, CallRef());
       SyntheticDoExprFrame.emplace(Info.EvaluatingSyntheticDoExprFrame, true);
+
+      // Name the body's own variables, so the two places that ask "is this a
+      // do-expression body local" can answer yes for them.
+      //
+      // Those places recognise one by its DeclContext being the synthetic one
+      // Sema builds for the body -- which Sema only builds when the
+      // do-expression is *not* already inside a function. In
+      //
+      //   void f() { constexpr B b = do { B x{6}; x &= B{3}; do_return x; }; }
+      //
+      // `x` belongs to `f`, the synthetic frame has no callee to match it
+      // against, and the lookup gave up: no frame, so `x` looked like an
+      // object that exists outside the expression and could be read but not
+      // modified. The same body at namespace scope, and the same mutation
+      // through a lambda, both worked.
+      auto RegisterBodyLocals = [&](const Stmt *S, auto &Self) -> void {
+        if (!S)
+          return;
+        // Not into anything with a scope of its own; its locals are not ours.
+        if (isa<LambdaExpr>(S))
+          return;
+        if (const auto *DS = dyn_cast<DeclStmt>(S))
+          for (const Decl *D : DS->decls())
+            if (const auto *VD = dyn_cast<VarDecl>(D))
+              if (VD->hasLocalStorage())
+                Info.DoExprLocalVarDecls.insert(VD);
+        for (const Stmt *Sub : S->children())
+          Self(Sub, Self);
+      };
+      RegisterBodyLocals(E->getBody(), RegisterBodyLocals);
     }
 
     if (const Stmt *Init = E->getInitStmt()) {
