@@ -10196,10 +10196,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
         auto *P = dyn_cast_or_null<ParmVarDecl>(FTI.Params[I].Param);
         if (!P)
           continue;
-        if (P->isParameterPack()) {
-          Diag(P->getLocation(), diag::err_macro_parameter_pack);
-          NewFD->setInvalidDecl();
-        }
         // Operator syntax supplies expression operands only.
         if (IsOperator && P->getType()
                               .getNonReferenceType()

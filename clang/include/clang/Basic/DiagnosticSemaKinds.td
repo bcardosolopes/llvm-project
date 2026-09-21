@@ -3322,8 +3322,6 @@ def err_decl_macro_dependent : Error<
   "instantiation">;
 def err_operator_macro_requires_operator : Error<
   "%0 is an expression macro and can only be invoked with operator syntax">;
-def err_macro_parameter_pack : Error<
-  "an expression macro cannot have a parameter pack">;
 def err_macro_argument_in_lambda : Error<
   "an expression argument cannot be interpolated into the body of a lambda">;
 def err_decl_spec_wrong_context : Error<

@@ -199,8 +199,6 @@ struct S {
   __macro member(int x) { return ^^{ \(x) }; }  // expected-error {{a non-static member expression macro must have an explicit object parameter}}
 };
 
-__macro pack(auto&&... xs) { return ^^{ 0 }; }  // expected-error {{an expression macro cannot have a parameter pack}}
-
 }  // namespace N8
 
 namespace N9 {
@@ -826,3 +824,58 @@ __macro elvis_nested(int x) { return ^^{ relay!(\(x)) ?: 7 }; }
 static_assert(elvis_nested!(0) == 7);
 
 }  // namespace N21
+
+namespace N22 {
+
+// Parameter packs: one bound expression per element. A fold over the pack in
+// the body is the repetition syntax; each \(xs) inside it is its own
+// interpolation, so each argument is still evaluated exactly once.
+__macro sum(auto&&... xs) {
+  token_sequence body = ^^{ 0 };
+  ((body = body + ^^{ + (\(xs)) }), ...);
+  return body;
+}
+static_assert(sum!() == 0);
+static_assert(sum!(1, 2, 3) == 6);
+static_assert(sum!{1, 2 * 3} == 7);
+
+// The pack's arguments are expressions, with their types and value
+// categories.
+template <class T> struct is_lvalue_ref { static constexpr bool value = false; };
+template <class T> struct is_lvalue_ref<T&> { static constexpr bool value = true; };
+template <class... Ts>
+__macro count_lvalues(Ts&&... xs) {
+  int n = 0;
+  ((n += is_lvalue_ref<Ts>::value), ...);
+  return ^^{ \(n) };
+}
+void categories(int a, int&& b) {
+  static_assert(count_lvalues!(a, b, a + 1, 2) == 2);
+  static_assert(count_lvalues!() == 0);
+}
+
+// Mixed: leading parameters and a pack; a leading raw parameter is not
+// greedy when a pack follows it.
+__macro lead(token_sequence op, int first, auto&&... rest) {
+  token_sequence r = ^^{ \(first) };
+  ((r = r + op + ^^{ (\(rest)) }), ...);
+  return r;
+}
+static_assert(lead!(*, 2, 3, 4) == 24);
+static_assert(lead!(-, 10) == 10);
+
+// Evaluate-once holds per element.
+int next();
+__macro dup(auto&&... xs) {
+  token_sequence r = ^^{ 0 };
+  ((r = r + ^^{ + \(xs) + \(xs) }), ...);
+  return r;
+}
+int d = dup!(1, next());  // expected-error {{expansion of expression macro would evaluate this argument more than once}}
+
+// An interpolation of the pack outside any expansion is the usual error.
+__macro bad(auto&&... xs) {
+  return ^^{ \(xs) };  // expected-error {{expression contains unexpanded parameter pack 'xs'}}
+}
+
+}  // namespace N22

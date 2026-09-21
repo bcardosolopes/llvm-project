@@ -66,6 +66,7 @@
 #include "clang/Lex/Token.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/APFixedPoint.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -530,6 +531,13 @@ namespace {
     /// key and this value as the version.
     CallRef Arguments;
 
+    /// Where a `return` in this function puts its value, and the result
+    /// object it constructs in place (if known). A do-expression body
+    /// evaluates with the do-expression's own result, so a `return` reached
+    /// inside one is routed here.
+    APValue *FunctionReturnValue = nullptr;
+    const LValue *FunctionReturnSlot = nullptr;
+
     /// Source location information about the default argument or default
     /// initializer expression we're evaluating, if any.
     CurrentSourceLocExprScope CurSourceLocExprScope;
@@ -926,8 +934,21 @@ namespace {
 
     /// Value returned by an outer-scope `return` seen while evaluating a
     /// do-expression body. This is consumed when the pending control-flow is
-    /// translated back to ESR_Returned.
+    /// translated back to ESR_Returned. (Only used when the body evaluated
+    /// without a function frame; otherwise `return` writes the function's
+    /// result directly.)
     std::optional<APValue> PendingDoExprReturnValue;
+
+    /// The do-expressions being evaluated, innermost last: where `do_return`
+    /// puts its value, and the result object it constructs in place when the
+    /// evaluator knows it (a class-type result). Evaluating a class value
+    /// anywhere else -- a frame temporary -- would leave the yielded value
+    /// pointing at storage the statement's scope then destroys.
+    struct DoExprTarget {
+      APValue *Value;
+      const LValue *Slot;
+    };
+    SmallVector<DoExprTarget, 4> DoExprTargets;
 
     /// Namespace-scope do-expression bodies are parsed without a real function
     /// DeclContext, so declarations inside their compound statement don't have
@@ -6535,10 +6556,15 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
       EvaluateDependentExpr(RetExpr, Info);
       return ESR_Failed;
     }
+    // The value goes to the innermost do-expression's result -- in place
+    // when its result object is known -- not to `Result`, which is the
+    // enclosing function's (for a `return` in the body).
+    assert(!Info.DoExprTargets.empty() && "do_return outside a do-expression");
+    EvalInfo::DoExprTarget Target = Info.DoExprTargets.back();
     if (RetExpr &&
-        !(Result.Slot
-              ? EvaluateInPlace(Result.Value, Info, *Result.Slot, RetExpr)
-              : Evaluate(Result.Value, Info, RetExpr)))
+        !(Target.Slot ? EvaluateInPlace(*Target.Value, Info, *Target.Slot,
+                                        RetExpr)
+                      : Evaluate(*Target.Value, Info, RetExpr)))
       return ESR_Failed;
     return Scope.destroy() ? ESR_DoReturn : ESR_Failed;
   }
@@ -7649,6 +7675,8 @@ static bool HandleFunctionCall(SourceLocation CallLoc,
   }
 
   StmtResult Ret = {Result, ResultSlot};
+  Info.CurrentCall->FunctionReturnValue = &Result;
+  Info.CurrentCall->FunctionReturnSlot = ResultSlot;
   EvalStmtResult ESR = EvaluateStmt(Ret, Info, Body);
   if (ESR == ESR_Succeeded) {
     if (Callee->getReturnType()->isVoidType())
@@ -7683,6 +7711,7 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
   // wasteful.
   APValue RetVal;
   StmtResult Ret = {RetVal, nullptr};
+  Info.CurrentCall->FunctionReturnValue = &RetVal;
 
   // If it's a delegating constructor, delegate.
   if (Definition->isDelegatingConstructor()) {
@@ -8020,6 +8049,7 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceRange CallRange,
   // wasteful.
   APValue RetVal;
   StmtResult Ret = {RetVal, nullptr};
+  Info.CurrentCall->FunctionReturnValue = &RetVal;
   if (EvaluateStmt(Ret, Info, Definition->getBody()) == ESR_Failed)
     return false;
 
@@ -9697,11 +9727,25 @@ public:
   }
 
   bool VisitDoExpr(const DoExpr *E) {
+    APValue Result;
+    if (!handleDoExpr(E, Result, nullptr))
+      return false;
+    return DerivedSuccess(Result, E);
+  }
+
+  /// Evaluate a do-expression, yielding into \p Result -- constructed in
+  /// place at \p ResultSlot when the derived evaluator knows the result
+  /// object (RecordExprEvaluator), as handleCallExpr does for a call.
+  bool handleDoExpr(const DoExpr *E, APValue &Result,
+                    const LValue *ResultSlot) {
     llvm::SaveAndRestore NotCheckingForUB(Info.CheckingForUndefinedBehavior,
                                           false);
 
-    APValue YieldedValue;
-    StmtResult Body = {YieldedValue, nullptr};
+    // `do_return` yields into this do-expression's result (see the
+    // DoReturnStmt case).
+    Info.DoExprTargets.push_back({&Result, ResultSlot});
+    auto PopTarget =
+        llvm::make_scope_exit([&] { Info.DoExprTargets.pop_back(); });
 
     // At namespace scope (e.g. evaluating a constexpr variable initializer),
     // there is no real call frame on the stack — only the BottomFrame.
@@ -9718,6 +9762,17 @@ public:
                              /*CallExpr=*/E, CallRef());
       SyntheticDoExprFrame.emplace(Info.EvaluatingSyntheticDoExprFrame, true);
     }
+
+    // A plain `return` in the body returns from the enclosing function, so
+    // the body's statement result is the function's own: its value lands in
+    // the function's result object, in place. Only a body evaluated without
+    // a function frame (a namespace-scope constant) falls back to a scratch
+    // value.
+    APValue Scratch;
+    StmtResult Body = Info.CurrentCall->FunctionReturnValue
+                          ? StmtResult{*Info.CurrentCall->FunctionReturnValue,
+                                       Info.CurrentCall->FunctionReturnSlot}
+                          : StmtResult{Scratch, nullptr};
 
     if (const Stmt *Init = E->getInitStmt()) {
       unsigned OldCleanupStackSize = Info.CleanupStack.size();
@@ -9785,11 +9840,8 @@ public:
     BlockScopeRAII Scope(Info);
     EvalStmtResult ESR = EvaluateStmt(Body, Info, E->getBody());
 
-    if (ESR == ESR_DoReturn) {
-      if (!Scope.destroy())
-        return false;
-      return DerivedSuccess(YieldedValue, E);
-    }
+    if (ESR == ESR_DoReturn)
+      return Scope.destroy();
     if (ESR == ESR_Failed)
       return false;
     if (ESR == ESR_Break || ESR == ESR_Continue || ESR == ESR_Returned) {
@@ -9806,8 +9858,8 @@ public:
       if (!Scope.destroy())
         return false;
       Info.PendingDoExprControlFlow = static_cast<unsigned>(ESR);
-      if (ESR == ESR_Returned && YieldedValue.hasValue())
-        Info.PendingDoExprReturnValue = std::move(YieldedValue);
+      if (ESR == ESR_Returned && &Body.Value == &Scratch && Scratch.hasValue())
+        Info.PendingDoExprReturnValue = std::move(Scratch);
       return false;
     }
     if (ESR == ESR_Succeeded && E->getType()->isVoidType()) {
@@ -11993,6 +12045,9 @@ namespace {
 
     bool VisitCallExpr(const CallExpr *E) {
       return handleCallExpr(E, Result, &This);
+    }
+    bool VisitDoExpr(const DoExpr *E) {
+      return handleDoExpr(E, Result, &This);
     }
     bool VisitCastExpr(const CastExpr *E);
     bool VisitInitListExpr(const InitListExpr *E);
@@ -24759,6 +24814,7 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
   CallStackFrame Frame(Info, Macro->getSourceRange(), Macro, /*This=*/nullptr,
                        /*CallExpr=*/nullptr, Call);
   StmtResult Ret = {Result, nullptr};
+  Info.CurrentCall->FunctionReturnValue = &Result;
   EvalStmtResult ESR = EvaluateStmt(Ret, Info, Macro->getBody());
   if (ESR == ESR_Succeeded) {
     Info.FFDiag(Macro->getEndLoc(), diag::note_constexpr_no_return);

@@ -46,9 +46,27 @@ the arguments. (Operator macros are the exception on both counts: they have no
 name at the use site and are found however operator functions are found; see
 [Member macros and operator macros](#member-macros-and-operator-macros).)
 
-A macro cannot declare a parameter pack, cannot be virtual, defaulted or
-deleted, and a non-static member macro must have an explicit object parameter
-(all diagnosed). Default arguments are allowed: `id!()` binds the default
+A macro cannot be virtual, defaulted or deleted, and a non-static member
+macro must have an explicit object parameter (all diagnosed). A macro may
+declare a parameter pack (`auto&&... xs`, `Ts&&... xs`): each element binds
+one argument expression, and a fold over the pack in the body is the
+repetition syntax — each `\(xs)` inside the fold is its own interpolation,
+so every argument is still evaluated exactly once, at its own position:
+
+```cpp
+template <class... Ts>
+__macro vec(Ts&&... xs) {                       // vec![a, b, c]
+  std::meta::list_builder pushes;
+  ((pushes += ^^{ __v.__emplace_back_assume_capacity(\(xs)); }), ...);
+  return ^^{ do -> std::vector<...> { std::vector<...> __v;
+             __v.reserve(\(sizeof...(xs))); \(pushes) do_return __v; } };
+}
+```
+
+(A pack is always an *expression* pack: a function parameter pack's type
+must be dependent, so there is no raw `token_sequence...` pack. A trailing
+raw parameter is greedy instead, which covers the "rest of the tokens" use.)
+Default arguments are allowed: `id!()` binds the default
 argument expression exactly as a call would. `name!()` is an empty argument
 list — never a single empty token sequence — so a sole raw parameter needs a
 default argument (`token_sequence body = ^^{}`) for an empty invocation to be
