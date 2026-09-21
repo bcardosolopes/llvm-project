@@ -251,7 +251,7 @@ static_assert([] {
          token_kind_of(toks[1]) == token_kind::punctuator &&
          token_kind_of(toks[2]) == token_kind::literal &&
          operator_of(toks[1]) == std::meta::operators::op_less_less &&
-         identifier_of(toks[0]) == std::meta::id("x");
+         toks[0] == std::meta::id("x");
 }());
 
 // A keyword is its own kind; alternative tokens are still punctuators; empty or

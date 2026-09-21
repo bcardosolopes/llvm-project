@@ -771,12 +771,6 @@ static bool token_kind_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                           SourceRange Range, ArrayRef<Expr *> Args,
                           Decl *ContainingDecl);
 
-static bool identifier_of_token(APValue &Result, ASTContext &C,
-                                MetaActions &Meta, EvalFn Evaluator,
-                                DiagFn Diagnoser, bool AllowInjection,
-                                QualType ResultTy, SourceRange Range,
-                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
-
 static bool operator_of_token(APValue &Result, ASTContext &C,
                               MetaActions &Meta, EvalFn Evaluator,
                               DiagFn Diagnoser, bool AllowInjection,
@@ -996,7 +990,6 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_sizeT, 1, 1, token_count },
   { Metafunction::MFRK_tokenSequence, 2, 2, get_ith_token },
   { Metafunction::MFRK_sizeT, 1, 1, token_kind_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, identifier_of_token },
   { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
   { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
   { Metafunction::MFRK_metaInfo, 1, 1, test_expression },
@@ -1815,9 +1808,6 @@ StringRef DescriptionOf(APValue RV, bool Granular = true) {
   case ReflectionKind::Annotation: {
     return "an annotation";
   }
-  case ReflectionKind::Identifier: {
-    return "an identifier";
-  }
   case ReflectionKind::Expression: {
     return "an expression";
   }
@@ -2437,21 +2427,6 @@ bool token_kind_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                                      C.getSizeType())));
 }
 
-bool identifier_of_token(APValue &Result, ASTContext &C, MetaActions &Meta,
-                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
-                         QualType ResultTy, SourceRange Range,
-                         ArrayRef<Expr *> Args, Decl *ContainingDecl) {
-  assert(ResultTy == C.MetaInfoTy);
-  std::optional<Token> Tok;
-  if (!getSingleToken(Evaluator, Args[0], Tok))
-    return true;
-  if (!Tok || !Tok->is(tok::identifier))
-    return DiagnoseReflectionKind(Diagnoser, Range,
-                                  "a single identifier token");
-  return SetAndSucceed(
-      Result, APValue(ReflectionKind::Identifier, Tok->getIdentifierInfo()));
-}
-
 bool operator_of_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                        QualType ResultTy, SourceRange Range,
@@ -2628,7 +2603,6 @@ bool identifier_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Object:
   case ReflectionKind::Value:
   case ReflectionKind::Annotation:
-  case ReflectionKind::Identifier:
   case ReflectionKind::Expression:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_have_name)
         << DescriptionOf(RV) << Range;
@@ -2824,7 +2798,6 @@ bool source_location_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Null:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
-  case ReflectionKind::Identifier:
     return findDeclLoc(Result, C, Evaluator, ResultTy, nullptr);
   }
   llvm_unreachable("unknown reflection kind");

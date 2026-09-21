@@ -633,7 +633,6 @@ let Class = PropertyTypeCase<APValue, "Reflection"> in {
       V = APValue(kind, TDMS);
       break;
     }
-    case ReflectionKind::Identifier:
     case ReflectionKind::Expression:
     case ReflectionKind::DeclarationSpec:
       // Not yet supported through the property-based serializer; the writer

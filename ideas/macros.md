@@ -180,10 +180,13 @@ compare equal by content. `unknown` covers empty and multi-token sequences.
 Classify by `token_kind_of`, not by `stringize` string-sniffing. Note that
 alternative tokens keep their spelling, so `^^{ or } != ^^{ || }` even though
 both are `punctuator`; kind-based checks see through this, `==` does not.
-A token can also be converted into the two vocabularies interpolation already
-understands: `identifier_of(tok) -> info` (an identifier reflection, as
-`id(...)` produces) and `operator_of(tok) -> operators` (for a token spelling a
-complete operator; `(`, `[`, `new` do not qualify). Concatenation and
+To match a specific identifier, compare against `id(...)` directly
+(`tok == id("name")` — `id` produces a single-identifier-token
+`token_sequence`, the identifier sibling of `str_lit`; it originally
+returned an identifier *reflection*, a vestige removed once tokens became
+directly comparable). `operator_of(tok) -> operators` converts a token
+spelling a complete operator (`(`, `[`, `new` do not qualify) into the
+interpolable `operators` vocabulary. Concatenation and
 interpolation of `token_sequence` values already exist. There are no grammar
 fragment parameters and no parser-combinator API; if a macro wants to treat
 raw tokens as an expression, that is a future `parse_expression(ts)`

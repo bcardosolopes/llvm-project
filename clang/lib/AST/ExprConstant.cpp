@@ -22704,15 +22704,6 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
                   static_cast<void *>(Val.getReflectedFunctionDeclSpec()));
               Tok.setAnnotationEndLoc(SrcTok.getLocation());
               NewTokens.push_back(Tok);
-            } else if (Val.isReflectedIdentifier()) {
-              IdentifierInfo *II = Val.getReflectedIdentifier();
-
-              // Create a tok::identifier token.
-              Token Tok = SrcTok;
-              Tok.setKind(tok::identifier);
-              Tok.setIdentifierInfo(II);
-              Tok.setLength(II->getLength());
-              NewTokens.push_back(Tok);
             } else if (Val.isReflectedDecl() &&
                        isa<EnumConstantDecl>(Val.getReflectedDecl())) {
               // Enumerator reflection: create an integer literal with the
@@ -22913,8 +22904,17 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
       return false;
   }
 
+  // A single identifier token: id() is a token_sequence producer, the
+  // identifier sibling of str_lit().
   IdentifierInfo &II = Info.Ctx.Idents.get(Name);
-  return Success(APValue(ReflectionKind::Identifier, &II), E);
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::identifier);
+  Tok.setIdentifierInfo(&II);
+  Tok.setLength(II.getLength());
+  Tok.setLocation(E->getBeginLoc());
+  Token Toks[] = {Tok};
+  return Success(APValue(CreateTokenSequenceData(Info.Ctx, Toks)), E);
 }
 
 bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(

@@ -15,7 +15,7 @@ namespace std::meta {
     consteval auto tokenize(Ts const&...) -> token_sequence;
 
     template <class... Ts>
-    consteval auto id(Ts const&...) -> info;
+    consteval auto id(Ts const&...) -> token_sequence;
 }
 using std::meta::info;
 using std::meta::token_sequence;

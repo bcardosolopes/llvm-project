@@ -41,8 +41,8 @@ static_assert(size(^^{ }) == 0);
 static_assert(m::token_kind_of(ts[0]) == m::token_kind::identifier);
 static_assert(m::token_kind_of(ts[1]) == m::token_kind::punctuator);
 static_assert(m::token_kind_of(ts[2]) == m::token_kind::identifier);
-static_assert(m::identifier_of(ts[0]) == m::id("a"));
-static_assert(m::identifier_of(ts[2]) == m::id("b"));
+static_assert(ts[0] == m::id("a"));  // id() is a single-identifier-token
+static_assert(ts[2] == m::id("b"));  // sequence; tokens compare directly
 
 // The result is an ordinary single-token sequence: it splices, compares,
 // and concatenates like any other.

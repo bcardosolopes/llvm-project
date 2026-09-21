@@ -569,7 +569,6 @@ enum : unsigned {
   __metafn_token_count,
   __metafn_get_ith_token,
   __metafn_token_kind_of,
-  __metafn_identifier_of_token,
   __metafn_operator_of_token,
   __metafn_is_constant_expression,
   __metafn_test_expression,
@@ -3152,8 +3151,11 @@ public:
   }
 };
 
+// A single identifier token assembled from the arguments (strings and
+// integers), the identifier sibling of str_lit(). Compare against a token
+// directly: ts[0] == id("a").
 template <class... Ts>
-consteval auto id(Ts const&...) -> info;
+consteval auto id(Ts const&...) -> token_sequence;
 
 template <class... Ts>
 consteval auto str_lit(Ts const&...) -> token_sequence;
@@ -3210,14 +3212,12 @@ enum class token_kind {
   unknown,
 };
 
-// Token classification and conversions into the interpolable vocabularies
-// (identifier reflections and operators values).
+// Token classification. To match a specific identifier, compare the token
+// against id(...) directly: tok == id("name"). (An identifier_of(tok)
+// converter used to exist for that purpose, from before tokens were
+// directly comparable.)
 consteval auto token_kind_of(token_sequence tok) -> token_kind {
   return token_kind(__metafunction(detail::__metafn_token_kind_of, tok));
-}
-
-consteval auto identifier_of(token_sequence tok) -> info {
-  return __metafunction(detail::__metafn_identifier_of_token, tok);
 }
 
 consteval auto operator_of(token_sequence tok) -> operators {

@@ -8,7 +8,7 @@ namespace std::meta {
     using token_sequence = decltype(^^{ });
 
     template <class... Ts>
-    consteval auto id(Ts const&...) -> info;
+    consteval auto id(Ts const&...) -> token_sequence;
 
     template <class... Ts>
     consteval auto str_lit(Ts const&...) -> token_sequence;
