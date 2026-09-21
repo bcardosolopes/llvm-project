@@ -879,3 +879,32 @@ __macro bad(auto&&... xs) {
 }
 
 }  // namespace N22
+
+namespace N23 {
+
+// Lifetime analysis sees through an interpolated argument to the expression
+// behind it: a forwarding macro does not hide a dangling reference (or a
+// returned local's address) that the same code without the macro reports.
+struct Box {
+  int v;
+  int& get() [[clang::lifetimebound]] { return v; }
+};
+int& first([[clang::lifetimebound]] Box&& b) { return b.v; }
+template <class T>
+__macro pass(T&& x) { return ^^{ static_cast<\(^^T)&&>(\(x)) }; }
+__macro same(auto&& x) { return ^^{ \(x) }; }
+
+void g() {
+  int& r1 = first(pass!(Box{1}));  // expected-warning {{temporary bound to local reference 'r1' will be destroyed at the end of the full-expression}}
+  int& r2 = pass!(Box{2}).get();   // expected-warning {{temporary bound to local reference 'r2' will be destroyed at the end of the full-expression}}
+  Box b{3};
+  int& ok = pass!(b).get();        // b outlives the reference: nothing to say
+  (void)r1, (void)r2, (void)ok;
+}
+
+int* h() {
+  int local = 0;
+  return same!(&local);  // expected-warning {{address of stack memory associated with local variable 'local' returned}}
+}
+
+}  // namespace N23

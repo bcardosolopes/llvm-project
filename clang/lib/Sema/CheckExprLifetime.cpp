@@ -705,6 +705,19 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
     });
     break;
 
+  case Stmt::OpaqueValueExprClass: {
+    // A *unique* opaque value -- an expression macro's interpolated argument,
+    // emitted in place -- designates whatever its source expression does.
+    // Without this, `fwd!(x)` would hide `x` from the analysis. (Bound opaque
+    // values, as in a GNU ?:, are deliberately left alone: following them
+    // would also be right, but changes upstream's diagnostics.)
+    auto *OVE = cast<OpaqueValueExpr>(Init);
+    if (OVE->isUnique() && OVE->getSourceExpr())
+      visitLocalsRetainedByReferenceBinding(Path, OVE->getSourceExpr(), RK,
+                                            Visit);
+    break;
+  }
+
     // FIXME: Visit the left-hand side of an -> or ->*.
 
   default:
@@ -975,6 +988,16 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
                                        /*RevisitSubinits=*/true);
     });
     break;
+
+  case Stmt::OpaqueValueExprClass: {
+    // As above: an interpolated macro argument produces whatever its source
+    // expression produces.
+    auto *OVE = cast<OpaqueValueExpr>(Init);
+    if (OVE->isUnique() && OVE->getSourceExpr())
+      visitLocalsRetainedByInitializer(Path, OVE->getSourceExpr(), Visit,
+                                       RevisitSubinits);
+    break;
+  }
 
   case Stmt::BlockExprClass:
     if (cast<BlockExpr>(Init)->getBlockDecl()->hasCaptures()) {
