@@ -196,6 +196,17 @@ bool isValueTransparent(const Expr *Parent, const Expr *Child) {
   return false;
 }
 
+/// Whether the lambda belongs to an instantiated template rather than to the
+/// pattern it was written in.
+bool isInTemplateInstantiation(const LambdaExpr *Lambda) {
+  for (const DeclContext *DC = Lambda->getCallOperator()->getDeclContext(); DC;
+       DC = DC->getParent())
+    if (const auto *FD = dyn_cast<FunctionDecl>(DC))
+      if (FD->isTemplateInstantiation())
+        return true;
+  return false;
+}
+
 /// The lambda object a call expression invokes, or null if the callee is not a
 /// lambda written right at the call site.
 const LambdaExpr *getInvokedLambda(const CallExpr *Call) {
@@ -295,7 +306,16 @@ void UseDoExprCheck::report(const CallExpr *Call, ASTContext &Ctx,
   const SourceLocation Loc = Lambda->getBeginLoc();
 
   // The same lambda is matched once for a template pattern and again for each
-  // instantiation of the enclosing template, all sharing this location.
+  // instantiation of the enclosing template, all sharing this location. Let
+  // the pattern be the one that reports, rather than whichever is matched
+  // first: an instantiation's body is missing the discarded branch of every
+  // `if constexpr` in it, so the returns collected there can be a subset of
+  // the ones the rewrite has to turn into `do_return`. Leaving one behind is
+  // not a missed rewrite -- a `return` inside a do-expression body returns
+  // from the *enclosing function*.
+  if (isInTemplateInstantiation(Lambda))
+    return;
+
   if (!ReportedLambdas.insert(SM.getFileLoc(Loc).getRawEncoding()).second)
     return;
 
@@ -462,26 +482,98 @@ bool UseDoExprCheck::buildRewrite(const CallExpr *Call,
       Discarded && !Lambda->getCallOperator()->getReturnType()->isVoidType();
   std::string Head = NeedVoidCast ? "(void)(do " : NeedParens ? "(do " : "do ";
   if (Lambda->hasExplicitResultType()) {
-    // A trailing return type carries over as `do -> T`. Take it from the
-    // function's own TypeLoc: `getReturnTypeSourceRange()` is empty for a
-    // lambda, whose declarator has no leading return type to point at.
+    // A trailing return type carries over as `do -> T`, copied verbatim from
+    // between the `->` and the body's `{`.
+    //
+    // Not from the return TypeLoc's source range: that begins at the type
+    // name, so a qualifier written before it is outside the range. `-> C
+    // const *` survives and `-> const C *` silently becomes `-> C *`, which
+    // either fails to compile or, worse, compiles with the const dropped.
     const auto FTL = Lambda->getCallOperator()
                          ->getTypeSourceInfo()
                          ->getTypeLoc()
                          .getAsAdjusted<FunctionProtoTypeLoc>();
     if (!FTL)
       return false;
-    const StringRef Ret = Lexer::getSourceText(
-        CharSourceRange::getTokenRange(FTL.getReturnLoc().getSourceRange()), SM,
-        LO);
+    // Walk from the parameter list's `)` to the first `->` outside parentheses.
+    // The depth matters: `noexcept(noexcept(a->b))` may sit in between, and its
+    // arrow is not this one.
+    SourceLocation Arrow;
+    for (SourceLocation L = FTL.getRParenLoc(); L.isValid();) {
+      std::optional<Token> Tok = Lexer::findNextToken(L, SM, LO);
+      if (!Tok || Tok->getLocation().isInvalid() ||
+          !SM.isBeforeInTranslationUnit(Tok->getLocation(),
+                                        Body->getLBracLoc()))
+        break;
+      if (Tok->is(tok::arrow)) {
+        Arrow = Tok->getLocation();
+        break;
+      }
+      if (Tok->is(tok::l_paren)) {
+        // Skip the whole parenthesized group.
+        unsigned Depth = 1;
+        SourceLocation P = Tok->getLocation();
+        while (Depth) {
+          std::optional<Token> Inner = Lexer::findNextToken(P, SM, LO);
+          if (!Inner || Inner->getLocation().isInvalid())
+            break;
+          if (Inner->is(tok::l_paren))
+            ++Depth;
+          else if (Inner->is(tok::r_paren))
+            --Depth;
+          P = Inner->getLocation();
+        }
+        L = P;
+        continue;
+      }
+      L = Tok->getLocation();
+    }
+    const SourceLocation RetBegin =
+        Arrow.isValid() ? Lexer::getLocForEndOfToken(Arrow, 0, SM, LO)
+                        : FTL.getReturnLoc().getSourceRange().getBegin();
+    const StringRef Ret =
+        Lexer::getSourceText(
+            CharSourceRange::getCharRange(RetBegin, Body->getLBracLoc()), SM,
+            LO)
+            .trim();
     if (Ret.empty())
       return false;
     Head += ("-> " + Ret + " ").str();
   }
 
+  // Where the invocation itself starts: the `(` of `l()`, or the `.` of the
+  // `l.operator()()` spelling.
+  //
+  // Not the end of the body. A lambda may be parenthesized before it is
+  // called -- `([&] { ... })()` -- and the `)` between the body and the
+  // invocation belongs to the source, not to the call. Removing everything
+  // from the body to the call's end took it away and left the opening paren
+  // unmatched.
   const SourceLocation AfterBody =
       Lexer::getLocForEndOfToken(Body->getRBracLoc(), 0, SM, LO);
   if (AfterBody.isInvalid() || Call->getEndLoc().isInvalid())
+    return false;
+  SourceLocation CallStart;
+  // Start at the body's closing brace: findNextToken yields the token after
+  // the one it is given, so starting at AfterBody would skip the first
+  // candidate and miss the plain `l()` spelling entirely.
+  for (SourceLocation L = Body->getRBracLoc(); L.isValid();) {
+    std::optional<Token> Tok = Lexer::findNextToken(L, SM, LO);
+    if (!Tok || Tok->getLocation().isInvalid() ||
+        SM.isBeforeInTranslationUnit(Call->getEndLoc(), Tok->getLocation()))
+      break;
+    // `(` of `l()`, or `.` of the `l.operator()()` spelling. A `)` before
+    // either closes a parenthesis the source opened before the lambda and has
+    // to stay.
+    if (Tok->isOneOf(tok::l_paren, tok::period)) {
+      CallStart = Tok->getLocation();
+      break;
+    }
+    if (!Tok->is(tok::r_paren))
+      break;
+    L = Tok->getLocation();
+  }
+  if (CallStart.isInvalid())
     return false;
 
   // Everything from the introducer up to the body's `{` is the lambda-specific
@@ -492,7 +584,7 @@ bool UseDoExprCheck::buildRewrite(const CallExpr *Call,
                                     Body->getLBracLoc()),
       Head);
   Diag << FixItHint::CreateReplacement(
-      CharSourceRange::getTokenRange(AfterBody, Call->getEndLoc()),
+      CharSourceRange::getTokenRange(CallStart, Call->getEndLoc()),
       NeedParens || NeedVoidCast ? ")" : "");
   for (const ReturnStmt *R : Returns)
     Diag << FixItHint::CreateReplacement(
