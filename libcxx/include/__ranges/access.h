@@ -49,7 +49,7 @@ void begin() = delete;
 
 template <class _Tp>
 concept __unqualified_begin =
-    !__member_begin<_Tp> && __can_borrow<_Tp> && __class_or_enum<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
+    !__member_begin<_Tp> && __can_borrow<_Tp> && __class_or_enum_or_token_sequence<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
       { _LIBCPP_AUTO_CAST(begin(__t)) } -> input_or_output_iterator;
     };
 
@@ -112,7 +112,7 @@ void end() = delete;
 
 template <class _Tp>
 concept __unqualified_end =
-    !__member_end<_Tp> && __can_borrow<_Tp> && __class_or_enum<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
+    !__member_end<_Tp> && __can_borrow<_Tp> && __class_or_enum_or_token_sequence<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
       typename iterator_t<_Tp>;
       { _LIBCPP_AUTO_CAST(end(__t)) } -> sentinel_for<iterator_t<_Tp>>;
     };

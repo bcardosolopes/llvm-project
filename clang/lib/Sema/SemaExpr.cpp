@@ -5617,6 +5617,15 @@ Sema::CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
     Qualifiers Combined = BaseQuals + MemberQuals;
     if (Combined != MemberQuals)
       ResultType = Context.getQualifiedType(ResultType, Combined);
+  } else if (LHSTy->isTokenSequenceType()) {
+    // ts[i]: the i-th token of a token sequence, as its own single-token
+    // sequence. A prvalue, and consteval-only like every token_sequence
+    // expression; evaluated by the constant evaluator.
+    BaseExpr = LHSExp;
+    IndexExpr = RHSExp;
+    ResultType = Context.TokenSequenceTy;
+    VK = VK_PRValue;
+    OK = OK_Ordinary;
   } else if (LHSTy->isArrayType()) {
     // If we see an array that wasn't promoted by
     // DefaultFunctionArrayLvalueConversion, it must be an array that

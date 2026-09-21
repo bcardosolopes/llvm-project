@@ -403,6 +403,7 @@ template <reflection_range R1 = initializer_list<info>,
 #include <optional>
 
 #include <__ranges/access.h>
+#include <__ranges/enable_borrowed_range.h>
 #include <__ranges/concepts.h>
 #include <__ranges/size.h>
 
@@ -3357,13 +3358,124 @@ consteval auto forwarding_call_for(info d, token_sequence receiver)
   return __metafunction(detail::__metafn_forwarding_call_for, d, receiver);
 }
 
-// Each token of the sequence as its own single-token sequence.
+// A token_sequence is itself an iterable, indexable range: begin/end and
+// size below are found by ADL and token_sequence is directly iterable:
+//
+//   token_sequence ts = ^^{ a + b };
+//   for (token_sequence tok : ts) ...   // each token, as a single-token
+//                                       // sequence
+//   ts[0]                               // ^^{ a }
+//   size(ts)                            // 3
+//
+// An out-of-range ts[i] is not a constant expression (diagnosed with the
+// index and the sequence's size).
+//
+struct token_iterator {
+  using value_type = token_sequence;
+  using difference_type = ptrdiff_t;
+  using iterator_concept = random_access_iterator_tag;
+
+  token_sequence __seq_ = ^^{ };
+  size_t __index_ = 0;
+
+  consteval auto operator*() const -> token_sequence {
+    return __metafunction(detail::__metafn_get_ith_token, __seq_, __index_);
+  }
+  consteval auto operator[](difference_type __n) const -> token_sequence {
+    return __metafunction(detail::__metafn_get_ith_token, __seq_,
+                          __index_ + __n);
+  }
+  consteval auto operator++() -> token_iterator& {
+    ++__index_;
+    return *this;
+  }
+  consteval auto operator++(int) -> token_iterator {
+    auto __tmp = *this;
+    ++__index_;
+    return __tmp;
+  }
+  consteval auto operator--() -> token_iterator& {
+    --__index_;
+    return *this;
+  }
+  consteval auto operator--(int) -> token_iterator {
+    auto __tmp = *this;
+    --__index_;
+    return __tmp;
+  }
+  consteval auto operator+=(difference_type __n) -> token_iterator& {
+    __index_ += __n;
+    return *this;
+  }
+  consteval auto operator-=(difference_type __n) -> token_iterator& {
+    __index_ -= __n;
+    return *this;
+  }
+  friend consteval auto operator+(token_iterator __it, difference_type __n)
+      -> token_iterator {
+    __it += __n;
+    return __it;
+  }
+  friend consteval auto operator+(difference_type __n, token_iterator __it)
+      -> token_iterator {
+    __it += __n;
+    return __it;
+  }
+  friend consteval auto operator-(token_iterator __it, difference_type __n)
+      -> token_iterator {
+    __it -= __n;
+    return __it;
+  }
+  friend consteval auto operator-(token_iterator __lhs, token_iterator __rhs)
+      -> difference_type {
+    return static_cast<difference_type>(__lhs.__index_) -
+           static_cast<difference_type>(__rhs.__index_);
+  }
+  friend consteval auto operator==(token_iterator __lhs, token_iterator __rhs)
+      -> bool {
+    return __lhs.__index_ == __rhs.__index_;
+  }
+  friend consteval auto operator<=>(token_iterator __lhs, token_iterator __rhs)
+      -> strong_ordering {
+    return __lhs.__index_ <=> __rhs.__index_;
+  }
+};
+
+consteval auto size(token_sequence __ts) -> size_t {
+  return __metafunction(detail::__metafn_token_count, __ts);
+}
+
+consteval auto empty(token_sequence __ts) -> bool {
+  return size(__ts) == 0;
+}
+
+consteval auto begin(token_sequence __ts) -> token_iterator {
+  return {__ts, 0};
+}
+
+consteval auto end(token_sequence __ts) -> token_iterator {
+  return {__ts, size(__ts)};
+}
+
+_LIBCPP_END_NAMESPACE_REFLECTION_V2
+
+// A token_sequence's storage is owned by the compilation itself, so
+// iterators obtained from an rvalue sequence never dangle.
+template <>
+inline constexpr bool std::ranges::enable_borrowed_range<
+    std::meta::token_sequence> = true;
+
+_LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
+
+// Each token of the sequence as its own single-token sequence. Predates
+// token_sequence being directly iterable (above); prefer iterating or
+// indexing the sequence itself.
 consteval auto tokens_of(token_sequence tokens) -> vector<token_sequence> {
   vector<token_sequence> result;
-  size_t n = __metafunction(detail::__metafn_token_count, tokens);
+  size_t n = size(tokens);
   result.reserve(n);
-  for (size_t i = 0; i < n; ++i)
-    result.push_back(__metafunction(detail::__metafn_get_ith_token, tokens, i));
+  for (token_sequence tok : tokens)
+    result.push_back(tok);
   return result;
 }
 

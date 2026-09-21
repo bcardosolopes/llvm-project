@@ -27,6 +27,14 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 template <class _Tp>
 concept __class_or_enum = is_class_v<_Tp> || is_union_v<_Tp> || is_enum_v<_Tp>;
 
+#if __has_feature(reflection)
+template <class _Tp>
+concept __class_or_enum_or_token_sequence = __class_or_enum<_Tp> || __is_same(_Tp, decltype(^^{ }));
+#else
+template <class _Tp>
+concept __class_or_enum_or_token_sequence = __class_or_enum<_Tp>;
+#endif
+
 #endif // _LIBCPP_STD_VER >= 20
 
 _LIBCPP_END_NAMESPACE_STD

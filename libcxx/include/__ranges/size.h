@@ -54,13 +54,13 @@ concept __member_size = __size_enabled<_Tp> && requires(_Tp&& __t) {
 
 template <class _Tp>
 concept __unqualified_size =
-    __size_enabled<_Tp> && !__member_size<_Tp> && __class_or_enum<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
+    __size_enabled<_Tp> && !__member_size<_Tp> && __class_or_enum_or_token_sequence<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
       { _LIBCPP_AUTO_CAST(size(__t)) } -> __integer_like;
     };
 
 template <class _Tp>
 concept __difference =
-    !__member_size<_Tp> && !__unqualified_size<_Tp> && __class_or_enum<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
+    !__member_size<_Tp> && !__unqualified_size<_Tp> && __class_or_enum_or_token_sequence<remove_cvref_t<_Tp>> && requires(_Tp&& __t) {
       { ranges::begin(__t) } -> forward_iterator;
       { ranges::end(__t) } -> sized_sentinel_for<decltype(ranges::begin(std::declval<_Tp>()))>;
     };

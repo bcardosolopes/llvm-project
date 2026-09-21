@@ -22530,6 +22530,7 @@ public:
   bool VisitCXXBuiltinTokenizeExpr(const CXXBuiltinTokenizeExpr *E);
   bool VisitBinaryOperator(const BinaryOperator *E);
   bool VisitDeclRefExpr(const DeclRefExpr *E);
+  bool VisitArraySubscriptExpr(const ArraySubscriptExpr *E);
 };
 
 bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
@@ -23036,6 +23037,23 @@ bool ReflectionEvaluator::VisitCXXBuiltinTokenizeExpr(
   return Success(APValue(TSD), E);
 }
 
+// Evaluate a token_sequence-typed operand to its rvalue, as a
+// *subexpression* of the current evaluation. (The file-level
+// EvaluateAsRValue is a top-level entry point: it ends with
+// CheckMemoryLeaks, so calling it mid-evaluation reports every live
+// allocation -- e.g. a std::vector in the enclosing consteval function --
+// as a leak.)
+static bool EvaluateTokenSequenceOperand(const Expr *E, APValue &Result,
+                                         EvalInfo &Info) {
+  if (E->isGLValue()) {
+    LValue LV;
+    if (!EvaluateLValue(E, LV, Info))
+      return false;
+    return handleLValueToRValueConversion(Info, E, E->getType(), LV, Result);
+  }
+  return Evaluate(Result, Info, E);
+}
+
 bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
   // Handle token_sequence + token_sequence concatenation.
   if (E->getOpcode() != BO_Add)
@@ -23047,9 +23065,9 @@ bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
     return BaseType::VisitBinaryOperator(E);
 
   APValue LHSVal, RHSVal;
-  if (!EvaluateAsRValue(Info, E->getLHS(), LHSVal))
+  if (!EvaluateTokenSequenceOperand(E->getLHS(), LHSVal, Info))
     return false;
-  if (!EvaluateAsRValue(Info, E->getRHS(), RHSVal))
+  if (!EvaluateTokenSequenceOperand(E->getRHS(), RHSVal, Info))
     return false;
 
   if (!LHSVal.isTokenSequence() || !RHSVal.isTokenSequence()) {
@@ -23060,6 +23078,33 @@ bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
   TokenSequenceData NewTSD =
     CreateTokenSequenceData(Info.Ctx, LHSVal.getTokenSequence(), RHSVal.getTokenSequence());
   return Success(APValue(NewTSD), E);
+}
+bool ReflectionEvaluator::VisitArraySubscriptExpr(
+    const ArraySubscriptExpr *E) {
+  // ts[i]: the i-th token of a token sequence as a single-token sequence.
+  if (!E->getBase()->getType()->isTokenSequenceType())
+    return Error(E);
+
+  APValue BaseVal;
+  if (!EvaluateTokenSequenceOperand(E->getBase(), BaseVal, Info))
+    return false;
+  APSInt Index;
+  if (!EvaluateInteger(E->getIdx(), Index, Info))
+    return false;
+
+  if (!BaseVal.isTokenSequence()) {
+    Info.FFDiag(E->getExprLoc());
+    return false;
+  }
+  TokenSequenceData TSD = BaseVal.getTokenSequence();
+  if (Index.isNegative() || Index.uge(TSD.size())) {
+    Info.FFDiag(E->getExprLoc(), diag::note_constexpr_token_index_out_of_range)
+        << toString(Index, 10) << (unsigned)TSD.size();
+    return false;
+  }
+
+  Token Toks[] = {TSD[Index.getZExtValue()]};
+  return Success(APValue(CreateTokenSequenceData(Info.Ctx, Toks)), E);
 }
 }  // end anonymous namespace
 
