@@ -287,6 +287,10 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::ArraySubscriptExprClass:
     if (cast<ArraySubscriptExpr>(E)->getBase()->getType()->isVectorType())
       return ClassifyInternal(Ctx, cast<ArraySubscriptExpr>(E)->getBase());
+    // Indexing a token sequence yields a new single-token sequence, not a
+    // subobject of the base: a prvalue (as Sema builds it).
+    if (cast<ArraySubscriptExpr>(E)->getBase()->getType()->isTokenSequenceType())
+      return Cl::CL_PRValue;
     if (Lang.CPlusPlus11) {
       // Step over the array-to-pointer decay if present, but not over the
       // temporary materialization.

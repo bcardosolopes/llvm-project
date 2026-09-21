@@ -7650,17 +7650,40 @@ public:
       : Inherited(Ctx), Tracked(Tracked) {}
 
   void VisitOpaqueValueExpr(const OpaqueValueExpr *E) {
-    // The same opaque value node can appear several times in the semantic
-    // form of one construct (a GNU ?: places it in two positions); it is
-    // still bound - and its source evaluated - once.
-    if (!Visited.insert(E).second)
-      return;
+    // An interpolated argument is a *unique* opaque value, emitted in place:
+    // every occurrence in the expansion is an evaluation. (The same node
+    // recurs when a saved fragment holding it is spliced twice.) So is a
+    // nested macro's interpolation, whose source leads back to this macro's
+    // arguments.
     if (Tracked.contains(E)) {
       ++Uses[E];
       return;
     }
+    if (E->isUnique()) {
+      if (const Expr *Src = E->getSourceExpr())
+        this->Visit(Src);
+      return;
+    }
+    // A *bound* opaque value (a pseudo-object's, an array-init loop's) can
+    // appear several times in the semantic form of one construct; it is
+    // still bound - and its source evaluated - once.
+    if (!Visited.insert(E).second)
+      return;
     if (const Expr *Src = E->getSourceExpr())
       this->Visit(Src);
+  }
+  void VisitBinaryConditionalOperator(const BinaryConditionalOperator *E) {
+    // The common expression is a child of its own; the bound opaque value
+    // that carries it into the condition and result positions must not
+    // count it again.
+    Visited.insert(E->getOpaqueValue());
+    Inherited::VisitStmt(E);
+  }
+  void VisitPseudoObjectExpr(const PseudoObjectExpr *E) {
+    // Only the semantic form is evaluated (the syntactic form shares its
+    // subexpressions with it, through the bound opaque values).
+    for (const Expr *S : E->semantics())
+      this->Visit(S);
   }
   void VisitLambdaExpr(const LambdaExpr *LE) {
     Lambdas.push_back(LE);

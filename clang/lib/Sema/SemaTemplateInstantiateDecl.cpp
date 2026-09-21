@@ -5776,6 +5776,34 @@ bool Sema::InstantiateDefaultArgument(SourceLocation CallLoc, FunctionDecl *FD,
                                       ParmVarDecl *Param) {
   assert(Param->hasUninstantiatedDefaultArg());
 
+  // A clone made by std::meta::declaration_of keeps the *pattern* default of
+  // the member it was cloned from, and instantiates it as that member would:
+  // with the source specialization's arguments -- plus the clone's own
+  // template arguments, if it is a template -- and with the pattern's
+  // parameters standing for the clone's.
+  if (const FunctionDecl *Src = getClonedDeclarationSource(FD)) {
+    std::optional<ArrayRef<TemplateArgument>> Innermost;
+    if (const TemplateArgumentList *TAL = FD->getTemplateSpecializationArgs())
+      Innermost = TAL->asArray();
+    MultiLevelTemplateArgumentList TemplateArgs = getTemplateInstantiationArgs(
+        Src, /*DC=*/nullptr, /*Final=*/false, Innermost);
+
+    LocalInstantiationScope Scope(*this);
+    const FunctionDecl *SrcPattern =
+        Src->getTemplateInstantiationPattern(/*ForDefinition=*/false);
+    for (const FunctionDecl *P : {SrcPattern, Src})
+      if (P && P->getNumParams() == FD->getNumParams())
+        for (unsigned I = 0, N = FD->getNumParams(); I != N; ++I)
+          Scope.InstantiatedLocal(P->getParamDecl(I), FD->getParamDecl(I));
+
+    if (SubstDefaultArgument(CallLoc, Param, TemplateArgs,
+                             /*ForCallExpr=*/false))
+      return true;
+    if (ASTMutationListener *L = getASTMutationListener())
+      L->DefaultArgumentInstantiated(Param);
+    return false;
+  }
+
   // FIXME: We don't track member specialization info for non-defining
   // friend declarations, so we will not be able to later find the function
   // pattern. As a workaround, don't instantiate the default argument in this

@@ -16380,6 +16380,15 @@ public:
   /// The scope levels collected for the macro expansion currently being
   /// parsed during template instantiation (empty otherwise).
   SmallVector<SmallVector<NamedDecl *, 4>, 4> MacroExpansionLocalScopes;
+  /// A declaration cloned by std::meta::declaration_of from a member of a
+  /// class template specialization keeps that member's *pattern* default
+  /// arguments and instantiates them on use, as the member itself would.
+  /// Maps such a clone to its source member.
+  llvm::DenseMap<const FunctionDecl *, const FunctionDecl *>
+      ClonedDeclarationSources;
+  /// The source member recorded for \p FD, or for the clone \p FD is a
+  /// specialization or instantiation of; null if \p FD is not such a clone.
+  const FunctionDecl *getClonedDeclarationSource(const FunctionDecl *FD) const;
   ExprResult BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
                                            SourceLocation LParenLoc,
                                            ArrayRef<Expr *> Args,

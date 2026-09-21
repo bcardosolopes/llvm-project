@@ -1700,17 +1700,31 @@ Decl *Sema::ActOnConstevalBlockDeclaration(SourceLocation ConstevalLoc,
   return BuildConstevalBlockDeclaration(ConstevalLoc, EvaluatingExpr);
 }
 
+// The Rewrite-kind substitution that maps a source declaration's template
+// parameters to their already-cloned counterparts: one level per parameter
+// list, innermost first (a nested template template parameter list, then
+// the list enclosing it).
+static MultiLevelTemplateArgumentList
+clonedParameterRewrite(ArrayRef<ArrayRef<TemplateArgument>> Levels) {
+  MultiLevelTemplateArgumentList Args;
+  Args.setKind(TemplateSubstitutionKind::Rewrite);
+  for (ArrayRef<TemplateArgument> Level : Levels)
+    Args.addOuterTemplateArguments(Level);
+  return Args;
+}
+
 // Clones one template parameter for an injected declaration description
 // (std::meta::declaration_of), renaming it per the description's naming
-// policy and remapping references to earlier parameters through 'Args'
-// (a Rewrite-kind substitution built from the already-cloned parameters).
-// Follows the recipe of CTAD deduction-guide synthesis.
+// policy and remapping references to earlier parameters through 'Levels'
+// (see clonedParameterRewrite). Follows the recipe of CTAD deduction-guide
+// synthesis.
 static NamedDecl *transformClonedTemplateParam(
     Sema &SemaRef, DeclContext *DC, NamedDecl *Param,
-    MultiLevelTemplateArgumentList &Args, unsigned NewIndex,
+    ArrayRef<ArrayRef<TemplateArgument>> Levels, unsigned NewIndex,
     IdentifierInfo *NewName, SourceLocation Loc, unsigned NewDepth = 0,
     bool KeepDefaults = true) {
   ASTContext &C = SemaRef.Context;
+  MultiLevelTemplateArgumentList Args = clonedParameterRewrite(Levels);
 
   if (auto *TTP = dyn_cast<TemplateTypeParmDecl>(Param)) {
     auto *NewTTP = TemplateTypeParmDecl::Create(
@@ -1773,17 +1787,54 @@ static NamedDecl *transformClonedTemplateParam(
     return NewNTTP;
   }
 
-  // Template template parameters: keep the nested parameter list as-is (its
-  // names are a separate scope and do not participate in forwarding), but
-  // still rename the parameter itself.
+  // Template template parameters: the nested parameter list is cloned too.
+  // Its names keep their spelling (they are a separate scope and do not
+  // participate in forwarding), but its parameters' types, constraints and
+  // defaults can refer to the enclosing list's parameters -- which are being
+  // renamed and reindexed -- and they live one depth below them.
   if (auto *TTPD = dyn_cast<TemplateTemplateParmDecl>(Param)) {
     if (TTPD->isExpandedParameterPack())
       return nullptr;
 
+    TemplateParameterList *OldTPL = TTPD->getTemplateParameters();
+    SmallVector<NamedDecl *, 4> NestedParams;
+    SmallVector<TemplateArgument, 4> NestedArgs;
+    for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
+      // Earlier parameters of this list (innermost), then the enclosing
+      // lists. NestedArgs is read before it grows.
+      SmallVector<ArrayRef<TemplateArgument>, 4> NestedLevels;
+      NestedLevels.push_back(NestedArgs);
+      NestedLevels.append(Levels.begin(), Levels.end());
+      NamedDecl *OldNested = OldTPL->getParam(I);
+      NamedDecl *NewNested = transformClonedTemplateParam(
+          SemaRef, DC, OldNested, NestedLevels, I, OldNested->getIdentifier(),
+          Loc, NewDepth + 1, /*KeepDefaults=*/true);
+      if (!NewNested)
+        return nullptr;
+      NestedArgs.push_back(C.getInjectedTemplateArg(NewNested));
+      NestedParams.push_back(NewNested);
+    }
+    Expr *NestedRC = nullptr;
+    if (Expr *OldRC = OldTPL->getRequiresClause()) {
+      SmallVector<ArrayRef<TemplateArgument>, 4> NestedLevels;
+      NestedLevels.push_back(NestedArgs);
+      NestedLevels.append(Levels.begin(), Levels.end());
+      MultiLevelTemplateArgumentList RCArgs =
+          clonedParameterRewrite(NestedLevels);
+      ExprResult R =
+          SemaRef.SubstConstraintExprWithoutSatisfaction(OldRC, RCArgs);
+      if (R.isInvalid())
+        return nullptr;
+      NestedRC = R.get();
+    }
+    TemplateParameterList *NewTPL = TemplateParameterList::Create(
+        C, OldTPL->getTemplateLoc(), OldTPL->getLAngleLoc(), NestedParams,
+        OldTPL->getRAngleLoc(), NestedRC);
+
     auto *NewTTPD = TemplateTemplateParmDecl::Create(
         C, DC, Loc, NewDepth, NewIndex, TTPD->isParameterPack(), NewName,
         TTPD->templateParameterKind(), TTPD->wasDeclaredWithTypename(),
-        TTPD->getTemplateParameters());
+        NewTPL);
     if (KeepDefaults && TTPD->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(
@@ -1820,17 +1871,24 @@ bool Sema::ActOnInjectedTemplateParameters(
   // source's own requires-clause is not carried: it constrains the
   // *primary's* arguments, and any actual specialization the injected
   // declaration could match already satisfies it.
+  // Substitution needs a code-synthesis context even outside any
+  // instantiation (a namespace-scope fragment): the same one CTAD's guide
+  // synthesis uses, as the function-declaration path does.
   LocalInstantiationScope InstScope(*this);
+  InstantiatingTemplate BDG(*this, Loc, cast<TemplateDecl>(Spec->Source),
+                            InstantiatingTemplate::BuildingDeductionGuidesTag{});
+  if (BDG.isInvalid())
+    return true;
+
   SmallVector<TemplateArgument, 8> NewParamArgs;
   unsigned StartIndex = TemplateParams.size();
   for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
-    MultiLevelTemplateArgumentList PartialArgs;
-    PartialArgs.setKind(TemplateSubstitutionKind::Rewrite);
-    PartialArgs.addOuterTemplateArguments(NewParamArgs);
+    // Read before NewParamArgs grows.
+    ArrayRef<TemplateArgument> Cloned = NewParamArgs;
     IdentifierInfo *NewName = &Context.Idents.get(
         Spec->TemplateParameterPrefix + std::to_string(I));
     NamedDecl *NewParam = transformClonedTemplateParam(
-        *this, CurContext, OldTPL->getParam(I), PartialArgs, StartIndex + I,
+        *this, CurContext, OldTPL->getParam(I), Cloned, StartIndex + I,
         NewName, Loc, Depth, TPS->KeepDefaults);
     if (!NewParam) {
       Diag(Loc, diag::err_decl_spec_clone_failed)
@@ -1891,13 +1949,12 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     TemplateParameterList *OldTPL = SrcFTD->getTemplateParameters();
     SmallVector<NamedDecl *, 8> NewParams;
     for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
-      MultiLevelTemplateArgumentList PartialArgs;
-      PartialArgs.setKind(TemplateSubstitutionKind::Rewrite);
-      PartialArgs.addOuterTemplateArguments(NewParamArgs);
+      // Read before NewParamArgs grows.
+      ArrayRef<TemplateArgument> Cloned = NewParamArgs;
       IdentifierInfo *NewName = &Context.Idents.get(
           Spec->TemplateParameterPrefix + std::to_string(I));
       NamedDecl *NewParam = transformClonedTemplateParam(
-          *this, RD, OldTPL->getParam(I), PartialArgs, I, NewName, Loc);
+          *this, RD, OldTPL->getParam(I), Cloned, I, NewName, Loc);
       if (!NewParam)
         return Fail();
       NewParamArgs.push_back(Context.getInjectedTemplateArg(NewParam));
@@ -1919,6 +1976,7 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   // Clone the function parameters with new names.
   SmallVector<ParmVarDecl *, 8> NewParms;
   SmallVector<QualType, 8> NewParamTys;
+  bool KeepsPatternDefaults = false;
   for (unsigned I = 0, N = SrcMD->getNumParams(); I != N; ++I) {
     ParmVarDecl *OldParm = SrcMD->getParamDecl(I);
     TypeSourceInfo *NewTSI = OldParm->getTypeSourceInfo();
@@ -1946,24 +2004,15 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
       OldDefault = OldParm->getDefaultArg();
     if (OldDefault) {
       if (OldParm->hasUninstantiatedDefaultArg()) {
-        // An uninstantiated default is the *pattern's* expression: it can
-        // reference the enclosing class template's parameters (at their
-        // pattern depths) in addition to the member's own. Substitute with
-        // the source specialization's arguments plus the rewrite mapping
-        // for the member's own head. Substitution of the parts that depend
-        // only on the member's own parameters stays lazy (Rewrite maps
-        // parameter to parameter); parts depending on the enclosing class
-        // are resolved now, as any use would resolve them.
-        MultiLevelTemplateArgumentList DefArgs = getTemplateInstantiationArgs(
-            SrcMD, /*DC=*/nullptr, /*Final=*/false,
-            SrcFTD ? std::optional<ArrayRef<TemplateArgument>>(NewParamArgs)
-                   : std::nullopt);
-        if (SrcFTD)
-          DefArgs.setKind(TemplateSubstitutionKind::Rewrite);
-        ExprResult R = SubstExpr(OldDefault, DefArgs);
-        if (R.isInvalid())
-          return Fail();
-        NewParm->setDefaultArg(R.get());
+        // An uninstantiated default is the *pattern's* expression, which
+        // the source member (a member of a class template specialization)
+        // instantiates only when a call uses it. The clone does the same --
+        // see Sema::InstantiateDefaultArgument, which resolves it against
+        // the source specialization. Instantiating it now would turn an
+        // unused, invalid default into an error and move its point of
+        // instantiation.
+        NewParm->setUninstantiatedDefaultArg(OldDefault);
+        KeepsPatternDefaults = true;
       } else if (SrcFTD) {
         ExprResult R = SubstExpr(OldDefault, Args);
         if (R.isInvalid())
@@ -2030,6 +2079,8 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   Method->setParams(NewParms);
   Method->setAccess(AS);
   Method->setLexicalDeclContext(CurContext);
+  if (KeepsPatternDefaults)
+    ClonedDeclarationSources[Method] = SrcMD;
 
   // A clone with the same name and signature as an inherited virtual
   // implicitly overrides it (that is how mock<Interface> implements an
@@ -2055,6 +2106,26 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
 
   PushOnScopeChains(Introduced, S, /*AddToContext=*/true);
   return Introduced;
+}
+
+const FunctionDecl *
+Sema::getClonedDeclarationSource(const FunctionDecl *FD) const {
+  // The clone itself, a specialization of a clone template, or an
+  // instantiation of a clone declared in a class template.
+  for (const FunctionDecl *D = FD; D;) {
+    auto It = ClonedDeclarationSources.find(D->getCanonicalDecl());
+    if (It != ClonedDeclarationSources.end())
+      return It->second;
+    const FunctionDecl *Next = nullptr;
+    if (const FunctionTemplateDecl *Primary = D->getPrimaryTemplate())
+      Next = Primary->getTemplatedDecl();
+    else
+      Next = D->getTemplateInstantiationPattern(/*ForDefinition=*/false);
+    if (Next == D)
+      break;
+    D = Next;
+  }
+  return nullptr;
 }
 
 ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,

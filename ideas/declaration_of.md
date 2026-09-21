@@ -360,7 +360,14 @@ recovers the interface properties the per-name forwarder loses:
 - braced-init-list calls work (real parameter types);
 - explicit template arguments work (real heads: `x.get<0>()` binds a
   genuine `size_t` parameter);
-- function-parameter default arguments work (cloned);
+- function-parameter default arguments work (cloned). When the source is a
+  member of a class template specialization, its defaults are still the
+  *pattern's* expressions, instantiated only by a call that uses them; the
+  clone keeps exactly that behavior (the default is resolved against the
+  source specialization, plus the clone's own template arguments, at the
+  call). So `template <class V> int k(int = T::missing)` clones from
+  `U<int>` and `w.k<void>(7)` is fine, just as `U<int>{}.k<void>(7)` is;
+  `w.k<void>()` diagnoses the default at the call, as the source would;
 - cv/ref-qualifiers are per-clone rather than deduced;
 - **constraints clone**, so `append_range(3)` fails with
   "container_compatible_range not satisfied" again, not a

@@ -799,3 +799,30 @@ constexpr int a = 3;
 static_assert(first_plus!(a b c, 7) == 37);
 
 }  // namespace N20
+
+namespace N21 {
+
+// Splicing a saved fragment twice duplicates the interpolated argument's
+// evaluation exactly as two interpolations would, and is diagnosed the same.
+__macro twice_via_fragment(int x) {
+  auto once = ^^{ \(x) };
+  return once + ^^{ + } + once;
+}
+int a = twice_via_fragment!(1);  // expected-error {{expansion of expression macro would evaluate this argument more than once}}
+
+__macro relay(int x) { return ^^{ (\(x)) }; }
+__macro twice_nested_fragment(int x) {
+  auto once = ^^{ relay!(\(x)) };
+  return once + ^^{ + } + once;
+}
+int b = twice_nested_fragment!(1);  // expected-error {{expansion of expression macro would evaluate this argument more than once}}
+
+// A GNU ?: binds its common operand once, in whichever position: not a
+// duplicate evaluation.
+__macro elvis(int x) { return ^^{ \(x) ?: 7 }; }
+static_assert(elvis!(0) == 7);
+static_assert(elvis!(3) == 3);
+__macro elvis_nested(int x) { return ^^{ relay!(\(x)) ?: 7 }; }
+static_assert(elvis_nested!(0) == 7);
+
+}  // namespace N21

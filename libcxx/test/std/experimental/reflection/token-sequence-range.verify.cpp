@@ -29,3 +29,10 @@ constexpr std::meta::token_sequence negative = ts[-1];
 constexpr std::meta::token_sequence from_empty = (^^{ })[0];
 // expected-error@-1 {{constexpr variable 'from_empty' must be initialized by a constant expression}}
 // expected-note@-2 {{token index 0 is out of range for a token sequence of 0 tokens}}
+
+// An indexed token is a prvalue, so it is not assignable -- diagnosed as
+// such, not misclassified.
+consteval void assign() {
+  auto seq = ^^{ a b };
+  seq[0] = seq[1];  // expected-error {{expression is not assignable}}
+}

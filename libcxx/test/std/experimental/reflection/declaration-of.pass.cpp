@@ -24,6 +24,7 @@
 // constraints.
 
 #include <meta>
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <string>
@@ -302,7 +303,83 @@ static_assert(W{}.f<int>(7) == 7);
 // never touches it.
 static_assert(W{}.g<int>(11, 0) == 11);
 
+// A non-template member of a specialization has pattern defaults too, and
+// a default that is invalid *for the source specialization* is still only
+// instantiated when a call uses it (the source itself is callable with the
+// argument supplied, so the clone must be as well).
+template <class T>
+struct Outer2 {
+  constexpr int h(int x = sizeof(T)) const { return x; }
+  template <class V>
+  constexpr int k(int x = T::missing) const { return x; }
+};
+
+struct W2 {
+  Outer2<long> impl;
+
+  consteval {
+    auto hd = std::meta::declaration_of(^^Outer2<long>::h);
+    auto kd = std::meta::declaration_of(^^Outer2<long>::template k);
+    queue_injection(^^{
+      \(hd) { return \(std::meta::forwarding_call_for(hd, ^^{ impl })); }
+      \(kd) { return \(std::meta::forwarding_call_for(kd, ^^{ impl })); }
+    });
+  }
+};
+
+static_assert(W2{}.h() == sizeof(long));
+static_assert(W2{}.h(5) == 5);
+static_assert(W2{}.k<void>(7) == 7);
+
 }  // namespace defaults
+
+// ----------------------------------------------------------------------------
+// Template heads clone outside any instantiation (a namespace-scope
+// fragment): with defaults, with dependent parameter types, and with nested
+// template template parameter lists, whose parameters may refer to the
+// enclosing list's (which are being renamed and reindexed).
+// ----------------------------------------------------------------------------
+namespace heads {
+
+template <class T = int> struct source_default {};
+consteval {
+  auto h = std::meta::template_parameter_list_for(
+      std::meta::declaration_of(^^source_default));
+  queue_injection(^^{
+    template <\(h)> struct target_default { using type = T0; };
+  });
+}
+static_assert(std::meta::dealias(^^target_default<>::type) == ^^int);
+static_assert(std::meta::dealias(^^target_default<char>::type) == ^^char);
+
+template <class T, T N> struct source_dependent {};
+consteval {
+  auto d = std::meta::declaration_of(^^source_dependent);
+  auto h = std::meta::template_parameter_list_for(d, {.defaults = false});
+  queue_injection(^^{
+    template <\(h)> struct target_dependent { static constexpr T0 value = T1; };
+  });
+}
+static_assert(target_dependent<int, 3>::value == 3);
+
+// The nested 'template <T> class C' refers to the enclosing T, which the
+// clone renames to T0 and, after the written 'I', moves to index 1.
+template <class T, template <T> class C> struct source_nested {};
+template <int> struct int_arg {};
+template <int, class> struct trait { static constexpr int value = 0; };
+consteval {
+  auto d = std::meta::declaration_of(^^source_nested);
+  auto h = std::meta::template_parameter_list_for(d, {.defaults = false});
+  auto a = std::meta::template_argument_list_for(d);
+  queue_injection(^^{
+    template <int I, \(h)>
+    struct trait<I, source_nested<\(a)>> { static constexpr int value = I + 1; };
+  });
+}
+static_assert(trait<0, int>::value == 0);
+static_assert(trait<4, source_nested<int, int_arg>>::value == 5);
+
+}  // namespace heads
 
 // ----------------------------------------------------------------------------
 // Array and function parameters adjust to pointers in the clone, exactly as
@@ -503,6 +580,48 @@ int tag() {
 
 int use_mangling() { return tag<da>() + 10 * tag<db>(); }
 
+// So do descriptions of overloads that differ only in their template heads
+// (parameter kinds) or in their constraints.
+struct V {
+  template <class> int f();
+  template <int> int f();
+  template <class T> int g() requires (sizeof(T) == 1);
+  template <class T> int g() requires (sizeof(T) != 1);
+};
+
+consteval std::array<std::meta::info, 4> overloads() {
+  std::array<std::meta::info, 4> r;
+  int n = 0;
+  for (std::meta::info m :
+       members_of(^^V, std::meta::access_context::unchecked()))
+    if (is_function_template(m))
+      r[n++] = m;
+  return r;
+}
+constexpr auto vm = overloads();
+constexpr auto d0 = std::meta::declaration_of(vm[0]);
+constexpr auto d1 = std::meta::declaration_of(vm[1]);
+constexpr auto d2 = std::meta::declaration_of(vm[2]);
+constexpr auto d3 = std::meta::declaration_of(vm[3]);
+static_assert(d0 != d1 && d2 != d3);
+
+template <std::meta::info D>
+int tag_head() {
+  if constexpr (D == d0)
+    return 1;
+  else if constexpr (D == d1)
+    return 2;
+  else if constexpr (D == d2)
+    return 3;
+  else
+    return 4;
+}
+
+int use_mangling_heads() {
+  return tag_head<d0>() + 10 * tag_head<d1>() + 100 * tag_head<d2>() +
+         1000 * tag_head<d3>();
+}
+
 }  // namespace mangling
 
 int main() {
@@ -512,5 +631,7 @@ int main() {
     return 2;
   if (mangling::use_mangling() != 21)
     return 3;
+  if (mangling::use_mangling_heads() != 4321)
+    return 4;
   return 0;
 }

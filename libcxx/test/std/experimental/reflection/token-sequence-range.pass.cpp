@@ -49,6 +49,27 @@ static_assert(ts[2] == m::id("b"));  // sequence; tokens compare directly
 static_assert(ts[0] + ts[1] + ts[2] == ^^{ a + b });
 static_assert(ts[1] == ^^{ + });
 
+// ... and a prvalue: it can be selected by a conditional and bound to a
+// reference like any other rvalue (contexts that classify the operand).
+static_assert((true ? ts[0] : ts[2]) == ^^{ a });
+static_assert((false ? ts[0] : ts[2]) == ^^{ b });
+static_assert([] { auto&& t = ts[1]; return t == ^^{ + }; }());
+
+// Interpolation while an unrelated allocation is live: the operand is
+// evaluated as a subexpression of the enclosing evaluation, not as a
+// top-level evaluation with its own leak check.
+consteval m::token_sequence with_live_vector() {
+  std::vector<int> v{1, 2};
+  m::token_sequence tok = ^^{ x };
+  return ^^{ \(tok) \(^^int) \(v.size()) };
+}
+static_assert([] {
+  auto r = with_live_vector();
+  return size(r) == 3 && r[0] == ^^{ x } &&
+         m::token_kind_of(r[1]) == m::token_kind::annotation &&
+         m::token_kind_of(r[2]) == m::token_kind::annotation;
+}());
+
 // ----------------------------------------------------------------------------
 // Range-for.
 // ----------------------------------------------------------------------------

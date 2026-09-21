@@ -155,3 +155,26 @@ static_assert(h8 == ^^{ T0... });
 constexpr auto h9 = std::meta::template_argument_list_for(
     std::meta::declaration_of(^^S::template explicit_obj));
 static_assert(h9 == ^^{ T0 });
+
+// ----------------------------------------------------------------------------
+// A cloned pattern default is instantiated only when a call uses it; then it
+// is diagnosed as the source member's would be.
+// ----------------------------------------------------------------------------
+template <class T>
+struct Lazy {
+  template <class V>
+  constexpr int k(int x = T::missing) const { return x; }
+  // expected-error@-1 {{type 'int' cannot be used prior to '::' because it has no members}}
+};
+
+struct LazyW {
+  Lazy<int> impl;
+  consteval {
+    auto kd = std::meta::declaration_of(^^Lazy<int>::template k);
+    queue_injection(^^{ \(kd) { return p0; } });
+  }
+};
+
+static_assert(LazyW{}.k<void>(7) == 7);  // the default is not needed
+constexpr int lazy_bad = LazyW{}.k<void>();
+// expected-note@-1 {{in instantiation of default function argument expression for 'k<void>' required here}}

@@ -5093,8 +5093,13 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
         getASTContext().getCanonicalTagType(MD->getParent()), Out, false);
     Out << "M$" << MD->getDeclName().getAsString() << '$';
     Context.mangleCanonicalTypeName(MD->getType(), Out, false);
+    // Overloads with the same signature can still differ in their template
+    // heads (parameter kinds, constraints) and trailing requires-clauses;
+    // mangle those in full, as a lambda's template head is.
     if (auto *FTD = dyn_cast<FunctionTemplateDecl>(FDS->Source))
-      Out << 'H' << FTD->getTemplateParameters()->size();
+      mangleTemplateParameterList(FTD->getTemplateParameters());
+    if (const Expr *TRC = MD->getTrailingRequiresClause().ConstraintExpr)
+      mangleRequiresClause(TRC);
     if (FDS->Name)
       Out << "N$" << *FDS->Name << '$';
     Out << "T$" << FDS->TemplateParameterPrefix << '$';
