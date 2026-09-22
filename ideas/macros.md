@@ -236,6 +236,33 @@ category, `int&` for an lvalue `int`), and it keeps the caller's name lookup:
 `\(x)` always means the `x` the caller wrote, regardless of what the macro
 declares around it.
 
+Token sequences nest, and so do their interpolations, with the rule of
+nested backquotes: **an interpolation binds to the innermost literal
+enclosing it, and each further backslash reaches one literal further out.**
+A generator that emits a macro writes the macro's own interpolations as
+usual — they stay tokens until the generated macro runs — and reaches its
+own level from inside the inner literal with `\\(...)`:
+
+```cpp
+consteval {
+  for (info e : enumerators_of(^^LogLevel)) {
+    auto name = id(identifier_of(e));
+    queue_injection(^^{
+      template <class... Args>
+      __macro \(name)(this Log& self, string_view raw, Args&&... args) {
+        ...
+        return ^^{ \(self).do_log(::LogLevel::\\(name), \(raw), \(call_args)); };
+      }                                       // ^^ the generator's
+    });                                       //    everything else: the macro's
+  }
+}
+```
+
+More backslashes than there are enclosing literals is an error. (Rust's
+`quote!` has the opposite default — the outermost active quotation claims
+every `#var` — which makes exactly this case, generating a macro, the
+awkward one; binding inward keeps the common case escape-free.)
+
 Each interpolated expression is evaluated exactly once, at the point where its
 interpolation lands in the expansion. This is the rule that makes `check!`
 correct, and it has one consequence: **the interpolated nodes of one argument's

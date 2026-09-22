@@ -1863,6 +1863,9 @@ def warn_meant_parenthesize_reflection : Warning<
   "'%0' binds to reflection operand">, InGroup<ReflexingParse>;
 def err_macro_expansion_not_single_expression : Error<
   "expansion of expression macro must form a single expression">;
+def err_interpolation_escapes_token_sequence : Error<
+  "interpolation with %0 backslashes escapes the enclosing token sequence "
+  "(%1 %plural{1:level|:levels}1 of token sequence enclose it)">;
 def err_splice_template_argument : Error<
   "unparenthesized splice expression cannot be used as a template argument">;
 }

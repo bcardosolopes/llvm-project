@@ -30,27 +30,65 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
   if (Tok.is(tok::l_brace)) {
     SourceLocation LBraceLoc = ConsumeBrace();
 
+    auto IsBackslash = [&](const Token &T) {
+      return T.is(tok::unknown) && T.getLength() == 1 &&
+             *PP.getSourceManager().getCharacterData(T.getLocation()) == '\\';
+    };
+
     SmallVector<Token, 16> Tokens;
     unsigned BraceDepth = 1;
+    // The brace depths at which nested ^^{ } literals opened, innermost
+    // last. An interpolation binds to the innermost literal enclosing it;
+    // each additional backslash reaches one literal further out (as with
+    // nested backquotes). With D nested literals open, `\(e)` written with
+    // K backslashes is this literal's when K == D + 1; with fewer it belongs
+    // to a nested literal and is kept as tokens for when that literal is
+    // parsed in turn; with more it escapes past this literal.
+    SmallVector<unsigned, 2> NestedLiterals;
     while (BraceDepth > 0 && Tok.isNot(tok::eof)) {
+      // A nested literal: keep its '^^{' and remember where it closes.
+      if (Tok.is(tok::caretcaret) && NextToken().is(tok::l_brace)) {
+        Tokens.push_back(Tok);
+        ConsumeToken();
+        ++BraceDepth;
+        NestedLiterals.push_back(BraceDepth);
+        Tokens.push_back(Tok);
+        ConsumeBrace();
+        continue;
+      }
       if (Tok.is(tok::l_brace))
         ++BraceDepth;
       else if (Tok.is(tok::r_brace)) {
+        if (!NestedLiterals.empty() && NestedLiterals.back() == BraceDepth)
+          NestedLiterals.pop_back();
         --BraceDepth;
         if (BraceDepth == 0)
           break;
       }
 
-      // Check for interpolation: \(expr)
-      if (Tok.is(tok::unknown) && Tok.getLength() == 1 &&
-          *PP.getSourceManager().getCharacterData(Tok.getLocation()) == '\\' &&
-          NextToken().is(tok::l_paren)) {
+      // Check for interpolation: \(expr), with one backslash per level.
+      unsigned Backslashes = 0;
+      if (IsBackslash(Tok)) {
+        Backslashes = 1;
+        while (IsBackslash(GetLookAheadToken(Backslashes)))
+          ++Backslashes;
+        if (GetLookAheadToken(Backslashes).isNot(tok::l_paren))
+          Backslashes = 0;
+      }
+      unsigned Level = NestedLiterals.size() + 1;
+      if (Backslashes > Level) {
+        Diag(Tok, diag::err_interpolation_escapes_token_sequence)
+            << Backslashes << Level;
+        Backslashes = Level; // recover as this literal's
+      }
+      if (Backslashes == Level) {
         SourceLocation BackslashLoc = Tok.getLocation();
         // Preserve leading space from the backslash token so that stringize
         // can correctly reproduce whitespace (e.g., "int \(id("x"))" should
         // become "int x", not "intx").
         bool HadLeadingSpace = Tok.hasLeadingSpace();
-        ConsumeToken();  // consume '\'
+        while (IsBackslash(Tok))
+          ConsumeToken();  // consume the '\'s
         ConsumeParen();  // consume '('
 
         ExprResult Expr = ParseAssignmentExpression();
