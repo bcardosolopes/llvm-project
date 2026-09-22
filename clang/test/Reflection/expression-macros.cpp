@@ -782,6 +782,31 @@ static_assert(a == 1 && b == 2 && C::m == 3);
 constexpr int bad1 = two!(1, 2];  // expected-error {{expected ')'}} \
                                   // expected-note {{to match this '('}}
 
+// The braced form permits a trailing comma, as a braced initializer list
+// does; the call-like brackets do not.
+static_assert(two!{1, 2,} == 12);
+static_assert(two!{1, 2,} == two!(1, 2));
+constexpr int tc1 = two!(1, 2,);  // expected-error {{expected expression}}
+constexpr int tc2 = two![1, 2,];  // expected-error {{expected expression}}
+
+// A trailing comma requires at least one argument.
+__macro dflt2(int x = 5) { return ^^{ \(x) }; }
+static_assert(dflt2!{} == 5);
+constexpr int tc3 = dflt2!{,};  // expected-error {{expected expression}}
+
+// A greedy raw parameter captures the comma as a token: raw means raw.
+__macro raw_is_ab_comma(token_sequence ts) {
+  return ^^{ \(ts == ^^{ a, b, }) };
+}
+static_assert(raw_is_ab_comma!{a, b,});   // 'a' ',' 'b' ','
+static_assert(!raw_is_ab_comma!{a, b});   // no trailing token
+
+// A non-greedy raw parameter's comma is a delimiter; trailing-comma sugar
+// applies after the last argument as usual, in declaration position too
+// (reusing decl! from above: raw name, then a typed argument).
+decl!{c, 4,};
+static_assert(c == 4);
+
 }  // namespace N19
 
 namespace N20 {

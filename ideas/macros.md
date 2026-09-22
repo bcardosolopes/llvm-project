@@ -91,6 +91,14 @@ argument simply ends at the closer matching the invocation's opener, with any
 other brackets nesting inside it as before. (Nothing is lost: `!` cannot
 follow a name in C++, so `f!{` and `f![` are as free as `f!(`.)
 
+The braced form additionally permits a trailing comma — `vec!{1, 2, 3,}` —
+exactly as a braced initializer list does and a call does not; pick braces
+when the arguments are a *list* (one per line, appended to, diffed). Two
+boundary cases follow the obvious rules: a trailing comma requires at least
+one argument (`f!{,}` is an error, consistent with `f!{}` being an empty
+argument list), and a *greedy* raw parameter still captures the comma as a
+token — raw means raw, and `define_enum!{A, B, C,}` may well want it.
+
 The `!` is there for the reader as much as for the parser. It says: the
 arguments may be captured rather than evaluated, evaluated in rewritten form,
 inspected for their spelling, or (for raw parameters) not parsed as expressions

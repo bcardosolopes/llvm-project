@@ -627,6 +627,13 @@ bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
       Args.push_back(Arg.get());
       if (!TryConsumeToken(tok::comma))
         break;
+      // A braced argument list permits a trailing comma, as a braced
+      // initializer list does; the call-like brackets do not, as a call does
+      // not. (Requires at least one argument: 'f!{,}' is not an empty list.
+      // And a *greedy* raw parameter never reaches here -- it swallows
+      // top-level commas, so its trailing comma is tokens, not sugar.)
+      if (Close == tok::r_brace && Tok.is(Close))
+        break;
     }
   }
   // name!() is an empty argument list, never a single empty token sequence;
