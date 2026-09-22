@@ -1714,14 +1714,61 @@ clonedParameterRewrite(ArrayRef<ArrayRef<TemplateArgument>> Levels) {
   return Args;
 }
 
+// One level of the constraint-space substitution for a clone: an argument
+// list with the declaration it substitutes into (ordinary Specialization
+// kind, since the enclosing specializations' arguments are concrete values
+// that Rewrite-kind substitution cannot carry).
+struct ConstraintSubstLevel {
+  Decl *AssociatedDecl;
+  ArrayRef<TemplateArgument> Args;
+};
+
+// Collects the template arguments of every class template specialization
+// enclosing the given source member, innermost first. A member of an
+// instantiated class keeps its *constraint* expressions unsubstituted, in
+// the pattern's depth space: its own parameters one depth below each
+// enclosing class's, whose parameters the expressions still reference.
+// Constraint checking on the source compensates by supplying these
+// arguments as outer levels; a clone leaves that machinery behind, so it
+// must bake them in when substituting the source's constraints (and only
+// the constraints -- the rest of the source declaration is already in the
+// instantiated, depth-0 space).
+static void collectSourceConstraintOuterLevels(
+    const Decl *SourceMember, SmallVectorImpl<ConstraintSubstLevel> &Levels) {
+  for (const DeclContext *Ctx = SourceMember->getDeclContext(); Ctx;
+       Ctx = Ctx->getParent()) {
+    if (auto *SD = dyn_cast<ClassTemplateSpecializationDecl>(
+            const_cast<DeclContext *>(Ctx)))
+      Levels.push_back({SD, SD->getTemplateInstantiationArgs().asArray()});
+    if (!isa<CXXRecordDecl>(Ctx))
+      break;
+  }
+}
+
+// Builds the constraint-space substitution from its levels, innermost
+// first: the cloned parameters (at the source pattern's own depth), then
+// the source's enclosing specializations' arguments below them.
+static MultiLevelTemplateArgumentList
+clonedConstraintSubst(ArrayRef<ConstraintSubstLevel> Levels) {
+  MultiLevelTemplateArgumentList Args;
+  for (const ConstraintSubstLevel &Level : Levels)
+    Args.addOuterTemplateArguments(Level.AssociatedDecl, Level.Args,
+                                   /*Final=*/false);
+  return Args;
+}
+
 // Clones one template parameter for an injected declaration description
 // (std::meta::declaration_of), renaming it per the description's naming
 // policy and remapping references to earlier parameters through 'Levels'
 // (see clonedParameterRewrite). Follows the recipe of CTAD deduction-guide
-// synthesis.
+// synthesis. 'ConstraintLevels' is the complete constraint-space
+// substitution, innermost first (see clonedConstraintSubst); its innermost
+// level's Args are expected to match Levels' innermost (the parameters
+// cloned so far).
 static NamedDecl *transformClonedTemplateParam(
     Sema &SemaRef, DeclContext *DC, NamedDecl *Param,
-    ArrayRef<ArrayRef<TemplateArgument>> Levels, unsigned NewIndex,
+    ArrayRef<ArrayRef<TemplateArgument>> Levels,
+    ArrayRef<ConstraintSubstLevel> ConstraintLevels, unsigned NewIndex,
     IdentifierInfo *NewName, SourceLocation Loc, unsigned NewDepth = 0,
     bool KeepDefaults = true) {
   ASTContext &C = SemaRef.Context;
@@ -1732,9 +1779,18 @@ static NamedDecl *transformClonedTemplateParam(
         C, DC, Loc, Loc, NewDepth, NewIndex, NewName,
         TTP->wasDeclaredWithTypename(), TTP->isParameterPack(),
         TTP->hasTypeConstraint(), TTP->getNumExpansionParameters());
-    if (const auto *TC = TTP->getTypeConstraint())
-      SemaRef.SubstTypeConstraint(NewTTP, TC, Args,
-                                  /*EvaluateConstraint=*/false);
+    if (const auto *TC = TTP->getTypeConstraint()) {
+      // The type-constraint lives in the source pattern's depth space, not
+      // the instantiated member's: substitute it against the cloned
+      // parameters *and* the enclosing specializations' arguments, so the
+      // clone's constraint is self-contained. EvaluateConstraint=true here
+      // means "substitute now rather than defer" -- the rebuilt constraint
+      // still names the new parameter, so nothing is eagerly satisfied.
+      MultiLevelTemplateArgumentList CArgs =
+          clonedConstraintSubst(ConstraintLevels);
+      SemaRef.SubstTypeConstraint(NewTTP, TC, CArgs,
+                                  /*EvaluateConstraint=*/true);
+    }
     if (KeepDefaults && TTP->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(
@@ -1807,9 +1863,12 @@ static NamedDecl *transformClonedTemplateParam(
       NestedLevels.push_back(NestedArgs);
       NestedLevels.append(Levels.begin(), Levels.end());
       NamedDecl *OldNested = OldTPL->getParam(I);
+      SmallVector<ConstraintSubstLevel, 8> NestedCLevels;
+      NestedCLevels.push_back({TTPD, NestedArgs});
+      NestedCLevels.append(ConstraintLevels.begin(), ConstraintLevels.end());
       NamedDecl *NewNested = transformClonedTemplateParam(
-          SemaRef, DC, OldNested, NestedLevels, I, OldNested->getIdentifier(),
-          Loc, NewDepth + 1, /*KeepDefaults=*/true);
+          SemaRef, DC, OldNested, NestedLevels, NestedCLevels, I,
+          OldNested->getIdentifier(), Loc, NewDepth + 1, /*KeepDefaults=*/true);
       if (!NewNested)
         return nullptr;
       NestedArgs.push_back(C.getInjectedTemplateArg(NewNested));
@@ -1817,11 +1876,11 @@ static NamedDecl *transformClonedTemplateParam(
     }
     Expr *NestedRC = nullptr;
     if (Expr *OldRC = OldTPL->getRequiresClause()) {
-      SmallVector<ArrayRef<TemplateArgument>, 4> NestedLevels;
-      NestedLevels.push_back(NestedArgs);
-      NestedLevels.append(Levels.begin(), Levels.end());
+      SmallVector<ConstraintSubstLevel, 8> NestedCLevels;
+      NestedCLevels.push_back({TTPD, NestedArgs});
+      NestedCLevels.append(ConstraintLevels.begin(), ConstraintLevels.end());
       MultiLevelTemplateArgumentList RCArgs =
-          clonedParameterRewrite(NestedLevels);
+          clonedConstraintSubst(NestedCLevels);
       ExprResult R =
           SemaRef.SubstConstraintExprWithoutSatisfaction(OldRC, RCArgs);
       if (R.isInvalid())
@@ -1881,16 +1940,22 @@ bool Sema::ActOnInjectedTemplateParameters(
   if (BDG.isInvalid())
     return true;
 
+  SmallVector<ConstraintSubstLevel, 4> SrcOuterLevels;
+  collectSourceConstraintOuterLevels(cast<Decl>(Spec->Source), SrcOuterLevels);
+
   SmallVector<TemplateArgument, 8> NewParamArgs;
   unsigned StartIndex = TemplateParams.size();
   for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
     // Read before NewParamArgs grows.
     ArrayRef<TemplateArgument> Cloned = NewParamArgs;
+    SmallVector<ConstraintSubstLevel, 8> CLevels;
+    CLevels.push_back({cast<Decl>(Spec->Source), Cloned});
+    CLevels.append(SrcOuterLevels.begin(), SrcOuterLevels.end());
     IdentifierInfo *NewName = &Context.Idents.get(
         Spec->TemplateParameterPrefix + std::to_string(I));
     NamedDecl *NewParam = transformClonedTemplateParam(
-        *this, CurContext, OldTPL->getParam(I), Cloned, StartIndex + I,
-        NewName, Loc, Depth, TPS->KeepDefaults);
+        *this, CurContext, OldTPL->getParam(I), Cloned, CLevels,
+        StartIndex + I, NewName, Loc, Depth, TPS->KeepDefaults);
     if (!NewParam) {
       Diag(Loc, diag::err_decl_spec_clone_failed)
           << cast<NamedDecl>(Spec->Source);
@@ -1938,6 +2003,16 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
       return nullptr;
   }
 
+  // The source's constraint expressions (type-constraints, the template
+  // head's requires-clause, the trailing requires-clause) are left
+  // unsubstituted when a member of a class template is instantiated, so
+  // they are still written in the pattern's depth space and reference the
+  // enclosing class's parameters. The source relies on constraint checking
+  // to supply the enclosing specialization's arguments; the clone cannot
+  // (its own enclosing class is unrelated), so bake them in now.
+  SmallVector<ConstraintSubstLevel, 4> SrcOuterLevels;
+  collectSourceConstraintOuterLevels(SrcMD, SrcOuterLevels);
+
   // Clone the template head, renaming each parameter and remapping
   // references to earlier parameters (Rewrite-kind substitution, as CTAD
   // deduction-guide synthesis does).
@@ -1952,10 +2027,13 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     for (unsigned I = 0, N = OldTPL->size(); I != N; ++I) {
       // Read before NewParamArgs grows.
       ArrayRef<TemplateArgument> Cloned = NewParamArgs;
+      SmallVector<ConstraintSubstLevel, 8> CLevels;
+      CLevels.push_back({SrcFTD, Cloned});
+      CLevels.append(SrcOuterLevels.begin(), SrcOuterLevels.end());
       IdentifierInfo *NewName = &Context.Idents.get(
           Spec->TemplateParameterPrefix + std::to_string(I));
       NamedDecl *NewParam = transformClonedTemplateParam(
-          *this, RD, OldTPL->getParam(I), Cloned, I, NewName, Loc);
+          *this, RD, OldTPL->getParam(I), Cloned, CLevels, I, NewName, Loc);
       if (!NewParam)
         return Fail();
       NewParamArgs.push_back(Context.getInjectedTemplateArg(NewParam));
@@ -1965,7 +2043,11 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
 
     Expr *NewRC = nullptr;
     if (Expr *OldRC = OldTPL->getRequiresClause()) {
-      ExprResult R = SubstConstraintExprWithoutSatisfaction(OldRC, Args);
+      SmallVector<ConstraintSubstLevel, 8> CLevels;
+      CLevels.push_back({SrcFTD, NewParamArgs});
+      CLevels.append(SrcOuterLevels.begin(), SrcOuterLevels.end());
+      MultiLevelTemplateArgumentList CArgs = clonedConstraintSubst(CLevels);
+      ExprResult R = SubstConstraintExprWithoutSatisfaction(OldRC, CArgs);
       if (R.isInvalid())
         return Fail();
       NewRC = R.get();
@@ -2053,12 +2135,19 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
       ProtoLoc.setParam(I, NewParms[I]);
 
   // The trailing requires-clause; it may reference the (remapped) template
-  // and function parameters.
+  // and function parameters, and -- like every constraint of a member of an
+  // instantiated class -- the enclosing class's parameters, still in the
+  // pattern's depth space.
   AssociatedConstraint NewTRC;
   if (const AssociatedConstraint &OldTRC = SrcMD->getTrailingRequiresClause()) {
-    if (SrcFTD) {
+    if (SrcFTD || !SrcOuterLevels.empty()) {
+      SmallVector<ConstraintSubstLevel, 8> CLevels;
+      if (SrcFTD)
+        CLevels.push_back({SrcFTD, NewParamArgs});
+      CLevels.append(SrcOuterLevels.begin(), SrcOuterLevels.end());
+      MultiLevelTemplateArgumentList CArgs = clonedConstraintSubst(CLevels);
       ExprResult R = SubstConstraintExprWithoutSatisfaction(
-          const_cast<Expr *>(OldTRC.ConstraintExpr), Args);
+          const_cast<Expr *>(OldTRC.ConstraintExpr), CArgs);
       if (R.isInvalid())
         return Fail();
       NewTRC = AssociatedConstraint(R.get(), OldTRC.ArgPackSubstIndex);

@@ -434,14 +434,16 @@ Response HandleFunction(Sema &SemaRef, const FunctionDecl *Function,
 
     // If this function template was injected into a class template
     // specialization (rather than instantiated from a member of the class
-    // template pattern), it was parsed fresh inside the instantiated class:
-    // its template parameters are at depth 0 and we should not add the
-    // enclosing class template's arguments as an additional level, lest
-    // they clobber the template's own parameters during constraint
-    // checking. Exceptions: deduction guides (their template parameter
-    // depth is handled by the CTAD machinery) and declaration_of clones
-    // (their constraints are kept at the source's depths and still expect
-    // the enclosing arguments).
+    // template pattern), it is entirely in the instantiated, depth-0 space:
+    // token-injected members are parsed fresh inside the instantiated
+    // class, and declaration_of clones bake the source's enclosing
+    // arguments into their constraints at splice time. Adding the enclosing
+    // class template's arguments as an additional level would clobber the
+    // template's own parameters during constraint checking. Deduction
+    // guides are excluded: their template parameter depth is handled by the
+    // CTAD machinery. The constraintsReferBeyondOwnParams check is a safety
+    // net: any remaining constraint written beyond the template's own depth
+    // still needs the enclosing arguments.
     if (!isa<CXXDeductionGuideDecl>(Function) &&
         Sema::isInjectedIntoSpecialization(Function->getDeclContext(),
                                            Template) &&

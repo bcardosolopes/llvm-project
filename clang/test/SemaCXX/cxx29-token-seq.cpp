@@ -1138,3 +1138,44 @@ namespace constrained_injected_members {
     constexpr int use(Dyn<char> d) { return 1; }
     static_assert(use(Dyn<char>('x')) == 1);
 }
+
+namespace injection_from_template_scope {
+    // Instantiating a token-injecting class from inside another template's
+    // scope: the injected tokens used to be parsed with that template's
+    // scopes visible ("declaration of 'T' shadows template parameter") and,
+    // worse, with its parameter list still open, so the injected template's
+    // own parameters were created at depth 1 -- leaving the "instantiated"
+    // bodies dependent and crashing constant evaluation.
+    template<class Iface> struct Dyn {
+        consteval {
+            std::meta::queue_injection(^^{
+                template <class T>
+                static constexpr bool injected_v = !__is_same(T, void);
+
+                template <class T>
+                static consteval bool check() {
+                    return requires { T{}; } and !__is_same(T, void);
+                }
+            });
+        }
+    };
+
+    // The trigger: parsing this requires-clause completes Dyn<int> while
+    // 'T' (deliberately the same name) is in scope.
+    template <class T>
+        requires (Dyn<int>::injected_v<T> && Dyn<int>::check<T>())
+    constexpr int probe(T) { return 42; }
+
+    static_assert(probe(1) == 42);
+    static_assert(Dyn<int>::injected_v<int>);
+    static_assert(!Dyn<int>::injected_v<void>);
+    static_assert(Dyn<int>::check<int>());
+
+    // The negative side, from a templated context (a failed requirement in
+    // a non-templated requires-expression is ill-formed, as everywhere).
+    struct NoDefault { NoDefault() = delete; };
+    template <class U>
+    constexpr bool can_probe = requires(U u) { probe(u); };
+    static_assert( can_probe<int>);
+    static_assert(!can_probe<NoDefault>);
+}

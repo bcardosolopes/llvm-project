@@ -1195,6 +1195,19 @@ void Parser::ProcessDeferredInjectedDecls(const Decl *ForClass,
   if (!ShouldParse)
     return;
 
+  // The instantiation completing the class can be triggered from an
+  // arbitrary parse point, possibly inside another template. The late
+  // pieces belong to a concrete instantiated class: parse them rooted at
+  // file scope, with the template parameter depth of a clean context, so
+  // the trigger site's scopes and open template parameter lists cannot
+  // leak into them (see ProcessTokenInjections).
+  Scope *FileScope = getCurScope();
+  while (FileScope->getParent() &&
+         !(FileScope->getEntity() && FileScope->getEntity()->isFileContext()))
+    FileScope = FileScope->getParent();
+  llvm::SaveAndRestore<Scope *> ScopeSwap(Actions.CurScope, FileScope);
+  llvm::SaveAndRestore<unsigned> DepthReset(TemplateParameterDepth, 0u);
+
   for (auto &PC : WorkList) {
     // The class is now complete, so late-parsed member pieces that reference it
     // (e.g. default arguments, noexcept-expressions, member initializers, and
@@ -1314,10 +1327,20 @@ void Parser::ProcessTokenInjections(
     // chain at file scope. Otherwise the new scope would be parented on
     // the current function-body scope, causing CppLookupName to hit a
     // non-file-context DeclContext during unqualified lookup.
+    // Injections processed during template instantiation are triggered from
+    // an arbitrary parse point, possibly inside another template's
+    // parameter list or body. Freshly parsed template parameters take their
+    // depth from TemplateParameterDepth, which reflects that unrelated
+    // parse point; the injected declarations belong to a concrete
+    // (instantiated or namespace) context, where new template parameters
+    // are at depth 0. Each instantiation-time branch below resets it.
+    std::optional<llvm::SaveAndRestore<unsigned>> DepthReset;
+
     std::optional<Sema::ContextRAII> TargetCtx;
     std::optional<ParseScope> TargetScope;
     std::optional<llvm::SaveAndRestore<Scope *>> ScopeSwap;
     if (Inj.TargetDC) {
+      DepthReset.emplace(TemplateParameterDepth, 0u);
       TargetCtx.emplace(Actions, Inj.TargetDC);
 
       // Walk up to find the file-scope so the new scope is parented
@@ -1354,6 +1377,8 @@ void Parser::ProcessTokenInjections(
       bool ReuseCurrentScope = !Actions.inTemplateInstantiation() &&
                                !Actions.CurContext->isDependentContext() &&
                                HasCurrentDeclContextScope();
+      if (!ReuseCurrentScope)
+        DepthReset.emplace(TemplateParameterDepth, 0u);
 
       // During template instantiation, or while parsing a dependent function
       // body, later ordinary source cannot look up names that are injected only
@@ -1419,10 +1444,25 @@ void Parser::ProcessTokenInjections(
       bool HasActiveClassParsing =
           !ClassStack.empty() && getCurrentClass().TagOrTemplate == TagDecl;
       std::optional<ParsingClassDefinition> ParsingDef;
+      std::optional<llvm::SaveAndRestore<Scope *>> ClassScopeSwap;
       std::optional<ParseScope> ClassScope;
       if (!HasActiveClassParsing) {
+        DepthReset.emplace(TemplateParameterDepth, 0u);
         ParsingDef.emplace(*this, TagDecl, /*TopLevelClass=*/true,
                            /*IsInterface=*/false);
+        // The injection runs during template instantiation, which can be
+        // triggered from an arbitrary parse point -- including from inside
+        // another template's scope (e.g. a requires-clause naming a member
+        // of the class being instantiated). The injected members must not
+        // see that site's scopes (its template parameters would shadow or
+        // capture names in the injected tokens), so re-root the scope chain
+        // at file scope first, as the target-namespace path above does.
+        Scope *FileScope = getCurScope();
+        while (FileScope->getParent() &&
+               !(FileScope->getEntity() &&
+                 FileScope->getEntity()->isFileContext()))
+          FileScope = FileScope->getParent();
+        ClassScopeSwap.emplace(Actions.CurScope, FileScope);
         // Create a scope with the class as entity so that
         // CheckTemplateDeclScope can find it when parsing member templates.
         ClassScope.emplace(this, Scope::ClassScope | Scope::DeclScope);
