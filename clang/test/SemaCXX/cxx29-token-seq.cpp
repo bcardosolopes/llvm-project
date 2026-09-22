@@ -944,6 +944,22 @@ namespace N34 {
     // Stringize of tokenize result
     static_assert(__builtin_strcmp(stringize(tokenize("hello")), "hello") == 0);
     static_assert(__builtin_strcmp(stringize(tokenize("a + b")), "a + b") == 0);
+
+    // Annotation tokens render as source-like text rather than crashing:
+    // an interpolated type prints via the printing policy...
+    struct Local { };
+    static_assert(__builtin_strcmp(
+        stringize(^^{ (\(^^Local)*)x }), "(N34::Local*)x") == 0);
+    static_assert(__builtin_strcmp(
+        stringize(^^{ \(^^const int) y }), "const int y") == 0);
+    // ...an interpolated value by its value, and a template by its name.
+    static_assert(__builtin_strcmp(stringize(^^{ f(\(1 + 2)) }), "f(3)") == 0);
+    template <class T> struct tmpl { };
+    static_assert(__builtin_strcmp(
+        stringize(^^{ \(^^tmpl)<int> }), "N34::tmpl<int>") == 0);
+    // An unresolved interpolation in a nested literal prints as written.
+    static_assert(__builtin_strcmp(
+        stringize(^^{ ^^{ \(a) } }), "^^{ \\(a) }") == 0);
 }
 
 // Interpolating a template reflection yields a template-name token: followed

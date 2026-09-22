@@ -54,6 +54,7 @@
 #include "clang/AST/OSLog.h"
 #include "clang/AST/OptionalDiagnostic.h"
 #include "clang/AST/RecordLayout.h"
+#include "clang/AST/Reflection.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/TypeLoc.h"
@@ -1998,6 +1999,8 @@ void SubobjectDesignator::adjustIndex(EvalInfo &Info, const Expr *E, APSInt N,
 }
 
 static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E);
+static bool EvaluateOperandAsRValue(EvalInfo &Info, const Expr *SubExpr,
+                                    APValue &Result);
 static bool EvaluateInPlace(APValue &Result, EvalInfo &Info,
                             const LValue &This, const Expr *E,
                             bool AllowNonLiteralTypes = false);
@@ -10968,9 +10971,10 @@ public:
   }
 
   bool VisitCXXBuiltinStringizeExpr(const CXXBuiltinStringizeExpr *E) {
-    // Evaluate the token_sequence operand.
+    // Evaluate the token_sequence operand (as a subexpression of the
+    // current evaluation, not as a top-level entry with a leak check).
     APValue Operand;
-    if (!EvaluateAsRValue(Info, E->getOperand(), Operand))
+    if (!EvaluateOperandAsRValue(Info, E->getOperand(), Operand))
       return false;
 
     if (!Operand.isTokenSequence()) {
@@ -10982,6 +10986,22 @@ public:
 
     // Convert tokens to string, preserving whitespace using Token::hasLeadingSpace().
     std::string ResultStr;
+    llvm::raw_string_ostream OS(ResultStr);
+    PrintingPolicy Policy(Info.Ctx.getLangOpts());
+    // Pretty-print an interpolated expression: a resolved value (a
+    // ConstantExpr carrying its result) by that value, a macro argument
+    // through its opaque value to the argument as written.
+    auto PrintExpr = [&](const Expr *Ex) {
+      if (const auto *CE = dyn_cast<ConstantExpr>(Ex);
+          CE && CE->hasAPValueResult()) {
+        CE->getAPValueResult().printPretty(OS, Info.Ctx, CE->getType());
+        return;
+      }
+      if (const auto *OVE = dyn_cast<OpaqueValueExpr>(Ex))
+        if (const Expr *Src = OVE->getSourceExpr())
+          Ex = Src;
+      Ex->printPretty(OS, nullptr, Policy);
+    };
     bool IsFirst = true;
     for (const Token &Tok : TSD) {
       // Add space if this token had leading space (preserves original spacing).
@@ -10989,14 +11009,45 @@ public:
         ResultStr += ' ';
       IsFirst = false;
 
-      // Get the token's text representation.
-      if (Tok.isLiteral() && Tok.getLiteralData()) {
+      // Get the token's text representation. Annotation tokens (interpolated
+      // types, expressions, templates, declaration descriptions) render as
+      // source-like text -- stringize exists for humans to read.
+      if (Tok.is(tok::annot_typename)) {
+        QualType::getFromOpaquePtr(Tok.getAnnotationValue()).print(OS, Policy);
+      } else if (Tok.isOneOf(tok::annot_primary_expr,
+                             tok::annot_token_seq_expr)) {
+        // An interpolated argument or value. (A resolved *value*
+        // interpolation keeps the annot_token_seq_expr kind, only its
+        // annotation value changes; an interpolation belonging to a nested,
+        // not-yet-evaluated literal is raw tokens, not an annotation.)
+        PrintExpr(static_cast<const Expr *>(Tok.getAnnotationValue()));
+      } else if (Tok.is(tok::annot_template_name)) {
+        TemplateName::getFromVoidPointer(Tok.getAnnotationValue())
+            .print(OS, Policy);
+      } else if (Tok.is(tok::annot_decl_spec)) {
+        const auto *FDS =
+            static_cast<const FunctionDeclSpec *>(Tok.getAnnotationValue());
+        OS << "<declaration of '" << FDS->Source->getQualifiedNameAsString()
+           << "'>";
+      } else if (Tok.is(tok::annot_template_param_spec)) {
+        const auto *TPS = static_cast<const TemplateParamListSpec *>(
+            Tok.getAnnotationValue());
+        OS << "<template parameters of '"
+           << TPS->Spec->Source->getQualifiedNameAsString() << "'>";
+      } else if (Tok.isAnnotation()) {
+        OS << "<annotation>";
+      } else if (Tok.isLiteral() && Tok.getLiteralData()) {
         ResultStr.append(Tok.getLiteralData(), Tok.getLength());
       } else if (const IdentifierInfo *II = Tok.getIdentifierInfo()) {
         ResultStr += II->getName();
-      } else {
-        // For punctuation and other tokens, get the spelling.
-        ResultStr += tok::getPunctuatorSpelling(Tok.getKind());
+      } else if (const char *Sp = tok::getPunctuatorSpelling(Tok.getKind())) {
+        ResultStr += Sp;
+      } else if (Tok.is(tok::unknown) && Tok.getLength() == 1 &&
+                 Tok.getLocation().isValid()) {
+        // The '\' of an interpolation belonging to a nested literal lexes as
+        // a single-character unknown token; spell it from the source.
+        ResultStr += *Info.Ctx.getSourceManager().getCharacterData(
+            Tok.getLocation());
       }
     }
 
