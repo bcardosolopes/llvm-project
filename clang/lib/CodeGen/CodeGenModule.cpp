@@ -4361,11 +4361,19 @@ ConstantAddress CodeGenModule::GetAddrOfPersistentAllocDecl(
 
   // An allocation persisted by a consteval variable is never emitted;
   // pointers into it are consteval-only values, and Sema diagnoses every
-  // escape route. Reaching here means one slipped through.
+  // escape route. Reaching here means one slipped through: report it, and
+  // hand back a zero-filled global of the right shape so code generation of
+  // the already-erroneous translation unit can continue without asserting.
   if (Owner->isConsteval()) {
     Error(Owner->getLocation(),
           "allocation persisted by a consteval variable cannot be emitted");
-    return ConstantAddress::invalid();
+    llvm::Type *ErrTy = getTypes().ConvertTypeForMem(PAD->getType());
+    auto *ErrGV = new llvm::GlobalVariable(
+        getModule(), ErrTy, /*isConstant=*/true,
+        llvm::GlobalValue::InternalLinkage,
+        llvm::Constant::getNullValue(ErrTy), Name);
+    ErrGV->setAlignment(Alignment.getAsAlign());
+    return ConstantAddress(ErrGV, ErrTy, Alignment);
   }
 
   // The allocation is placed in read-only storage only if it was marked
@@ -4540,6 +4548,10 @@ bool CodeGenModule::shouldEmitCUDAGlobalVar(const VarDecl *Global) const {
 
 void CodeGenModule::EmitGlobal(GlobalDecl GD) {
   const auto *Global = cast<ValueDecl>(GD.getDecl());
+
+  // A consteval variable exists only during translation (see EmitVarDecl).
+  if (const auto *VD = dyn_cast<VarDecl>(Global); VD && VD->isConsteval())
+    return;
 
   // Weak references don't produce any output by themselves.
   if (Global->hasAttr<WeakRefAttr>())

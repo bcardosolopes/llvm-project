@@ -213,6 +213,14 @@ void CodeGenFunction::EmitDecl(const Decl &D, bool EvaluateConditionDecl) {
 /// EmitVarDecl - This method handles emission of any variable declaration
 /// inside a function, including static vars etc.
 void CodeGenFunction::EmitVarDecl(const VarDecl &D) {
+  // A consteval variable (written, or a constexpr variable silently upgraded
+  // because its value holds consteval-only content -- a vector<info>, say)
+  // exists only during translation: every runtime use is diagnosed by Sema,
+  // and its value may own persisted allocations that must not be emitted.
+  // This includes the compile-time range of a 'template for (consteval ...)'.
+  if (D.isConsteval())
+    return;
+
   if (D.hasExternalStorage())
     // Don't emit it now, allow it to be emitted lazily on its first use.
     return;
