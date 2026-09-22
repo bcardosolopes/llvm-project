@@ -1107,3 +1107,34 @@ namespace N37 {
     template <int N> inline constexpr ann pick{};
     template <int N> struct [[=pick<N>]] dep { static constexpr int id = 3; };
 }
+
+namespace constrained_injected_members {
+    // A member template injected into a class template specialization is
+    // parsed fresh inside the instantiation: its template parameters are at
+    // depth 0. Constraint checking must not add the enclosing
+    // specialization's arguments as an outer level, which used to clobber
+    // the injected template's own parameters (the requires-clause below was
+    // checked with T = Iface regardless of the constructor argument).
+    template <class Iface> struct Dyn {
+        consteval {
+            std::meta::queue_injection(^^{
+                template <class T> requires (sizeof(T) == sizeof(Iface))
+                constexpr Dyn(T) {}
+            });
+        }
+    };
+
+    struct Big { int x[100]; };
+
+    // Dyn<char>'s injected constructor requires sizeof(T) == 1.
+    static_assert( __is_constructible(Dyn<char>, char));
+    static_assert(!__is_constructible(Dyn<char>, Big));
+
+    // Dyn<Big>'s requires sizeof(T) == sizeof(Big).
+    static_assert( __is_constructible(Dyn<Big>, Big));
+    static_assert(!__is_constructible(Dyn<Big>, char));
+
+    // The satisfied case still instantiates correctly.
+    constexpr int use(Dyn<char> d) { return 1; }
+    static_assert(use(Dyn<char>('x')) == 1);
+}

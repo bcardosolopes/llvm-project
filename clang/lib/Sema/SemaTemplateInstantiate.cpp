@@ -297,6 +297,67 @@ HandleClassTemplateSpec(const ClassTemplateSpecializationDecl *ClassTemplSpec,
   return Response::UseNextDecl(ClassTemplSpec);
 }
 
+// Detects references to template parameters at a depth strictly beyond
+// OwnDepth.
+struct DeeperTemplateParmRefFinder : DynamicRecursiveASTVisitor {
+  unsigned OwnDepth;
+  bool Match = false;
+
+  explicit DeeperTemplateParmRefFinder(unsigned OwnDepth)
+      : OwnDepth(OwnDepth) {}
+
+  bool check(unsigned ParmDepth) {
+    if (ParmDepth > OwnDepth)
+      Match = true;
+    return !Match;
+  }
+  bool VisitTemplateTypeParmType(TemplateTypeParmType *T) override {
+    return check(T->getDepth());
+  }
+  bool VisitTemplateTypeParmTypeLoc(TemplateTypeParmTypeLoc TL) override {
+    return check(TL.getTypePtr()->getDepth());
+  }
+  bool VisitDeclRefExpr(DeclRefExpr *E) override {
+    if (auto *PD = dyn_cast<NonTypeTemplateParmDecl>(E->getDecl()))
+      return check(PD->getDepth());
+    return true;
+  }
+  bool TraverseTemplateName(TemplateName N) override {
+    if (auto *PD =
+            dyn_cast_or_null<TemplateTemplateParmDecl>(N.getAsTemplateDecl()))
+      if (!check(PD->getDepth()))
+        return false;
+    return DynamicRecursiveASTVisitor::TraverseTemplateName(N);
+  }
+  bool VisitSubstTemplateTypeParmType(SubstTemplateTypeParmType *T) override {
+    return TraverseType(T->getReplacementType());
+  }
+};
+
+// Whether the template's associated constraints refer to template parameters
+// beyond its own parameter list. True for a CTAD-style clone injected by a
+// std::meta::declaration_of splice, which deliberately keeps the source's
+// constraint expressions unsubstituted (its own parameters at the source's
+// depth, the source class's parameters below them): checking its constraints
+// still needs the enclosing specialization's arguments as outer levels, even
+// though the rest of the declaration -- parameter types, defaults, body --
+// is fully parsed at depth 0 and must not receive them.
+bool constraintsReferBeyondOwnParams(const RedeclarableTemplateDecl *Pattern) {
+  const TemplateParameterList *TPL = Pattern->getTemplateParameters();
+  if (!TPL || TPL->size() == 0)
+    return false;
+
+  SmallVector<AssociatedConstraint, 3> AC;
+  Pattern->getAssociatedConstraints(AC);
+  DeeperTemplateParmRefFinder Finder(TPL->getDepth());
+  for (const AssociatedConstraint &C : AC) {
+    Finder.TraverseStmt(const_cast<Expr *>(C.ConstraintExpr));
+    if (Finder.Match)
+      return true;
+  }
+  return false;
+}
+
 Response HandleFunction(Sema &SemaRef, const FunctionDecl *Function,
                         MultiLevelTemplateArgumentList &Result,
                         const FunctionDecl *Pattern, bool RelativeToPrimary,
@@ -370,6 +431,22 @@ Response HandleFunction(Sema &SemaRef, const FunctionDecl *Function,
         }
       }
     }
+
+    // If this function template was injected into a class template
+    // specialization (rather than instantiated from a member of the class
+    // template pattern), it was parsed fresh inside the instantiated class:
+    // its template parameters are at depth 0 and we should not add the
+    // enclosing class template's arguments as an additional level, lest
+    // they clobber the template's own parameters during constraint
+    // checking. Exceptions: deduction guides (their template parameter
+    // depth is handled by the CTAD machinery) and declaration_of clones
+    // (their constraints are kept at the source's depths and still expect
+    // the enclosing arguments).
+    if (!isa<CXXDeductionGuideDecl>(Function) &&
+        Sema::isInjectedIntoSpecialization(Function->getDeclContext(),
+                                           Template) &&
+        !constraintsReferBeyondOwnParams(Template))
+      return Response::Done();
   }
   // If this is a friend or local declaration and it declares an entity at
   // namespace scope, take arguments from its lexical parent
