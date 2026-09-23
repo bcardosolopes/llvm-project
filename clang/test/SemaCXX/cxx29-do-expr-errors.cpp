@@ -273,6 +273,84 @@ namespace fall_off_end {
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
   }
+
+  // Covering every enumerator does not prove the switch cannot fall through:
+  // an enumeration can hold values outside its enumerator set. Unlike
+  // -Wreturn-type (see covered_enum_function below), the do-expression
+  // analysis does not treat a covered enum as exhaustive.
+  enum Color { Red, Green, Blue };
+
+  const char *bad_covered_enum(Color c) {
+    return do -> const char * {
+      switch (c) {
+        case Red:   do_return "Red";
+        case Green: do_return "Green";
+        case Blue:  do_return "Blue";
+      }
+      // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'const char *'}}
+    };
+  }
+
+  enum class Scoped { A, B };
+
+  int bad_covered_scoped_enum(Scoped s) {
+    return do -> int {
+      switch (s) {
+        case Scoped::A: do_return 1;
+        case Scoped::B: do_return 2;
+      }
+      // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
+    };
+  }
+
+  // With a fixed underlying type every value of that type is a valid
+  // enumeration value, so the fall-through edge is plainly reachable.
+  enum Fixed : int { F0, F1 };
+
+  int bad_covered_fixed_enum(Fixed f) {
+    return do -> int {
+      switch (f) {
+        case F0: do_return 1;
+        case F1: do_return 2;
+      }
+      // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
+    };
+  }
+
+  // The two ways to say "I know better".
+  [[noreturn]] void unreachable_hook();
+
+  const char *ok_covered_enum_noreturn(Color c) {
+    return do -> const char * {
+      switch (c) {
+        case Red:   do_return "Red";
+        case Green: do_return "Green";
+        case Blue:  do_return "Blue";
+      }
+      unreachable_hook();
+    };
+  }
+
+  const char *ok_covered_enum_default(Color c) {
+    return do -> const char * {
+      switch (c) {
+        case Red:   do_return "Red";
+        case Green: do_return "Green";
+        case Blue:  do_return "Blue";
+        default:    do_return "?";
+      }
+    };
+  }
+
+  // Functions are unchanged: -Wreturn-type is on by default and has long
+  // chosen to treat a covered enum switch as exhaustive. No diagnostic here.
+  const char *covered_enum_function(Color c) {
+    switch (c) {
+      case Red:   return "Red";
+      case Green: return "Green";
+      case Blue:  return "Blue";
+    }
+  }
 }
 
 namespace jump_into_do_expr {

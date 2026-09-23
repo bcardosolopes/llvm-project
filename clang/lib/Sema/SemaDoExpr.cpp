@@ -132,9 +132,11 @@ toConstevalConditionKind(ConstevalIfKind Kind) {
 /// Reachability is computed from a CFG built in do-expression-body mode (so
 /// escaping `break`/`continue` and `do_return` are modeled as edges to the
 /// exit block, and nested do-expressions are opaque). This reuses the same
-/// graph construction that powers -Wreturn-type, so switch coverage, `&&`/`||`,
-/// `?:`, constant loop conditions, and `if constexpr`/`if consteval` pruning
-/// are all handled accurately.
+/// graph construction that powers -Wreturn-type, so `&&`/`||`, `?:`, constant
+/// loop conditions, and `if constexpr`/`if consteval` pruning are all handled
+/// accurately. It is deliberately *stricter* than -Wreturn-type for a `switch`
+/// that covers every enumerator of its enumeration; see the note on
+/// AssumeReachableDefaultInSwitchStatements below.
 static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
                                      ConstevalIfKind ConstevalKind) {
   CFG::BuildOptions Options;
@@ -142,6 +144,23 @@ static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
   Options.PruneTriviallyFalseEdges = true;
   Options.AddEHEdges = false;
   Options.ConstevalCondition = toConstevalConditionKind(ConstevalKind);
+  // Covering every enumerator of a `switch` does not prove the `switch` cannot
+  // fall through: an enumeration can hold values outside its enumerator set,
+  // and always can when it has a fixed underlying type. Keep the implicit
+  // default edge reachable so that
+  //
+  //   enum Color : int { Red, Green, Blue };
+  //   const char *name = do {
+  //     switch (c) { case Red: do_return "Red"; case Green: do_return "Green";
+  //                  case Blue: do_return "Blue"; }
+  //   };
+  //
+  // is diagnosed instead of yielding an indeterminate value for any other `c`.
+  // For a function that is merely undefined behavior and -Wreturn-type has
+  // long chosen not to warn; for a do-expression it is required to be
+  // ill-formed. Users who know better say so with `std::unreachable()` or a
+  // `default:`.
+  Options.AssumeReachableDefaultInSwitchStatements = true;
 
   std::unique_ptr<CFG> Cfg =
       CFG::buildCFG(/*D=*/nullptr, Body, &S.Context, Options);
@@ -161,8 +180,11 @@ static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
   // `return`/`break`/`continue`, a `throw`, or a [[noreturn]] call. Edges from
   // pruned (unreachable) branches appear as null predecessors and are dropped
   // by IgnoreNullPredecessors.
+  //
+  // FilterOptions::IgnoreDefaultsWithCoveredEnums is deliberately left clear,
+  // for the same reason AssumeReachableDefaultInSwitchStatements is set above:
+  // it would drop the very edge we just kept.
   CFGBlock::FilterOptions FO;
-  FO.IgnoreDefaultsWithCoveredEnums = 1;
 
   for (CFGBlock::filtered_pred_iterator I =
            Cfg->getExit().filtered_pred_start_end(FO);
