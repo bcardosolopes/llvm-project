@@ -9760,8 +9760,17 @@ public:
     std::optional<CallStackFrame> SyntheticFrame;
     std::optional<llvm::SaveAndRestore<bool>> SyntheticDoExprFrame;
     if (Info.CurrentCall == &Info.BottomFrame) {
+      // Inherit `this` rather than starting from none. The synthetic frame is
+      // scaffolding for the body, not a call: it stands in for the frame it is
+      // pushed on top of, so the body sees the same object that frame did. A
+      // default member initializer is where this shows: the evaluator sets
+      // `This` on the current frame for the duration of the initializer (see
+      // ThisOverrideRAII), and a do-expression in that initializer would
+      // otherwise lose it and reject `do { do_return a + 10; }` for naming a
+      // non-static member.
       SyntheticFrame.emplace(Info, E->getSourceRange(),
-                             /*Callee=*/nullptr, /*This=*/nullptr,
+                             /*Callee=*/nullptr,
+                             /*This=*/Info.CurrentCall->This,
                              /*CallExpr=*/E, CallRef());
       SyntheticDoExprFrame.emplace(Info.EvaluatingSyntheticDoExprFrame, true);
 

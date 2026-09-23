@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -std=c++2d -verify -fsyntax-only %s
+// expected-no-diagnostics
 
 // Naming a member of the enclosing class from a do-expression body that is
 // itself in that class -- an implicit member access, or an access-controlled
@@ -86,25 +87,32 @@ namespace lambda_inside_a_body_in_a_dmi {
 }
 
 namespace constant_evaluation_of_this {
-  // FIXME: constant-evaluating a default member initializer whose
-  // do-expression body names a *non-static* member does not work. The
-  // evaluator enters the body as a synthetic call frame ("in call to
-  // '<expression body>'") that carries no object, so the implicit `this` is
-  // unavailable even though the initializer is being evaluated for a concrete
-  // object. Sema is happy -- the namespaces above compile -- and the same
-  // body inside a constexpr member function, or the equivalent
-  // immediately-invoked lambda in the same default member initializer, both
-  // evaluate fine, so this is specific to the do-expression's synthetic frame
-  // rather than to default member initializers.
-  //
-  // The diagnostics below record today's behavior so that fixing it is
-  // noticed here.
+  // Constant-evaluating a default member initializer whose do-expression body
+  // names a non-static member. The synthetic frame the evaluator pushes for
+  // the body inherits `this` from the frame it is pushed on top of, which is
+  // where the initializer's object lives.
   struct S {
     int a = 1;
-    int x = do { do_return a + 10; }; // expected-note {{implicit use of 'this' pointer is only allowed within the evaluation of a call to a 'constexpr' member function}}
-                                      // expected-note@-1 {{in call to '<expression body>'}}
+    int x = do { do_return a + 10; };
   };
-  static_assert(S{}.x == 11); // expected-error {{static assertion expression is not an integral constant expression}}
+  static_assert(S{}.x == 11);
+
+  // Through a nested do-expression, and with the member read more than once.
+  struct Nested {
+    int a = 2;
+    int b = 3;
+    int x = do { do_return a + do { do_return b * a; }; };
+  };
+  static_assert(Nested{}.x == 8);
+
+  // A do-expression in a default member initializer of a member that is
+  // itself initialized from another member's value.
+  struct Chained {
+    int a = 4;
+    int b = do { do_return a + 1; };
+    int c = do { do_return b + 1; };
+  };
+  static_assert(Chained{}.c == 6);
 
   // The controls, which all work.
   struct InConstexprMemberFn {
