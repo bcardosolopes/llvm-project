@@ -9752,58 +9752,22 @@ public:
 
     // At namespace scope (e.g. evaluating a constexpr variable initializer),
     // there is no real call frame on the stack — only the BottomFrame.
-    // Push a synthetic CallStackFrame so the body's evaluation has a valid
-    // call context (used by error diagnostics, the cleanup machinery, and so
-    // on). This does NOT yet enable declaring local variables inside such a
-    // body, since the parser still gives those variables a static-storage
-    // DeclContext at namespace scope.
-    std::optional<CallStackFrame> SyntheticFrame;
+    // The body is given a synthetic CallStackFrame so its evaluation has a
+    // valid call context (used by error diagnostics, the cleanup machinery,
+    // and so on).
+    //
+    // The flag is set here, but the frame itself is pushed further down,
+    // *after* the init-statement has been evaluated. Init-hoist declarations
+    // outlive the body -- their lifetime runs to the end of the enclosing
+    // full-expression -- so their storage must not be created in a frame that
+    // is popped as soon as the body ends. The flag still has to be in effect
+    // while the init-statement runs, because at namespace scope those
+    // declarations have static storage and EvaluateVarDecl only evaluates them
+    // when it can see they belong to a do-expression.
+    const bool NeedsSyntheticFrame = Info.CurrentCall == &Info.BottomFrame;
     std::optional<llvm::SaveAndRestore<bool>> SyntheticDoExprFrame;
-    if (Info.CurrentCall == &Info.BottomFrame) {
-      // Inherit `this` rather than starting from none. The synthetic frame is
-      // scaffolding for the body, not a call: it stands in for the frame it is
-      // pushed on top of, so the body sees the same object that frame did. A
-      // default member initializer is where this shows: the evaluator sets
-      // `This` on the current frame for the duration of the initializer (see
-      // ThisOverrideRAII), and a do-expression in that initializer would
-      // otherwise lose it and reject `do { do_return a + 10; }` for naming a
-      // non-static member.
-      SyntheticFrame.emplace(Info, E->getSourceRange(),
-                             /*Callee=*/nullptr,
-                             /*This=*/Info.CurrentCall->This,
-                             /*CallExpr=*/E, CallRef());
+    if (NeedsSyntheticFrame)
       SyntheticDoExprFrame.emplace(Info.EvaluatingSyntheticDoExprFrame, true);
-
-      // Name the body's own variables, so the two places that ask "is this a
-      // do-expression body local" can answer yes for them.
-      //
-      // Those places recognise one by its DeclContext being the synthetic one
-      // Sema builds for the body -- which Sema only builds when the
-      // do-expression is *not* already inside a function. In
-      //
-      //   void f() { constexpr B b = do { B x{6}; x &= B{3}; do_return x; }; }
-      //
-      // `x` belongs to `f`, the synthetic frame has no callee to match it
-      // against, and the lookup gave up: no frame, so `x` looked like an
-      // object that exists outside the expression and could be read but not
-      // modified. The same body at namespace scope, and the same mutation
-      // through a lambda, both worked.
-      auto RegisterBodyLocals = [&](const Stmt *S, auto &Self) -> void {
-        if (!S)
-          return;
-        // Not into anything with a scope of its own; its locals are not ours.
-        if (isa<LambdaExpr>(S))
-          return;
-        if (const auto *DS = dyn_cast<DeclStmt>(S))
-          for (const Decl *D : DS->decls())
-            if (const auto *VD = dyn_cast<VarDecl>(D))
-              if (VD->hasLocalStorage())
-                Info.DoExprLocalVarDecls.insert(VD);
-        for (const Stmt *Sub : S->children())
-          Self(Sub, Self);
-      };
-      RegisterBodyLocals(E->getBody(), RegisterBodyLocals);
-    }
 
     // A plain `return` in the body returns from the enclosing function, so
     // the body's statement result is the function's own: its value lands in
@@ -9877,6 +9841,54 @@ public:
         if (IsDoExprInitCleanup)
           Info.CleanupStack[I].setDestroyedAtEndOf(ScopeKind::FullExpression);
       }
+    }
+
+    // Now that the init-hoist declarations are safely in the enclosing frame,
+    // push the body's own.
+    std::optional<CallStackFrame> SyntheticFrame;
+    if (NeedsSyntheticFrame) {
+      // Inherit `this` rather than starting from none. The synthetic frame is
+      // scaffolding for the body, not a call: it stands in for the frame it is
+      // pushed on top of, so the body sees the same object that frame did. A
+      // default member initializer is where this shows: the evaluator sets
+      // `This` on the current frame for the duration of the initializer (see
+      // ThisOverrideRAII), and a do-expression in that initializer would
+      // otherwise lose it and reject `do { do_return a + 10; }` for naming a
+      // non-static member.
+      SyntheticFrame.emplace(Info, E->getSourceRange(),
+                             /*Callee=*/nullptr,
+                             /*This=*/Info.CurrentCall->This,
+                             /*CallExpr=*/E, CallRef());
+
+      // Name the body's own variables, so the two places that ask "is this a
+      // do-expression body local" can answer yes for them.
+      //
+      // Those places recognise one by its DeclContext being the synthetic one
+      // Sema builds for the body -- which Sema only builds when the
+      // do-expression is *not* already inside a function. In
+      //
+      //   void f() { constexpr B b = do { B x{6}; x &= B{3}; do_return x; }; }
+      //
+      // `x` belongs to `f`, the synthetic frame has no callee to match it
+      // against, and the lookup gave up: no frame, so `x` looked like an
+      // object that exists outside the expression and could be read but not
+      // modified. The same body at namespace scope, and the same mutation
+      // through a lambda, both worked.
+      auto RegisterBodyLocals = [&](const Stmt *S, auto &Self) -> void {
+        if (!S)
+          return;
+        // Not into anything with a scope of its own; its locals are not ours.
+        if (isa<LambdaExpr>(S))
+          return;
+        if (const auto *DS = dyn_cast<DeclStmt>(S))
+          for (const Decl *D : DS->decls())
+            if (const auto *VD = dyn_cast<VarDecl>(D))
+              if (VD->hasLocalStorage())
+                Info.DoExprLocalVarDecls.insert(VD);
+        for (const Stmt *Sub : S->children())
+          Self(Sub, Self);
+      };
+      RegisterBodyLocals(E->getBody(), RegisterBodyLocals);
     }
 
     BlockScopeRAII Scope(Info);
@@ -10366,8 +10378,19 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
     CallStackFrame *CurrFrame = Info.CurrentCall;
     const DeclContext *VarCtx = skipExpansionStmts(VD->getDeclContext());
     if (IsDoExprLocal) {
+      // Usually the current frame, but not always: an init-hoist declaration
+      // (`do [k = 5] { ... }`) outlives the body, so its storage is created in
+      // the frame that encloses the body rather than in the body's own. Walk
+      // out to the frame that actually holds it, and fall back to the current
+      // one so an as-yet-uninitialized variable still diagnoses as before.
       Frame = CurrFrame;
-      Version = CurrFrame->getCurrentTemporaryVersion(VD);
+      for (CallStackFrame *F = CurrFrame; F; F = F->Caller) {
+        if (F->getCurrentTemporary(VD)) {
+          Frame = F;
+          break;
+        }
+      }
+      Version = Frame->getCurrentTemporaryVersion(VD);
     } else if (CurrFrame->Callee && CurrFrame->Callee->Equals(VarCtx)) {
       // Function parameters are stored in some caller's frame. (Usually the
       // immediate caller, but for an inherited constructor they may be more
