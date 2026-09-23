@@ -2228,7 +2228,13 @@ bool is_structural_type(APValue &Result, ASTContext &C, MetaActions &Meta,
     const QualType QT = RV.getReflectedType();
     const Type* T = QT.getTypePtr();
 
-    result = T->isStructuralType();
+    // An incomplete class type is not structural; 'isStructuralType' would
+    // assert if asked about a class with no definition.
+    if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+        RD && !RD->hasDefinition())
+      result = false;
+    else
+      result = T->isStructuralType();
   }
 
   return SetAndSucceed(Result, makeBool(C, result));

@@ -9,6 +9,10 @@
 //===----------------------------------------------------------------------===//
 //
 // RUN: %clang_cc1 %s -std=c++26 -freflection -Wno-unused-value -verify
+//
+// Also check a target where size_t is 32 bits; the expansion index is a
+// size_t-typed template argument and must be built at the target's width.
+// RUN: %clang_cc1 %s -triple i686-linux-gnu -std=c++26 -freflection -Wno-unused-value -verify
 
 
                           // ================

@@ -233,4 +233,16 @@ static_assert(variant_alternative(3, ^^Var) == ^^int *);
  static_assert(is_structural_type(^^TCls<X>));
  static_assert(!is_structural_type(^^TCls<Y>));
 
+ // An incomplete class type is not structural (and must not crash).
+ struct Fwd;
+ static_assert(!is_structural_type(^^Fwd));
+
+ // A nested class of a class template, queried while the enclosing template
+ // is being instantiated, must be completed before answering.
+ template <class T> struct Outer {
+   struct Inner { T value; };
+   static constexpr bool b = is_structural_type(^^Inner);
+ };
+ static_assert(Outer<int>::b);
+
 int main() { }

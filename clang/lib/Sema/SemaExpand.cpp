@@ -568,7 +568,8 @@ StmtResult Sema::FinishCXXExpansionStmt(Stmt *Heading, Stmt *Body) {
     ExpansionStmtSynthesisRAII ExpansionGuard(*this, !DC->isDependentContext());
 
     TemplateArgument TArgs[] = {
-        { Context, llvm::APSInt::get(Instantiations.size()),
+        { Context, Context.MakeIntValue(Instantiations.size(),
+                                        Context.getSizeType()),
           Context.getSizeType() }
     };
     MultiLevelTemplateArgumentList MTArgList(StmtDecl, TArgs, true);

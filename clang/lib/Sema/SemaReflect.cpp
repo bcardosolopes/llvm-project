@@ -311,6 +311,13 @@ public:
         return true;
 
       S.InstantiateFunctionDefinition(Range.getBegin(), FD, true, true);
+    } else if (auto *TD = dyn_cast<TagDecl>(D);
+               TD && !TD->isCompleteDefinition()) {
+      // Tag types that are not specialization decls (e.g., member classes of
+      // class template instantiations) can still have an instantiable
+      // definition; the completion machinery knows how to find it.
+      (void)S.isCompleteType(Range.getBegin(),
+                             S.Context.getCanonicalTagType(TD));
     }
     return true;
   }
@@ -964,6 +971,10 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
   }
 
   if (auto *TD = dyn_cast<TypeDecl>(ND)) {
+    // A reflect-expression is a use of its operand (e.g., for the purposes of
+    // -Wunused-local-typedef).
+    MarkAnyDeclReferenced(NameInfo.getBeginLoc(), TD, /*MightBeOdrUse=*/false);
+
     QualType QT = Context.getTypeDeclType(TD);
     return BuildCXXReflectExpr(OpLoc, NameInfo.getBeginLoc(), QT);
   }
