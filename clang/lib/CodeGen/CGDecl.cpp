@@ -2146,6 +2146,40 @@ void CodeGenFunction::EmitExprAsInit(const Expr *init, const ValueDecl *D,
     EmitStoreThroughLValue(rvalue, lvalue, true);
     return;
   }
+  // A prvalue do-expression that is the whole initializer can produce its
+  // result directly in the variable's storage. Otherwise EmitDoExpr allocates
+  // a `doexpr.result` temporary, every do_return stores into that, and the
+  // join block loads it back out and stores it again into the variable: one
+  // extra alloca per site plus a store/load pair on the join path. mem2reg
+  // removes all of it, so this only shows at -O0 -- which is where the
+  // measured case for the feature is strongest, so it is worth not giving
+  // away.
+  //
+  // The aggregate path below already does this through AggValueSlot; this is
+  // the scalar and complex analogue. Any conversion between the
+  // do-expression and the variable leaves an ImplicitCastExpr in between, so
+  // matching the DoExpr directly is what keeps this to the exact-type case.
+  // Excluded: a __block variable, which has to be drilled into first; a
+  // non-simple lvalue, which has no plain address to hand over; and a volatile
+  // or atomic destination, where the number and kind of the writes is
+  // observable -- do_return stores through EmitAnyExprToMem with no
+  // qualifiers, so writing there directly would drop the volatility that
+  // storing through the lvalue preserves.
+  if (!capturedByInit && getEvaluationKind(type) != TEK_Aggregate &&
+      lvalue.isSimple() && !type.isVolatileQualified() &&
+      !type->isAtomicType()) {
+    if (const auto *DE = dyn_cast<DoExpr>(init->IgnoreParens())) {
+      if (DE->isPRValue() && getContext().hasSameType(DE->getType(), type)) {
+        EmitDoExpr(
+            *DE, AggValueSlot::forLValue(lvalue, AggValueSlot::IsNotDestructed,
+                                         AggValueSlot::DoesNotNeedGCBarriers,
+                                         AggValueSlot::IsNotAliased,
+                                         AggValueSlot::DoesNotOverlap));
+        return;
+      }
+    }
+  }
+
   switch (getEvaluationKind(type)) {
   case TEK_Scalar:
     EmitScalarInit(init, D, lvalue, capturedByInit);

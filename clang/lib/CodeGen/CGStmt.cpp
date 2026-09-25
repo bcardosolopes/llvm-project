@@ -1848,15 +1848,15 @@ Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
     QualType PtrTy = getContext().getPointerType(Ty);
     Slot = CreateMemTemp(PtrTy, "doexpr.refresult");
   } else if (!IsVoid) {
-    if (AVS.isIgnored() || hasAggregateEvaluationKind(Ty)) {
-      // Use the provided aggregate slot if any, otherwise allocate one.
-      if (!AVS.isIgnored() && AVS.getAddress().isValid())
-        Slot = AVS.getAddress();
-      else
-        Slot = CreateMemTemp(Ty, "doexpr.result");
-    } else {
+    // Use the slot the caller supplied, whatever the evaluation kind. For an
+    // aggregate that is the usual AggValueSlot threading; for a scalar it is
+    // the destination of an initialization that is exactly this do-expression
+    // (see EmitExprAsInit), and using it saves a temporary plus the store and
+    // load that copy out of it. Otherwise allocate.
+    if (!AVS.isIgnored() && AVS.getAddress().isValid())
+      Slot = AVS.getAddress();
+    else
       Slot = CreateMemTemp(Ty, "doexpr.result");
-    }
   }
 
   // Init declarations live until the enclosing full-expression, so emit them

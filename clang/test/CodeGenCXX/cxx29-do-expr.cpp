@@ -23,10 +23,12 @@ int two_returns(int n) {
 
 // 'return' inside do-expression returns from the enclosing function:
 // the -1 path stores into %retval and branches to %return, while the
-// do_return path stores into %doexpr.result.
+// do_return path stores into the result slot -- here the variable being
+// initialized, since the do-expression is the whole initializer (see
+// cxx29-do-expr-result-slot.cpp).
 // CHECK-LABEL: define {{.*}} @_Z12outer_returnb
 // CHECK: store i32 -1, ptr %retval
-// CHECK: store i32 1, ptr %doexpr.result
+// CHECK: store i32 1, ptr %x
 int outer_return(bool b) {
   int x = do {
     if (!b) return -1;
