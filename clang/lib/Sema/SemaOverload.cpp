@@ -15238,6 +15238,27 @@ ExprResult Sema::BuildMacroCandidateExpansion(const OverloadCandidate &Best,
       static_cast<CallExpr::ADLCallKind>(Best.IsADLCandidate));
 }
 
+bool Sema::EvaluateMacroCandidate(const OverloadCandidate &Best,
+                                  ArrayRef<Expr *> Args, SourceLocation Loc,
+                                  SourceLocation RParenLoc,
+                                  bool HadMultipleCandidates,
+                                  TokenSequenceData &Expansion) {
+  FunctionDecl *Macro = Best.Function;
+  if (Macro->isInvalidDecl())
+    return true;
+
+  const Expr *Base = nullptr;
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(Macro); MD && !MD->isStatic())
+    Base = Args[0];
+  ExprResult Fn = CreateFunctionRefExpr(*this, Macro, Best.FoundDecl, Base,
+                                        HadMultipleCandidates, Loc);
+  if (Fn.isInvalid())
+    return true;
+  return EvaluateMacroExpansion(
+      Fn.get(), Macro, Loc, Args, RParenLoc,
+      static_cast<CallExpr::ADLCallKind>(Best.IsADLCandidate), Expansion);
+}
+
 /// Finish a comparison for which overload resolution selected a rewritten or
 /// reversed candidate: negate the selected operator== for '!=', or compare
 /// the selected operator<=> against 0. \p R is the call to (or expansion of)

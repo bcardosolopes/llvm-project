@@ -1758,6 +1758,26 @@ namespace {
     ExprResult TransformDeclRefExpr(DeclRefExpr *E);
     ExprResult TransformCXXReflectExpr(CXXReflectExpr *E);
     ExprResult TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E);
+
+    void TransformUnparsedMacroEnvironment(CXXMacroInvocationExpr *Old,
+                                           CXXMacroInvocationExpr *New) {
+      // Parameters substituted here are gone (their uses in the captured
+      // tokens were replaced); the others may have been re-created.
+      SmallVector<NamedDecl *, 4> Params;
+      for (NamedDecl *P : Old->getUnparsedTemplateParams()) {
+        auto [Depth, Index] = getDepthAndIndex(P);
+        if (Depth < TemplateArgs.getNumLevels() &&
+            TemplateArgs.hasTemplateArgument(Depth, Index))
+          continue;
+        if (LocalInstantiationScope *Scope = SemaRef.CurrentInstantiationScope)
+          if (auto *Inst = Scope->getInstantiationOfIfExists(P))
+            if (auto *D =
+                    dyn_cast_if_present<NamedDecl>(Inst->dyn_cast<Decl *>()))
+              P = D;
+        Params.push_back(P);
+      }
+      New->setUnparsedEnvironment(SemaRef.Context, SemaRef.CurContext, Params);
+    }
     ExprResult TransformCXXDefaultArgExpr(CXXDefaultArgExpr *E);
 
     ExprResult TransformTemplateParmRefExpr(Expr *E,
@@ -2645,149 +2665,104 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
       getSema(), Sema::ExpressionEvaluationContext::ReflectionContext);
 
   TokenSequenceData TSD = E->getTokenSequence();
+  ArrayRef<TokenSequenceParamBinding> Bindings = E->getParamBindings();
 
-  // Build a map from identifier name to (Depth, Index, NamedDecl*) for all
-  // template parameters across all substitution levels.
-  struct ParamInfo {
-    unsigned Depth;
-    unsigned Index;
-    NamedDecl *Param;
-  };
-  llvm::StringMap<ParamInfo> ParamMap;
-
-  for (unsigned Depth = TemplateArgs.getNumRetainedOuterLevels();
-       Depth < TemplateArgs.getNumLevels(); ++Depth) {
-    auto [AssocDecl, Final] = TemplateArgs.getAssociatedDecl(Depth);
-    if (!AssocDecl)
-      continue;
-    TemplateParameterList *TPL = nullptr;
-    // Partial specializations have their own parameter list with names
-    // distinct from the primary template; prefer those when available.
-    if (auto *Partial =
-            dyn_cast<ClassTemplatePartialSpecializationDecl>(AssocDecl))
-      TPL = Partial->getTemplateParameters();
-    else if (auto *Partial =
-                 dyn_cast<VarTemplatePartialSpecializationDecl>(AssocDecl))
-      TPL = Partial->getTemplateParameters();
-    else if (auto *TD = dyn_cast<TemplateDecl>(AssocDecl))
-      TPL = TD->getTemplateParameters();
-    else if (auto *CTSD =
-                 dyn_cast<ClassTemplateSpecializationDecl>(AssocDecl))
-      TPL = CTSD->getSpecializedTemplate()->getTemplateParameters();
-    else if (auto *VTSD =
-                 dyn_cast<VarTemplateSpecializationDecl>(AssocDecl))
-      TPL = VTSD->getSpecializedTemplate()->getTemplateParameters();
-    if (!TPL)
-      continue;
-    for (unsigned I = 0; I < TPL->size(); ++I) {
-      NamedDecl *P = TPL->getParam(I);
-      if (IdentifierInfo *II = P->getIdentifier())
-        ParamMap[II->getName()] = {Depth, I, P};
-    }
-  }
-
-  // Scan tokens for identifiers matching template parameters, or
-  // annot_token_seq_expr tokens containing expressions that need transformation.
-  bool HasSubstitutions = false;
-  for (const Token &Tok : TSD) {
-    if (Tok.is(tok::identifier)) {
-      IdentifierInfo *II = Tok.getIdentifierInfo();
-      if (II && ParamMap.count(II->getName())) {
-        HasSubstitutions = true;
-        break;
-      }
-    } else if (Tok.is(tok::annot_token_seq_expr)) {
-      // All interpolation expressions need to be transformed during
-      // instantiation, since they may reference local declarations
-      // from the template that have been instantiated to new decls.
-      HasSubstitutions = true;
-      break;
-    }
-  }
-
-  if (!HasSubstitutions)
+  // Interpolated expressions always need transforming: they may reference
+  // local declarations of the template, which have been instantiated to new
+  // declarations.
+  bool HasInterpolations = llvm::any_of(
+      TSD, [](const Token &Tok) { return Tok.is(tok::annot_token_seq_expr); });
+  if (Bindings.empty() && !HasInterpolations)
     return RecordConsteval.RecordAndReturn(
         inherited::TransformCXXTokenSequenceExpr(E));
 
   ASTContext &Ctx = getSema().Context;
-  SmallVector<Token, 16> NewTokens(TSD.size());
-  for (unsigned I = 0; I < TSD.size(); ++I) {
-    NewTokens[I] = TSD[I];
+  SmallVector<Token, 16> NewTokens(TSD.begin(), TSD.end());
+  for (Token &Tok : NewTokens) {
+    if (!Tok.is(tok::annot_token_seq_expr))
+      continue;
+    Expr *SubExpr = static_cast<Expr *>(Tok.getAnnotationValue());
+    if (!SubExpr)
+      continue;
+    ExprResult Transformed = TransformExpr(SubExpr);
+    if (Transformed.isInvalid())
+      return ExprError();
 
-    if (TSD[I].is(tok::annot_token_seq_expr)) {
-      // Transform all expressions inside interpolation tokens.
-      Expr *SubExpr = static_cast<Expr *>(
-          TSD[I].getAnnotationValue());
-      if (SubExpr) {
-        ExprResult Transformed = TransformExpr(SubExpr);
-        if (Transformed.isInvalid())
-          return ExprError();
+    // TransformExpr may strip implicit conversions inserted by the
+    // original ActOnTokenSequenceInterpolation (e.g., when the
+    // operand had a user-defined conversion to token_sequence/info).
+    // Re-apply the same conversion logic so the substituted operand
+    // carries the conversion in the new instantiation.
+    Transformed = getSema().ActOnTokenSequenceInterpolation(Transformed.get());
+    if (Transformed.isInvalid())
+      return ExprError();
 
-        // TransformExpr may strip implicit conversions inserted by the
-        // original ActOnTokenSequenceInterpolation (e.g., when the
-        // operand had a user-defined conversion to token_sequence/info).
-        // Re-apply the same conversion logic so the substituted operand
-        // carries the conversion in the new instantiation.
-        Transformed = getSema().ActOnTokenSequenceInterpolation(
-            Transformed.get());
-        if (Transformed.isInvalid())
-          return ExprError();
+    // Force instantiation of any consteval function definitions in the
+    // expression. These will be evaluated later during consteval
+    // evaluation of the token sequence, but the definitions must be
+    // available at that point.
+    ConstevalFunctionInstantiator Instantiator(getSema(),
+                                               Transformed.get()->getExprLoc());
+    Instantiator.TraverseStmt(Transformed.get());
 
-        // Force instantiation of any consteval function definitions in the
-        // expression. These will be evaluated later during consteval
-        // evaluation of the token sequence, but the definitions must be
-        // available at that point.
-        ConstevalFunctionInstantiator Instantiator(getSema(),
-                                                   Transformed.get()->getExprLoc());
-        Instantiator.TraverseStmt(Transformed.get());
+    Tok.setAnnotationValue(static_cast<void *>(Transformed.get()));
+  }
 
-        NewTokens[I].setAnnotationValue(
-            static_cast<void *>(Transformed.get()));
-      }
+  // Replace each identifier that named a template parameter where the
+  // sequence was written by that parameter's argument. (Matching on
+  // spelling instead would also replace member names that share it, and
+  // miss parameters renamed by an out-of-line definition.)
+  SmallVector<TokenSequenceParamBinding, 4> NewBindings;
+  for (const TokenSequenceParamBinding &B : Bindings) {
+    Token &Tok = NewTokens[B.TokenIndex];
+    SourceLocation Loc = Tok.getLocation();
+    auto [Depth, Index] = getDepthAndIndex(B.Param);
+    if (Depth >= TemplateArgs.getNumLevels() ||
+        !TemplateArgs.hasTemplateArgument(Depth, Index)) {
+      // Not substituted here (a parameter of a template nested within the
+      // one being instantiated). The instantiation may have re-created its
+      // declaration, at a new depth.
+      NamedDecl *Param = B.Param;
+      if (LocalInstantiationScope *Scope = getSema().CurrentInstantiationScope)
+        if (auto *Inst = Scope->getInstantiationOfIfExists(Param))
+          if (auto *D =
+                  dyn_cast_if_present<NamedDecl>(Inst->dyn_cast<Decl *>()))
+            Param = D;
+      NewBindings.push_back({B.TokenIndex, Param});
       continue;
     }
 
-    if (!TSD[I].is(tok::identifier)) continue;
-    IdentifierInfo *II = TSD[I].getIdentifierInfo();
-    if (!II) continue;
-    auto It = ParamMap.find(II->getName());
-    if (It == ParamMap.end()) continue;
-
-    ParamInfo &PI = It->second;
-    if (!TemplateArgs.hasTemplateArgument(PI.Depth, PI.Index))
-      continue;
-    const TemplateArgument &Arg = TemplateArgs(PI.Depth, PI.Index);
-
-    if (isa<TemplateTypeParmDecl>(PI.Param)) {
-      // Type template parameter: substitute with annot_typename.
-      assert(Arg.getKind() == TemplateArgument::Type);
-      QualType QT = Arg.getAsType();
-      NewTokens[I].setKind(tok::annot_typename);
-      NewTokens[I].setAnnotationEndLoc(TSD[I].getLocation());
-      NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
-    } else if (isa<NonTypeTemplateParmDecl>(PI.Param)) {
-      // Non-type template parameter: substitute with annot_token_seq_expr.
-      Expr *Val = nullptr;
-      if (Arg.getKind() == TemplateArgument::Expression) {
-        Val = Arg.getAsExpr();
-      } else if (Arg.getKind() == TemplateArgument::Integral) {
-        Val = IntegerLiteral::Create(
-            Ctx, Arg.getAsIntegral(), Arg.getIntegralType(),
-            TSD[I].getLocation());
-      }
-      if (Val) {
-        NewTokens[I].setKind(tok::annot_token_seq_expr);
-        NewTokens[I].setAnnotationEndLoc(TSD[I].getLocation());
-        NewTokens[I].setAnnotationValue(static_cast<void *>(Val));
-      }
+    // A token stands for one entity; a pack has no single replacement.
+    if (B.Param->isParameterPack()) {
+      getSema().Diag(Loc, diag::err_token_sequence_param_pack) << B.Param;
+      return ExprError();
     }
+
+    if (auto *TTP = dyn_cast<TemplateTypeParmDecl>(B.Param)) {
+      QualType T = TransformType(QualType(TTP->getTypeForDecl(), 0));
+      if (T.isNull())
+        return ExprError();
+      Tok.setKind(tok::annot_typename);
+      Tok.setAnnotationEndLoc(Loc);
+      Tok.setAnnotationValue(T.getAsOpaquePtr());
+    } else if (auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(B.Param)) {
+      ExprResult Ref = getSema().BuildDeclarationNameExpr(
+          CXXScopeSpec(), DeclarationNameInfo(NTTP->getDeclName(), Loc), NTTP);
+      if (!Ref.isInvalid())
+        Ref = TransformExpr(Ref.get());
+      if (Ref.isInvalid())
+        return ExprError();
+      Tok.setKind(tok::annot_token_seq_expr);
+      Tok.setAnnotationEndLoc(Loc);
+      Tok.setAnnotationValue(static_cast<void *>(Ref.get()));
+    }
+    // A template template parameter is left to lookup in the expansion.
   }
 
   TokenSequenceData NewTSD = CreateTokenSequenceData(Ctx, NewTokens);
 
-  return RecordConsteval.RecordAndReturn(
-      CXXTokenSequenceExpr::Create(Ctx, E->getOperatorLoc(),
-                                   E->getOperandRange(), NewTSD));
+  return RecordConsteval.RecordAndReturn(CXXTokenSequenceExpr::Create(
+      Ctx, E->getOperatorLoc(), E->getOperandRange(), NewTSD, NewBindings));
 }
 
 ExprResult TemplateInstantiator::TransformCXXDefaultArgExpr(

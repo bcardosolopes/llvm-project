@@ -855,6 +855,17 @@ public:
 
   ExprResult TransformAddressOfOperand(Expr *E);
 
+  /// Parse the arguments of \p E, captured as tokens, according to the now
+  /// known shape \p RawParams, and transform them.
+  bool TransformDeferredMacroArguments(ArrayRef<bool> RawParams,
+                                       CXXMacroInvocationExpr *E,
+                                       SmallVectorImpl<Expr *> &Args);
+  /// Give \p New, a rebuilt invocation of still unknown shape, the
+  /// environment its arguments are to be parsed in: the context being
+  /// transformed into, with the template parameters of \p Old that remain.
+  void TransformUnparsedMacroEnvironment(CXXMacroInvocationExpr *Old,
+                                         CXXMacroInvocationExpr *New);
+
   ExprResult TransformDependentScopeDeclRefExpr(DependentScopeDeclRefExpr *E,
                                                 bool IsAddressOfOperand,
                                                 TypeSourceInfo **RecoveryTSI);
@@ -9357,6 +9368,28 @@ TreeTransform<Derived>::TransformCXXBuiltinTokenizeExpr(
 }
 
 template <typename Derived>
+bool TreeTransform<Derived>::TransformDeferredMacroArguments(
+    ArrayRef<bool> RawParams, CXXMacroInvocationExpr *E,
+    SmallVectorImpl<Expr *> &Args) {
+  // The arguments are parsed as part of the template they were written in,
+  // then transformed like the rest of it.
+  SmallVector<Expr *, 4> PatternArgs;
+  if (getSema().ParseDeferredMacroArguments(RawParams, E, PatternArgs) ||
+      getDerived().TransformExprs(PatternArgs.data(), PatternArgs.size(),
+                                  /*IsCall=*/true, Args))
+    return true;
+  getSema().ForgetConsumedMacroArguments(Args);
+  return false;
+}
+
+template <typename Derived>
+void TreeTransform<Derived>::TransformUnparsedMacroEnvironment(
+    CXXMacroInvocationExpr *Old, CXXMacroInvocationExpr *New) {
+  New->setUnparsedEnvironment(getSema().Context, getSema().CurContext,
+                              Old->getUnparsedTemplateParams());
+}
+
+template <typename Derived>
 ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     CXXMacroInvocationExpr *E) {
   // A member invocation looks its macros up in the (now known) class of the
@@ -9365,6 +9398,35 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     ExprResult Base = getDerived().TransformExpr(E->getBase());
     if (Base.isInvalid())
       return ExprError();
+    if (E->areArgsUnparsed()) {
+      // The arguments were captured as tokens, the shape being unknown.
+      const IdentifierInfo *II =
+          E->getMemberNameInfo().getName().getAsIdentifierInfo();
+      SmallVector<bool, 4> RawParams;
+      bool ShapeUnknown = false;
+      if (getSema().GetMemberMacroParameterShape(
+              Base.get(), E->isArrow() ? tok::arrow : tok::period, II,
+              E->getMemberNameInfo().getLoc(), RawParams, ShapeUnknown))
+        return ExprError();
+      if (ShapeUnknown) {
+        ExprResult Blob = getDerived().TransformExpr(E->getArg(0));
+        if (Blob.isInvalid())
+          return ExprError();
+        auto *New = CXXMacroInvocationExpr::CreateMember(
+            getSema().Context, Base.get(), E->isArrow(), E->getOperatorLoc(),
+            E->getMemberNameInfo(), {Blob.get()}, E->getExclaimLoc(),
+            E->getLParenLoc(), E->getRParenLoc());
+        getDerived().TransformUnparsedMacroEnvironment(E, New);
+        return New;
+      }
+      SmallVector<Expr *, 4> Args;
+      if (getDerived().TransformDeferredMacroArguments(RawParams, E, Args))
+        return ExprError();
+      return getSema().BuildMemberMacroInvocation(
+          Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
+          E->getExclaimLoc(), E->getLParenLoc(), Args, E->getRParenLoc(),
+          /*InstantiationPattern=*/E);
+    }
     SmallVector<Expr *, 4> Args;
     if (getDerived().TransformExprs(E->getArgs().data(), E->getNumArgs(),
                                     /*IsCall=*/true, Args))
@@ -9373,6 +9435,39 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
         Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
         E->getExclaimLoc(), E->getLParenLoc(), Args, E->getRParenLoc(),
         /*InstantiationPattern=*/E);
+  }
+
+  // A dependent qualifier: the macros are looked up only now, and the
+  // arguments, captured as tokens, parsed according to their shape.
+  if (E->areArgsUnparsed()) {
+    UnresolvedLookupExpr *Old = E->getCallee();
+    NestedNameSpecifierLoc QualifierLoc =
+        getDerived().TransformNestedNameSpecifierLoc(Old->getQualifierLoc());
+    if (!QualifierLoc)
+      return ExprError();
+    UnresolvedLookupExpr *Callee = nullptr;
+    SmallVector<bool, 4> RawParams;
+    bool StillDependent = false;
+    if (getSema().LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(),
+                                               Callee, RawParams,
+                                               StillDependent))
+      return ExprError();
+    if (StillDependent) {
+      ExprResult Blob = getDerived().TransformExpr(E->getArg(0));
+      if (Blob.isInvalid())
+        return ExprError();
+      auto *New = CXXMacroInvocationExpr::Create(
+          getSema().Context, Callee, {Blob.get()}, E->getExclaimLoc(),
+          E->getLParenLoc(), E->getRParenLoc());
+      getDerived().TransformUnparsedMacroEnvironment(E, New);
+      return New;
+    }
+    SmallVector<Expr *, 4> Args;
+    if (getDerived().TransformDeferredMacroArguments(RawParams, E, Args))
+      return ExprError();
+    return getSema().BuildMacroInvocation(
+        /*S=*/nullptr, Callee, E->getExclaimLoc(), E->getLParenLoc(), Args,
+        E->getRParenLoc(), /*InstantiationPattern=*/E);
   }
 
   // The macros were found by ordinary lookup when the template was parsed;

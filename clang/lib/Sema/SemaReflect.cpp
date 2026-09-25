@@ -1042,11 +1042,57 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
   return BuildCXXReflectExpr(OperatorLoc, E);
 }
 
-ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
-                                                  SourceRange OperandRange,
-                                                  ArrayRef<Token> Tokens) {
+/// True if the identifier at \p Tokens[I] follows a member access or a
+/// nested-name-specifier ('x.N', 'p->N', 'T::N', 'x.template N', 'x.~N'),
+/// where it names a member rather than whatever unqualified lookup finds.
+static bool isMemberNameToken(ArrayRef<Token> Tokens, unsigned I) {
+  auto IsAccess = [&](unsigned J) {
+    return Tokens[J].isOneOf(tok::period, tok::arrow, tok::coloncolon);
+  };
+  if (I == 0)
+    return false;
+  if (IsAccess(I - 1))
+    return true;
+  return I >= 2 && Tokens[I - 1].isOneOf(tok::kw_template, tok::tilde) &&
+         IsAccess(I - 2);
+}
+
+/// Record the identifier tokens of \p Tokens that name template parameters
+/// in scope \p S. Binding them here, where the sequence is written, keeps
+/// their meaning when the sequence is instantiated: a parameter is found
+/// under the name it has at this point (an out-of-line member may rename its
+/// class's parameters), and a member name that merely shares a parameter's
+/// spelling is left alone.
+static void collectTokenSequenceParamBindings(
+    Sema &SemaRef, Scope *S, ArrayRef<Token> Tokens,
+    SmallVectorImpl<TokenSequenceParamBinding> &Bindings) {
+  if (!S || !S->getTemplateParamParent())
+    return;
+
+  for (unsigned I = 0, N = Tokens.size(); I != N; ++I) {
+    const Token &T = Tokens[I];
+    if (!T.is(tok::identifier) || isMemberNameToken(Tokens, I))
+      continue;
+    LookupResult R(SemaRef, T.getIdentifierInfo(), T.getLocation(),
+                   Sema::LookupOrdinaryName);
+    R.suppressDiagnostics();
+    if (!SemaRef.LookupName(R, S, /*AllowBuiltinCreation=*/false) ||
+        !R.isSingleResult())
+      continue;
+    NamedDecl *Found = R.getFoundDecl();
+    if (Found->isTemplateParameter())
+      Bindings.push_back({I, Found});
+  }
+}
+
+ExprResult Sema::ActOnCXXTokenSequenceReflection(Scope *S, SourceLocation OpLoc,
+                                                 SourceRange OperandRange,
+                                                 ArrayRef<Token> Tokens) {
   TokenSequenceData TSD = CreateTokenSequenceData(Context, Tokens);
-  return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD);
+  SmallVector<TokenSequenceParamBinding, 4> Bindings;
+  collectTokenSequenceParamBindings(*this, S, Tokens, Bindings);
+  return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD,
+                                      Bindings);
 }
 
 enum class TokenOpTarget { MetaInfo, TokenSequence };

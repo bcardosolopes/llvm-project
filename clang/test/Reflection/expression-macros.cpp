@@ -533,20 +533,23 @@ here:
 }
 static_assert(in_label(3) == 13);
 
-// A raw member macro cannot be invoked through an object of unknown
-// dependent type: the argument tokens were already parsed as an expression.
+// Through an object of unknown dependent type, the macro's parameter shape
+// is not known when the invocation is parsed: the argument list is captured
+// as tokens and parsed at instantiation, so raw parameters work too.
 struct Raw {
   __macro raw(this Raw const&, token_sequence t) { return ^^{ (\(t)) }; }
   __macro expr(this Raw const&, int x) { return ^^{ \(x) }; }
+  __macro mixed(this Raw const&, int x, token_sequence rest) {
+    return ^^{ \(x) + sizeof((\(rest))) };
+  }
 };
 
 template <class T>
 constexpr int call_raw(T const& t) {
-  return t.raw!(1 + 2);  // expected-error {{member expression macro 'raw' has a token sequence parameter, but the object's type was not known when the invocation was parsed, so the argument was parsed as an expression}} \
-                         // expected-note {{invoke the macro on an object whose type is known at the point of invocation to pass raw tokens}}
+  int local = 10;
+  return t.raw!(1 + local) + t.mixed!(local * 2, ((char)1, (short)2));
 }
-constexpr int bad = call_raw(Raw{});  // expected-note {{in instantiation of function template specialization 'N16::call_raw<N16::Raw>' requested here}} \
-                                      // expected-error {{constexpr variable 'bad' must be initialized by a constant expression}}
+static_assert(call_raw(Raw{}) == 11 + 20 + 2);
 
 // An expression-parameter member macro through the same dependent path is
 // fine, as is a raw member macro on a known (current-instantiation) type.
@@ -973,3 +976,128 @@ make_scaled!();
 static_assert(scaled!(2) == 6);
 
 }  // namespace N24
+
+namespace N25 {
+
+// With a dependent qualifier the macros, and so their parameter shape, are
+// unknown until instantiation: the argument list is captured as tokens and
+// parsed then, whatever the shape.
+struct H {
+  static __macro keep(token_sequence t) { return t; }
+  static __macro twice(int x) { return ^^{ 2 * \(x) }; }
+  static __macro add(int x, int y) { return ^^{ \(x) + \(y) }; }  // #add
+  static __macro head_rest(int x, token_sequence rest) {
+    return ^^{ \(x) + sizeof((\(rest))) };
+  }
+  static __macro none() { return ^^{ 42 }; }
+};
+
+template <class T> struct Wrap { using type = T; };
+
+template <class T, int N>
+constexpr int f(int v) {
+  int local = 100;
+  return T::keep!(v + local + N)                    // raw, naming locals and N
+         + T::twice!(local)                         // expression parameter
+         + T::add!(N, sizeof(T))                    // split at the comma
+         + T::head_rest!(1, ((char)1, (short)2))    // greedy raw rest
+         + T::none!()                               // no arguments
+         + T::add!{1, 2,}                           // braces: trailing comma
+         + Wrap<T>::type::twice!(3);                // nested dependent name
+}
+static_assert(f<H, 5>(1) == 106 + 200 + 6 + 3 + 42 + 3 + 6);
+
+// Still dependent after the enclosing template is instantiated.
+template <class T>
+constexpr auto g() {
+  return [](auto u) { return decltype(u)::keep!(sizeof(T) + 1); };
+}
+static_assert(g<int>()(H{}) == 5);
+
+// Errors surface at instantiation.
+template <class T> constexpr int bad1() { return T::nope!(1); }  // expected-error {{use of undeclared expression macro 'nope'}}
+template <class T> constexpr int bad2() { return T::twice!(1 +); }  // expected-error {{expected expression}}
+template <class T> constexpr int bad3() { return T::add!(1); }  // expected-error {{no matching function for call to 'add'}}
+int b1 = bad1<H>();  // expected-note {{in instantiation of function template specialization 'N25::bad1<N25::H>' requested here}}
+int b2 = bad2<H>();  // expected-note {{in instantiation of function template specialization 'N25::bad2<N25::H>' requested here}}
+int b3 = bad3<H>();  // expected-note {{in instantiation of function template specialization 'N25::bad3<N25::H>' requested here}} \
+                     // expected-note@#add {{candidate function not viable: requires 2 arguments, but 1 was provided}}
+
+}  // namespace N25
+
+namespace N26 {
+// Arguments captured with an unknown shape are parsed where they were
+// written, as part of the template, then substituted into like the rest of
+// it: packs, member names, lambdas, and nested templates all behave.
+using token_sequence = decltype(^^{});
+
+struct H {
+  static __macro keep(token_sequence t) { return t; }
+  static __macro twice(int n) { return ^^{ (\(n) * 2) }; }
+  static __macro sum(int a, int b) { return ^^{ (\(a) + \(b)) }; }
+  __macro expr(this H const &, int n) { return ^^{ \(n) }; }
+};
+
+template <class T, class... Ts> constexpr int p1(T t) { return t.expr!(sizeof...(Ts)); }
+static_assert(p1<H, int, long>(H{}) == 2);
+template <class T, class... Ts> constexpr int p2() { return T::twice!(sizeof...(Ts)); }
+static_assert(p2<H, int, int, int>() == 6);
+
+// 'x.N' names the member, not the parameter.
+struct X { int N; };
+template <class T, int N> constexpr int m1(T t) { X x{42}; return t.expr!(x.N); }
+static_assert(m1<H, 0>(H{}) == 42);
+template <class T, int N> constexpr int m2(X x) { return T::keep!(x.N + N); }
+static_assert(m2<H, 1>(X{41}) == 42);
+
+// Type parameters in raw tokens.
+template <class T, class U> constexpr int t1() { return T::keep!(sizeof(U)); }
+static_assert(t1<H, long>() == sizeof(long));
+
+// In a lambda, and a lambda in the arguments.
+template <class T> constexpr int l1(int v) {
+  int w = 10;
+  return [&](int u) { return T::sum!(u, w + v); }(1);
+}
+static_assert(l1<H>(5) == 16);
+template <class T> constexpr int l2(int v) { return T::keep!([=] { return v; }()); }
+static_assert(l2<H>(7) == 7);
+
+// Still dependent after the enclosing template is instantiated.
+template <class T> constexpr int g1(int v) {
+  return [v](auto h) { return decltype(h)::sum!(v, sizeof(T)); }(H{});
+}
+static_assert(g1<char>(3) == 4);
+template <class T> constexpr int g2(T t) {
+  return [&]<class U>(U u) { return u.expr!(sizeof(T) + sizeof(U)); }(t);
+}
+static_assert(g2(H{}) == 2);
+
+// Not in a function.
+template <class T, int N> constexpr int v1 = T::twice!(N);
+static_assert(v1<H, 4> == 8);
+template <class T> struct D { int x = T::twice!(sizeof(T)); };
+static_assert(D<H>{}.x == 2);
+
+// Raw tokens name what they named where they were written: an out-of-line
+// member may rename its class's template parameters.
+__macro keep(token_sequence t) { return t; }
+template <class T> struct R {
+  static constexpr int f();
+  template <int N> static constexpr int g(X x);
+};
+template <class U> constexpr int R<U>::f() { return keep!(sizeof(U)); }
+static_assert(R<long>::f() == sizeof(long));
+template <class U> template <int M> constexpr int R<U>::g(X x) {
+  return H::keep!(x.N + M + sizeof(U));
+}
+static_assert(R<char>::g<2>(X{3}) == 6);
+
+// Expanded in the template, raw tokens may name a pack; expanded at
+// instantiation, no one token can stand for its elements.
+template <class... Ts> constexpr int ok() { return keep!(sizeof...(Ts)); }
+static_assert(ok<int, int>() == 2);
+template <class T, class... Ts> constexpr int bad() { return T::keep!(sizeof...(Ts)); }  // expected-error {{template parameter pack 'Ts' cannot be substituted into a token sequence}}
+int b = bad<H, int>();  // expected-note {{in instantiation of function template specialization 'N26::bad<N26::H, int>' requested here}}
+
+}  // namespace N26

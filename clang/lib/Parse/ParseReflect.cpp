@@ -18,9 +18,10 @@
 #include "clang/Lex/Token.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
-#include "clang/Sema/Lookup.h"
-#include "llvm/ADT/ScopeExit.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
+#include "clang/Sema/Lookup.h"
+#include "clang/Sema/Template.h"
+#include "llvm/ADT/ScopeExit.h"
 using namespace clang;
 
 ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
@@ -153,8 +154,8 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
     }
 
     SourceRange OperandRange(LBraceLoc, RBraceLoc);
-    return Actions.ActOnCXXTokenSequenceReflection(OpLoc, OperandRange,
-                                                   Tokens);
+    return Actions.ActOnCXXTokenSequenceReflection(getCurScope(), OpLoc,
+                                                   OperandRange, Tokens);
   }
 
   Sema::ConstevalOnlyRecorder RecordConstevalOnly(Actions);
@@ -437,14 +438,12 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   assert(isMacroInvocationExclaim());
 
   // The macro's parameter shape decides how each argument is parsed, so the
-  // macro has to be found before the arguments are read.
+  // macro has to be found before the arguments are read. (With a dependent
+  // qualifier it cannot be, and the arguments wait for instantiation.)
   SmallVector<bool, 4> RawParams;
-  bool ShapeError;
-  {
-    LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
-    Actions.LookupParsedName(R, getCurScope(), &SS, /*ObjectType=*/QualType());
-    ShapeError = Actions.GetMacroParameterShape(R, RawParams);
-  }
+  bool ShapeUnknown = false;
+  bool ShapeError = Actions.GetQualifiedMacroParameterShape(
+      getCurScope(), SS, II, NameLoc, RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
   BalancedDelimiterTracker T(*this, Tok.getKind());
@@ -456,14 +455,14 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   }
 
   ExprVector Args;
-  if (ParseMacroArguments(RawParams, T, Args))
+  if (ParseMacroArguments(RawParams, ShapeUnknown, T, Args))
     return ExprError();
   if (T.consumeClose())
     return ExprError();
 
   return Actions.ActOnMacroInvocation(getCurScope(), SS, II, NameLoc,
                                       ExclaimLoc, T.getOpenLocation(), Args,
-                                      T.getCloseLocation());
+                                      T.getCloseLocation(), ShapeUnknown);
 }
 
 /// Parse 'obj.name!(args)' / 'obj->name!(args)'. The member name has been
@@ -476,10 +475,11 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
   assert(isMacroInvocationExclaim());
 
   // If the object's class is not known yet (a dependent object expression),
-  // every argument is parsed as an expression.
+  // the arguments wait for instantiation.
   SmallVector<bool, 4> RawParams;
-  bool ShapeError =
-      Actions.GetMemberMacroParameterShape(Base, OpKind, II, NameLoc, RawParams);
+  bool ShapeUnknown = false;
+  bool ShapeError = Actions.GetMemberMacroParameterShape(
+      Base, OpKind, II, NameLoc, RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
   BalancedDelimiterTracker T(*this, Tok.getKind());
@@ -491,14 +491,14 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
   }
 
   ExprVector Args;
-  if (ParseMacroArguments(RawParams, T, Args))
+  if (ParseMacroArguments(RawParams, ShapeUnknown, T, Args))
     return ExprError();
   if (T.consumeClose())
     return ExprError();
 
   return Actions.ActOnMemberMacroInvocation(
       getCurScope(), Base, OpLoc, OpKind, II, NameLoc, ExclaimLoc,
-      T.getOpenLocation(), Args, T.getCloseLocation());
+      T.getOpenLocation(), Args, T.getCloseLocation(), ShapeUnknown);
 }
 
 /// Parse a declaration-position macro invocation, 'name!(args);', at
@@ -538,7 +538,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   }
 
   ExprVector Args;
-  if (ParseMacroArguments(RawParams, T, Args)) {
+  if (ParseMacroArguments(RawParams, /*ShapeUnknown=*/false, T, Args)) {
     TryConsumeToken(tok::semi);
     return nullptr;
   }
@@ -604,10 +604,29 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
 /// closing bracket (the one matching the invocation's opener); raw parameters
 /// take their arguments as token sequences. Skips to the closing bracket and
 /// returns true on error.
-bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
+bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams, bool ShapeUnknown,
                                  BalancedDelimiterTracker &T,
                                  ExprVector &Args) {
   tok::TokenKind Close = T.getCloseKind();
+  if (ShapeUnknown) {
+    ExprResult Blob = ParseMacroRawArgument(Close, /*Greedy=*/true);
+    if (Blob.isInvalid()) {
+      T.skipToEnd();
+      return true;
+    }
+    Args.push_back(Blob.get());
+    return false;
+  }
+  if (ParseMacroArgumentList(RawParams, Close, Close == tok::r_brace, Args)) {
+    T.skipToEnd();
+    return true;
+  }
+  return false;
+}
+
+bool Parser::ParseMacroArgumentList(ArrayRef<bool> RawParams,
+                                    tok::TokenKind Close, bool Braced,
+                                    ExprVector &Args) {
   if (Tok.isNot(Close)) {
     while (true) {
       unsigned Idx = Args.size();
@@ -620,10 +639,8 @@ bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
         Arg = ParseBraceInitializer();
       else
         Arg = ParseAssignmentExpression();
-      if (Arg.isInvalid()) {
-        T.skipToEnd();
+      if (Arg.isInvalid())
         return true;
-      }
       Args.push_back(Arg.get());
       if (!TryConsumeToken(tok::comma))
         break;
@@ -632,7 +649,7 @@ bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams,
       // not. (Requires at least one argument: 'f!{,}' is not an empty list.
       // And a *greedy* raw parameter never reaches here -- it swallows
       // top-level commas, so its trailing comma is tokens, not sugar.)
-      if (Close == tok::r_brace && Tok.is(Close))
+      if (Braced && Tok.is(Close))
         break;
     }
   }
@@ -652,14 +669,14 @@ ExprResult Parser::ParseMacroRawArgument(tok::TokenKind Close, bool Greedy) {
   SourceLocation EndLoc = StartLoc;
   SmallVector<tok::TokenKind, 4> Closers;
   while (true) {
+    // (\p Close is eof when re-parsing a captured argument list.)
+    if (Closers.empty() && (Tok.is(Close) || (Tok.is(tok::comma) && !Greedy)))
+      break;
     if (Tok.is(tok::eof)) {
       Diag(Tok, diag::err_expected)
           << (Closers.empty() ? Close : Closers.back());
       return ExprError();
     }
-    if (Closers.empty() &&
-        (Tok.is(Close) || (Tok.is(tok::comma) && !Greedy)))
-      break;
     if (Tok.is(tok::l_paren)) {
       Closers.push_back(tok::r_paren);
     } else if (Tok.is(tok::l_square)) {
@@ -681,7 +698,132 @@ ExprResult Parser::ParseMacroRawArgument(tok::TokenKind Close, bool Greedy) {
     ConsumeAnyToken();
   }
   return Actions.ActOnCXXTokenSequenceReflection(
-      StartLoc, SourceRange(StartLoc, EndLoc), Tokens);
+      getCurScope(), StartLoc, SourceRange(StartLoc, EndLoc), Tokens);
+}
+
+bool Parser::ParseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
+                                         TokenSequenceData TSD,
+                                         SourceLocation Loc, DeclContext *Ctx,
+                                         ArrayRef<NamedDecl *> TemplateParams,
+                                         SmallVectorImpl<Expr *> &Args) {
+  // The arguments are parsed where they were written, as part of the
+  // template: re-enter the template scopes and contexts around \p Ctx, as
+  // for a late-parsed template, so that names bind as they would have there.
+  // The chain is rooted at the translation unit's scope, not the current
+  // one: whatever is being parsed now is unrelated to the template.
+  Scope *SavedScope = Actions.CurScope;
+  Scope *Root = SavedScope;
+  while (Root->getParent())
+    Root = Root->getParent();
+  Actions.CurScope = Root;
+  auto RestoreScope =
+      llvm::make_scope_exit([&] { Actions.CurScope = SavedScope; });
+
+  TemplateParameterDepthRAII DepthTracker(TemplateParameterDepth);
+  Sema::ContextRAII SavedContext(Actions,
+                                 Actions.Context.getTranslationUnitDecl());
+  MultiParseScope Scopes(*this);
+  SmallVector<DeclContext *, 4> Contexts;
+  for (DeclContext *DC = Ctx; DC && !DC->isTranslationUnit();
+       DC = DC->getLexicalParent())
+    Contexts.push_back(DC);
+  for (DeclContext *DC : llvm::reverse(Contexts)) {
+    DepthTracker.addDepth(ReenterTemplateScopes(Scopes, cast<Decl>(DC)));
+    Scopes.Enter(Scope::DeclScope);
+    // The innermost function gets its own function scope below.
+    if (DC != Ctx || !DC->isFunctionOrMethod())
+      getCurScope()->setEntity(DC);
+    Actions.CurContext = DC;
+  }
+
+  // Template parameters of an enclosing template that is not a context (a
+  // variable or alias template, say) were not re-entered.
+  llvm::SmallPtrSet<Decl *, 8> Visible;
+  for (Scope *S = getCurScope(); S; S = S->getParent())
+    if (S->isTemplateParamScope())
+      Visible.insert(S->decls().begin(), S->decls().end());
+  SmallVector<NamedDecl *, 4> Extra;
+  for (NamedDecl *P : TemplateParams)
+    if (P->getDeclName() && !Visible.count(P))
+      Extra.push_back(P);
+  Scope *ExtraScope = nullptr;
+  if (!Extra.empty()) {
+    Scopes.Enter(Scope::TemplateParamScope);
+    DepthTracker.addDepth(1);
+    ExtraScope = getCurScope();
+    for (NamedDecl *P : Extra) {
+      ExtraScope->AddDecl(P);
+      Actions.IdResolver.AddDecl(P);
+    }
+  }
+  // They are not ours to pop (with the scope) off their identifiers.
+  auto RemoveExtra = llvm::make_scope_exit([&] {
+    for (NamedDecl *P : Extra) {
+      ExtraScope->RemoveDecl(P);
+      Actions.IdResolver.RemoveDecl(P);
+    }
+  });
+
+  // A function scope of its own, for anything (a lambda, say) the
+  // arguments contain; and one for each enclosing lambda, for captures of
+  // what it encloses. (The captures are redone when the arguments are
+  // substituted into; the local instantiation scope keeps what rebuilding
+  // the lambdas records out of the one being instantiated.)
+  LocalInstantiationScope CaptureScope(Actions,
+                                       /*CombineWithOuterScope=*/true);
+  Actions.PushFunctionScope();
+  unsigned NumFunctionScopes = 1;
+  for (DeclContext *DC : llvm::reverse(Contexts))
+    if (isLambdaCallOperator(DC)) {
+      Actions.CurContext = DC;
+      Actions.RebuildLambdaScopeInfo(cast<CXXMethodDecl>(DC));
+      ++NumFunctionScopes;
+    }
+  Actions.CurContext = Ctx;
+  auto PopFunctionScopes = llvm::make_scope_exit([&] {
+    while (NumFunctionScopes--)
+      Actions.PopFunctionScopeInfo();
+  });
+
+  // The tokens were captured at the invocation and keep their locations.
+  SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
+  Token Eof;
+  Eof.startToken();
+  Eof.setKind(tok::eof);
+  Eof.setLocation(Loc);
+  Toks.push_back(Eof);
+
+  Token SavedTok = Tok;
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                      /*IsReinject=*/true);
+  ConsumeAnyToken();
+
+  bool Invalid;
+  {
+    MacroExpansionLookupScope LookupScope(*this);
+    GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
+    ColonProtectionRAIIObject ColonProtection(*this, false);
+    ExprVector Parsed;
+    Invalid = ParseMacroArgumentList(RawParams, tok::eof, Braced, Parsed);
+    if (!Invalid && Tok.isNot(tok::eof)) {
+      Diag(Tok, diag::err_expected) << tok::comma;
+      Invalid = true;
+    }
+    Args.append(Parsed.begin(), Parsed.end());
+  }
+  while (Tok.isNot(tok::eof))
+    ConsumeAnyToken();
+
+  Tok = SavedTok;
+  return Invalid;
+}
+
+bool Parser::DeferredMacroArgumentsCallback(
+    void *P, ArrayRef<bool> RawParams, bool Braced, TokenSequenceData TSD,
+    SourceLocation Loc, DeclContext *Ctx, ArrayRef<NamedDecl *> TemplateParams,
+    SmallVectorImpl<Expr *> &Args) {
+  return static_cast<Parser *>(P)->ParseDeferredMacroArguments(
+      RawParams, Braced, TSD, Loc, Ctx, TemplateParams, Args);
 }
 
 ExprResult Parser::ExpressionMacroExpansionCallback(void *P,
@@ -812,64 +954,7 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
                       /*IsReinject=*/true);
   ConsumeAnyToken();
 
-  // During template instantiation the parser is not positioned inside the
-  // function being instantiated. Give the expansion a function scope with the
-  // instantiated parameters and the locals Sema collected as visible at the
-  // invocation, so unqualified names resolve as they would have in the
-  // template.
-  auto HasScopeFor = [&](DeclContext *DC) {
-    for (Scope *S = getCurScope(); S; S = S->getParent())
-      if (S->getEntity() == DC)
-        return true;
-    return false;
-  };
-  std::optional<ParseScope> FnScope;
-  llvm::SmallPtrSet<NamedDecl *, 16> SeenSeeded;
-  SmallVector<NamedDecl *, 8> SeededBase;
-  SmallVector<SmallVector<NamedDecl *, 4>, 4> SeededLevels;
-  unsigned NumLevelScopes = 0;
-  if (Actions.CurContext->isFunctionOrMethod() &&
-      !HasScopeFor(Actions.CurContext)) {
-    FnScope.emplace(this, Scope::FnScope | Scope::DeclScope |
-                              Scope::CompoundStmtScope);
-    getCurScope()->setEntity(Actions.CurContext);
-    auto SeedInto = [&](NamedDecl *D, SmallVectorImpl<NamedDecl *> &Out) {
-      if (!D->getDeclName() || !SeenSeeded.insert(D).second)
-        return;
-      getCurScope()->AddDecl(D);
-      Actions.IdResolver.AddDecl(D);
-      Out.push_back(D);
-    };
-    if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext))
-      for (ParmVarDecl *P : FD->parameters())
-        SeedInto(P, SeededBase);
-    for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup)
-      SeedInto(D, SeededBase);
-    // Each level of locals Sema collected gets its own nested scope, so an
-    // inner declaration hides an outer one the way it did at the invocation.
-    for (const auto &Level : Actions.MacroExpansionLocalScopes) {
-      if (Level.empty())
-        continue;
-      EnterScope(Scope::DeclScope);
-      ++NumLevelScopes;
-      SeededLevels.emplace_back();
-      for (NamedDecl *D : Level)
-        SeedInto(D, SeededLevels.back());
-    }
-  }
-  auto Unseed = llvm::make_scope_exit([&] {
-    for (unsigned I = NumLevelScopes; I--;) {
-      for (NamedDecl *D : SeededLevels[I]) {
-        getCurScope()->RemoveDecl(D);
-        Actions.IdResolver.RemoveDecl(D);
-      }
-      ExitScope();
-    }
-    for (NamedDecl *D : SeededBase) {
-      getCurScope()->RemoveDecl(D);
-      Actions.IdResolver.RemoveDecl(D);
-    }
-  });
+  MacroExpansionLookupScope LookupScope(*this);
 
   // The expansion is delimited by its own eof, so it is parsed free of the
   // enclosing context's bracket rules.
@@ -893,4 +978,194 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
 
   Tok = SavedTok;
   return Result;
+}
+
+Parser::MacroExpansionLookupScope::MacroExpansionLookupScope(Parser &P) : P(P) {
+  Sema &Actions = P.Actions;
+  DeclContext *DC = Actions.CurContext;
+  if (!DC->isFunctionOrMethod())
+    return;
+  for (Scope *S = P.getCurScope(); S; S = S->getParent())
+    if (S->getEntity() == DC)
+      return;
+
+  FnScope.emplace(&P,
+                  Scope::FnScope | Scope::DeclScope | Scope::CompoundStmtScope);
+  P.getCurScope()->setEntity(DC);
+  if (auto *FD = dyn_cast<FunctionDecl>(DC))
+    for (ParmVarDecl *Param : FD->parameters())
+      seed(Param, Base);
+  for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup)
+    seed(D, Base);
+  // Each level of locals Sema collected gets its own nested scope, so an
+  // inner declaration hides an outer one the way it did at the invocation.
+  for (const auto &Level : Actions.MacroExpansionLocalScopes) {
+    if (Level.empty())
+      continue;
+    P.EnterScope(Scope::DeclScope);
+    Levels.emplace_back();
+    for (NamedDecl *D : Level)
+      seed(D, Levels.back());
+  }
+}
+
+void Parser::MacroExpansionLookupScope::seed(
+    NamedDecl *D, SmallVectorImpl<NamedDecl *> &Out) {
+  if (!D->getDeclName() || !Seen.insert(D).second)
+    return;
+  P.getCurScope()->AddDecl(D);
+  P.Actions.IdResolver.AddDecl(D);
+  Out.push_back(D);
+}
+
+Parser::MacroExpansionLookupScope::~MacroExpansionLookupScope() {
+  for (unsigned I = Levels.size(); I--;) {
+    for (NamedDecl *D : Levels[I]) {
+      P.getCurScope()->RemoveDecl(D);
+      P.Actions.IdResolver.RemoveDecl(D);
+    }
+    P.ExitScope();
+  }
+  for (NamedDecl *D : Base) {
+    P.getCurScope()->RemoveDecl(D);
+    P.Actions.IdResolver.RemoveDecl(D);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Mem-initializer macros: C(...) : name!(args), ... { }
+//===----------------------------------------------------------------------===//
+
+bool Parser::ParseMemInitializerOrMacro(
+    Decl *ConstructorDecl, SmallVectorImpl<CXXCtorInitializer *> &MemInits) {
+  // '::'[opt] nested-name-specifier[opt], shared by both forms.
+  CXXScopeSpec SS;
+  if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                     /*ObjectHasErrors=*/false,
+                                     /*EnteringContext=*/false))
+    return true;
+
+  if (getLangOpts().Reflection && Tok.is(tok::identifier) &&
+      NextToken().is(tok::exclaim) &&
+      isMacroArgumentListOpener(GetLookAheadToken(2).getKind()))
+    return ParseMemInitMacroInvocation(ConstructorDecl, SS, MemInits);
+
+  MemInitResult MemInit = ParseMemInitializer(ConstructorDecl, SS);
+  if (MemInit.isInvalid())
+    return true;
+  MemInits.push_back(MemInit.get());
+  return false;
+}
+
+bool Parser::ParseMemInitMacroInvocation(
+    Decl *ConstructorDecl, CXXScopeSpec &SS,
+    SmallVectorImpl<CXXCtorInitializer *> &MemInits) {
+  assert(Tok.is(tok::identifier) && NextToken().is(tok::exclaim));
+
+  IdentifierInfo *II = Tok.getIdentifierInfo();
+  SourceLocation NameLoc = ConsumeToken();
+  SourceLocation StartLoc = SS.isEmpty() ? NameLoc : SS.getBeginLoc();
+
+  // The macro's parameter shape decides how each argument is parsed.
+  SmallVector<bool, 4> RawParams;
+  bool ShapeUnknown = false;
+  // An invalid qualifier has already been diagnosed.
+  bool ShapeError = SS.isInvalid() || Actions.GetQualifiedMacroParameterShape(
+                                          getCurScope(), SS, II, NameLoc,
+                                          RawParams, ShapeUnknown);
+
+  SourceLocation ExclaimLoc = ConsumeToken();
+  BalancedDelimiterTracker T(*this, Tok.getKind());
+  T.consumeOpen();
+
+  if (ShapeError) {
+    T.skipToEnd();
+    return true;
+  }
+
+  ExprVector Args;
+  if (ParseMacroArguments(RawParams, ShapeUnknown, T, Args))
+    return true;
+  if (T.consumeClose())
+    return true;
+
+  TokenSequenceData Expansion;
+  bool Deferred = false;
+  if (Actions.ActOnMemInitMacroInvocation(
+          getCurScope(), ConstructorDecl, MemInits.size(), SS, II, NameLoc,
+          ExclaimLoc, T.getOpenLocation(), Args, T.getCloseLocation(),
+          ShapeUnknown, Expansion, Deferred))
+    return true;
+  if (Deferred)
+    return false;
+
+  return ParseMemInitMacroExpansion(ConstructorDecl, Expansion,
+                                    SourceRange(StartLoc, T.getCloseLocation()),
+                                    MemInits);
+}
+
+bool Parser::ParseMemInitializersUntilEof(
+    Decl *ConstructorDecl, SmallVectorImpl<CXXCtorInitializer *> &MemInits) {
+  // Unlike a written mem-initializer-list, an expansion may be empty: the
+  // invocation itself is what the source wrote.
+  if (Tok.is(tok::eof))
+    return false;
+
+  while (true) {
+    // The rest of a malformed expansion is not worth diagnosing.
+    if (ParseMemInitializerOrMacro(ConstructorDecl, MemInits))
+      return true;
+
+    if (Tok.is(tok::eof))
+      break;
+    if (!TryConsumeToken(tok::comma)) {
+      Diag(Tok, diag::err_expected) << tok::comma;
+      return true;
+    }
+    // No trailing comma: 'a(x),' is not a mem-initializer-list.
+    if (Tok.is(tok::eof)) {
+      Diag(Tok, diag::err_expected_member_or_base_name);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Parser::ParseMemInitMacroExpansion(
+    Decl *ConstructorDecl, TokenSequenceData TSD, SourceRange Invocation,
+    SmallVectorImpl<CXXCtorInitializer *> &Out) {
+  SmallVector<Token, 16> Toks(TSD.begin(), TSD.end());
+  relocateExpansionTokens(PP.getSourceManager(), Toks, Invocation);
+  Token Eof;
+  Eof.startToken();
+  Eof.setKind(tok::eof);
+  Eof.setLocation(Invocation.getEnd());
+  Toks.push_back(Eof);
+
+  Token SavedTok = Tok;
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                      /*IsReinject=*/true);
+  ConsumeAnyToken();
+
+  bool Invalid;
+  {
+    MacroExpansionLookupScope LookupScope(*this);
+    GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
+    ColonProtectionRAIIObject ColonProtection(*this, false);
+    PoisonSEHIdentifiersRAIIObject PoisonSEHIdentifiers(*this, true);
+    Invalid = ParseMemInitializersUntilEof(ConstructorDecl, Out);
+  }
+  // Drain what is left so the enclosing token stream resumes cleanly.
+  while (Tok.isNot(tok::eof))
+    ConsumeAnyToken();
+
+  Tok = SavedTok;
+  return Invalid;
+}
+
+bool Parser::MemInitMacroExpansionCallback(
+    void *P, Decl *ConstructorDecl, TokenSequenceData TSD,
+    SourceRange Invocation, SmallVectorImpl<CXXCtorInitializer *> &Out) {
+  return static_cast<Parser *>(P)->ParseMemInitMacroExpansion(
+      ConstructorDecl, TSD, Invocation, Out);
 }

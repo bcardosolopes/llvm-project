@@ -1025,6 +1025,38 @@ bool Parser::ConsumeAndStoreFunctionPrologue(CachedTokens &Toks) {
       ConsumeToken();
       continue;
     }
+
+    // A macro invocation, 'name!(...)', whose expansion is mem-initializers.
+    // The arguments are bracketed by any of (), {} or [].
+    if (getLangOpts().Reflection && isMacroInvocationExclaim()) {
+      Toks.push_back(Tok);
+      ConsumeToken();
+      tok::TokenKind OpenKind = Tok.getKind();
+      tok::TokenKind CloseKind = OpenKind == tok::l_paren   ? tok::r_paren
+                                 : OpenKind == tok::l_brace ? tok::r_brace
+                                                            : tok::r_square;
+      SourceLocation OpenLoc = Tok.getLocation();
+      Toks.push_back(Tok);
+      ConsumeAnyToken();
+      if (!ConsumeAndStoreUntil(CloseKind, Toks, /*StopAtSemi=*/true)) {
+        Diag(Tok, diag::err_expected) << CloseKind;
+        Diag(OpenLoc, diag::note_matching) << OpenKind;
+        return true;
+      }
+      if (Tok.is(tok::comma)) {
+        Toks.push_back(Tok);
+        ConsumeToken();
+        continue;
+      }
+      if (Tok.is(tok::l_brace)) {
+        Toks.push_back(Tok);
+        ConsumeBrace();
+        return false;
+      }
+      return Diag(Tok.getLocation(), diag::err_expected_either)
+             << tok::l_brace << tok::comma;
+    }
+
     if (Tok.is(tok::less))
       MightBeTemplateArgument = true;
 

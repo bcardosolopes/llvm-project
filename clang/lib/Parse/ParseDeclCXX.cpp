@@ -4406,11 +4406,8 @@ void Parser::ParseConstructorInitializer(Decl *ConstructorDecl) {
       return;
     }
 
-    MemInitResult MemInit = ParseMemInitializer(ConstructorDecl);
-    if (!MemInit.isInvalid())
-      MemInitializers.push_back(MemInit.get());
-    else
-      AnyErrors = true;
+    bool Invalid = ParseMemInitializerOrMacro(ConstructorDecl, MemInitializers);
+    AnyErrors |= Invalid;
 
     if (Tok.is(tok::comma))
       ConsumeToken();
@@ -4418,14 +4415,13 @@ void Parser::ParseConstructorInitializer(Decl *ConstructorDecl) {
       break;
     // If the previous initializer was valid and the next token looks like a
     // base or member initializer, assume that we're just missing a comma.
-    else if (!MemInit.isInvalid() &&
-             Tok.isOneOf(tok::identifier, tok::coloncolon)) {
+    else if (!Invalid && Tok.isOneOf(tok::identifier, tok::coloncolon)) {
       SourceLocation Loc = PP.getLocForEndOfToken(PrevTokLocation);
       Diag(Loc, diag::err_ctor_init_missing_comma)
           << FixItHint::CreateInsertion(Loc, ", ");
     } else {
       // Skip over garbage, until we get to '{'.  Don't eat the '{'.
-      if (!MemInit.isInvalid())
+      if (!Invalid)
         Diag(Tok.getLocation(), diag::err_expected_either)
             << tok::l_brace << tok::comma;
       SkipUntil(tok::l_brace, StopAtSemi | StopBeforeMatch);
@@ -4437,14 +4433,8 @@ void Parser::ParseConstructorInitializer(Decl *ConstructorDecl) {
                                AnyErrors);
 }
 
-MemInitResult Parser::ParseMemInitializer(Decl *ConstructorDecl) {
-  // parse '::'[opt] nested-name-specifier[opt]
-  CXXScopeSpec SS;
-  if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                     /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/false))
-    return true;
-
+MemInitResult Parser::ParseMemInitializer(Decl *ConstructorDecl,
+                                          CXXScopeSpec &SS) {
   // : identifier
   IdentifierInfo *II = nullptr;
   SourceLocation IdLoc = Tok.getLocation();

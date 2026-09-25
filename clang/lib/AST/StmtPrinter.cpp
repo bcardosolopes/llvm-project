@@ -2952,6 +2952,10 @@ void StmtPrinter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *S) {
     PrintExpr(S->getCallee());
   }
   OS << "!(";
+  if (S->areArgsUnparsed()) {
+    OS << "...)";
+    return;
+  }
   for (unsigned I = 0, N = S->getNumArgs(); I != N; ++I) {
     if (I)
       OS << ", ";

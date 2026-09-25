@@ -1374,6 +1374,21 @@ public:
     typedef ExprResult ExpressionMacroExpansionCB(void *P,
                                                   TokenSequenceData TSD,
                                                   SourceRange Invocation);
+    // Parse a mem-initializer macro's token sequence as a (possibly empty)
+    // mem-initializer-list of \p Ctor, appending to \p Out. Returns true on
+    // error.
+    typedef bool
+    MemInitMacroExpansionCB(void *P, Decl *Ctor, TokenSequenceData TSD,
+                            SourceRange Invocation,
+                            SmallVectorImpl<CXXCtorInitializer *> &Out);
+    // Parse the argument list of a macro invocation, captured as tokens when
+    // the macro's parameter shape was unknown, according to \p RawParams.
+    // Returns true on error.
+    typedef bool DeferredMacroArgumentsCB(void *P, ArrayRef<bool> RawParams,
+                                          bool Braced, TokenSequenceData TSD,
+                                          SourceLocation Loc, DeclContext *Ctx,
+                                          ArrayRef<NamedDecl *> TemplateParams,
+                                          SmallVectorImpl<Expr *> &Args);
 
     void setParser(void *P) { OpaqueParser = P; }
 
@@ -1394,6 +1409,42 @@ public:
     void setExpressionMacroExpansionCallback(
         ExpressionMacroExpansionCB *CB) {
       ExpressionMacroExpansionCallback = CB;
+    }
+
+    void setMemInitMacroExpansionCallback(MemInitMacroExpansionCB *CB) {
+      MemInitMacroExpansionCallback = CB;
+    }
+
+    void setDeferredMacroArgumentsCallback(DeferredMacroArgumentsCB *CB) {
+      DeferredMacroArgumentsCallback = CB;
+    }
+
+    bool canParseDeferredMacroArguments() const {
+      return DeferredMacroArgumentsCallback && OpaqueParser;
+    }
+
+    bool parseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
+                                     TokenSequenceData TSD, SourceLocation Loc,
+                                     DeclContext *Ctx,
+                                     ArrayRef<NamedDecl *> TemplateParams,
+                                     SmallVectorImpl<Expr *> &Args) const {
+      assert(DeferredMacroArgumentsCallback && OpaqueParser &&
+             "deferred macro arguments parsed without a parser");
+      return DeferredMacroArgumentsCallback(
+          OpaqueParser, RawParams, Braced, TSD, Loc, Ctx, TemplateParams, Args);
+    }
+
+    bool canParseMemInitMacroExpansion() const {
+      return MemInitMacroExpansionCallback && OpaqueParser;
+    }
+
+    bool parseMemInitMacroExpansion(
+        Decl *Ctor, TokenSequenceData TSD, SourceRange Invocation,
+        SmallVectorImpl<CXXCtorInitializer *> &Out) const {
+      assert(MemInitMacroExpansionCallback && OpaqueParser &&
+             "mem-initializer macro expansion requested without a parser");
+      return MemInitMacroExpansionCallback(OpaqueParser, Ctor, TSD, Invocation,
+                                           Out);
     }
 
     bool canParseExpressionMacroExpansion() const {
@@ -1466,6 +1517,8 @@ public:
     DeferredInjectedDefsCB *DeferredInjectedDefsCallback = nullptr;
     ExpressionMacroExpansionCB *ExpressionMacroExpansionCallback = nullptr;
     ExpressionMacroExpansionCB *SpeculativeExpressionCallback = nullptr;
+    MemInitMacroExpansionCB *MemInitMacroExpansionCallback = nullptr;
+    DeferredMacroArgumentsCB *DeferredMacroArgumentsCallback = nullptr;
     void *OpaqueParser = nullptr;
   };
 
@@ -1488,6 +1541,22 @@ public:
   }
   bool CanParseExpressionMacroExpansion() const {
     return ParserBridge.canParseExpressionMacroExpansion();
+  }
+  void SetMemInitMacroExpansionCallback(
+      SemaParserBridge::MemInitMacroExpansionCB *CB) {
+    ParserBridge.setMemInitMacroExpansionCallback(CB);
+  }
+  void SetDeferredMacroArgumentsCallback(
+      SemaParserBridge::DeferredMacroArgumentsCB *CB) {
+    ParserBridge.setDeferredMacroArgumentsCallback(CB);
+  }
+  bool CanParseMemInitMacroExpansion() const {
+    return ParserBridge.canParseMemInitMacroExpansion();
+  }
+  bool ParseMemInitMacroExpansionFromParserBridge(
+      Decl *Ctor, TokenSequenceData TSD, SourceRange Invocation,
+      SmallVectorImpl<CXXCtorInitializer *> &Out) {
+    return ParserBridge.parseMemInitMacroExpansion(Ctor, TSD, Invocation, Out);
   }
   ExprResult ParseExpressionMacroExpansionFromParserBridge(
       TokenSequenceData TSD, SourceRange Invocation) {
@@ -16305,7 +16374,9 @@ public:
                                  ParsedTemplateArgument Template);
   ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc, CXXSpliceExpr *E);
 
-  ExprResult ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
+  /// A token sequence written in scope \p S. Identifiers that name template
+  /// parameters there are recorded (see TokenSequenceParamBinding).
+  ExprResult ActOnCXXTokenSequenceReflection(Scope *S, SourceLocation OpLoc,
                                              SourceRange OperandRange,
                                              ArrayRef<Token> Tokens);
 
@@ -16318,11 +16389,46 @@ public:
   /// the overloads disagree.
   bool GetMacroParameterShape(LookupResult &R,
                               SmallVectorImpl<bool> &RawParams);
-  ExprResult ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
-                                  const IdentifierInfo *II, SourceLocation NameLoc,
-                                  SourceLocation ExclaimLoc,
-                                  SourceLocation LParenLoc, MultiExprArg Args,
-                                  SourceLocation RParenLoc);
+  /// Look up the macros 'SS name' names and determine their parameter shape,
+  /// as for GetMacroParameterShape. If \p SS is dependent and names no known
+  /// class, the macros cannot be found until instantiation: sets
+  /// \p ShapeUnknown instead.
+  bool GetQualifiedMacroParameterShape(Scope *S, CXXScopeSpec &SS,
+                                       const IdentifierInfo *II,
+                                       SourceLocation NameLoc,
+                                       SmallVectorImpl<bool> &RawParams,
+                                       bool &ShapeUnknown);
+  /// \p ArgsUnparsed: the shape was unknown, and the single argument is the
+  /// argument list as tokens (see CXXMacroInvocationExpr::areArgsUnparsed).
+  ExprResult
+  ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
+                       SourceLocation NameLoc, SourceLocation ExclaimLoc,
+                       SourceLocation LParenLoc, MultiExprArg Args,
+                       SourceLocation RParenLoc, bool ArgsUnparsed = false);
+  /// For an invocation whose qualifier was dependent when parsed: look up
+  /// the macros in the substituted qualifier \p QualifierLoc, producing the
+  /// callee and parameter shape. Sets \p StillDependent (and the callee, with
+  /// no declarations) if the qualifier is still dependent.
+  bool LookupDeferredQualifiedMacro(NestedNameSpecifierLoc QualifierLoc,
+                                    const DeclarationNameInfo &NameInfo,
+                                    UnresolvedLookupExpr *&Callee,
+                                    SmallVectorImpl<bool> &RawParams,
+                                    bool &StillDependent);
+  /// Parse the argument list of \p E, captured as tokens when the macro's
+  /// shape was unknown, according to the now-known shape \p RawParams. The
+  /// arguments are parsed where they were written, as part of the template,
+  /// so \p PatternArgs are to be substituted into like any other part of it.
+  bool ParseDeferredMacroArguments(ArrayRef<bool> RawParams,
+                                   const CXXMacroInvocationExpr *E,
+                                   SmallVectorImpl<Expr *> &PatternArgs);
+  /// Mark the arguments of \p E unparsed, to be parsed where they are
+  /// written: in the current context, with the template parameters in scope
+  /// \p S.
+  void SetUnparsedMacroEnvironment(CXXMacroInvocationExpr *E, Scope *S);
+  /// Raw (token sequence) macro arguments are consumed by the macro's
+  /// evaluation; they are not consteval-only values escaping into the
+  /// enclosing expression.
+  void ForgetConsumedMacroArguments(ArrayRef<Expr *> Args);
   /// Resolve and expand a macro invocation, or defer it (as a
   /// CXXMacroInvocationExpr) if anything about it is dependent. When called
   /// from instantiation, \p InstantiationPattern is the deferred node being
@@ -16334,22 +16440,19 @@ public:
                                   SourceLocation RParenLoc,
                                   const Stmt *InstantiationPattern = nullptr);
   /// Determine the parameter shape of the member macros 'base.name' (or
-  /// 'base->name') would find. Leaves \p RawParams empty (every argument is
-  /// an expression) if the class is not yet known; diagnoses and returns true
-  /// if the name does not denote macros of that class.
+  /// 'base->name') would find. Sets \p ShapeUnknown if the class is not yet
+  /// known; diagnoses and returns true if the name does not denote macros of
+  /// that class.
   bool GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
                                     const IdentifierInfo *II,
                                     SourceLocation NameLoc,
-                                    SmallVectorImpl<bool> &RawParams);
-  ExprResult ActOnMemberMacroInvocation(Scope *S, Expr *Base,
-                                        SourceLocation OpLoc,
-                                        tok::TokenKind OpKind,
-                                        const IdentifierInfo *II,
-                                        SourceLocation NameLoc,
-                                        SourceLocation ExclaimLoc,
-                                        SourceLocation LParenLoc,
-                                        MultiExprArg Args,
-                                        SourceLocation RParenLoc);
+                                    SmallVectorImpl<bool> &RawParams,
+                                    bool &ShapeUnknown);
+  ExprResult ActOnMemberMacroInvocation(
+      Scope *S, Expr *Base, SourceLocation OpLoc, tok::TokenKind OpKind,
+      const IdentifierInfo *II, SourceLocation NameLoc,
+      SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
+      SourceLocation RParenLoc, bool ArgsUnparsed = false);
   /// Resolve and expand 'base.name!(args)', binding the object expression to
   /// the macro's explicit object parameter, or defer it if anything about it
   /// is dependent.
@@ -16358,9 +16461,37 @@ public:
       const DeclarationNameInfo &NameInfo, SourceLocation ExclaimLoc,
       SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
       const Stmt *InstantiationPattern = nullptr);
+  /// Resolve 'base.name!(args)' (non-dependent) to a member macro and hand
+  /// the selected candidate, with the object argument prepended to the
+  /// arguments, to \p Finish. Returns true on (diagnosed) error, or whatever
+  /// \p Finish returns.
+  bool ResolveMemberMacroInvocation(
+      Expr *Base, bool IsArrow, SourceLocation OpLoc,
+      const DeclarationNameInfo &NameInfo, MultiExprArg Args,
+      llvm::function_ref<bool(const OverloadCandidate &Best,
+                              ArrayRef<Expr *> MacroArgs,
+                              bool HadMultipleCandidates)>
+          Finish);
+  /// Resolve 'base.name!(args)' and evaluate the member macro, producing its
+  /// expansion without parsing it (as for a mem-initializer macro).
+  bool EvaluateMemberMacroInvocation(Expr *Base, bool IsArrow,
+                                     SourceLocation OpLoc,
+                                     const DeclarationNameInfo &NameInfo,
+                                     SourceLocation LParenLoc,
+                                     MultiExprArg Args,
+                                     SourceLocation RParenLoc,
+                                     TokenSequenceData &Expansion);
   /// Expand the macro that overload resolution selected for an operator
   /// expression or a member invocation. \p Args are the operands as written
   /// (the object expression first, for a member macro).
+  /// Evaluate the macro overload resolution selected, with \p Args (the
+  /// object argument first, for a non-static member macro), producing its
+  /// expansion without parsing it. Returns true on (diagnosed) error.
+  bool EvaluateMacroCandidate(const OverloadCandidate &Best,
+                              ArrayRef<Expr *> Args, SourceLocation Loc,
+                              SourceLocation RParenLoc,
+                              bool HadMultipleCandidates,
+                              TokenSequenceData &Expansion);
   ExprResult BuildMacroCandidateExpansion(const OverloadCandidate &Best,
                                           ArrayRef<Expr *> Args,
                                           SourceLocation Loc,
@@ -16376,6 +16507,11 @@ public:
   /// Collect the instantiations of the local declarations that are visible
   /// before \p PatternStmt in the function template being instantiated, one
   /// inner vector per lexical scope, outermost first.
+  /// Collect the local declarations of \p FD visible at \p Target, a
+  /// statement of its body, one level per scope, outermost first.
+  void CollectLocalDeclsForLookup(
+      const FunctionDecl *FD, const Stmt *Target,
+      SmallVectorImpl<SmallVector<NamedDecl *, 4>> &ScopeLevels);
   void CollectInstantiatedLocalDeclsForLookup(
       const Stmt *PatternStmt,
       SmallVectorImpl<SmallVector<NamedDecl *, 4>> &ScopeLevels);
@@ -16419,6 +16555,33 @@ public:
                                 SourceLocation LParenLoc, MultiExprArg Args,
                                 SourceLocation RParenLoc,
                                 TokenSequenceData &Expansion);
+
+  /// A macro invocation as an entry of a ctor-initializer. In a dependent
+  /// constructor the invocation is recorded (at \p Position among the
+  /// written mem-initializers) for expansion at instantiation, and
+  /// \p Deferred is set; otherwise the macro is evaluated and the parser
+  /// parses \p Expansion as zero or more mem-initializers in place. Returns
+  /// true on (diagnosed) error.
+  bool ActOnMemInitMacroInvocation(
+      Scope *S, Decl *ConstructorDecl, unsigned Position, CXXScopeSpec &SS,
+      const IdentifierInfo *II, SourceLocation NameLoc,
+      SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
+      SourceLocation RParenLoc, bool ArgsUnparsed, TokenSequenceData &Expansion,
+      bool &Deferred);
+
+  /// Resolve and evaluate a macro invocation that was deferred from a
+  /// template, with already-substituted callee and arguments.
+  bool EvaluateMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
+                               SourceLocation LParenLoc, MultiExprArg Args,
+                               SourceLocation RParenLoc,
+                               TokenSequenceData &Expansion);
+
+  /// Mem-initializer macro invocations in dependent constructors, keyed by
+  /// the (canonical) constructor, each with its position among the written
+  /// mem-initializers. Expanded by InstantiateMemInitializers.
+  llvm::DenseMap<const CXXConstructorDecl *,
+                 SmallVector<std::pair<unsigned, CXXMacroInvocationExpr *>, 1>>
+      DeferredMemInitMacros;
 
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,

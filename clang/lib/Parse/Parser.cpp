@@ -92,6 +92,10 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
       &Parser::ExpressionMacroExpansionCallback);
   Actions.SetSpeculativeExpressionCallback(
       &Parser::SpeculativeExpressionCallback);
+  Actions.SetMemInitMacroExpansionCallback(
+      &Parser::MemInitMacroExpansionCallback);
+  Actions.SetDeferredMacroArgumentsCallback(
+      &Parser::DeferredMacroArgumentsCallback);
   Actions.SetDeferredInjectedDefsCallback(&Parser::DeferredInjectedDefsCallback);
 }
 

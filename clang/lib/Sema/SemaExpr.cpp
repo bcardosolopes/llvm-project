@@ -7312,13 +7312,164 @@ bool Sema::GetMacroParameterShape(LookupResult &R,
   return false;
 }
 
-ExprResult Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
-                                      const IdentifierInfo *II,
-                                      SourceLocation NameLoc,
-                                      SourceLocation ExclaimLoc,
-                                      SourceLocation LParenLoc,
-                                      MultiExprArg Args,
-                                      SourceLocation RParenLoc) {
+/// True if \p SS is dependent and names no class known yet: the macros it
+/// qualifies cannot be looked up until instantiation.
+static bool isUnknownDependentScope(Sema &S, CXXScopeSpec &SS) {
+  return SS.isSet() && S.isDependentScopeSpecifier(SS) &&
+         !S.computeDeclContext(SS, /*EnteringContext=*/false);
+}
+
+bool Sema::GetQualifiedMacroParameterShape(Scope *S, CXXScopeSpec &SS,
+                                           const IdentifierInfo *II,
+                                           SourceLocation NameLoc,
+                                           SmallVectorImpl<bool> &RawParams,
+                                           bool &ShapeUnknown) {
+  ShapeUnknown = isUnknownDependentScope(*this, SS);
+  if (ShapeUnknown)
+    return false;
+  LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
+  LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
+  return GetMacroParameterShape(R, RawParams);
+}
+
+/// The callee of an invocation whose macros await a dependent qualifier: an
+/// UnresolvedLookupExpr with no declarations.
+static ExprResult buildDependentMacroCallee(Sema &S,
+                                            NestedNameSpecifierLoc QualifierLoc,
+                                            const DeclarationNameInfo &Name) {
+  UnresolvedSet<1> None;
+  return S.CreateUnresolvedLookupExpr(/*NamingClass=*/nullptr, QualifierLoc,
+                                      Name, None, /*PerformADL=*/false);
+}
+
+bool Sema::LookupDeferredQualifiedMacro(NestedNameSpecifierLoc QualifierLoc,
+                                        const DeclarationNameInfo &NameInfo,
+                                        UnresolvedLookupExpr *&Callee,
+                                        SmallVectorImpl<bool> &RawParams,
+                                        bool &StillDependent) {
+  CXXScopeSpec SS;
+  SS.Adopt(QualifierLoc);
+  StillDependent = isUnknownDependentScope(*this, SS);
+  if (!StillDependent) {
+    LookupResult R(*this, NameInfo, LookupOrdinaryName);
+    LookupParsedName(R, /*S=*/nullptr, &SS, /*ObjectType=*/QualType());
+    if (GetMacroParameterShape(R, RawParams))
+      return true;
+    UnresolvedSet<8> Macros;
+    for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
+      Macros.addDecl(*I, I.getAccess());
+    ExprResult Result = CreateUnresolvedLookupExpr(
+        /*NamingClass=*/nullptr, QualifierLoc, NameInfo, Macros,
+        /*PerformADL=*/false);
+    if (Result.isInvalid())
+      return true;
+    Callee = cast<UnresolvedLookupExpr>(Result.get());
+    return false;
+  }
+  ExprResult Result = buildDependentMacroCallee(*this, QualifierLoc, NameInfo);
+  if (Result.isInvalid())
+    return true;
+  Callee = cast<UnresolvedLookupExpr>(Result.get());
+  return false;
+}
+
+bool Sema::ParseDeferredMacroArguments(ArrayRef<bool> RawParams,
+                                       const CXXMacroInvocationExpr *E,
+                                       SmallVectorImpl<Expr *> &PatternArgs) {
+  assert(E->areArgsUnparsed() && "arguments already parsed");
+  auto *TSE =
+      dyn_cast<CXXTokenSequenceExpr>(E->getArg(0)->IgnoreParenImpCasts());
+  assert(TSE && "captured macro arguments are a token sequence");
+  // The captured list does not record its brackets; braces permit a trailing
+  // comma.
+  bool Braced = false;
+  if (SourceLocation LParenLoc = E->getLParenLoc(); LParenLoc.isValid()) {
+    SourceLocation Spelling = SourceMgr.getSpellingLoc(LParenLoc);
+    bool Invalid = false;
+    const char *C = SourceMgr.getCharacterData(Spelling, &Invalid);
+    Braced = !Invalid && *C == '{';
+  }
+
+  // The arguments may name the locals visible where they were written: the
+  // parameters of enclosing functions (those of the innermost one are added
+  // by the parser) and the locals declared before the invocation.
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> SavedScopes;
+  SavedScopes.swap(MacroExpansionLocalScopes);
+  auto RestoreScopes = llvm::make_scope_exit(
+      [&] { SavedScopes.swap(MacroExpansionLocalScopes); });
+  DeclContext *Ctx = E->getUnparsedContext();
+  SmallVector<FunctionDecl *, 2> Functions;
+  for (DeclContext *DC = Ctx; DC && !DC->isFileContext();
+       DC = DC->getLexicalParent())
+    if (auto *FD = dyn_cast<FunctionDecl>(DC))
+      Functions.push_back(FD);
+  if (!Functions.empty()) {
+    SmallVector<NamedDecl *, 4> &Params =
+        MacroExpansionLocalScopes.emplace_back();
+    for (FunctionDecl *FD : llvm::reverse(llvm::drop_begin(Functions)))
+      Params.append(FD->param_begin(), FD->param_end());
+    CollectLocalDeclsForLookup(Functions.back(), E, MacroExpansionLocalScopes);
+  }
+
+  assert(ParserBridge.canParseDeferredMacroArguments() &&
+         "no parser for deferred macro arguments");
+  if (ParserBridge.parseDeferredMacroArguments(
+          RawParams, Braced, TSE->getTokenSequence(), E->getRParenLoc(), Ctx,
+          E->getUnparsedTemplateParams(), PatternArgs)) {
+    // The parser's diagnostics do not show the instantiation context.
+    PrintContextStack();
+    return true;
+  }
+  ForgetConsumedMacroArguments(PatternArgs);
+  return false;
+}
+
+void Sema::ForgetConsumedMacroArguments(ArrayRef<Expr *> Args) {
+  for (Expr *Arg : Args)
+    if (Arg->getType()->isTokenSequenceType())
+      ExprEvalContexts.back().ConstevalOnly.erase(Arg);
+}
+
+void Sema::SetUnparsedMacroEnvironment(CXXMacroInvocationExpr *E, Scope *S) {
+  SmallVector<NamedDecl *, 4> TemplateParams;
+  for (; S; S = S->getParent())
+    if (S->isTemplateParamScope())
+      for (Decl *D : S->decls())
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->isTemplateParameter())
+          TemplateParams.push_back(ND);
+  E->setUnparsedEnvironment(Context, CurContext, TemplateParams);
+}
+
+/// True if \p R found non-static member macros: an unqualified invocation of
+/// the name is then an implicit member access on '*this'.
+static bool findsNonStaticMemberMacro(const LookupResult &R) {
+  return llvm::any_of(R, [](NamedDecl *D) {
+    const NamedDecl *U = D->getUnderlyingDecl();
+    if (const auto *FTD = dyn_cast<FunctionTemplateDecl>(U))
+      U = FTD->getTemplatedDecl();
+    const auto *MD = dyn_cast<CXXMethodDecl>(U);
+    return MD && !MD->isStatic();
+  });
+}
+
+ExprResult
+Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
+                           SourceLocation NameLoc, SourceLocation ExclaimLoc,
+                           SourceLocation LParenLoc, MultiExprArg Args,
+                           SourceLocation RParenLoc, bool ArgsUnparsed) {
+  if (ArgsUnparsed) {
+    ExprResult Callee =
+        buildDependentMacroCallee(*this, SS.getWithLocInContext(Context),
+                                  DeclarationNameInfo(II, NameLoc));
+    if (Callee.isInvalid())
+      return ExprError();
+    auto *E = CXXMacroInvocationExpr::Create(
+        Context, cast<UnresolvedLookupExpr>(Callee.get()), Args, ExclaimLoc,
+        LParenLoc, RParenLoc);
+    SetUnparsedMacroEnvironment(E, S);
+    return E;
+  }
+
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
   LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
   SmallVector<bool, 4> RawParams;
@@ -7328,13 +7479,7 @@ ExprResult Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS,
   // An unqualified name that finds non-static member macros is an implicit
   // member access, as it would be for a function: '*this' is the object
   // expression.
-  if (SS.isEmpty() && llvm::any_of(R, [](NamedDecl *D) {
-        const NamedDecl *U = D->getUnderlyingDecl();
-        if (const auto *FTD = dyn_cast<FunctionTemplateDecl>(U))
-          U = FTD->getTemplatedDecl();
-        const auto *MD = dyn_cast<CXXMethodDecl>(U);
-        return MD && !MD->isStatic();
-      })) {
+  if (SS.isEmpty() && findsNonStaticMemberMacro(R)) {
     ExprResult This = ActOnCXXThis(NameLoc);
     if (This.isInvalid())
       return ExprError();
@@ -7466,31 +7611,135 @@ bool Sema::ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
   if (Callee.isInvalid())
     return true;
 
+  return EvaluateMacroInvocation(S, cast<UnresolvedLookupExpr>(Callee.get()),
+                                 LParenLoc, Args, RParenLoc, Expansion);
+}
+
+bool Sema::EvaluateMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
+                                   SourceLocation LParenLoc, MultiExprArg Args,
+                                   SourceLocation RParenLoc,
+                                   TokenSequenceData &Expansion) {
   FunctionDecl *Macro = nullptr;
   ExprResult Fn;
   CallExpr::ADLCallKind UsesADL;
-  if (ResolveMacroCallee(S, cast<UnresolvedLookupExpr>(Callee.get()), Args,
-                         LParenLoc, RParenLoc, Fn, Macro, UsesADL))
+  if (ResolveMacroCallee(S, Callee, Args, LParenLoc, RParenLoc, Fn, Macro,
+                         UsesADL))
     return true;
 
   return EvaluateMacroExpansion(Fn.get(), Macro, LParenLoc, Args, RParenLoc,
                                 UsesADL, Expansion);
 }
 
+/// A macro invocation as an entry of a ctor-initializer, 'C(...) : m!(...)'.
+/// Its expansion is zero or more mem-initializers. (Empty is fine: the
+/// invocation is what the source wrote, so the mem-initializer-list is not
+/// empty as written.) A dependent constructor defers the expansion to
+/// instantiation even when the arguments are not dependent: the class the
+/// macro would inspect is only the pattern until then, and members injected
+/// per specialization do not exist in it.
+bool Sema::ActOnMemInitMacroInvocation(
+    Scope *S, Decl *ConstructorDecl, unsigned Position, CXXScopeSpec &SS,
+    const IdentifierInfo *II, SourceLocation NameLoc, SourceLocation ExclaimLoc,
+    SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
+    bool ArgsUnparsed, TokenSequenceData &Expansion, bool &Deferred) {
+  Deferred = false;
+  if (!ConstructorDecl)
+    return true;
+  AdjustDeclIfTemplate(ConstructorDecl);
+  auto *Ctor = dyn_cast<CXXConstructorDecl>(ConstructorDecl);
+  if (!Ctor) {
+    Diag(NameLoc, diag::err_only_constructors_take_base_inits);
+    return true;
+  }
+
+  // With a dependent qualifier, the macros and even the arguments await
+  // instantiation.
+  if (ArgsUnparsed) {
+    ExprResult Callee =
+        buildDependentMacroCallee(*this, SS.getWithLocInContext(Context),
+                                  DeclarationNameInfo(II, NameLoc));
+    if (Callee.isInvalid())
+      return true;
+    auto *E = CXXMacroInvocationExpr::Create(
+        Context, cast<UnresolvedLookupExpr>(Callee.get()), Args, ExclaimLoc,
+        LParenLoc, RParenLoc);
+    SetUnparsedMacroEnvironment(E, S);
+    DeferredMemInitMacros[Ctor->getCanonicalDecl()].push_back({Position, E});
+    Deferred = true;
+    return false;
+  }
+
+  LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
+  LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
+  SmallVector<bool, 4> RawParams;
+  if (GetMacroParameterShape(R, RawParams))
+    return true;
+
+  bool Dependent = Ctor->isDependentContext();
+  for (Expr *Arg : Args)
+    Dependent |= Arg->isInstantiationDependent() ||
+                 Arg->containsUnexpandedParameterPack();
+
+  // An unqualified name that finds non-static member macros is an implicit
+  // member access on '*this', as in an expression.
+  if (SS.isEmpty() && findsNonStaticMemberMacro(R)) {
+    ExprResult This = ActOnCXXThis(NameLoc);
+    if (This.isInvalid())
+      return true;
+    DeclarationNameInfo NameInfo = R.getLookupNameInfo();
+    if (Dependent || This.get()->isInstantiationDependent()) {
+      auto *E = CXXMacroInvocationExpr::CreateMember(
+          Context, This.get(), /*IsArrow=*/true, NameLoc, NameInfo, Args,
+          ExclaimLoc, LParenLoc, RParenLoc);
+      DeferredMemInitMacros[Ctor->getCanonicalDecl()].push_back({Position, E});
+      Deferred = true;
+      return false;
+    }
+    return EvaluateMemberMacroInvocation(This.get(), /*IsArrow=*/true, NameLoc,
+                                         NameInfo, LParenLoc, Args, RParenLoc,
+                                         Expansion);
+  }
+
+  UnresolvedSet<8> Macros;
+  for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
+    Macros.addDecl(*I, I.getAccess());
+  ExprResult Callee = CreateUnresolvedLookupExpr(
+      /*NamingClass=*/nullptr, SS.getWithLocInContext(Context),
+      R.getLookupNameInfo(), Macros, /*PerformADL=*/false);
+  if (Callee.isInvalid())
+    return true;
+  auto *ULE = cast<UnresolvedLookupExpr>(Callee.get());
+
+  Dependent |= ULE->isInstantiationDependent();
+  if (Dependent) {
+    auto *E = CXXMacroInvocationExpr::Create(Context, ULE, Args, ExclaimLoc,
+                                             LParenLoc, RParenLoc);
+    DeferredMemInitMacros[Ctor->getCanonicalDecl()].push_back({Position, E});
+    Deferred = true;
+    return false;
+  }
+
+  return EvaluateMacroInvocation(S, ULE, LParenLoc, Args, RParenLoc, Expansion);
+}
+
 bool Sema::GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
                                         const IdentifierInfo *II,
                                         SourceLocation NameLoc,
-                                        SmallVectorImpl<bool> &RawParams) {
+                                        SmallVectorImpl<bool> &RawParams,
+                                        bool &ShapeUnknown) {
+  ShapeUnknown = false;
   QualType ObjectType = Base->getType();
   if (OpKind == tok::arrow)
     if (const PointerType *PT = ObjectType->getAs<PointerType>())
       ObjectType = PT->getPointeeType();
 
   // The class is known if the type is not dependent or is the current
-  // instantiation; otherwise every argument is parsed as an expression.
+  // instantiation; otherwise the shape is not known until instantiation.
   auto *RD = dyn_cast_or_null<CXXRecordDecl>(computeDeclContext(ObjectType));
-  if (!RD)
+  if (!RD) {
+    ShapeUnknown = ObjectType->isDependentType();
     return false;
+  }
   if (!ObjectType->isDependentType() &&
       RequireCompleteType(NameLoc, ObjectType,
                           diag::err_incomplete_member_access))
@@ -7504,7 +7753,16 @@ bool Sema::GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
 ExprResult Sema::ActOnMemberMacroInvocation(
     Scope *S, Expr *Base, SourceLocation OpLoc, tok::TokenKind OpKind,
     const IdentifierInfo *II, SourceLocation NameLoc, SourceLocation ExclaimLoc,
-    SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc) {
+    SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
+    bool ArgsUnparsed) {
+  if (ArgsUnparsed) {
+    auto *E = CXXMacroInvocationExpr::CreateMember(
+        Context, Base, OpKind == tok::arrow, OpLoc,
+        DeclarationNameInfo(II, NameLoc), Args, ExclaimLoc, LParenLoc,
+        RParenLoc);
+    SetUnparsedMacroEnvironment(E, S);
+    return E;
+  }
   return BuildMemberMacroInvocation(Base, OpKind == tok::arrow, OpLoc,
                                     DeclarationNameInfo(II, NameLoc),
                                     ExclaimLoc, LParenLoc, Args, RParenLoc);
@@ -7525,6 +7783,25 @@ ExprResult Sema::BuildMemberMacroInvocation(
                                                 NameInfo, Args, ExclaimLoc,
                                                 LParenLoc, RParenLoc);
 
+  ExprResult Result;
+  if (ResolveMemberMacroInvocation(
+          Base, IsArrow, OpLoc, NameInfo, Args,
+          [&](const OverloadCandidate &Best, ArrayRef<Expr *> MacroArgs,
+              bool HadMultipleCandidates) {
+            Result = BuildMacroCandidateExpansion(
+                Best, MacroArgs, LParenLoc, RParenLoc, HadMultipleCandidates,
+                InstantiationPattern);
+            return Result.isInvalid();
+          }))
+    return ExprError();
+  return Result;
+}
+
+bool Sema::ResolveMemberMacroInvocation(
+    Expr *Base, bool IsArrow, SourceLocation OpLoc,
+    const DeclarationNameInfo &NameInfo, MultiExprArg Args,
+    llvm::function_ref<bool(const OverloadCandidate &, ArrayRef<Expr *>, bool)>
+        Finish) {
   // Apply any operator-> chain and find the object type, as for a member
   // access.
   ParsedType ObjectTypeP;
@@ -7533,41 +7810,28 @@ ExprResult Sema::BuildMemberMacroInvocation(
       /*S=*/nullptr, Base, OpLoc, IsArrow ? tok::arrow : tok::period,
       ObjectTypeP, MayBePseudoDestructor);
   if (BaseResult.isInvalid())
-    return ExprError();
+    return true;
   Base = BaseResult.get();
   QualType ObjectType = GetTypeFromParser(ObjectTypeP);
   auto *RD = ObjectType->getAsCXXRecordDecl();
   if (!RD) {
     Diag(NameInfo.getLoc(), diag::err_typecheck_member_reference_struct_union)
         << ObjectType << Base->getSourceRange();
-    return ExprError();
+    return true;
   }
 
   LookupResult R(*this, NameInfo, LookupMemberName);
   LookupQualifiedName(R, RD);
   SmallVector<bool, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams))
-    return ExprError();
-
-  // If the invocation was parsed with the object's type unknown, every
-  // argument was parsed as an expression; raw tokens cannot be recovered
-  // from it now. (An argument that already has token-sequence type was
-  // captured raw when the shape was known, e.g. within the class itself.)
-  for (unsigned I = 0, N = RawParams.size(); I != N; ++I)
-    if (RawParams[I] && I < Args.size() && Args[I] &&
-        !Args[I]->getType()->isTokenSequenceType()) {
-      Diag(NameInfo.getLoc(), diag::err_macro_raw_member_dependent)
-          << R.getLookupName();
-      Diag(Args[I]->getExprLoc(), diag::note_macro_raw_member_dependent);
-      return ExprError();
-    }
+    return true;
 
   // The object expression binds to the explicit object parameter.
   Expr *Object = Base;
   if (IsArrow) {
     ExprResult Deref = CreateBuiltinUnaryOp(OpLoc, UO_Deref, Base);
     if (Deref.isInvalid())
-      return ExprError();
+      return true;
     Object = Deref.get();
   }
 
@@ -7587,14 +7851,14 @@ ExprResult Sema::BuildMemberMacroInvocation(
                             PDiag(diag::err_ovl_no_viable_member_function_in_call)
                                 << NameInfo.getName() << Base->getSourceRange()),
         *this, OCD_AllCandidates, Args);
-    return ExprError();
+    return true;
   case OR_Ambiguous:
     CandidateSet.NoteCandidates(
         PartialDiagnosticAt(NameInfo.getLoc(),
                             PDiag(diag::err_ovl_ambiguous_member_call)
                                 << NameInfo.getName() << Base->getSourceRange()),
         *this, OCD_AmbiguousCandidates, Args);
-    return ExprError();
+    return true;
   case OR_Deleted: {
     StringLiteral *Msg = Best->Function->getDeletedMessage();
     CandidateSet.NoteCandidates(
@@ -7605,7 +7869,7 @@ ExprResult Sema::BuildMemberMacroInvocation(
                                 << (Msg ? Msg->getString() : StringRef())
                                 << Base->getSourceRange()),
         *this, OCD_AllCandidates, Args);
-    return ExprError();
+    return true;
   }
   }
 
@@ -7613,16 +7877,27 @@ ExprResult Sema::BuildMemberMacroInvocation(
   if (Macro->isStatic()) {
     Diag(NameInfo.getLoc(), diag::err_macro_static_member_via_object)
         << Macro << (RD->getName() + "::" + Macro->getName() + "!(...)").str();
-    return ExprError();
+    return true;
   }
   CheckMemberAccess(NameInfo.getLoc(), RD, Best->FoundDecl);
 
   SmallVector<Expr *, 4> MacroArgs;
   MacroArgs.push_back(Object);
   MacroArgs.append(Args.begin(), Args.end());
-  return BuildMacroCandidateExpansion(*Best, MacroArgs, LParenLoc, RParenLoc,
-                                      CandidateSet.size() > 1,
-                                      InstantiationPattern);
+  return Finish(*Best, MacroArgs, CandidateSet.size() > 1);
+}
+
+bool Sema::EvaluateMemberMacroInvocation(
+    Expr *Base, bool IsArrow, SourceLocation OpLoc,
+    const DeclarationNameInfo &NameInfo, SourceLocation LParenLoc,
+    MultiExprArg Args, SourceLocation RParenLoc, TokenSequenceData &Expansion) {
+  return ResolveMemberMacroInvocation(
+      Base, IsArrow, OpLoc, NameInfo, Args,
+      [&](const OverloadCandidate &Best, ArrayRef<Expr *> MacroArgs,
+          bool HadMultipleCandidates) {
+        return EvaluateMacroCandidate(Best, MacroArgs, LParenLoc, RParenLoc,
+                                      HadMultipleCandidates, Expansion);
+      });
 }
 
 namespace {
@@ -7863,6 +8138,9 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
       Expansion, SourceRange(Fn->getExprLoc(), RParenLoc));
   if (Parsed.isInvalid() || Parsed.get()->containsErrors()) {
     Diag(LParenLoc, diag::note_macro_expanded_here) << Macro;
+    // A parse error, reported by the parser, did not show the instantiation
+    // context; the note (being a note) does not either.
+    PrintContextStack();
     if (Parsed.isInvalid())
       return ExprError();
   }

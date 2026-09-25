@@ -3293,6 +3293,8 @@ def err_builtin_constexpr_diag_arg : Error<
 def err_macro_argument_evaluated_twice : Error<
   "expansion of expression macro would evaluate this argument more than once">;
 def note_macro_expanded_here : Note<"in expansion of expression macro %0">;
+def err_token_sequence_param_pack : Error<
+  "template parameter pack %0 cannot be substituted into a token sequence">;
 def err_macro_member : Error<
   "a non-static member expression macro must have an explicit object "
   "parameter">;
@@ -3306,13 +3308,6 @@ def err_macro_defaulted_deleted : Error<
   "an expression macro cannot be %select{defaulted|deleted}0">;
 def err_macro_static_member_via_object : Error<
   "static member expression macro %0 must be invoked as %1">;
-def err_macro_raw_member_dependent : Error<
-  "member expression macro %0 has a token sequence parameter, but the "
-  "object's type was not known when the invocation was parsed, so the "
-  "argument was parsed as an expression">;
-def note_macro_raw_member_dependent : Note<
-  "invoke the macro on an object whose type is known at the point of "
-  "invocation to pass raw tokens">;
 def err_annotation_inject_members_not_tokens : Error<
   "'inject_members' callback of annotation type %0 must return a token "
   "sequence">;

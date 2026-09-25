@@ -2028,10 +2028,9 @@ void CXXTokenSequenceExpr::initializeInterpolationExprs() {
     setInterpolationExpr(I, nullptr);
 }
 
-CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
-                                                   SourceLocation OperatorLoc,
-                                                   SourceRange OperandRange,
-                                                   TokenSequenceData TSD) {
+CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(
+    ASTContext &C, SourceLocation OperatorLoc, SourceRange OperandRange,
+    TokenSequenceData TSD, ArrayRef<TokenSequenceParamBinding> ParamBindings) {
   unsigned NumInterpolationExprs = countInterpolationExprs(TSD);
   void *Mem =
       C.Allocate(totalSizeToAlloc<Stmt *>(NumInterpolationExprs));
@@ -2040,7 +2039,24 @@ CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
                                      NumInterpolationExprs);
   E->setOperatorLoc(OperatorLoc);
   E->setOperandRange(OperandRange);
+  if (!ParamBindings.empty()) {
+    auto *Bindings =
+        C.Allocate<TokenSequenceParamBinding>(ParamBindings.size());
+    llvm::copy(ParamBindings, Bindings);
+    E->ParamBindings = Bindings;
+    E->NumParamBindings = ParamBindings.size();
+  }
   return E;
+}
+
+void CXXMacroInvocationExpr::setUnparsedEnvironment(
+    ASTContext &C, DeclContext *Ctx, ArrayRef<NamedDecl *> TemplateParams) {
+  ArgsUnparsed = true;
+  UnparsedContext = Ctx;
+  auto *Params = C.Allocate<NamedDecl *>(TemplateParams.size());
+  llvm::copy(TemplateParams, Params);
+  UnparsedTemplateParams = Params;
+  NumUnparsedTemplateParams = TemplateParams.size();
 }
 
 CXXTokenSequenceExpr *

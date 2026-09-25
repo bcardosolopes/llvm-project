@@ -3636,7 +3636,16 @@ private:
   ///         '::'[opt] nested-name-specifier[opt] class-name
   ///         identifier
   /// \endverbatim
-  MemInitResult ParseMemInitializer(Decl *ConstructorDecl);
+  ///
+  /// \p SS is the already-parsed optional nested-name-specifier.
+  MemInitResult ParseMemInitializer(Decl *ConstructorDecl, CXXScopeSpec &SS);
+
+  /// Parse one entry of a ctor-initializer: a mem-initializer, appended to
+  /// \p MemInits, or (with reflection) a possibly qualified macro invocation,
+  /// whose expansion is appended. Returns true on error.
+  bool
+  ParseMemInitializerOrMacro(Decl *ConstructorDecl,
+                             SmallVectorImpl<CXXCtorInitializer *> &MemInits);
 
   /// If the given declarator has any parts for which parsing has to be
   /// delayed, e.g., default arguments or an exception-specification, create a
@@ -8637,9 +8646,32 @@ private:
                                         tok::TokenKind OpKind,
                                         const IdentifierInfo *II,
                                         SourceLocation NameLoc);
-  bool ParseMacroArguments(ArrayRef<bool> RawParams,
+  /// Parse the argument list of a macro invocation, up to (not including)
+  /// the closing bracket of \p T, according to the parameter shape
+  /// \p RawParams. If \p ShapeUnknown (the macro cannot be looked up until
+  /// instantiation), the whole list is captured as a single token sequence
+  /// instead, since even where the arguments split depends on the shape.
+  bool ParseMacroArguments(ArrayRef<bool> RawParams, bool ShapeUnknown,
                            BalancedDelimiterTracker &T, ExprVector &Args);
+  /// Parse a macro argument list ending at \p Close; \p Braced if the
+  /// invocation's brackets were braces (which permit a trailing comma).
+  /// Returns true on error, without skipping.
+  bool ParseMacroArgumentList(ArrayRef<bool> RawParams, tok::TokenKind Close,
+                              bool Braced, ExprVector &Args);
   ExprResult ParseMacroRawArgument(tok::TokenKind Close, bool Greedy);
+  /// Parse an argument list captured when the macro's shape was unknown
+  /// (see ParseMacroArguments), now that it is known: in the context \p Ctx
+  /// it was written in, with the template parameters of that context (and
+  /// \p TemplateParams) in scope, so producing dependent expressions.
+  bool ParseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
+                                   TokenSequenceData TSD, SourceLocation Loc,
+                                   DeclContext *Ctx,
+                                   ArrayRef<NamedDecl *> TemplateParams,
+                                   SmallVectorImpl<Expr *> &Args);
+  static bool DeferredMacroArgumentsCallback(
+      void *P, ArrayRef<bool> RawParams, bool Braced, TokenSequenceData TSD,
+      SourceLocation Loc, DeclContext *Ctx,
+      ArrayRef<NamedDecl *> TemplateParams, SmallVectorImpl<Expr *> &Args);
   ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,
                                            SourceRange Invocation,
                                            bool Speculative = false);
@@ -8649,6 +8681,50 @@ private:
   static ExprResult SpeculativeExpressionCallback(void *P,
                                                   TokenSequenceData TSD,
                                                   SourceRange Invocation);
+
+  /// Parse 'name!(args)' as an entry of a ctor-initializer, the optional
+  /// nested-name-specifier \p SS having been parsed. The expansion is zero or
+  /// more mem-initializers, appended to \p MemInits; in a dependent
+  /// constructor the invocation is recorded for expansion at instantiation
+  /// instead. Returns true on error.
+  bool
+  ParseMemInitMacroInvocation(Decl *ConstructorDecl, CXXScopeSpec &SS,
+                              SmallVectorImpl<CXXCtorInitializer *> &MemInits);
+  /// Parse an already-entered, eof-delimited token stream as a possibly empty
+  /// mem-initializer-list for \p ConstructorDecl. Returns true on error.
+  bool
+  ParseMemInitializersUntilEof(Decl *ConstructorDecl,
+                               SmallVectorImpl<CXXCtorInitializer *> &MemInits);
+  /// Parse the tokens produced by a mem-initializer macro, in place of the
+  /// invocation \p Invocation. Returns true on error.
+  bool ParseMemInitMacroExpansion(Decl *ConstructorDecl, TokenSequenceData TSD,
+                                  SourceRange Invocation,
+                                  SmallVectorImpl<CXXCtorInitializer *> &Out);
+  static bool
+  MemInitMacroExpansionCallback(void *P, Decl *ConstructorDecl,
+                                TokenSequenceData TSD, SourceRange Invocation,
+                                SmallVectorImpl<CXXCtorInitializer *> &Out);
+
+  /// While a macro expansion is parsed during template instantiation, the
+  /// parser is not positioned inside the function being instantiated. This
+  /// gives the expansion a function scope holding the instantiated
+  /// parameters and the locals Sema collected as visible at the invocation,
+  /// so unqualified names resolve as they would have in the template. Does
+  /// nothing when the parser already has a scope for the current function.
+  class MacroExpansionLookupScope {
+  public:
+    explicit MacroExpansionLookupScope(Parser &P);
+    ~MacroExpansionLookupScope();
+
+  private:
+    void seed(NamedDecl *D, SmallVectorImpl<NamedDecl *> &Out);
+
+    Parser &P;
+    std::optional<ParseScope> FnScope;
+    llvm::SmallPtrSet<NamedDecl *, 16> Seen;
+    SmallVector<NamedDecl *, 8> Base;
+    SmallVector<SmallVector<NamedDecl *, 4>, 4> Levels;
+  };
 
   bool ParseSpliceSpecifier(bool TryParseSpecialization = false);
 

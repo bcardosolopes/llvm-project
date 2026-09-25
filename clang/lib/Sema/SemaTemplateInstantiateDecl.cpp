@@ -282,6 +282,22 @@ static bool containsStmt(const Stmt *S, const Stmt *Target) {
   return false;
 }
 
+void Sema::CollectLocalDeclsForLookup(
+    const FunctionDecl *FD, const Stmt *Target,
+    SmallVectorImpl<SmallVector<NamedDecl *, 4>> &ScopeLevels) {
+  if (!FD->hasBody() || !containsStmt(FD->getBody(), Target))
+    return;
+  LocalDeclLevels Levels(1);
+  collectVisibleLocalDeclsBefore(
+      FD->getBody(), [&](const Stmt *C) { return containsStmt(C, Target); },
+      Levels);
+  for (const auto &Level : Levels) {
+    SmallVector<NamedDecl *, 4> &Out = ScopeLevels.emplace_back();
+    for (const NamedDecl *ND : Level)
+      Out.push_back(const_cast<NamedDecl *>(ND));
+  }
+}
+
 void Sema::CollectInstantiatedLocalDeclsForLookup(
     const Stmt *PatternStmt,
     SmallVectorImpl<SmallVector<NamedDecl *, 4>> &ScopeLevels) {
@@ -7072,6 +7088,108 @@ void Sema::InstantiateVariableDefinition(SourceLocation PointOfInstantiation,
   GlobalInstantiations.perform();
 }
 
+/// Expand a mem-initializer macro invocation deferred from the constructor
+/// template: substitute into the callee and arguments, evaluate the macro
+/// (its macro_expansion_context() is now the instantiated constructor, of a
+/// complete class), and parse the expansion as mem-initializers.
+static bool
+expandDeferredMemInitMacro(Sema &S, CXXConstructorDecl *New,
+                           CXXMacroInvocationExpr *E,
+                           const MultiLevelTemplateArgumentList &TemplateArgs,
+                           SmallVectorImpl<CXXCtorInitializer *> &Out) {
+  // Locals of an enclosing expansion are not visible here.
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> SavedScopes;
+  SavedScopes.swap(S.MacroExpansionLocalScopes);
+  auto RestoreScopes = llvm::make_scope_exit(
+      [&] { SavedScopes.swap(S.MacroExpansionLocalScopes); });
+
+  // A raw (token sequence) argument is consumed by the macro's evaluation
+  // and never reaches the constructor, so it is not a consteval-only value
+  // escaping into it.
+  auto ForgetRawArgs = [&](ArrayRef<Expr *> Args) {
+    for (Expr *Arg : Args)
+      if (Arg->getType()->isTokenSequenceType())
+        S.ExprEvalContexts.back().ConstevalOnly.erase(Arg);
+  };
+
+  TokenSequenceData Expansion;
+  auto ParseExpansion = [&](SourceLocation NameLoc) {
+    assert(S.CanParseMemInitMacroExpansion() && "no parser to expand into");
+    return S.ParseMemInitMacroExpansionFromParserBridge(
+        New, Expansion, SourceRange(NameLoc, E->getRParenLoc()), Out);
+  };
+
+  SmallVector<Expr *, 4> Args;
+  if (E->isMemberInvocation()) {
+    // An implicit member access, 'this->name!(...)'.
+    ExprResult Base = S.SubstExpr(E->getBase(), TemplateArgs);
+    if (Base.isInvalid() ||
+        S.SubstExprs(E->getArgs(), /*IsCall=*/true, TemplateArgs, Args))
+      return true;
+    ForgetRawArgs(Args);
+    if (S.EvaluateMemberMacroInvocation(
+            Base.get(), E->isArrow(), E->getOperatorLoc(),
+            E->getMemberNameInfo(), E->getLParenLoc(), Args, E->getRParenLoc(),
+            Expansion))
+      return true;
+    return ParseExpansion(E->getMemberNameInfo().getLoc());
+  }
+
+  UnresolvedLookupExpr *Old = E->getCallee();
+  ExprResult Callee;
+  if (E->areArgsUnparsed()) {
+    // A dependent qualifier: look the macros up now, then parse the
+    // arguments (captured as tokens) according to their shape.
+    NestedNameSpecifierLoc QualifierLoc =
+        S.SubstNestedNameSpecifierLoc(Old->getQualifierLoc(), TemplateArgs);
+    if (!QualifierLoc)
+      return true;
+    UnresolvedLookupExpr *Found = nullptr;
+    SmallVector<bool, 4> RawParams;
+    bool StillDependent = false;
+    if (S.LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(), Found,
+                                       RawParams, StillDependent))
+      return true;
+    assert(!StillDependent && "constructor definition still dependent");
+    // The arguments are parsed as part of the constructor template, then
+    // substituted into.
+    SmallVector<Expr *, 4> PatternArgs;
+    if (S.ParseDeferredMacroArguments(RawParams, E, PatternArgs) ||
+        S.SubstExprs(PatternArgs, /*IsCall=*/true, TemplateArgs, Args))
+      return true;
+    Callee = Found;
+  } else {
+    UnresolvedSet<8> Macros;
+    for (auto I = Old->decls_begin(), End = Old->decls_end(); I != End; ++I) {
+      auto *D = cast_or_null<NamedDecl>(
+          S.FindInstantiatedDecl(Old->getNameLoc(), *I, TemplateArgs));
+      if (!D)
+        return true;
+      Macros.addDecl(D, I.getAccess());
+    }
+    NestedNameSpecifierLoc QualifierLoc = Old->getQualifierLoc();
+    if (QualifierLoc) {
+      QualifierLoc = S.SubstNestedNameSpecifierLoc(QualifierLoc, TemplateArgs);
+      if (!QualifierLoc)
+        return true;
+    }
+    Callee = S.CreateUnresolvedLookupExpr(
+        /*NamingClass=*/nullptr, QualifierLoc, Old->getNameInfo(), Macros,
+        /*PerformADL=*/false);
+    if (Callee.isInvalid())
+      return true;
+
+    if (S.SubstExprs(E->getArgs(), /*IsCall=*/true, TemplateArgs, Args))
+      return true;
+  }
+  ForgetRawArgs(Args);
+  if (S.EvaluateMacroInvocation(
+          /*S=*/nullptr, cast<UnresolvedLookupExpr>(Callee.get()),
+          E->getLParenLoc(), Args, E->getRParenLoc(), Expansion))
+    return true;
+  return ParseExpansion(Old->getNameLoc());
+}
+
 void
 Sema::InstantiateMemInitializers(CXXConstructorDecl *New,
                                  const CXXConstructorDecl *Tmpl,
@@ -7080,12 +7198,32 @@ Sema::InstantiateMemInitializers(CXXConstructorDecl *New,
   SmallVector<CXXCtorInitializer*, 4> NewInits;
   bool AnyErrors = Tmpl->isInvalidDecl();
 
+  // Mem-initializer macro invocations were deferred to here; each expands in
+  // place, at its position among the written initializers. (Copied: an
+  // expansion may instantiate further constructors.)
+  SmallVector<std::pair<unsigned, CXXMacroInvocationExpr *>, 1> Macros;
+  if (auto It = DeferredMemInitMacros.find(Tmpl->getCanonicalDecl());
+      It != DeferredMemInitMacros.end())
+    Macros.assign(It->second.begin(), It->second.end());
+  unsigned NextMacro = 0;
+  auto ExpandMacrosThrough = [&](unsigned Position) {
+    for (; NextMacro != Macros.size() && Macros[NextMacro].first <= Position;
+         ++NextMacro)
+      if (expandDeferredMemInitMacro(*this, New, Macros[NextMacro].second,
+                                     TemplateArgs, NewInits)) {
+        AnyErrors = true;
+        New->setInvalidDecl();
+      }
+  };
+  unsigned WrittenPosition = 0;
+
   // Instantiate all the initializers.
   for (const auto *Init : Tmpl->inits()) {
     // Only instantiate written initializers, let Sema re-construct implicit
     // ones.
     if (!Init->isWritten())
       continue;
+    ExpandMacrosThrough(WrittenPosition++);
 
     SourceLocation EllipsisLoc;
 
@@ -7208,6 +7346,8 @@ Sema::InstantiateMemInitializers(CXXConstructorDecl *New,
       NewInits.push_back(NewInit.get());
     }
   }
+
+  ExpandMacrosThrough(~0u);
 
   // Assign all the initializers to the new constructor.
   ActOnMemInitializers(New,

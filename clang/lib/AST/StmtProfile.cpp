@@ -2519,6 +2519,7 @@ void StmtProfiler::VisitCXXBuiltinStringizeExpr(
 void StmtProfiler::VisitCXXMacroInvocationExpr(
     const CXXMacroInvocationExpr *E) {
   VisitExpr(E);
+  ID.AddBoolean(E->areArgsUnparsed());
   if (E->isMemberInvocation()) {
     ID.AddBoolean(E->isArrow());
     VisitName(E->getMemberNameInfo().getName());

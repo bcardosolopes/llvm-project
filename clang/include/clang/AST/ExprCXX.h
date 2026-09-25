@@ -5702,6 +5702,15 @@ public:
 ///
 /// The captured tokens may include interpolation expressions (introduced via
 /// `\(...)`) which are evaluated when the token sequence is materialized.
+/// An identifier token of a token sequence that, where the sequence was
+/// written, names a template parameter (by ordinary name lookup). When the
+/// sequence is instantiated, the token is replaced by that parameter's
+/// argument.
+struct TokenSequenceParamBinding {
+  unsigned TokenIndex;
+  NamedDecl *Param;
+};
+
 class CXXTokenSequenceExpr final
     : public Expr,
       private llvm::TrailingObjects<CXXTokenSequenceExpr, Stmt *> {
@@ -5713,6 +5722,10 @@ class CXXTokenSequenceExpr final
   TokenSequenceData TokSeq;
 
   unsigned NumInterpolationExprs;
+
+  // Template parameters named by identifier tokens (ASTContext storage).
+  const TokenSequenceParamBinding *ParamBindings = nullptr;
+  unsigned NumParamBindings = 0;
 
   // Source locations.
   SourceLocation OperatorLoc;
@@ -5728,9 +5741,10 @@ class CXXTokenSequenceExpr final
   }
 
 public:
-  static CXXTokenSequenceExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
-                                      SourceRange OperandRange,
-                                      TokenSequenceData TSD);
+  static CXXTokenSequenceExpr *
+  Create(ASTContext &C, SourceLocation OperatorLoc, SourceRange OperandRange,
+         TokenSequenceData TSD,
+         ArrayRef<TokenSequenceParamBinding> ParamBindings = {});
   static CXXTokenSequenceExpr *CreateEmpty(const ASTContext &C,
                                            unsigned NumInterpolationExprs);
 
@@ -5742,6 +5756,12 @@ public:
   }
 
   unsigned getNumInterpolationExprs() const { return NumInterpolationExprs; }
+
+  /// The identifier tokens that name template parameters where the sequence
+  /// was written, in token order.
+  ArrayRef<TokenSequenceParamBinding> getParamBindings() const {
+    return {ParamBindings, NumParamBindings};
+  }
 
   /// Returns an APValue representing this token sequence.
   APValue getValue() const;
@@ -6297,6 +6317,18 @@ class CXXMacroInvocationExpr : public Expr {
   Stmt **SubExprs;
   unsigned NumArgs;
   bool IsArrow = false;
+  /// True if the macro was not known when the invocation was parsed (a
+  /// dependent qualifier or object type): its parameter shape, which decides
+  /// how the arguments are parsed -- and where they split -- was unknown, so
+  /// the single argument is a token sequence of the whole argument list, to
+  /// be parsed at instantiation.
+  bool ArgsUnparsed = false;
+  /// Where unparsed arguments are to be parsed: the context the invocation
+  /// was written in, and the template parameters in scope there (ASTContext
+  /// storage). Not serialized, as token sequences are not.
+  DeclContext *UnparsedContext = nullptr;
+  NamedDecl *const *UnparsedTemplateParams = nullptr;
+  unsigned NumUnparsedTemplateParams = 0;
   /// The member name of a member invocation.
   DeclarationNameInfo MemberNameInfo;
   SourceLocation OperatorLoc;
@@ -6338,6 +6370,18 @@ public:
   void setBase(Expr *E) { SubExprs[1] = E; }
   bool isArrow() const { return IsArrow; }
   void setIsArrow(bool A) { IsArrow = A; }
+  bool areArgsUnparsed() const { return ArgsUnparsed; }
+  void setArgsUnparsed(bool U) { ArgsUnparsed = U; }
+  /// The context unparsed arguments are parsed in (see ArgsUnparsed).
+  DeclContext *getUnparsedContext() const { return UnparsedContext; }
+  /// The template parameters in scope for unparsed arguments.
+  ArrayRef<NamedDecl *> getUnparsedTemplateParams() const {
+    return {UnparsedTemplateParams, NumUnparsedTemplateParams};
+  }
+  /// Mark the arguments unparsed, to be parsed in \p Ctx with
+  /// \p TemplateParams in scope.
+  void setUnparsedEnvironment(ASTContext &C, DeclContext *Ctx,
+                              ArrayRef<NamedDecl *> TemplateParams);
   const DeclarationNameInfo &getMemberNameInfo() const {
     return MemberNameInfo;
   }
