@@ -353,6 +353,82 @@ namespace fall_off_end {
   }
 }
 
+namespace jump_out_of_do_expr_initializer {
+  // P2806R5 §`goto`: "referring to any label that is in scope of the variable
+  // we're initializing needs to be disallowed -- since we wouldn't have
+  // actually initialized the variable. We need to ensure that the [stmt.dcl]
+  // rule is extended to cover this case."
+  //
+  // Jumping out of a do-expression is otherwise fine; it is specifically a
+  // label in the scope of the variable being initialized that is not.
+  extern bool cond;
+
+  void to_label_at_function_scope() {
+    int i = do { // expected-note {{jump bypasses variable initialization}}
+      if (cond) { goto after; } // expected-error {{cannot jump from this goto statement to its label}}
+      do_return 1;
+    };
+    (void)i;
+  after:;
+  }
+
+  void to_later_label_in_same_block() {
+    {
+      int i = do { // expected-note {{jump bypasses variable initialization}}
+        if (cond) { goto later; } // expected-error {{cannot jump from this goto statement to its label}}
+        do_return 1;
+      };
+      (void)i;
+    later:;
+    }
+  }
+
+  // The hazard the rule exists for: without the diagnostic `t` is left
+  // uninitialized while in scope, and its destructor still runs.
+  struct T { int x; explicit T(int v); ~T(); };
+
+  void nontrivial_destructor() {
+    T t = do { // expected-note {{jump bypasses variable initialization}}
+      if (cond) { goto after; } // expected-error {{cannot jump from this goto statement to its label}}
+      do_return T(7);
+    };
+    (void)t;
+  after:;
+  }
+
+  // A label BEFORE the declaration is not in the variable's scope, so a
+  // backward jump skips no initialization and stays valid.
+  void backward_jump_is_fine() {
+  before:
+    if (cond) {
+      int i = do {
+        if (cond) { goto before; }
+        do_return 1;
+      };
+      (void)i;
+    }
+  }
+
+  // A jump wholly inside the body is unaffected.
+  void jump_within_body() {
+    int i = do {
+      if (cond) goto inner;
+    inner:
+      do_return 1;
+    };
+    (void)i;
+  }
+
+  // Not initializing a variable at all: nothing to bypass.
+  void discarded_result() {
+    (void)do -> int {
+      if (cond) { goto after; }
+      do_return 1;
+    };
+  after:;
+  }
+}
+
 namespace jump_into_do_expr {
   int bad_goto() {
     int x;

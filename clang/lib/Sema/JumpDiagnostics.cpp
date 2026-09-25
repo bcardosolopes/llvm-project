@@ -231,8 +231,55 @@ static ScopePair GetDiagForGotoScopeDecl(Sema &S, const Decl *D) {
   return ScopePair(0U, 0U);
 }
 
+/// Does \p S contain a do-expression, not counting one nested in a lambda or
+/// block body (which is a separate function for jump purposes)?
+static bool containsDoExpr(const Stmt *S) {
+  if (!S)
+    return false;
+  if (isa<DoExpr>(S))
+    return true;
+  if (isa<LambdaExpr>(S) || isa<BlockExpr>(S))
+    return false;
+  for (const Stmt *Sub : S->children())
+    if (containsDoExpr(Sub))
+      return true;
+  return false;
+}
+
 /// Build scope information for a declaration that is part of a DeclStmt.
 void JumpScopeChecker::BuildScopeInformation(Decl *D, unsigned &ParentScope) {
+  VarDecl *VD = dyn_cast<VarDecl>(D);
+  Expr *Init = VD ? VD->getInit() : nullptr;
+
+  // An initializer containing a do-expression is walked BEFORE the variable's
+  // own scope is pushed. While the initializer runs the variable is not yet
+  // initialized, so a jump out of it to a label that is in the variable's
+  // scope bypasses that initialization and has to be rejected. Pushing the
+  // variable's scope first makes such a jump look like it is already inside
+  // that scope, so it crosses nothing and is accepted in silence -- leaving
+  // the variable uninitialized while in scope, and still running its
+  // destructor at the end of the block.
+  //
+  // P2806 requires this, and names the wording hook:
+  //
+  //   "referring to any label that is in scope of the variable we're
+  //    initializing needs to be disallowed -- since we wouldn't have actually
+  //    initialized the variable. We need to ensure that the [stmt.dcl] rule is
+  //    extended to cover this case."
+  //
+  // A GNU statement-expression initializer can jump out in exactly the same
+  // way, and clang has always accepted that. Changing it is not this patch's
+  // business, so the reordering is limited to initializers that contain a
+  // do-expression.
+  //
+  // Any scope the initializer itself pushes -- a lifetime-extended temporary
+  // with a non-trivial destructor, say -- still becomes the enclosing scope
+  // for whatever follows the declaration, because ParentScope is by reference.
+  // That is what keeps an indirect goto past such a temporary diagnosed.
+  const bool InitCanJumpOut = Init && containsDoExpr(Init);
+  if (InitCanJumpOut)
+    BuildScopeInformation(Init, ParentScope);
+
   // If this decl causes a new scope, push and switch to it.
   std::pair<unsigned,unsigned> Diags = GetDiagForGotoScopeDecl(S, D);
   if (Diags.first || Diags.second) {
@@ -241,11 +288,10 @@ void JumpScopeChecker::BuildScopeInformation(Decl *D, unsigned &ParentScope) {
     ParentScope = Scopes.size()-1;
   }
 
-  // If the decl has an initializer, walk it with the potentially new
-  // scope we just installed.
-  if (VarDecl *VD = dyn_cast<VarDecl>(D))
-    if (Expr *Init = VD->getInit())
-      BuildScopeInformation(Init, ParentScope);
+  // Any other initializer is walked with the potentially new scope we just
+  // installed, as before.
+  if (Init && !InitCanJumpOut)
+    BuildScopeInformation(Init, ParentScope);
 }
 
 /// Build scope information for a captured block literal variables.
