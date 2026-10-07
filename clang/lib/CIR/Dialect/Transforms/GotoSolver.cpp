@@ -121,35 +121,44 @@ void GotoSolverPass::runOnOperation() {
   // and join the indirect branch's successors.  A SetVector keeps the first
   // occurrence in order: a label named more than once across initializers needs
   // to be a successor only once.
+  //
+  // Only globals are scanned.  Label addresses inside function bodies
+  // materialize as cir.block_address ops, which process() below collects
+  // directly, and no other top-level operation carries constant initializers,
+  // so scanning every op in the module would only re-scan millions of inherent
+  // attributes that can never hold an out-of-function block address.
   llvm::StringMap<llvm::SmallSetVector<StringRef, 4>> globalBlockAddrLabels;
-  getOperation()->walk([&](mlir::Operation *op) {
+  mlir::ModuleOp module = mlir::cast<mlir::ModuleOp>(getOperation());
+  for (cir::GlobalOp global : module.getOps<cir::GlobalOp>()) {
     auto collectBlockAddresses = [&](mlir::Attribute attr) {
-      attr.walk([&](cir::BlockAddrInfoAttr info) {
-        globalBlockAddrLabels[info.getFunc().getValue()].insert(
-            info.getLabel());
-      });
-      // A block-address difference attribute references two labels in the same
-      // function; keep both alive.
-      attr.walk([&](cir::BlockAddrDiffAttr diff) {
-        llvm::SmallSetVector<StringRef, 4> &labels =
-            globalBlockAddrLabels[diff.getFunc().getValue()];
-        labels.insert(diff.getLhsLabel().getValue());
-        labels.insert(diff.getRhsLabel().getValue());
+      attr.walk([&](mlir::Attribute nested) {
+        if (auto info = mlir::dyn_cast<cir::BlockAddrInfoAttr>(nested)) {
+          globalBlockAddrLabels[info.getFunc().getValue()].insert(
+              info.getLabel());
+        } else if (auto diff = mlir::dyn_cast<cir::BlockAddrDiffAttr>(nested)) {
+          // A block-address difference attribute references two labels in the
+          // same function; keep both alive.
+          llvm::SmallSetVector<StringRef, 4> &labels =
+              globalBlockAddrLabels[diff.getFunc().getValue()];
+          labels.insert(diff.getLhsLabel().getValue());
+          labels.insert(diff.getRhsLabel().getValue());
+        }
+        return mlir::WalkResult::advance();
       });
     };
-    op->getName().walkInherentAttrs(
-        op, [&](llvm::StringRef, mlir::Attribute &attr) {
+    global.getOperation()->getName().walkInherentAttrs(
+        global.getOperation(), [&](llvm::StringRef, mlir::Attribute &attr) {
           collectBlockAddresses(attr);
         });
-  });
+  }
 
   static const llvm::SmallVector<StringRef> empty;
-  getOperation()->walk([&](cir::FuncOp func) {
+  for (cir::FuncOp func : module.getOps<cir::FuncOp>()) {
     auto it = globalBlockAddrLabels.find(func.getSymName());
     process(func, it == globalBlockAddrLabels.end()
                       ? llvm::ArrayRef<StringRef>(empty)
                       : it->second.getArrayRef());
-  });
+  }
 }
 
 } // namespace
