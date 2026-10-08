@@ -166,6 +166,13 @@ bool cir::CopyOp::canUsesBeRemoved(
   if (getDst() == getSrc())
     return false;
 
+  // The copy must reference the slot directly. mem2reg's merge analysis
+  // only considers direct users of the slot pointer as defining blocks, so
+  // a copy through a bitcast would have its value computed but dropped at
+  // merges (like LLVM's mem2reg, leave a type-punned slot in memory).
+  if (getDst() != slot.ptr && getSrc() != slot.ptr)
+    return false;
+
   return getCopySizeInBytes(dataLayout) ==
          dataLayout.getTypeSize(slot.valueType);
 }
