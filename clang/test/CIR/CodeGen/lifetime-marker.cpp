@@ -1,12 +1,12 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -emit-cir %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s --check-prefixes=CIR,EXT-CIR,EXT-CIR-NOEH
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -emit-llvm -disable-llvm-passes %s -o %t.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fno-clangir-mem2reg -emit-llvm -disable-llvm-passes %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s --check-prefixes=LLVM,EXT-LLVM,EXT-LLVM-NOEH
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t-o0.cir
 // RUN: FileCheck --input-file=%t-o0.cir %s --implicit-check-not "cir.lifetime"
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O1 -fcxx-exceptions -fexceptions -fclangir -emit-cir %s -o %t-eh.cir
 // RUN: FileCheck --input-file=%t-eh.cir %s --check-prefixes=CIR-EH,EXT-CIR,EXT-CIR-EH
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O1 -fcxx-exceptions -fexceptions -fclangir -emit-llvm -disable-llvm-passes %s -o %t-eh.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O1 -fcxx-exceptions -fexceptions -fclangir -fno-clangir-mem2reg -emit-llvm -disable-llvm-passes %s -o %t-eh.ll
 // RUN: FileCheck --input-file=%t-eh.ll %s --check-prefixes=LLVM-EH,EXT-LLVM,EXT-LLVM-EH
 
 void use(int);

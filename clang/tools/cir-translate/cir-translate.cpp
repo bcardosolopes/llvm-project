@@ -157,6 +157,10 @@ void registerToLLVMTranslation() {
       "disable-cc-lowering",
       llvm::cl::desc("Disable calling convention lowering pass"),
       llvm::cl::init(false));
+  static llvm::cl::opt<bool> enableMem2Reg(
+      "cir-mem2reg",
+      llvm::cl::desc("Run mem2reg on flat CIR before conversion"),
+      llvm::cl::init(false));
 
   mlir::TranslateFromMLIRRegistration registration(
       "cir-to-llvmir", "Translate CIR to LLVMIR",
@@ -169,8 +173,8 @@ void registerToLLVMTranslation() {
         llvm::LLVMContext llvmContext;
         const bool enableOpenMP = mlir::omp::isOpenMPModule(cirModule);
         std::unique_ptr<llvm::Module> llvmModule =
-            cir::direct::lowerDirectlyFromCIRToLLVMIR(cirModule, llvmContext,
-                                                      enableOpenMP);
+            cir::direct::lowerDirectlyFromCIRToLLVMIR(
+                cirModule, llvmContext, enableOpenMP, enableMem2Reg);
         if (!llvmModule)
           return mlir::failure();
         llvmModule->renumberMetadataForAssembly();

@@ -1,0 +1,23 @@
+// RUN: cir-translate --cir-to-llvmir --target x86_64-unknown-linux-gnu --cir-mem2reg %s -o %t-on.ll
+// RUN: FileCheck %s -input-file %t-on.ll -check-prefix=ON
+// RUN: cir-translate --cir-to-llvmir --target x86_64-unknown-linux-gnu %s -o %t-off.ll
+// RUN: FileCheck %s -input-file %t-off.ll -check-prefix=OFF
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @store_load() -> !s32i {
+    %0 = cir.alloca "x" align(4) : !cir.ptr<!s32i>
+    %c = cir.const #cir.int<42> : !s32i
+    cir.store %c, %0 : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+}
+
+// ON-LABEL: define i32 @store_load()
+// ON-NOT: alloca
+// ON: ret i32 42
+
+// OFF-LABEL: define i32 @store_load()
+// OFF: alloca

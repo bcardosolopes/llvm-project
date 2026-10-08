@@ -68,10 +68,11 @@ getBackendActionFromOutputType(CIRGenAction::OutputType Action) {
 
 static std::unique_ptr<llvm::Module>
 lowerFromCIRToLLVMIR(mlir::ModuleOp MLIRModule, llvm::LLVMContext &LLVMCtx,
-                     bool EnableOpenMP,
+                     bool EnableOpenMP, bool EnableMem2Reg,
                      llvm::StringRef mlirSaveTempsOutFile = {},
                      llvm::vfs::FileSystem *fs = nullptr) {
   return direct::lowerDirectlyFromCIRToLLVMIR(MLIRModule, LLVMCtx, EnableOpenMP,
+                                              EnableMem2Reg,
                                               mlirSaveTempsOutFile, fs);
 }
 
@@ -175,9 +176,13 @@ static void emitCIRModuleOutput(
     // sandbox.
     LLVMCtx.setVirtualFileSystem(CI.getVirtualFileSystemPtr());
 
-    std::unique_ptr<llvm::Module> LLVMModule =
-        lowerFromCIRToLLVMIR(MlirModule, LLVMCtx, EnableOpenMP,
-                             mlirSaveTempsOutFile, &CI.getVirtualFileSystem());
+    // Like classic CodeGen, only promote at optimized levels: at -O0 the
+    // source allocas are the debuggable homes of every local.
+    const bool EnableMem2Reg = CI.getFrontendOpts().ClangIREnableMem2Reg &&
+                               (CGO.OptimizationLevel > 0);
+    std::unique_ptr<llvm::Module> LLVMModule = lowerFromCIRToLLVMIR(
+        MlirModule, LLVMCtx, EnableOpenMP, EnableMem2Reg, mlirSaveTempsOutFile,
+        &CI.getVirtualFileSystem());
     if (!LLVMModule) {
       // Lowering errors are already routed through the MLIR diagnostic
       // handler. Only emit the generic error if nothing was reported.
