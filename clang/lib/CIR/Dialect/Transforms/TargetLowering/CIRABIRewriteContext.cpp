@@ -345,9 +345,13 @@ mlir::ArrayAttr updateArgAttrs(mlir::MLIRContext *ctx, mlir::ModuleOp module,
           attrs.set(mlir::LLVM::LLVMDialect::getDeadOnReturnAttrName(),
                     builder.getI64IntegerAttr(static_cast<int64_t>(
                         llvm::DeadOnReturnInfo().toIntValue())));
-        attrs.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
-                  builder.getI64IntegerAttr(
-                      dl.getTypeAllocSize(pointeeTy).getFixedValue()));
+        // Skip zero sizes: dereferenceable(0) is invalid IR. Classic codegen
+        // gets this for free from AttrBuilder::addDereferenceableAttr.
+        // Alloc size, not store size: padding is dereferenceable too.
+        uint64_t bytes = dl.getTypeAllocSize(pointeeTy).getFixedValue();
+        if (bytes != 0)
+          attrs.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
+                    builder.getI64IntegerAttr(bytes));
       }
       newArgAttrs.push_back(attrs.getDictionary(ctx));
     } else if (ac.kind == ArgKind::IndirectAliased) {
