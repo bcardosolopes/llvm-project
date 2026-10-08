@@ -5,6 +5,8 @@
 !u16i = !cir.int<u, 16>
 !rec_Whole = !cir.struct<"Whole" {data !u16i, data !u16i}>
 !rec_AllPad = !cir.struct<"AllPad" {pad !u8i}>
+!rec_A = !cir.struct<"A" {data !s32i}>
+!rec_B = !cir.struct<"B" {data !s32i}>
 
 module {
   // Promote CIR stack slots through the generic mem2reg pass after CFG flattening.
@@ -93,5 +95,54 @@ module {
     cir.copy %src to %slot skip_tail_padding : !cir.ptr<!rec_AllPad>
     %v = cir.load %slot : !cir.ptr<!rec_AllPad>, !rec_AllPad
     cir.return %v : !rec_AllPad
+  }
+
+  // A copy that reaches the slot only through a bitcast does not promote,
+  // even when it covers the whole slot: mem2reg's merge analysis would not
+  // count the copying block as defining the slot.
+  // CHECK-LABEL: cir.func @do_not_promote_copy_to_bitcast_slot
+  cir.func @do_not_promote_copy_to_bitcast_slot(%src: !cir.ptr<!rec_B>) -> !rec_A {
+    // CHECK: %[[SLOT:.*]] = cir.alloca "s" align(4) init : !cir.ptr<!rec_A>
+    // CHECK: cir.copy %{{.+}} to %{{.+}} : !cir.ptr<!rec_B>
+    // CHECK: cir.load %[[SLOT]] : !cir.ptr<!rec_A>, !rec_A
+    %slot = cir.alloca "s" align(4) init : !cir.ptr<!rec_A>
+    %bc = cir.cast bitcast %slot : !cir.ptr<!rec_A> -> !cir.ptr<!rec_B>
+    cir.copy %src to %bc : !cir.ptr<!rec_B>
+    %v = cir.load %slot : !cir.ptr<!rec_A>, !rec_A
+    cir.return %v : !rec_A
+  }
+
+  // Same as above, but the slot is on the loaded (source) side of the copy.
+  // CHECK-LABEL: cir.func @do_not_promote_copy_from_bitcast_slot
+  cir.func @do_not_promote_copy_from_bitcast_slot(%v: !rec_A, %dst: !cir.ptr<!rec_B>) {
+    // CHECK: %[[SLOT:.*]] = cir.alloca "s" align(4) init : !cir.ptr<!rec_A>
+    // CHECK: cir.store %{{.+}}, %[[SLOT]] : !rec_A, !cir.ptr<!rec_A>
+    // CHECK: cir.copy %{{.+}} to %{{.+}} : !cir.ptr<!rec_B>
+    %slot = cir.alloca "s" align(4) init : !cir.ptr<!rec_A>
+    cir.store %v, %slot : !rec_A, !cir.ptr<!rec_A>
+    %bc = cir.cast bitcast %slot : !cir.ptr<!rec_A> -> !cir.ptr<!rec_B>
+    cir.copy %bc to %dst : !cir.ptr<!rec_B>
+    cir.return
+  }
+
+  // A bitcast copy on one side of a diamond must not promote either:
+  // promoting it would compute the copied value but drop it at the merge,
+  // reading the slot's default instead.
+  // CHECK-LABEL: cir.func @do_not_promote_bitcast_copy_diamond
+  cir.func @do_not_promote_bitcast_copy_diamond(%cond: !cir.bool, %src: !cir.ptr<!rec_B>) -> !rec_A {
+    // CHECK: %[[SLOT:.*]] = cir.alloca "s" align(4) init : !cir.ptr<!rec_A>
+    // CHECK: cir.copy %{{.+}} to %{{.+}} : !cir.ptr<!rec_B>
+    // CHECK: cir.load %[[SLOT]] : !cir.ptr<!rec_A>, !rec_A
+    %slot = cir.alloca "s" align(4) init : !cir.ptr<!rec_A>
+    cir.brcond %cond ^store, ^skip
+  ^store:
+    %bc = cir.cast bitcast %slot : !cir.ptr<!rec_A> -> !cir.ptr<!rec_B>
+    cir.copy %src to %bc : !cir.ptr<!rec_B>
+    cir.br ^merge
+  ^skip:
+    cir.br ^merge
+  ^merge:
+    %v = cir.load %slot : !cir.ptr<!rec_A>, !rec_A
+    cir.return %v : !rec_A
   }
 }
