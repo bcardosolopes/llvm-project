@@ -37,6 +37,10 @@ struct CIRToLLVMPipelineOptions
       *this, "enable-openmp",
       llvm::cl::desc("Add OpenMP-specific CIR-to-LLVM lowering passes"),
       llvm::cl::init(false)};
+  Option<bool> enableMem2Reg{
+      *this, "enable-mem2reg",
+      llvm::cl::desc("Run mem2reg on flat CIR before conversion"),
+      llvm::cl::init(false)};
 };
 
 int main(int argc, char **argv) {
@@ -59,7 +63,8 @@ int main(int argc, char **argv) {
   mlir::PassPipelineRegistration<CIRToLLVMPipelineOptions> pipeline(
       "cir-to-llvm", "",
       [](mlir::OpPassManager &pm, const CIRToLLVMPipelineOptions &options) {
-        cir::direct::populateCIRToLLVMPasses(pm, options.enableOpenMP);
+        cir::direct::populateCIRToLLVMPasses(pm, options.enableOpenMP,
+                                             options.enableMem2Reg);
       });
 
   ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {

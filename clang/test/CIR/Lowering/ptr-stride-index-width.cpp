@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -O1 -disable-llvm-passes -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -O1 -disable-llvm-passes -fno-clangir-mem2reg -emit-llvm %s -o - | FileCheck %s
 
 const unsigned char *f(const unsigned char *p, int n) {
   const int k = -n;

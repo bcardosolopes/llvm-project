@@ -12,6 +12,7 @@
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/Passes.h"
@@ -157,11 +158,15 @@ runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
 
 namespace mlir {
 
-void populateCIRPreLoweringPasses(OpPassManager &pm) {
+void populateCIRPreLoweringPasses(OpPassManager &pm, bool enableMem2Reg) {
   pm.addPass(createHoistAllocasPass());
   pm.addPass(createCIRFlattenCFGPass());
   pm.addPass(createCIREHABILoweringPass());
   pm.addPass(createGotoSolverPass());
+  // Promote flat allocas before conversion so the LLVM optimizer gets less
+  // stack traffic as input. Runs last so it sees the final CFG shape.
+  if (enableMem2Reg)
+    pm.addPass(createMem2Reg());
 }
 
 } // namespace mlir

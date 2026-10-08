@@ -43,7 +43,7 @@ std::unique_ptr<Pass> createGotoSolverPass();
 std::unique_ptr<Pass> createIdiomRecognizerPass();
 std::unique_ptr<Pass> createLibOptPass();
 
-void populateCIRPreLoweringPasses(mlir::OpPassManager &pm);
+void populateCIRPreLoweringPasses(mlir::OpPassManager &pm, bool enableMem2Reg);
 
 //===----------------------------------------------------------------------===//
 // Registration

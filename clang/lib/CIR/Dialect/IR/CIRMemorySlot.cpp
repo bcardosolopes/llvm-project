@@ -166,6 +166,20 @@ bool cir::CopyOp::canUsesBeRemoved(
   if (getDst() == getSrc())
     return false;
 
+  // A volatile copy is an externally observable access that must survive
+  // mem2reg, so it cannot be removed (this also blocks promotion of the
+  // slot). Matches LoadOp/StoreOp above and LLVM's isAllocaPromotable,
+  // which refuses any volatile user.
+  if (getIsVolatile())
+    return false;
+
+  // The copy must reference the slot directly. mem2reg's merge analysis
+  // only considers direct users of the slot pointer as defining blocks, so
+  // a copy through a bitcast would have its value computed but dropped at
+  // merges (like LLVM's mem2reg, leave a type-punned slot in memory).
+  if (getDst() != slot.ptr && getSrc() != slot.ptr)
+    return false;
+
   return getCopySizeInBytes(dataLayout) ==
          dataLayout.getTypeSize(slot.valueType);
 }
@@ -269,6 +283,37 @@ bool cir::CastOp::canUsesBeRemoved(
 }
 
 DeletionKind cir::CastOp::removeBlockingUses(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
+  return DeletionKind::Delete;
+}
+
+//===----------------------------------------------------------------------===//
+// Interfaces for LifetimeStartOp and LifetimeEndOp
+//===----------------------------------------------------------------------===//
+
+// A promoted slot is no longer on the stack, so its lifetime markers mean
+// nothing and go with it. Without this, every local CIRGen marks blocks its
+// own promotion.
+bool cir::LifetimeStartOp::canUsesBeRemoved(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses,
+    SmallVectorImpl<OpOperand *> &newBlockingUses,
+    const DataLayout &dataLayout) {
+  return true;
+}
+
+DeletionKind cir::LifetimeStartOp::removeBlockingUses(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
+  return DeletionKind::Delete;
+}
+
+bool cir::LifetimeEndOp::canUsesBeRemoved(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses,
+    SmallVectorImpl<OpOperand *> &newBlockingUses,
+    const DataLayout &dataLayout) {
+  return true;
+}
+
+DeletionKind cir::LifetimeEndOp::removeBlockingUses(
     const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
   return DeletionKind::Delete;
 }
