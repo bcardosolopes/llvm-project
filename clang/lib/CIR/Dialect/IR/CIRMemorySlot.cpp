@@ -166,6 +166,13 @@ bool cir::CopyOp::canUsesBeRemoved(
   if (getDst() == getSrc())
     return false;
 
+  // A volatile copy is an externally observable access that must survive
+  // mem2reg, so it cannot be removed (this also blocks promotion of the
+  // slot). Matches LoadOp/StoreOp above and LLVM's isAllocaPromotable,
+  // which refuses any volatile user.
+  if (getIsVolatile())
+    return false;
+
   // The copy must reference the slot directly. mem2reg's merge analysis
   // only considers direct users of the slot pointer as defining blocks, so
   // a copy through a bitcast would have its value computed but dropped at

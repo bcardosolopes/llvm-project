@@ -125,6 +125,19 @@ module {
     cir.return
   }
 
+  // A volatile copy is externally observable and must survive mem2reg,
+  // so its slot does not promote.
+  // CHECK-LABEL: cir.func @do_not_promote_volatile_copy
+  cir.func @do_not_promote_volatile_copy(%src: !cir.ptr<!rec_Whole>) -> !rec_Whole {
+    // CHECK: %[[SLOT:.*]] = cir.alloca "s" align(2) init : !cir.ptr<!rec_Whole>
+    // CHECK: cir.copy %{{.+}} to %[[SLOT]] volatile : !cir.ptr<!rec_Whole>
+    // CHECK: cir.load %[[SLOT]] : !cir.ptr<!rec_Whole>, !rec_Whole
+    %slot = cir.alloca "s" align(2) init : !cir.ptr<!rec_Whole>
+    cir.copy %src to %slot volatile : !cir.ptr<!rec_Whole>
+    %v = cir.load %slot : !cir.ptr<!rec_Whole>, !rec_Whole
+    cir.return %v : !rec_Whole
+  }
+
   // A bitcast copy on one side of a diamond must not promote either:
   // promoting it would compute the copied value but drop it at the merge,
   // reading the slot's default instead.
