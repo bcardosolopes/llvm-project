@@ -125,6 +125,22 @@ module {
     cir.return
   }
 
+  // Lifetime markers on a promoted slot go with it: the slot is no longer
+  // on the stack, so they mean nothing.
+  // CHECK-LABEL: cir.func @promote_slot_with_lifetime_markers
+  cir.func @promote_slot_with_lifetime_markers() -> !s32i {
+    // CHECK-NOT: cir.alloca
+    // CHECK-NOT: cir.lifetime
+    // CHECK: cir.return
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!s32i>
+    cir.lifetime.start %slot : !cir.ptr<!s32i>
+    %c = cir.const #cir.int<42> : !s32i
+    cir.store %c, %slot : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %slot : !cir.ptr<!s32i>, !s32i
+    cir.lifetime.end %slot : !cir.ptr<!s32i>
+    cir.return %v : !s32i
+  }
+
   // A volatile copy is externally observable and must survive mem2reg,
   // so its slot does not promote.
   // CHECK-LABEL: cir.func @do_not_promote_volatile_copy
