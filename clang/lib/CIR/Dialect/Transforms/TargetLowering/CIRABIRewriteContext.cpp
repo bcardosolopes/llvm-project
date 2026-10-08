@@ -285,9 +285,12 @@ mlir::ArrayAttr updateArgAttrs(mlir::MLIRContext *ctx,
         assert(!cir::MissingFeatures::deadOnReturnAttr());
         attrs.set(mlir::LLVM::LLVMDialect::getNoFreeObjAttrName(),
                   builder.getUnitAttr());
-        attrs.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
-                  builder.getI64IntegerAttr(
-                      dl.getTypeSize(pointeeTy).getFixedValue()));
+        // Skip zero sizes: dereferenceable(0) is invalid IR. Classic codegen
+        // gets this for free from AttrBuilder::addDereferenceableAttr.
+        uint64_t bytes = dl.getTypeSize(pointeeTy).getFixedValue();
+        if (bytes != 0)
+          attrs.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
+                    builder.getI64IntegerAttr(bytes));
       }
       newArgAttrs.push_back(attrs.getDictionary(ctx));
     } else {

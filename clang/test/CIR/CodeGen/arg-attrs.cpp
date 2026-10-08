@@ -54,3 +54,20 @@ void caller(Struct s, int i, Incomplete &inc) {
   // BOTH: call void @_ZN6Struct8arg_attrES_RiR10Incomplete(ptr noundef nonnull align 4 dereferenceable(20) %{{.*}}, ptr noundef byval(%struct.Struct) align 8 %{{.*}}, ptr noundef nonnull align 4 dereferenceable(4) %{{.*}}, ptr noundef nonnull align 1 %{{.*}})
 }
 
+// Function types have size 0, so references to them get no dereferenceable
+// attribute. Emitting dereferenceable(0) would be invalid IR.
+int callee(int x) { return x + 1; }
+
+void func_ref(int (&f)(int)) { f(42); }
+  // CIR: cir.func {{.*}}@_Z8func_refRFiiE(%{{.*}}: !cir.ptr<!cir.func<(!s32i) -> !s32i>> {llvm.nonnull, llvm.noundef} {{.*}}) {{.*}} {
+  // BOTH: define {{.*}}void @_Z8func_refRFiiE(ptr noundef nonnull %{{.*}})
+
+using FuncTy = int(int);
+FuncTy &return_func_ref() { return callee; }
+  // CIR: cir.func {{.*}}@_Z15return_func_refv() -> (!cir.ptr<!cir.func<(!s32i) -> !s32i>> {llvm.nonnull, llvm.noundef}) {{.*}} {
+  // BOTH: define {{.*}}noundef nonnull ptr @_Z15return_func_refv()
+
+void func_ref_caller() { func_ref(callee); }
+  // CIR: cir.call @_Z8func_refRFiiE(%{{.*}}) : (!cir.ptr<!cir.func<(!s32i) -> !s32i>> {llvm.nonnull, llvm.noundef})
+  // BOTH: call void @_Z8func_refRFiiE(ptr noundef nonnull @_Z6calleei)
+
