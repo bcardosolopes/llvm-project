@@ -5706,7 +5706,9 @@ def CIR_StackRestoreOp : CIR_Op<"stackrestore"> {
 // LifetimeStartOp & LifetimeEndOp
 //===----------------------------------------------------------------------===//
 
-def CIR_LifetimeStartOp : CIR_Op<"lifetime.start"> {
+def CIR_LifetimeStartOp : CIR_Op<"lifetime.start", [
+  DeclareOpInterfaceMethods<PromotableOpInterface>
+]> {
   let summary = "Marks the start of the lifetime of a variable produced by a cir.alloca operation";
   let description = [{
     The `cir.lifetime.start` operation marks the beginning of the lifetime
@@ -5746,7 +5748,9 @@ def CIR_LifetimeStartOp : CIR_Op<"lifetime.start"> {
   let llvmOp = "LifetimeStartOp";
 }
 
-def CIR_LifetimeEndOp : CIR_Op<"lifetime.end"> {
+def CIR_LifetimeEndOp : CIR_Op<"lifetime.end", [
+  DeclareOpInterfaceMethods<PromotableOpInterface>
+]> {
   let summary = "Marks the end of the lifetime of a variable produced by a cir.alloca operation";
   let description = [{
     The `cir.lifetime.end` operation marks the end of the lifetime of the

@@ -286,3 +286,34 @@ DeletionKind cir::CastOp::removeBlockingUses(
     const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
   return DeletionKind::Delete;
 }
+
+//===----------------------------------------------------------------------===//
+// Interfaces for LifetimeStartOp and LifetimeEndOp
+//===----------------------------------------------------------------------===//
+
+// A promoted slot is no longer on the stack, so its lifetime markers mean
+// nothing and go with it. Without this, every local CIRGen marks blocks its
+// own promotion.
+bool cir::LifetimeStartOp::canUsesBeRemoved(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses,
+    SmallVectorImpl<OpOperand *> &newBlockingUses,
+    const DataLayout &dataLayout) {
+  return true;
+}
+
+DeletionKind cir::LifetimeStartOp::removeBlockingUses(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
+  return DeletionKind::Delete;
+}
+
+bool cir::LifetimeEndOp::canUsesBeRemoved(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses,
+    SmallVectorImpl<OpOperand *> &newBlockingUses,
+    const DataLayout &dataLayout) {
+  return true;
+}
+
+DeletionKind cir::LifetimeEndOp::removeBlockingUses(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
+  return DeletionKind::Delete;
+}
