@@ -697,10 +697,15 @@ void CIRGenModule::constructFunctionReturnAttributes(
     // FIXME: fix this properly, https://reviews.llvm.org/D100388
     if (const auto *refTy = retTy->getAs<ReferenceType>()) {
       QualType pointeeTy = refTy->getPointeeType();
-      if (!pointeeTy->isIncompleteType() && pointeeTy->isConstantSizeType())
-        retAttrs.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
-                     builder.getI64IntegerAttr(
-                         getMinimumObjectSize(pointeeTy).getQuantity()));
+      if (!pointeeTy->isIncompleteType() && pointeeTy->isConstantSizeType()) {
+        uint64_t bytes = getMinimumObjectSize(pointeeTy).getQuantity();
+        // Classic codegen relies on AttrBuilder::addDereferenceableAttr
+        // ignoring zero sizes (e.g. function types have size 0). CIR bypasses
+        // AttrBuilder, so replicate the guard to avoid emitting invalid IR.
+        if (bytes != 0)
+          retAttrs.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
+                       builder.getI64IntegerAttr(bytes));
+      }
 
       if (getTypes().getTargetAddressSpace(pointeeTy) == 0 &&
           !codeGenOpts.NullPointerIsValid)
@@ -731,9 +736,11 @@ void CIRGenModule::constructFunctionArgumentAttributes(
 
       if (!codeGenOpts.NullPointerIsValid &&
           getTypes().getTargetAddressSpace(thisPtrTy) == 0) {
-        argAttrs[0].set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
-                        builder.getI64IntegerAttr(
-                            getMinimumObjectSize(thisTy).getQuantity()));
+        uint64_t bytes = getMinimumObjectSize(thisTy).getQuantity();
+        // See the zero-size guard on return attributes above.
+        if (bytes != 0)
+          argAttrs[0].set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
+                          builder.getI64IntegerAttr(bytes));
         argAttrs[0].set(mlir::LLVM::LLVMDialect::getNonNullAttrName(),
                         mlir::UnitAttr::get(&getMLIRContext()));
       } else {
@@ -796,10 +803,13 @@ void CIRGenModule::constructFunctionArgumentAttributes(
 
     if (const auto *refTy = argType->getAs<ReferenceType>()) {
       QualType pointeeTy = refTy->getPointeeType();
-      if (!pointeeTy->isIncompleteType() && pointeeTy->isConstantSizeType())
-        argAttrList.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
-                        builder.getI64IntegerAttr(
-                            getMinimumObjectSize(pointeeTy).getQuantity()));
+      if (!pointeeTy->isIncompleteType() && pointeeTy->isConstantSizeType()) {
+        uint64_t bytes = getMinimumObjectSize(pointeeTy).getQuantity();
+        // See the zero-size guard on return attributes above.
+        if (bytes != 0)
+          argAttrList.set(mlir::LLVM::LLVMDialect::getDereferenceableAttrName(),
+                          builder.getI64IntegerAttr(bytes));
+      }
       if (getTypes().getTargetAddressSpace(pointeeTy) == 0 &&
           !codeGenOpts.NullPointerIsValid)
         argAttrList.set(mlir::LLVM::LLVMDialect::getNonNullAttrName(),
