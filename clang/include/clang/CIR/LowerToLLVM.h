@@ -28,11 +28,10 @@ class ModuleOp;
 namespace cir {
 
 namespace direct {
-std::unique_ptr<llvm::Module>
-lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule,
-                             llvm::LLVMContext &llvmCtx, bool enableOpenMP,
-                             llvm::StringRef mlirSaveTempsOutFile = {},
-                             llvm::vfs::FileSystem *fs = nullptr);
+std::unique_ptr<llvm::Module> lowerDirectlyFromCIRToLLVMIR(
+    mlir::ModuleOp mlirModule, llvm::LLVMContext &llvmCtx, bool enableOpenMP,
+    bool enableMem2Reg, llvm::StringRef mlirSaveTempsOutFile = {},
+    llvm::vfs::FileSystem *fs = nullptr);
 } // namespace direct
 } // namespace cir
 

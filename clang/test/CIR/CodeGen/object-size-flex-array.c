@@ -1,34 +1,34 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -emit-cir %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s --check-prefix=CIR --check-prefix=CIR-NO-STRICT
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -emit-llvm -disable-llvm-passes %s -o %t-cir.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fno-clangir-mem2reg -emit-llvm -disable-llvm-passes %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s --check-prefix=LLVM --check-prefix=LLVM-NO-STRICT
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -emit-llvm -disable-llvm-passes %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s --check-prefix=OGCG --check-prefix=OGCG-NO-STRICT
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=0 -emit-cir %s -o %t-strict-0.cir
 // RUN: FileCheck --input-file=%t-strict-0.cir %s --check-prefix=CIR --check-prefix=CIR-STRICT-0
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=0 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-0.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fno-clangir-mem2reg -fstrict-flex-arrays=0 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-0.ll
 // RUN: FileCheck --input-file=%t-cir-strict-0.ll %s --check-prefix=LLVM --check-prefix=LLVM-STRICT-0
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fstrict-flex-arrays=0 -emit-llvm -disable-llvm-passes %s -o %t-strict-0.ll
 // RUN: FileCheck --input-file=%t-strict-0.ll %s --check-prefix=OGCG --check-prefix=OGCG-STRICT-0
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=1 -emit-cir %s -o %t-strict-1.cir
 // RUN: FileCheck --input-file=%t-strict-1.cir %s --check-prefix=CIR --check-prefix=CIR-STRICT-1
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=1 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-1.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fno-clangir-mem2reg -fstrict-flex-arrays=1 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-1.ll
 // RUN: FileCheck --input-file=%t-cir-strict-1.ll %s --check-prefix=LLVM --check-prefix=LLVM-STRICT-1
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fstrict-flex-arrays=1 -emit-llvm -disable-llvm-passes %s -o %t-strict-1.ll
 // RUN: FileCheck --input-file=%t-strict-1.ll %s --check-prefix=OGCG --check-prefix=OGCG-STRICT-1
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=2 -emit-cir %s -o %t-strict-2.cir
 // RUN: FileCheck --input-file=%t-strict-2.cir %s --check-prefix=CIR --check-prefix=CIR-STRICT-2
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=2 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-2.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fno-clangir-mem2reg -fstrict-flex-arrays=2 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-2.ll
 // RUN: FileCheck --input-file=%t-cir-strict-2.ll %s --check-prefix=LLVM --check-prefix=LLVM-STRICT-2
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fstrict-flex-arrays=2 -emit-llvm -disable-llvm-passes %s -o %t-strict-2.ll
 // RUN: FileCheck --input-file=%t-strict-2.ll %s --check-prefix=OGCG --check-prefix=OGCG-STRICT-2
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=3 -emit-cir %s -o %t-strict-3.cir
 // RUN: FileCheck --input-file=%t-strict-3.cir %s --check-prefix=CIR --check-prefix=CIR-STRICT-3
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fstrict-flex-arrays=3 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-3.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fclangir -fno-clangir-mem2reg -fstrict-flex-arrays=3 -emit-llvm -disable-llvm-passes %s -o %t-cir-strict-3.ll
 // RUN: FileCheck --input-file=%t-cir-strict-3.ll %s --check-prefix=LLVM --check-prefix=LLVM-STRICT-3
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -O2 -fstrict-flex-arrays=3 -emit-llvm -disable-llvm-passes %s -o %t-strict-3.ll
 // RUN: FileCheck --input-file=%t-strict-3.ll %s --check-prefix=OGCG --check-prefix=OGCG-STRICT-3

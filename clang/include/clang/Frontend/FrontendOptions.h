@@ -431,6 +431,11 @@ public:
   LLVM_PREFERRED_TYPE(bool)
   unsigned ClangIRCallConvLowering : 1;
 
+  /// Run mem2reg on flat Clang IR (CIR). Only honored for optimized
+  /// compiles, matching classic CodeGen which does not promote at -O0.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIREnableMem2Reg : 1;
+
   /// Enable ClangIR library optimization.
   /// Set when -fclangir-lib-opt or -fclangir-lib-opt= was passed.
   LLVM_PREFERRED_TYPE(bool)
@@ -577,7 +582,8 @@ public:
         UseClangIRPipeline(false), ClangIRDisablePasses(false),
         ClangIRDisableCIRVerifier(false), ClangIREnableIdiomRecognizer(false),
         ClangIRCallConvLowering(true), ClangIRLibOptEnabled(false),
-        TimeTraceGranularity(500), TimeTraceVerbose(false) {}
+        ClangIREnableMem2Reg(true), TimeTraceGranularity(500),
+        TimeTraceVerbose(false) {}
 
   /// getInputKindForExtension - Return the appropriate input kind for a file
   /// extension. For example, "c" would return Language::C.

@@ -5446,6 +5446,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_fclangir, options::OPT_fno_clangir, false))
     CmdArgs.push_back("-fclangir");
 
+  // Forward the mem2reg toggle; CC1 defaults it on and only honors it for
+  // optimized compiles.
+  if (const Arg *A = Args.getLastArg(options::OPT_fclangir_mem2reg,
+                                     options::OPT_fno_clangir_mem2reg))
+    CmdArgs.push_back(A->getOption().matches(options::OPT_fclangir_mem2reg)
+                          ? "-fclangir-mem2reg"
+                          : "-fno-clangir-mem2reg");
+
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
     const llvm::Triple &HostTriple =

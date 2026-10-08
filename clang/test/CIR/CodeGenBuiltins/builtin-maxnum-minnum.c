@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -x c++ -std=c++20 -disable-llvm-passes -O3 -triple x86_64 %s -emit-cir -o %t.cir
 // RUN: FileCheck %s --input-file=%t.cir --check-prefix=CIR
-// RUN: %clang_cc1 -x c++ -std=c++20 -disable-llvm-passes -O3 -triple x86_64 %s -emit-llvm -fclangir -o %t-cir.ll
+// RUN: %clang_cc1 -x c++ -std=c++20 -disable-llvm-passes -O3 -triple x86_64 %s -emit-llvm -fclangir -fno-clangir-mem2reg -o %t-cir.ll
 // RUN: FileCheck %s --input-file=%t-cir.ll --check-prefix=LLVM
 // RUN: %clang_cc1 -x c++ -std=c++20 -disable-llvm-passes -O3 -triple x86_64 %s -emit-llvm -o %t-ogcg.ll
 // RUN: FileCheck %s --input-file=%t-ogcg.ll --check-prefix=LLVM

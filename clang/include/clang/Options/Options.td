@@ -3540,6 +3540,13 @@ defm clangir_call_conv_lowering : BoolFOption<"clangir-call-conv-lowering",
           "Do not run the ClangIR calling-convention lowering pass">,
   BothFlags<[], [ClangOption, CC1Option], " (x86_64 only)">>;
 
+defm clangir_mem2reg : BoolFOption<"clangir-mem2reg",
+  FrontendOpts<"ClangIREnableMem2Reg">, DefaultTrue,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Run mem2reg on flat ClangIR (optimized compiles only)">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option],
+          "Do not run mem2reg on flat ClangIR">>;
+
 def clangir_lib_opt_EQ : Joined<["-"], "clangir-lib-opt=">,
   Visibility<[ClangOption, CC1Option]>, Group<f_Group>, Values<"all">,
   HelpText<"Enable C/C++ library based optimizations (with options)">,

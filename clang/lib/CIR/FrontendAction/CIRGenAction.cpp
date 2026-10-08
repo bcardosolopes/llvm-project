@@ -69,10 +69,11 @@ getBackendActionFromOutputType(CIRGenAction::OutputType Action) {
 
 static std::unique_ptr<llvm::Module>
 lowerFromCIRToLLVMIR(mlir::ModuleOp MLIRModule, llvm::LLVMContext &LLVMCtx,
-                     bool EnableOpenMP,
+                     bool EnableOpenMP, bool EnableMem2Reg,
                      llvm::StringRef mlirSaveTempsOutFile = {},
                      llvm::vfs::FileSystem *fs = nullptr) {
   return direct::lowerDirectlyFromCIRToLLVMIR(MLIRModule, LLVMCtx, EnableOpenMP,
+                                              EnableMem2Reg,
                                               mlirSaveTempsOutFile, fs);
 }
 
@@ -237,9 +238,13 @@ public:
       });
       LLVMCtx.setDiagnosticHandler(DiagConsumer.createDiagnosticHandler());
 
+      // Like classic CodeGen, only promote at optimized levels: at -O0 the
+      // source allocas are the debuggable homes of every local.
+      const bool EnableMem2Reg =
+          FEOptions.ClangIREnableMem2Reg && (CGO.OptimizationLevel > 0);
       std::unique_ptr<llvm::Module> LLVMModule = lowerFromCIRToLLVMIR(
-          MlirModule, LLVMCtx, C.getLangOpts().OpenMP, mlirSaveTempsOutFile,
-          &CI.getVirtualFileSystem());
+          MlirModule, LLVMCtx, C.getLangOpts().OpenMP, EnableMem2Reg,
+          mlirSaveTempsOutFile, &CI.getVirtualFileSystem());
 
       LLVMModule->setDataLayout(C.getTargetInfo().getDataLayoutString());
 
