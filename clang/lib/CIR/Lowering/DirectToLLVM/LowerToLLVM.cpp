@@ -7034,8 +7034,8 @@ std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass() {
 }
 
 void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP,
-                             bool enableOptimizations) {
-  mlir::populateCIRPreLoweringPasses(pm);
+                             bool enableOptimizations, bool enableMem2Reg) {
+  mlir::populateCIRPreLoweringPasses(pm, enableMem2Reg);
   if (enableOpenMP)
     pm.addPass(mlir::omp::createMarkDeclareTargetPass());
   pm.addPass(createConvertCIRToLLVMPass());
@@ -7053,13 +7053,13 @@ std::unique_ptr<llvm::Module>
 lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
                              bool enableOpenMP, StringRef mlirSaveTempsOutFile,
                              llvm::vfs::FileSystem *fs,
-                             bool enableOptimizations) {
+                             bool enableOptimizations, bool enableMem2Reg) {
   llvm::TimeTraceScope scope("lower from CIR to LLVM directly");
 
   mlir::MLIRContext *mlirCtx = mlirModule.getContext();
 
   mlir::PassManager pm(mlirCtx);
-  populateCIRToLLVMPasses(pm, enableOpenMP, enableOptimizations);
+  populateCIRToLLVMPasses(pm, enableOpenMP, enableOptimizations, enableMem2Reg);
 
   (void)mlir::applyPassManagerCLOptions(pm);
 

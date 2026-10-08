@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++17 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm -O1 -disable-llvm-passes %s -o %t.ll
+// RUN: %clang_cc1 -std=c++17 -triple x86_64-unknown-linux-gnu -fclangir -fno-clangir-mem2reg -emit-llvm -O1 -disable-llvm-passes %s -o %t.ll
 // RUN: FileCheck --check-prefix=LLVM-OPT --input-file=%t.ll %s
 // RUN: %clang_cc1 -std=c++17 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm -O0 -disable-O0-optnone -disable-llvm-passes %s -o %t-o0.ll
 // RUN: FileCheck --check-prefix=LLVM-O0 --input-file=%t-o0.ll %s
@@ -7,6 +7,8 @@
 // flow is flattened are merged into their predecessors by the
 // llvm-simplify-cfg pass at -O1+, in the LLVM dialect before translation.
 // At -O0 the pass is off and the raw shape is preserved.
+// mem2reg is disabled at -O1 so the loads and stores keep the block contents
+// visible to the checks.
 
 // LLVM-OPT-LABEL: define {{.*}} @_Z11fwd_if_elseiii(
 // LLVM-OPT:       store i32 %{{.*}}, ptr {{%.*}}, align 4

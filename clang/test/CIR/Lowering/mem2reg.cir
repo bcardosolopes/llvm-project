@@ -1,0 +1,17 @@
+// RUN: cir-opt %s --cir-to-llvm=enable-mem2reg | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // CHECK-LABEL: llvm.func @store_load_promoted
+  // CHECK-NOT: llvm.alloca
+  // CHECK: %[[C:.*]] = llvm.mlir.constant(42 : i32) : i32
+  // CHECK: llvm.return %[[C]] : i32
+  cir.func @store_load_promoted() -> !s32i {
+    %0 = cir.alloca "x" align(4) : !cir.ptr<!s32i>
+    %c = cir.const #cir.int<42> : !s32i
+    cir.store %c, %0 : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+}
