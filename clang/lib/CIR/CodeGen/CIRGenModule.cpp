@@ -3394,6 +3394,18 @@ void CIRGenModule::setCIRFunctionAttributesForDefinition(
     }
   }
 
+  // Classic codegen marks cold definitions to optimize for size when the
+  // function is being optimized. Declarations and call sites carry cold
+  // alone.
+  bool shouldAddOptNone = !codeGenOpts.DisableO0ImplyOptNone &&
+                          codeGenOpts.OptimizationLevel == 0 &&
+                          !decl->hasAttr<MinSizeAttr>() &&
+                          !decl->hasAttr<AlwaysInlineAttr>();
+  if (decl->hasAttr<ColdAttr>() && !decl->hasAttr<OptimizeNoneAttr>() &&
+      !shouldAddOptNone)
+    f->setAttr(cir::CIRDialect::getOptimizeForSizeAttrName(),
+               mlir::UnitAttr::get(&getMLIRContext()));
+
   assert(!cir::MissingFeatures::opFuncColdHotAttr());
 
   std::optional<uint64_t> explicitAlignment;
