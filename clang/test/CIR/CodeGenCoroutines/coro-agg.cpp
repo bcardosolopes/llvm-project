@@ -319,7 +319,7 @@ coro_t byval_nontrivial() { consume(co_await AwaitNT{}); }
 // CIR-EH-NEXT:   cir.call @_ZN2NTD1Ev(%[[A0]])
 
 // Destroying the coroutine at the second await runs ~NT on the first
-// argument (slot 1) before the coroutine cleanup.
+// argument before the coroutine cleanup.
 // LLVM-LABEL: define dso_local void @_Z19two_args_nontrivialv
 // LLVM: call noundef zeroext i1 @_ZN7AwaitNT11await_readyEv(
 // LLVM: i8 1, label %[[AWAIT1_CLEANUP:[0-9]+]]
@@ -328,9 +328,6 @@ coro_t byval_nontrivial() { consume(co_await AwaitNT{}); }
 // LLVM: call void @_ZN7AwaitNT12await_resumeEv(ptr {{.*}} %[[A0:[0-9]+]], ptr
 // LLVM: call noundef zeroext i1 @_ZN7AwaitNT11await_readyEv(
 // LLVM: i8 1, label %[[AWAIT2_CLEANUP:[0-9]+]]
-// LLVM: [[AWAIT2_CLEANUP]]:
-// LLVM-NEXT: store i32 1, ptr %[[SLOT:[0-9]+]], align 4
-// LLVM-NEXT: br label %[[A0_DTOR:[0-9]+]]
 // LLVM: call void @_ZN7AwaitNT12await_resumeEv(ptr {{.*}} %[[A1:[0-9]+]], ptr
 // LLVM-NEXT: br label %[[BB1:[0-9]+]]
 // LLVM: [[BB1]]:
@@ -340,15 +337,11 @@ coro_t byval_nontrivial() { consume(co_await AwaitNT{}); }
 // LLVM-NEXT: call void @_ZN2NTD1Ev(ptr {{.*}} %[[A1]])
 // LLVM-NEXT: br label %[[BB3:[0-9]+]]
 // LLVM: [[BB3]]:
-// LLVM-NEXT: store i32 0, ptr %[[SLOT]], align 4
-// LLVM-NEXT: br label %[[A0_DTOR]]
-// LLVM: [[A0_DTOR]]:
 // LLVM-NEXT: call void @_ZN2NTD1Ev(ptr {{.*}} %[[A0]])
-// LLVM: switch i32 %{{.*}}, label %{{.*}} [
-// LLVM-NEXT:   i32 0, label %{{.*}}
-// LLVM-NEXT:   i32 1, label %[[DESTROY:[0-9]+]]
-// LLVM-NEXT: ]
-// LLVM: [[DESTROY]]:
+// LLVM-NEXT: br label %{{[0-9]+}}
+// The destroy exit gets its own copy of the first argument's cleanup.
+// LLVM: [[AWAIT2_CLEANUP]]:
+// LLVM-NEXT: call void @_ZN2NTD1Ev(ptr {{.*}} %[[A0]])
 // LLVM-NEXT: br label %[[CORO_CLEANUP]]
 // LLVM: [[CORO_CLEANUP]]:
 // LLVM-NEXT: call ptr @llvm.coro.free(
@@ -428,13 +421,15 @@ coro_nt_t coreturn_coyield_nontrivial() { co_return co_yield 42; }
 // LLVM: switch i8 %{{.*}}, label %{{.*}} [
 // LLVM-NEXT:   i8 0, label %{{.*}}
 // LLVM-NEXT:   i8 1, label %[[AWAIT_CLEANUP:[0-9]+]]
-// LLVM: [[AWAIT_CLEANUP]]:
-// LLVM-NEXT: store i32 1, ptr %{{.*}}, align 4
-// LLVM-NEXT: br label %[[CLEANUP:[0-9]+]]
 // LLVM: call void @_ZN7AwaitNT12await_resumeEv(ptr {{.*}} %[[TMP:[0-9]+]], ptr
 // LLVM-NEXT: br label %{{.*}}
 // LLVM: store i8 1, ptr %[[FLAG]], align 1
-// LLVM: [[CLEANUP]]:
+// LLVM: %[[NF:.*]] = load i8, ptr %[[FLAG]], align 1
+// LLVM-NEXT: %[[NFB:.*]] = trunc i8 %[[NF]] to i1
+// LLVM-NEXT: br i1 %[[NFB]], label %[[NACTION:[0-9]+]], label %{{.*}}
+// LLVM: [[NACTION]]:
+// LLVM-NEXT: call void @_ZN2NTD1Ev(ptr {{.*}} %[[TMP]])
+// LLVM: [[AWAIT_CLEANUP]]:
 // LLVM-NEXT: %[[F:.*]] = load i8, ptr %[[FLAG]], align 1
 // LLVM-NEXT: %[[FB:.*]] = trunc i8 %[[F]] to i1
 // LLVM-NEXT: br i1 %[[FB]], label %[[ACTION:[0-9]+]], label %{{.*}}
