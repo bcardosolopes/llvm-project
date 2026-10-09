@@ -2786,6 +2786,7 @@ mlir::LogicalResult CIRToLLVMAbsOpLowering::matchAndRewrite(
 /// Return true for discardable CIR markers handled explicitly below.
 static bool isHandledDiscardableFuncAttr(mlir::NamedAttribute attr) {
   return attr.getName() == CIRDialect::getNoReturnAttrName() ||
+         attr.getName() == CIRDialect::getOptNoneAttrName() ||
          attr.getName() == CIRDialect::getNoUnwindAttrName() ||
          attr.getName() == CIRDialect::getWillReturnAttrName() ||
          attr.getName() == CIRDialect::getStrictFPAttrName() ||
@@ -2927,6 +2928,9 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
 
   if (op->hasAttr(CIRDialect::getNoReturnAttrName()))
     fn.setNoreturn(true);
+
+  if (op->hasAttr(CIRDialect::getOptNoneAttrName()))
+    fn.setOptimizeNone(true);
 
   if (std::optional<cir::UnwindTableKind> uwtableKind = op.getUwtable())
     fn.setUwtableKindAttr(mlir::LLVM::UWTableKindAttr::get(

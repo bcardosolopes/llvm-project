@@ -3346,7 +3346,6 @@ void CIRGenModule::setCIRFunctionAttributesForDefinition(
 
   assert(!cir::MissingFeatures::opFuncArmStreamingAttr());
   assert(!cir::MissingFeatures::opFuncArmNewAttr());
-  assert(!cir::MissingFeatures::opFuncOptNoneAttr());
   assert(!cir::MissingFeatures::opFuncMinSizeAttr());
   assert(!cir::MissingFeatures::opFuncNakedAttr());
   assert(!cir::MissingFeatures::opFuncNoDuplicateAttr());
@@ -3392,6 +3391,18 @@ void CIRGenModule::setCIRFunctionAttributesForDefinition(
         f.setInlineKind(cir::InlineKind::NoInline);
       }
     }
+  }
+
+  // User optnone is handled here; the O0-default optnone classic codegen adds
+  // is still missing.
+  assert(!cir::MissingFeatures::opFuncOptNoneAttr());
+  if (decl->hasAttr<OptimizeNoneAttr>() && !decl->hasAttr<AlwaysInlineAttr>() &&
+      !isAlwaysInline) {
+    // optnone implies noinline. Both are skipped for always_inline, which
+    // cannot combine with either in IR.
+    f.setInlineKind(cir::InlineKind::NoInline);
+    f->setAttr(cir::CIRDialect::getOptNoneAttrName(),
+               mlir::UnitAttr::get(&getMLIRContext()));
   }
 
   assert(!cir::MissingFeatures::opFuncColdHotAttr());
