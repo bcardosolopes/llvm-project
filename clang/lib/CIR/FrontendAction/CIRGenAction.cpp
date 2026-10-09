@@ -37,7 +37,10 @@
 #include "llvm/Support/LibraryOptionsContext.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/IPO/Internalize.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace cir;
 using namespace clang;
@@ -192,6 +195,37 @@ static void emitCIRModuleOutput(
     }
 
     LLVMModule->setDataLayout(CI.getTarget().getDataLayoutString());
+
+    // CIR lowering produces more basic blocks than classic CodeGen because
+    // CIR's structured control flow flattens into individual blocks joined
+    // by unconditional branches. Many of these are trivial forwarding
+    // blocks (single predecessor, single unconditional successor) that
+    // inflate the CFG handed to the LLVM optimizer: inlining cost
+    // estimates, loop recognition, and vectorization all scale with block
+    // count. Merge them away before running any LLVM passes. Like mem2reg
+    // above, this runs at -O1+ regardless of -disable-llvm-passes: it is
+    // frontend canonicalization of the optimizer input, and keeping it out
+    // of the raw dump would hide the IR the pipeline actually sees.
+    // MergeBlockIntoPredecessor refuses anything that is not a trivial
+    // merge (multiple predecessors, EH pads, address-taken blocks), so
+    // this is purely CFG compaction with no semantic effect.
+    if (CGO.OptimizationLevel > 0) {
+      llvm::TimeTraceScope MergeScope("MergeCIRForwardingBlocks");
+      for (llvm::Function &F : *LLVMModule) {
+        if (F.isDeclaration() || F.hasOptNone())
+          continue;
+        // Iterate to a fixpoint: merging a block into its predecessor can
+        // make the merged block mergeable into its own predecessor. Every
+        // merge strictly decreases the block count, so this terminates.
+        for (bool Changed = true; Changed;) {
+          Changed = false;
+          for (auto It = F.begin(); It != F.end();) {
+            llvm::BasicBlock *BB = &*It++;
+            Changed |= llvm::MergeBlockIntoPredecessor(BB);
+          }
+        }
+      }
+    }
 
     if (AddFunctionSourceLocations)
       AddFunctionSourceLocations(*LLVMModule);
