@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s -check-prefix=CIR
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t.ll
-// RUN: FileCheck --input-file=%t.ll %s -check-prefix=LLVM
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t-cir.ll
+// RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=CIRLLVM
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s -check-prefix=LLVM
 
@@ -56,3 +56,23 @@ int test_cleanup_return_in_loop(int n) {
 // LLVM: [[POST_LOOP:.*]]:
 // LLVM:     store i32 -1, ptr %{{.*}}, align 4
 // LLVM:     ret i32
+
+// CIR duplicates the cleanup once per exit instead of dispatching on a
+// cleanup destination slot like classic codegen does above.
+// CIRLLVM: define dso_local noundef i32 @_Z27test_cleanup_return_in_loopi(i32 noundef %{{.*}})
+// CIRLLVM: [[LOOP_COND:.*]]:
+// CIRLLVM:     %[[ICMP:.*]] = icmp slt i32
+// CIRLLVM-NEXT: br i1 %[[ICMP]]
+// CIRLLVM: [[LOOP_BODY:.*]]:
+// CIRLLVM:     %[[CALL:.*]] = call noundef {{.*}} @_ZN5Struk5checkEv(
+// CIRLLVM-NEXT: br i1 %[[CALL]]
+// CIRLLVM: [[CONTINUE_CLEANUP:.*]]:
+// CIRLLVM:     call void @_ZN5StrukD1Ev(
+// CIRLLVM: [[RETURN_CLEANUP:.*]]:
+// CIRLLVM:     call void @_ZN5StrukD1Ev(
+// CIRLLVM:     ret i32
+// CIRLLVM: [[LOOP_STEP:.*]]:
+// CIRLLVM:     add nsw i32 %{{.*}}, 1
+// CIRLLVM: [[POST_LOOP:.*]]:
+// CIRLLVM:     store i32 -1, ptr %{{.*}}, align 4
+// CIRLLVM:     ret i32
