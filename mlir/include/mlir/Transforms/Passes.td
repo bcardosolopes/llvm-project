@@ -336,6 +336,10 @@ def InlinerPass : Pass<"inline"> {
            "in the caller exceeds this value (in percentage), "
            "then the callee is not inlined even if it is legal "
            "to inline it">,
+    Option<"mergeFeatureAttributes", "merge-feature-attributes", "bool",
+           /*default=*/"false",
+           "Merge the callee's feature attributes, e.g. target_features, "
+           "into the caller when inlining">,
   ];
 }
 

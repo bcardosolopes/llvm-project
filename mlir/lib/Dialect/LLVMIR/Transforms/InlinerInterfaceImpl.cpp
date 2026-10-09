@@ -13,12 +13,15 @@
 
 #include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
 #include "mlir/Analysis/SliceWalk.h"
+#include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
 
 #include "llvm/Support/DebugLog.h"
@@ -667,6 +670,13 @@ static Value handleByValArgument(OpBuilder &builder, Operation *callable,
       dataLayout.getTypeSize(elementType), targetAlignment);
 }
 
+/// Strips the leading +/- from a target feature for conflict comparison.
+static StringRef stripFeatureSign(StringRef feature) {
+  if (feature.starts_with("+") || feature.starts_with("-"))
+    return feature.drop_front();
+  return feature;
+}
+
 namespace {
 struct LLVMInlinerInterface : public DialectInlinerInterface {
   using DialectInlinerInterface::DialectInlinerInterface;
@@ -834,6 +844,55 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
           builder.getStringAttr(LLVM::LLVMDialect::getNoAliasAttrName()),
           builder.getUnitAttr());
     return copyOp;
+  }
+
+  std::optional<NamedAttribute>
+  mergeFeatureAttributes(OpBuilder &builder, Operation *caller,
+                         Operation *callable) const override {
+    auto calleeTargetFeatures =
+        callable->getAttrOfType<LLVM::TargetFeaturesAttr>(
+            LLVM::TargetFeaturesAttr::getAttributeName());
+    // Nothing to merge from, leave the caller untouched.
+    if (!calleeTargetFeatures || calleeTargetFeatures.getFeatures().empty())
+      return std::nullopt;
+
+    auto callerTargetFeatures = caller->getAttrOfType<LLVM::TargetFeaturesAttr>(
+        LLVM::TargetFeaturesAttr::getAttributeName());
+
+    // Union the two sets. On a +/- conflict the enabled entry wins:
+    // disabling a feature the caller's own code uses would miscompile it,
+    // while enabling one the callee didn't use is harmless. Caller order is
+    // preserved, callee-only features append in callee order.
+    llvm::StringMap<StringRef> mergedByName;
+    auto record = [&](ArrayRef<StringAttr> features) {
+      for (StringAttr f : features) {
+        StringRef signedFeature = f.getValue();
+        auto [it, inserted] = mergedByName.try_emplace(
+            stripFeatureSign(signedFeature), signedFeature);
+        if (!inserted && signedFeature.starts_with("+"))
+          it->second = signedFeature;
+      }
+    };
+    if (callerTargetFeatures)
+      record(callerTargetFeatures.getFeatures());
+    record(calleeTargetFeatures.getFeatures());
+
+    DenseSet<StringRef> emitted;
+    SmallVector<StringRef> mergedFeatures;
+    auto appendInOrder = [&](ArrayRef<StringAttr> features) {
+      for (StringAttr f : features) {
+        StringRef name = stripFeatureSign(f.getValue());
+        if (emitted.insert(name).second)
+          mergedFeatures.push_back(mergedByName.lookup(name));
+      }
+    };
+    if (callerTargetFeatures)
+      appendInOrder(callerTargetFeatures.getFeatures());
+    appendInOrder(calleeTargetFeatures.getFeatures());
+
+    return builder.getNamedAttr(
+        LLVM::TargetFeaturesAttr::getAttributeName(),
+        LLVM::TargetFeaturesAttr::get(builder.getContext(), mergedFeatures));
   }
 
   void processInlinedCallBlocks(

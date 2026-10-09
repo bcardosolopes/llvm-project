@@ -44,6 +44,7 @@ public:
     return cloneCallback;
   }
   bool getCanHandleMultipleBlocks() const { return canHandleMultipleBlocks; }
+  bool getMergeFeatureAttributes() const { return mergeFeatureAttributes; }
 
   void setDefaultPipeline(DefaultPipelineTy pipeline) {
     defaultPipeline = std::move(pipeline);
@@ -57,6 +58,9 @@ public:
   }
   void setCanHandleMultipleBlocks(bool value = true) {
     canHandleMultipleBlocks = value;
+  }
+  void setMergeFeatureAttributes(bool value = true) {
+    mergeFeatureAttributes = value;
   }
 
 private:
@@ -94,6 +98,8 @@ private:
   /// transformation. see the example in
   /// mlir/test/lib/Transforms/TestInliningCallback.cpp
   bool canHandleMultipleBlocks{false};
+  /// Merge the callee's feature attributes into the caller when inlining.
+  bool mergeFeatureAttributes{false};
 };
 
 /// This is an implementation of the inliner

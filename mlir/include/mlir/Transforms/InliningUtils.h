@@ -83,6 +83,10 @@ public:
                              Operation *callable, Value result,
                              DictionaryAttr resultAttrs) const;
 
+  virtual std::optional<NamedAttribute>
+  mergeFeatureAttributes(OpBuilder &builder, Operation *caller,
+                         Operation *callable) const;
+
   virtual void processInlinedCallBlocks(
       Operation *call, iterator_range<Region::iterator> inlinedBlocks) const;
 
@@ -147,12 +151,13 @@ inlineRegion(InlinerInterface &interface,
 /// function returns failure if inlining is not possible, success otherwise. On
 /// failure, no changes are made to the module. 'shouldCloneInlinedRegion'
 /// corresponds to whether the source region should be cloned into the 'call' or
-/// spliced directly.
+/// spliced directly. If 'mergeAttributes' is true, the callee's feature
+/// attributes are merged into an attribute on the function enclosing the call.
 LogicalResult
 inlineCall(InlinerInterface &interface,
            function_ref<InlinerInterface::CloneCallbackSigTy> cloneCallback,
            CallOpInterface call, CallableOpInterface callable, Region *src,
-           bool shouldCloneInlinedRegion = true);
+           bool shouldCloneInlinedRegion = true, bool mergeAttributes = false);
 
 } // namespace mlir
 

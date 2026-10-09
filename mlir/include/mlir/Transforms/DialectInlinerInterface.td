@@ -171,6 +171,22 @@ def DialectInlinerInterface : DialectInterface<"DialectInlinerInterface"> {
       }]
     >,
     InterfaceMethod<[{
+        Merge the feature attributes of the callee into `caller` when
+        inlining `callable`. The returned named attribute, if any, is
+        attached to `caller`, the function enclosing the call as resolved by
+        the inliner, replacing any attribute of the same name: the hook must
+        incorporate `caller`'s current value. The dialect owns the name,
+        the merge semantics, and conflict resolution. This hook is only
+        invoked when attribute merging is requested.
+      }],
+      "std::optional<::mlir::NamedAttribute>", "mergeFeatureAttributes",
+      (ins "::mlir::OpBuilder &":$builder, "::mlir::Operation *":$caller,
+           "::mlir::Operation *":$callable),
+      [{
+        return std::nullopt;
+      }]
+    >,
+    InterfaceMethod<[{
         Process a set of blocks that have been inlined for a call. This callback
         is invoked before inlined terminator operations have been processed.
       }],

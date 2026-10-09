@@ -676,10 +676,11 @@ Inliner::Impl::inlineCallsInSCC(InlinerInterfaceImpl &inlinerIface,
     // then inline it in-place and delete the node if successful.
     bool inlineInPlace = useList.hasOneUseAndDiscardable(it.targetNode);
 
-    LogicalResult inlineResult =
-        inlineCall(inlinerIface, inliner.config.getCloneCallback(), call,
-                   cast<CallableOpInterface>(targetRegion->getParentOp()),
-                   targetRegion, /*shouldCloneInlinedRegion=*/!inlineInPlace);
+    LogicalResult inlineResult = inlineCall(
+        inlinerIface, inliner.config.getCloneCallback(), call,
+        cast<CallableOpInterface>(targetRegion->getParentOp()), targetRegion,
+        /*shouldCloneInlinedRegion=*/!inlineInPlace,
+        /*mergeAttributes=*/inliner.config.getMergeFeatureAttributes());
     if (failed(inlineResult)) {
       LDBG() << "** Failed to inline";
       continue;

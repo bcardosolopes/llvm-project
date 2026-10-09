@@ -17,6 +17,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DebugLog.h"
 #include "llvm/Support/raw_ostream.h"
@@ -171,6 +172,14 @@ Value InlinerInterface::handleResult(OpBuilder &builder, Operation *call,
   return handler->handleResult(builder, call, callable, result, resultAttrs);
 }
 
+std::optional<NamedAttribute>
+InlinerInterface::mergeFeatureAttributes(OpBuilder &builder, Operation *caller,
+                                         Operation *callable) const {
+  auto *handler = getInterfaceFor(callable);
+  assert(handler && "expected valid dialect handler");
+  return handler->mergeFeatureAttributes(builder, caller, callable);
+}
+
 void InlinerInterface::processInlinedCallBlocks(
     Operation *call, iterator_range<Region::iterator> inlinedBlocks) const {
   auto *handler = getInterfaceFor(call);
@@ -268,13 +277,28 @@ static void handleResultImpl(InlinerInterface &interface, OpBuilder &builder,
   }
 }
 
+static void mergeInlinedAttributes(InlinerInterface &interface,
+                                   OpBuilder &builder, Operation *call,
+                                   Operation *callable) {
+  // The merged attribute belongs on the function enclosing the call, which
+  // need not be the call's immediate parent. Only merge within one dialect:
+  // the callee's dialect must not decide attributes on a foreign op.
+  auto callerFunc = call->getParentOfType<FunctionOpInterface>();
+  if (!callerFunc || callerFunc->getDialect() != callable->getDialect())
+    return;
+  Operation *caller = callerFunc.getOperation();
+  if (std::optional<NamedAttribute> merged =
+          interface.mergeFeatureAttributes(builder, caller, callable))
+    caller->setAttr(merged->getName(), merged->getValue());
+}
+
 static LogicalResult inlineRegionImpl(
     InlinerInterface &interface,
     function_ref<InlinerInterface::CloneCallbackSigTy> cloneCallback,
     Region *src, Block *inlineBlock, Block::iterator inlinePoint,
     IRMapping &mapper, ValueRange resultsToReplace, TypeRange regionResultTypes,
     std::optional<Location> inlineLoc, bool shouldCloneInlinedRegion,
-    CallOpInterface call = {}) {
+    bool mergeAttributes, CallOpInterface call = {}) {
   assert(resultsToReplace.size() == regionResultTypes.size());
   // We expect the region to have at least one block.
   if (src->empty())
@@ -324,6 +348,11 @@ static LogicalResult inlineRegionImpl(
   if (call)
     interface.processInlinedCallBlocks(call, newBlocks);
   interface.processInlinedBlocks(newBlocks);
+
+  // Merge the callee's feature attributes into the caller if enabled.
+  if (call && callable && mergeAttributes)
+    mergeInlinedAttributes(interface, builder, call.getOperation(),
+                           callable.getOperation());
 
   bool singleBlockFastPath = interface.allowSingleBlockOptimization(newBlocks);
 
@@ -377,7 +406,7 @@ static LogicalResult inlineRegionImpl(
     Region *src, Block *inlineBlock, Block::iterator inlinePoint,
     ValueRange inlinedOperands, ValueRange resultsToReplace,
     std::optional<Location> inlineLoc, bool shouldCloneInlinedRegion,
-    CallOpInterface call = {}) {
+    bool mergeAttributes, CallOpInterface call = {}) {
   // We expect the region to have at least one block.
   if (src->empty())
     return failure();
@@ -401,7 +430,7 @@ static LogicalResult inlineRegionImpl(
   return inlineRegionImpl(interface, cloneCallback, src, inlineBlock,
                           inlinePoint, mapper, resultsToReplace,
                           resultsToReplace.getTypes(), inlineLoc,
-                          shouldCloneInlinedRegion, call);
+                          shouldCloneInlinedRegion, mergeAttributes, call);
 }
 
 LogicalResult mlir::inlineRegion(
@@ -423,7 +452,8 @@ LogicalResult mlir::inlineRegion(
     std::optional<Location> inlineLoc, bool shouldCloneInlinedRegion) {
   return inlineRegionImpl(
       interface, cloneCallback, src, inlineBlock, inlinePoint, mapper,
-      resultsToReplace, regionResultTypes, inlineLoc, shouldCloneInlinedRegion);
+      resultsToReplace, regionResultTypes, inlineLoc, shouldCloneInlinedRegion,
+      /*mergeAttributes=*/false);
 }
 
 LogicalResult mlir::inlineRegion(
@@ -445,7 +475,8 @@ LogicalResult mlir::inlineRegion(
     std::optional<Location> inlineLoc, bool shouldCloneInlinedRegion) {
   return inlineRegionImpl(interface, cloneCallback, src, inlineBlock,
                           inlinePoint, inlinedOperands, resultsToReplace,
-                          inlineLoc, shouldCloneInlinedRegion);
+                          inlineLoc, shouldCloneInlinedRegion,
+                          /*mergeAttributes=*/false);
 }
 
 /// Utility function used to generate a cast operation from the given interface,
@@ -475,12 +506,13 @@ static Value materializeConversion(const DialectInlinerInterface *interface,
 /// function returns failure if inlining is not possible, success otherwise. On
 /// failure, no changes are made to the module. 'shouldCloneInlinedRegion'
 /// corresponds to whether the source region should be cloned into the 'call' or
-/// spliced directly.
+/// spliced directly. If 'mergeAttributes' is true, the callee's feature
+/// attributes are merged into an attribute on the function enclosing the call.
 LogicalResult mlir::inlineCall(
     InlinerInterface &interface,
     function_ref<InlinerInterface::CloneCallbackSigTy> cloneCallback,
     CallOpInterface call, CallableOpInterface callable, Region *src,
-    bool shouldCloneInlinedRegion) {
+    bool shouldCloneInlinedRegion, bool mergeAttributes) {
   // We expect the region to have at least one block.
   if (src->empty())
     return failure();
@@ -563,7 +595,7 @@ LogicalResult mlir::inlineCall(
   if (failed(inlineRegionImpl(interface, cloneCallback, src, call->getBlock(),
                               ++call->getIterator(), mapper, callResults,
                               callableResultTypes, call.getLoc(),
-                              shouldCloneInlinedRegion, call)))
+                              shouldCloneInlinedRegion, mergeAttributes, call)))
     return cleanupState();
   return success();
 }

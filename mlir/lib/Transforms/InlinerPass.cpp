@@ -180,6 +180,7 @@ LogicalResult InlinerPass::initializeOptions(
   config.setOpPipelines(std::move(pipelines));
 
   config.setMaxInliningIterations(maxInliningIterations);
+  config.setMergeFeatureAttributes(mergeFeatureAttributes);
 
   return success();
 }
