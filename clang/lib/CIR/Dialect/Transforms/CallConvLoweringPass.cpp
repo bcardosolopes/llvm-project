@@ -51,6 +51,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/Support/MathExtras.h"
 
@@ -159,14 +160,22 @@ static bool hasIncompleteRecordByValue(mlir::Type ty) {
   return false;
 }
 
+/// Packed storage width, in bits, of a fixed boolean vector: one bit per
+/// lane, at least a byte, rounded up to a power of two.  Matches the integer
+/// classic codegen coerces the vector to up to 32 lanes.
+static uint64_t packedBoolVecWidth(cir::VectorType vecTy) {
+  return llvm::bit_ceil(std::max<uint64_t>(vecTy.getSize(), 8));
+}
+
 /// The CIR types the x86_64 bridge handles.  Scalars: an integer up to 128
 /// bits (including `__int128`), a `_BitInt` of any width, pointer, vtable
 /// pointer, bool, void, or any floating-point type.  Aggregates: a complete
 /// struct or union whose members are all themselves supported, or an array
 /// of a supported element type.  Also a `_Complex`, or a fixed-width vector,
-/// of a supported element type.  Everything else is reported NYI at the
-/// reject() choke point in classifyX86_64Function.
-static bool isSupportedType(mlir::Type ty, const DataLayout &dl) {
+/// of a supported element type.  A packed boolean vector of up to 32 lanes
+/// is handled as a top-level scalar only.  Everything else is reported NYI
+/// at the reject() choke point in classifyX86_64Function.
+static bool isSupportedType(mlir::Type ty, const DataLayout &dl, bool nested) {
   // A pointer is only handled in the default address space (null) or an
   // already-lowered target address space.  A LangAddressSpaceAttr must be
   // lowered before this pass, so reject it rather than silently dropping it.
@@ -199,17 +208,26 @@ static bool isSupportedType(mlir::Type ty, const DataLayout &dl) {
     return intTy.getWidth() <= 64 || intTy.getWidth() == 128;
   }
   if (auto complexTy = dyn_cast<cir::ComplexType>(ty))
-    return isSupportedType(complexTy.getElementType(), dl);
+    return isSupportedType(complexTy.getElementType(), dl, /*nested=*/true);
   if (auto vecTy = dyn_cast<cir::VectorType>(ty)) {
     // A scalable vector has no size the SysV eightbyte rules can read, and
     // x86_64 has no calling convention for one.
     if (vecTy.getIsScalable())
       return false;
+    // A packed boolean vector classifies as the integer clang packs it into
+    // (see mapCIRType), so the element-width rule below does not apply to it.
+    // Only as a top-level scalar: nested in a record or array, the CIR
+    // data-layout size (a byte per lane) disagrees with clang's packed bits
+    // and would misclassify the enclosing aggregate.  Wider than 32 lanes
+    // clang stops using the packed integer (64 lanes coerce to double, 128
+    // pass as a vector), and those shapes stay rejected.
+    if (mlir::isa<cir::BoolType>(vecTy.getElementType()))
+      return !nested && vecTy.getSize() <= 32;
     // The classifier sizes a vector as element count times element width, so
     // an element is only usable where that width is the one clang gives it.
-    // It is not for bool (a bit to clang, a byte here), for a _BitInt narrower
-    // than a byte (clang rounds to the storage container), or for x87 long
-    // double (80 bits here against clang's 128).
+    // It is not for a _BitInt narrower than a byte (clang rounds to the
+    // storage container), or for x87 long double (80 bits here against
+    // clang's 128).
     mlir::Type elemTy = vecTy.getElementType();
     if (auto elemInt = dyn_cast<cir::IntType>(elemTy)) {
       if (elemInt.getWidth() % 8)
@@ -225,19 +243,19 @@ static bool isSupportedType(mlir::Type ty, const DataLayout &dl) {
     // classified at 24 bits where clang uses 32.
     if (!llvm::isPowerOf2_64(dl.getTypeSizeInBits(ty).getFixedValue()))
       return false;
-    return isSupportedType(elemTy, dl);
+    return isSupportedType(elemTy, dl, /*nested=*/true);
   }
   if (auto arrTy = dyn_cast<cir::ArrayType>(ty))
-    return isSupportedType(arrTy.getElementType(), dl);
+    return isSupportedType(arrTy.getElementType(), dl, /*nested=*/true);
   // A bit-field is classified from the type it was declared with and the bits
   // it holds, and is loaded through its access unit, so both types have to be
   // ones the bridge handles.  A zero-width bit-field has no unit of its own.
   if (auto bfTy = dyn_cast<cir::BitFieldType>(ty)) {
     if (mlir::Type storageTy = bfTy.getStorageType())
-      if (!isSupportedType(storageTy, dl))
+      if (!isSupportedType(storageTy, dl, /*nested=*/true))
         return false;
     return llvm::all_of(bfTy.getFields(), [&](cir::BitFieldDeclAttr decl) {
-      return isSupportedType(decl.getDeclaredType(), dl);
+      return isSupportedType(decl.getDeclaredType(), dl, /*nested=*/true);
     });
   }
   if (auto recTy = dyn_cast<cir::RecordType>(ty)) {
@@ -246,8 +264,9 @@ static bool isSupportedType(mlir::Type ty, const DataLayout &dl) {
       return false;
     // The members are checked first so that everything below reasons only
     // about types the bridge handles.
-    if (!llvm::all_of(recTy.getMembers(),
-                      [&](mlir::Type m) { return isSupportedType(m, dl); }))
+    if (!llvm::all_of(recTy.getMembers(), [&](mlir::Type m) {
+          return isSupportedType(m, dl, /*nested=*/true);
+        }))
       return false;
     if (recTy.isUnion()) {
       llvm::ArrayRef<mlir::Type> members = recTy.getMembers();
@@ -389,7 +408,14 @@ static const llvm::abi::Type *mapCIRType(mlir::Type type,
             mapCIRType(complexTy.getElementType(), typeMapper, dl, modOp),
             llvm::Align(dl.getTypeABIAlignment(type)));
       })
-      .Case([&](cir::VectorType vecTy) {
+      .Case([&](cir::VectorType vecTy) -> const llvm::abi::Type * {
+        // A packed boolean vector classifies as the integer clang packs it
+        // into. Wider shapes never reach here (see isSupportedType).
+        if (mlir::isa<cir::BoolType>(vecTy.getElementType())) {
+          uint64_t width = packedBoolVecWidth(vecTy);
+          return tb.getIntegerType(width, llvm::Align(width / 8),
+                                   /*Signed=*/false);
+        }
         // isSupportedType rejects a scalable vector, so the element count is
         // always fixed here.
         return tb.getVectorType(
@@ -559,8 +585,9 @@ static const llvm::abi::Type *mapCIRType(mlir::Type type,
 ///
 /// Extend: bool or a sub-register integer needs a signext/zeroext attribute.
 /// The x86_64 classifier (llvm/lib/ABI/Targets/X86.cpp) only returns Extend
-/// for an integer or bool operand, so any other origTy is asserted rather
-/// than silently handled.
+/// for an integer or bool operand, plus a packed boolean vector (which maps
+/// to a promotable integer and is converted to a plain Direct coercion
+/// below), so any other origTy is asserted rather than silently handled.
 ///
 /// Indirect: an aggregate that does not fit in registers, or a scalar too
 /// wide to fit (a `_BitInt` over 128 bits), is passed via a pointer (sret
@@ -623,8 +650,17 @@ convertABIArgInfo(const llvm::abi::ArgInfo &info, MLIRContext *ctx,
   if (info.isExtend()) {
     if (isa_and_present<cir::BoolType>(origTy))
       return ArgClassification::getExtend(nullptr, info.isSignExt());
+    // A packed boolean vector maps to a promotable integer, so the classifier
+    // answers Extend; classic passes the packed value with no extension
+    // attribute, so lower it as a plain Direct coercion instead.
+    if (auto vecTy = dyn_cast_if_present<cir::VectorType>(origTy))
+      if (mlir::isa<cir::BoolType>(vecTy.getElementType())) {
+        mlir::Type packedTy = abiTypeToCIR(info.getCoerceToType(), ctx);
+        return ArgClassification::getDirect(packedTy, /*offset=*/0);
+      }
     assert((!origTy || isa<cir::IntType>(origTy)) &&
-           "the x86_64 classifier only returns Extend for integers and bool");
+           "the x86_64 classifier only returns Extend for integers, bool, "
+           "and packed boolean vectors");
     mlir::Type extendedTy = abiTypeToCIR(info.getCoerceToType(), ctx);
     return ArgClassification::getExtend(extendedTy, info.isSignExt());
   }
@@ -666,7 +702,7 @@ static std::optional<FunctionClassification> classifyX86_64Signature(
   bool voidRet = isa<cir::VoidType>(retCIR);
 
   auto reject = [&](mlir::Type t) -> bool {
-    if (isSupportedType(t, dl))
+    if (isSupportedType(t, dl, /*nested=*/false))
       return false;
     emitError()
         << "x86_64 calling-convention lowering not yet implemented for type "
