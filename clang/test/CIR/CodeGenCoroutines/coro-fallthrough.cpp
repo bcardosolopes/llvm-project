@@ -342,21 +342,15 @@ Task co_return_in_block() {
 
 // CIR-FLAT-LABEL: cir.func {{.*}} @_Z18co_return_in_blockv(
 // CIR-FLAT:         cir.call @_ZN4Task12promise_type11return_voidEv(
-// CIR-FLAT-NEXT:    %[[DEST:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:    cir.store %[[DEST]], %{{.*}}
 // CIR-FLAT-NEXT:    cir.br ^[[DTOR:bb[0-9]+]]
 // CIR-FLAT-NEXT:  ^bb{{[0-9]+}}:  // no predecessors
 // CIR-FLAT-NEXT:    cir.call @dead()
+// CIR-FLAT-NEXT:    cir.br ^[[DTOR2:bb[0-9]+]]
+// CIR-FLAT-NEXT:  ^[[DTOR2]]:
+// CIR-FLAT-NEXT:    cir.call @_ZN1SD1Ev(
 // CIR-FLAT:       ^[[DTOR]]:
 // CIR-FLAT-NEXT:    cir.call @_ZN1SD1Ev(
-// CIR-FLAT:         cir.switch.flat %{{.*}} : !s32i, ^{{.*}} [
-// CIR-FLAT-NEXT:      0: ^{{.*}},
-// CIR-FLAT-NEXT:      1: ^[[FROM_RET:bb[0-9]+]]
-// CIR-FLAT-NEXT:    ]
-// CIR-FLAT:       ^[[FROM_RET]]:
-// CIR-FLAT-NEXT:    cir.br ^[[FINAL:bb[0-9]+]]
-// CIR-FLAT:       ^[[FINAL]]:
-// CIR-FLAT-NEXT:    cir.call @_ZN4Task12promise_type13final_suspendEv(
+// CIR-FLAT:         cir.call @_ZN4Task12promise_type13final_suspendEv(
 
 // OGCG-LABEL: define {{.*}} @_Z18co_return_in_blockv(
 // OGCG:         {{call|invoke}} void @_ZN4Task12promise_type11return_voidEv(

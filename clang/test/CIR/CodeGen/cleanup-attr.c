@@ -75,21 +75,15 @@ void multiple(int c) {
 // LLVM: %[[COND:.*]] = icmp ne i32 %[[C_VAL]], 0
 // LLVM: br i1 %[[COND]], label %[[EARLY:.*]], label %[[FALLTHRU:.*]]
 //
-// Early return: record the exit and run the cleanups.
-// LLVM: [[EARLY]]:
-// LLVM: store i32 1, ptr %[[DEST:[^,]+]]
-// LLVM: br label %[[CLEANUP:.*]]
-//
-// Fall-through: x++, then run the cleanups.
-// LLVM: [[FALLTHRU]]:
-// LLVM: %[[X_VAL:.*]] = load i32, ptr %[[X]]
-// LLVM: %[[X_INC:.*]] = add nsw i32 %[[X_VAL]], 1
-// LLVM: store i32 %[[X_INC]], ptr %[[X]]
-// LLVM: store i32 0, ptr %[[DEST]]
-// LLVM: br label %[[CLEANUP]]
-//
-// y was declared last, so its cleanup runs before x's.
-// LLVM: [[CLEANUP]]:
-// LLVM: call void @vcl(ptr noundef %[[Y]])
-// LLVM: call void @cl(ptr noundef %[[X]])
-// LLVM: ret void
+// Per-exit duplication: each exit runs its own copy of the cleanups, so
+// there is no exit discriminator slot and no shared cleanup block.
+// y was declared last, so its cleanup runs before x's on both exits.
+// Fall-through still increments x before running the cleanups.
+// LLVMCIR: %[[X_VAL:.*]] = load i32, ptr %[[X]]
+// LLVMCIR: %[[X_INC:.*]] = add nsw i32 %[[X_VAL]], 1
+// LLVMCIR: store i32 %[[X_INC]], ptr %[[X]]
+// LLVMCIR: call void @vcl(ptr noundef %[[Y]])
+// LLVMCIR: call void @vcl(ptr noundef %[[Y]])
+// LLVMCIR: call void @cl(ptr noundef %[[X]])
+// LLVMCIR: call void @cl(ptr noundef %[[X]])
+// LLVMCIR: ret void

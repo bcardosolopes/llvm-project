@@ -1421,15 +1421,12 @@ void struct_ternary(bool b, bool c) {
 // LLVMCIR:         %[[A:.*]] = getelementptr inbounds nuw %struct.Pair, ptr %{{.*}}, i32 0, i32 0
 // LLVMCIR-NEXT:    call void @_ZN3ObjC1Ec(ptr {{.*}} %[[A]], i8 noundef signext 97)
 // LLVMCIR-NEXT:    store i8 1, ptr %[[ACTIVE:[0-9]+]]
-// LLVMCIR:         store i32 1, ptr %[[SLOT:[0-9]+]]
-// LLVMCIR-NEXT:    br label %[[CLEANUP:[0-9]+]]
 // LLVMCIR:         call void @_ZN3ObjC1Ec(ptr {{.*}}, i8 noundef signext 98)
 // LLVMCIR:         call void @_ZN3ObjC1Ec(ptr {{.*}}, i8 noundef signext 99)
 // LLVMCIR-NEXT:    br label %[[END:[0-9]+]]
 // LLVMCIR:       [[END]]:
 // LLVMCIR-NEXT:    store i8 0, ptr %[[ACTIVE]]
-// LLVMCIR-NEXT:    store i32 0, ptr %[[SLOT]]
-// LLVMCIR-NEXT:    br label %[[CLEANUP]]
+// LLVMCIR-NEXT:    br label %[[CLEANUP:[0-9]+]]
 // LLVMCIR:       [[CLEANUP]]:
 // LLVMCIR-NEXT:    %[[FLAG:.*]] = load i8, ptr %[[ACTIVE]]
 // LLVMCIR-NEXT:    %[[IS_ACTIVE:.*]] = trunc i8 %[[FLAG]] to i1
