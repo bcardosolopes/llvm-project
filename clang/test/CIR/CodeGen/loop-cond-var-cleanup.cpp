@@ -60,31 +60,28 @@ void while_cond_var(int n) {
 // LLVM-NEXT:            to label %[[CVB_CONT:.*]] unwind label %[[LPAD]]
 // LLVM:       [[CVB_CONT]]:
 // LLVM:         br i1 %[[CALL]], label %[[BODY:.*]], label %[[COND_FALSE:.*]]
-// The body sets the cleanup destination selector to the "continue" value and
-// the false (loop-exit) edge sets it to the "break" value; both then fall
-// through to the shared cleanup.
+// Each exit gets its own copy of the conditional cleanup: the body copy
+// branches to the loop back-edge, the false-edge (loop-exit) copy to the
+// loop exit.
 // LLVM:       [[BODY]]:
-// LLVM:         store i32 0, ptr %[[DEST:.*]],
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %[[BODY_CLEANUP:.*]]
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 1, ptr %[[DEST]]
-// LLVM:         br label %[[CLEANUP]]
-// The cleanup tests the active flag, destroys the condition variable when set,
-// then dispatches on the destination selector to the loop back-edge (continue)
-// or the loop exit (break).
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[BODY_CLEANUP]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]]
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[CONTINUE:.*]]
-// LLVM:           i32 1, label %[[BREAK:.*]]
-// LLVM:       [[CONTINUE]]:
+// LLVM:       [[BODY_JOIN:.*]]:
 // LLVM:         br label %[[BACKEDGE:.*]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -177,22 +174,25 @@ void while_cond_var_break() {
 // LLVM:       [[CVB_CONT]]:
 // LLVM:         br i1 %[[CALL]], label %[[BODY:.*]], label %[[COND_FALSE:.*]]
 // LLVM:       [[BODY]]:
-// LLVM:         store i32 1, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %{{.*}}
+// LLVM:         br label %[[BREAK_CLEANUP:.*]]
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 2, ptr %[[DEST]], align 4
-// LLVM:         br label %[[CLEANUP]]
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[BREAK_CLEANUP]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[CONTINUE:.*]]
-// LLVM:           i32 1, label %[[BREAK:.*]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[BREAK_JOIN:.*]]:
+// LLVM:         br label %[[EXIT]]
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -278,24 +278,25 @@ void while_cond_var_continue() {
 // LLVM:       [[CVB_CONT]]:
 // LLVM:         br i1 %[[CALL]], label %[[BODY:.*]], label %[[COND_FALSE:.*]]
 // LLVM:       [[BODY]]:
-// LLVM:         store i32 1, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %{{.*}}
+// LLVM:         br label %[[CONTINUE_CLEANUP:.*]]
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 2, ptr %[[DEST]], align 4
-// LLVM:         br label %[[CLEANUP]]
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[CONTINUE_CLEANUP]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 1, label %[[CONTINUE:.*]]
-// LLVM:           i32 2, label %[[BREAK:.*]]
-// LLVM:       [[CONTINUE]]:
+// LLVM:       [[CONTINUE_JOIN:.*]]:
 // LLVM:         br label %[[COND]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -385,22 +386,25 @@ void for_cond_var_break() {
 // LLVM:       [[CVB_CONT]]:
 // LLVM:         br i1 %[[CALL]], label %[[BODY:.*]], label %[[COND_FALSE:.*]]
 // LLVM:       [[BODY]]:
-// LLVM:         store i32 1, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %{{.*}}
+// LLVM:         br label %[[BREAK_CLEANUP:.*]]
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 2, ptr %[[DEST]], align 4
-// LLVM:         br label %[[CLEANUP]]
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[BREAK_CLEANUP]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[CONTINUE:.*]]
-// LLVM:           i32 1, label %[[BREAK:.*]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[BREAK_JOIN:.*]]:
+// LLVM:         br label %[[EXIT]]
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -489,24 +493,24 @@ void for_cond_var_continue() {
 // LLVM:       [[BODY]]:
 // LLVM:         br label %[[STEP:.*]]
 // LLVM:       [[STEP]]:
-// LLVM:         store i32 0, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %{{.*}}
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 1, ptr %[[DEST]], align 4
-// LLVM:         br label %[[CLEANUP]]
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[CONTINUE_CLEANUP:.*]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[CONTINUE:.*]]
-// LLVM:           i32 1, label %[[BREAK:.*]]
-// LLVM:       [[CONTINUE]]:
+// LLVM:       [[CONTINUE_JOIN:.*]]:
 // LLVM:         br label %[[BACKEDGE0:.*]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -603,24 +607,24 @@ void for_cond_var(int n) {
 // LLVM:       [[BODY]]:
 // LLVM:         br label %[[STEP:.*]]
 // LLVM:       [[STEP]]:
-// LLVM:         store i32 0, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %[[CONTINUE_CLEANUP:.*]]
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 1, ptr %[[DEST]], align 4
-// LLVM:         br label %[[CLEANUP]]
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[CONTINUE_CLEANUP]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[CONTINUE:.*]]
-// LLVM:           i32 1, label %[[BREAK:.*]]
-// LLVM:       [[CONTINUE]]:
+// LLVM:       [[CONTINUE_JOIN:.*]]:
 // LLVM:         br label %[[BACKEDGE0:.*]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -736,24 +740,24 @@ void while_cond_var_temp(int n) {
 // LLVM:       [[CVB_CONT]]:
 // LLVM:         br i1 %[[CALL]], label %[[BODY:.*]], label %[[COND_FALSE:.*]]
 // LLVM:       [[BODY]]:
-// LLVM:         store i32 0, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[CLEANUP:.*]]
+// LLVM:         br label %[[BODY_CLEANUP:.*]]
 // LLVM:       [[COND_FALSE]]:
-// LLVM:         store i32 1, ptr %[[DEST]], align 4
-// LLVM:         br label %[[CLEANUP]]
-// LLVM:       [[CLEANUP]]:
+// LLVM:         br label %[[FALSE_CLEANUP:.*]]
+// LLVM:       [[BODY_CLEANUP]]:
 // LLVM:         %[[ACT:.*]] = load i8, ptr %[[FLAG]]
 // LLVM:         %[[ACTB:.*]] = trunc i8 %[[ACT]] to i1
 // LLVM:         br i1 %[[ACTB]], label %[[DTOR:.*]], label %{{.*}}
 // LLVM:       [[DTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[SEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[CONTINUE:.*]]
-// LLVM:           i32 1, label %[[BREAK:.*]]
-// LLVM:       [[CONTINUE]]:
+// LLVM:       [[BODY_JOIN:.*]]:
 // LLVM:         br label %[[BACKEDGE:.*]]
-// LLVM:       [[BREAK]]:
+// LLVM:       [[FALSE_CLEANUP]]:
+// LLVM:         %[[FACT:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[FACTB:.*]] = trunc i8 %[[FACT]] to i1
+// LLVM:         br i1 %[[FACTB]], label %[[FDTOR:.*]], label %{{.*}}
+// LLVM:       [[FDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[FALSE_JOIN:.*]]:
 // LLVM:         br label %[[EXIT]]
 // LLVM:       [[LPAD_OUTER]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -893,24 +897,27 @@ void while_cond_var_nested(int n) {
 // LLVM-NEXT:            to label %[[BV_CONT:.*]] unwind label %[[INNER_LPAD]]
 // LLVM:       [[BV_CONT]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[BV]])
-// LLVM:         store i32 0, ptr %[[DEST:.*]], align 4
-// LLVM:         br label %[[ICLEANUP:.*]]
+// Hop blocks from nested cleanup flattening.
+// LLVM:         br label %{{.*}}
+// LLVM:         br label %{{.*}}
+// LLVM:         br label %{{.*}}
 // LLVM:       [[ICOND_FALSE]]:
-// LLVM:         store i32 1, ptr %[[DEST]], align 4
-// LLVM:         br label %[[ICLEANUP]]
-// LLVM:       [[ICLEANUP]]:
+// LLVM:         br label %[[IFALSE_CLEANUP:.*]]
+// LLVM:       [[IBODY_CLEANUP:.*]]:
 // LLVM:         %[[IACT:.*]] = load i8, ptr %[[FLAG_INNER]]
 // LLVM:         %[[IACTB:.*]] = trunc i8 %[[IACT]] to i1
 // LLVM:         br i1 %[[IACTB]], label %[[IDTOR:.*]], label %{{.*}}
 // LLVM:       [[IDTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[T]])
-// LLVM:         %[[ISEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[ISEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[ICONTINUE:.*]]
-// LLVM:           i32 1, label %[[IBREAK:.*]]
-// LLVM:       [[ICONTINUE]]:
+// LLVM:       [[IBODY_JOIN:.*]]:
 // LLVM:         br label %[[IBACKEDGE:.*]]
-// LLVM:       [[IBREAK]]:
+// LLVM:       [[IFALSE_CLEANUP]]:
+// LLVM:         %[[IFACT:.*]] = load i8, ptr %[[FLAG_INNER]]
+// LLVM:         %[[IFACTB:.*]] = trunc i8 %[[IFACT]] to i1
+// LLVM:         br i1 %[[IFACTB]], label %[[IFDTOR:.*]], label %{{.*}}
+// LLVM:       [[IFDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[T]])
+// LLVM:       [[IFALSE_JOIN:.*]]:
 // LLVM:         br label %[[INNER_EXIT]]
 // LLVM:       [[INNER_LPAD]]:
 // LLVM:         landingpad { ptr, i32 }
@@ -934,24 +941,24 @@ void while_cond_var_nested(int n) {
 // LLVM:       [[SCVB_CONT]]:
 // LLVM:         br i1 %[[SCALL]], label %[[OBODY:.*]], label %[[OCOND_FALSE:.*]]
 // LLVM:       [[OBODY]]:
-// LLVM:         store i32 0, ptr %[[DEST]], align 4
-// LLVM:         br label %[[OCLEANUP:.*]]
+// LLVM:         br label %[[OBODY_CLEANUP:.*]]
 // LLVM:       [[OCOND_FALSE]]:
-// LLVM:         store i32 1, ptr %[[DEST]], align 4
-// LLVM:         br label %[[OCLEANUP]]
-// LLVM:       [[OCLEANUP]]:
+// LLVM:         br label %[[OFALSE_CLEANUP:.*]]
+// LLVM:       [[OBODY_CLEANUP]]:
 // LLVM:         %[[OACT:.*]] = load i8, ptr %[[FLAG_OUTER]]
 // LLVM:         %[[OACTB:.*]] = trunc i8 %[[OACT]] to i1
 // LLVM:         br i1 %[[OACTB]], label %[[ODTOR:.*]], label %{{.*}}
 // LLVM:       [[ODTOR]]:
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
-// LLVM:         %[[OSEL:.*]] = load i32, ptr %[[DEST]], align 4
-// LLVM:         switch i32 %[[OSEL]], label %{{.*}}
-// LLVM:           i32 0, label %[[OCONTINUE:.*]]
-// LLVM:           i32 1, label %[[OBREAK:.*]]
-// LLVM:       [[OCONTINUE]]:
+// LLVM:       [[OBODY_JOIN:.*]]:
 // LLVM:         br label %[[OBACKEDGE:.*]]
-// LLVM:       [[OBREAK]]:
+// LLVM:       [[OFALSE_CLEANUP]]:
+// LLVM:         %[[OFACT:.*]] = load i8, ptr %[[FLAG_OUTER]]
+// LLVM:         %[[OFACTB:.*]] = trunc i8 %[[OFACT]] to i1
+// LLVM:         br i1 %[[OFACTB]], label %[[OFDTOR:.*]], label %{{.*}}
+// LLVM:       [[OFDTOR]]:
+// LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
+// LLVM:       [[OFALSE_JOIN:.*]]:
 // LLVM:         br label %[[OUTER_EXIT]]
 // LLVM:       [[OUTER_LPAD]]:
 // LLVM:         landingpad { ptr, i32 }

@@ -1235,7 +1235,6 @@ folly::coro::Task<int> co_return_with_dtor(int flag) {
 // then continues to the final suspend.
 
 // CIR-FLAT-LABEL: cir.func flattened_coroutine {{.*}} @_Z19co_return_with_dtori
-// CIR-FLAT:   %[[CLEANUP_DEST_SLOT:.*]] = cir.alloca "__cleanup_dest_slot"
 // CIR-FLAT:   %[[PROMISE:.*]] = cir.alloca "__promise"
 // CIR-FLAT:   %[[LOCAL:.*]] = cir.alloca "local"
 // CIR-FLAT:   cir.call @_ZNSt14suspend_always12await_resumeEv
@@ -1244,44 +1243,24 @@ folly::coro::Task<int> co_return_with_dtor(int flag) {
 // CIR-FLAT: ^[[IF_BODY]]:
 // CIR-FLAT:   %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
 // CIR-FLAT:   cir.call @_ZN5folly4coro4TaskIiE12promise_type12return_valueEi(%[[PROMISE]], %[[ONE]])
-// CIR-FLAT-NEXT:   %[[DEST_RET1:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_RET1]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR:bb[0-9]+]]
+// CIR-FLAT-NEXT:   cir.br ^[[DTOR1:bb[0-9]+]]
 // CIR-FLAT: ^[[IF_END]]:
 // CIR-FLAT-NEXT:   cir.br ^[[AFTER_IF:bb[0-9]+]]
 // CIR-FLAT: ^[[AFTER_IF]]:
 // CIR-FLAT:   %[[TWO:.*]] = cir.const #cir.int<2> : !s32i
 // CIR-FLAT:   cir.call @_ZN5folly4coro4TaskIiE12promise_type12return_valueEi(%[[PROMISE]], %[[TWO]])
-// CIR-FLAT-NEXT:   %[[DEST_RET2:.*]] = cir.const #cir.int<2> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_RET2]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR]]
-
-// The normal fallthrough out of the cleanup scope gets slot 0. It is dead
-// here because both paths end in a cir.co_return.
-// CIR-FLAT: ^[[FALLTHROUGH:bb[0-9]+]]:  // no predecessors
-// CIR-FLAT-NEXT:   %[[DEST_FALLTHROUGH:.*]] = cir.const #cir.int<0> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_FALLTHROUGH]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR]]
-
-// CIR-FLAT: ^[[DTOR]]:
+// CIR-FLAT-NEXT:   cir.br ^[[DTOR2:bb[0-9]+]]
+// Each co_return exit gets its own copy of the cleanup (no dest slot).
+// CIR-FLAT: ^[[DTOR1]]:
 // CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR_EXIT:bb[0-9]+]]
-// CIR-FLAT: ^[[DTOR_EXIT]]:
-// CIR-FLAT-NEXT:   %[[DEST:.*]] = cir.load %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.switch.flat %[[DEST]] : !s32i, ^[[DEFAULT:bb[0-9]+]] [
-// CIR-FLAT-NEXT:     0: ^[[FROM_FALLTHROUGH:bb[0-9]+]],
-// CIR-FLAT-NEXT:     1: ^[[FROM_RET1:bb[0-9]+]],
-// CIR-FLAT-NEXT:     2: ^[[FROM_RET2:bb[0-9]+]]
-// CIR-FLAT-NEXT:   ]
-// CIR-FLAT: ^[[FROM_FALLTHROUGH]]:
-// CIR-FLAT-NEXT:   cir.br ^[[AFTER_CLEANUP:bb[0-9]+]]
-// CIR-FLAT: ^[[FROM_RET1]]:
 // CIR-FLAT-NEXT:   cir.br ^[[FINAL:bb[0-9]+]]
-// CIR-FLAT: ^[[FROM_RET2]]:
+// CIR-FLAT: ^[[DTOR2]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[FINAL]]
-// CIR-FLAT: ^[[DEFAULT]]:
-// CIR-FLAT-NEXT:   cir.unreachable
-// CIR-FLAT: ^[[AFTER_CLEANUP]]:
+
+// The normal fallthrough out of the cleanup scope is dead here because both
+// paths end in a cir.co_return.
+// CIR-FLAT: ^[[FALLTHROUGH:bb[0-9]+]]:  // no predecessors
 // CIR-FLAT-NEXT:   cir.br ^[[FINAL]]
 // CIR-FLAT: ^[[FINAL]]:
 // CIR-FLAT-NEXT:   cir.call @_ZN5folly4coro4TaskIiE12promise_type13final_suspendEv(%[[PROMISE]])
@@ -1318,7 +1297,6 @@ VoidTask silly_task_with_dtor() {
 // the destroy case (slot 2) jumps from the ~HasDtor cleanup to %coro.cleanup.
 
 // CIR-FLAT-LABEL: cir.func flattened_coroutine {{.*}} @_Z20silly_task_with_dtorv()
-// CIR-FLAT:   %[[CLEANUP_DEST_SLOT:.*]] = cir.alloca "__cleanup_dest_slot"
 // CIR-FLAT:   %[[PROMISE:.*]] = cir.alloca "__promise"
 // CIR-FLAT:   %[[LOCAL:.*]] = cir.alloca "local"
 // CIR-FLAT:   %[[USER_AWAITER:.*]] = cir.alloca "ref.tmp1"
@@ -1330,29 +1308,18 @@ VoidTask silly_task_with_dtor() {
 // CIR-FLAT-NEXT:     0: ^[[USER_RESUME]],
 // CIR-FLAT-NEXT:     1: ^[[USER_DESTROY:bb[0-9]+]]
 // CIR-FLAT-NEXT:   ]
+// Each exit gets its own copy of the cleanup (no dest slot).
 // CIR-FLAT: ^[[USER_DESTROY]]:
-// CIR-FLAT-NEXT:   %[[DEST_DESTROY:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_DESTROY]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR:bb[0-9]+]]
+// CIR-FLAT-NEXT:   cir.br ^[[DTOR_DESTROY:bb[0-9]+]]
 // CIR-FLAT: ^[[USER_RESUME]]:
 // CIR-FLAT-NEXT:   cir.call @_ZNSt14suspend_always12await_resumeEv(%[[USER_AWAITER]])
-// CIR-FLAT:   %[[DEST_NORMAL:.*]] = cir.const #cir.int<0> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_NORMAL]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR]]
-// CIR-FLAT: ^[[DTOR]]:
-// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR_EXIT:bb[0-9]+]]
-// CIR-FLAT: ^[[DTOR_EXIT]]:
-// CIR-FLAT-NEXT:   %[[DEST:.*]] = cir.load %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.switch.flat %[[DEST]] : !s32i, ^{{.*}} [
-// CIR-FLAT-NEXT:     0: ^[[DTOR_TO_BODY:bb[0-9]+]],
-// CIR-FLAT-NEXT:     1: ^[[DTOR_TO_DESTROY:bb[0-9]+]]
-// CIR-FLAT-NEXT:   ]
-// CIR-FLAT: ^[[DTOR_TO_BODY]]:
+// The resume path falls through a trampoline into its own dtor copy.
+// CIR-FLAT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[AFTER_DTOR:bb[0-9]+]]
 
 // Destroy: after ~HasDtor, go on to the coroutine cleanup.
-// CIR-FLAT: ^[[DTOR_TO_DESTROY]]:
+// CIR-FLAT: ^[[DTOR_DESTROY]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[CORO_CLEANUP:bb[0-9]+]]
 
 // Resume: the rest of the body.
@@ -1601,7 +1568,6 @@ VoidTask await_in_loop_with_dtor(int n) {
 // to the coroutine cleanup, like classic codegen below.
 
 // CIR-FLAT-LABEL: cir.func flattened_coroutine {{.*}} @_Z23await_in_loop_with_dtori(
-// CIR-FLAT:   %[[CLEANUP_DEST_SLOT:.*]] = cir.alloca "__cleanup_dest_slot"
 // CIR-FLAT:   %[[I:.*]] = cir.alloca "i"
 // CIR-FLAT:   cir.store {{.*}} %{{.*}}, %[[I]]
 // CIR-FLAT-NEXT:   cir.br ^[[COND:bb[0-9]+]]
@@ -1618,29 +1584,18 @@ VoidTask await_in_loop_with_dtor(int n) {
 // CIR-FLAT-NEXT:     0: ^[[USER_RESUME]],
 // CIR-FLAT-NEXT:     1: ^[[USER_DESTROY:bb[0-9]+]]
 // CIR-FLAT-NEXT:   ]
+// Each exit gets its own copy of the cleanup (no dest slot).
 // CIR-FLAT: ^[[USER_DESTROY]]:
-// CIR-FLAT-NEXT:   %[[DEST_DESTROY:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_DESTROY]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR:bb[0-9]+]]
+// CIR-FLAT-NEXT:   cir.br ^[[DTOR_DESTROY:bb[0-9]+]]
 // CIR-FLAT: ^[[USER_RESUME]]:
 // CIR-FLAT-NEXT:   cir.call @_ZNSt14suspend_always12await_resumeEv(%[[USER_AWAITER]])
-// CIR-FLAT:   %[[DEST_NORMAL:.*]] = cir.const #cir.int<0> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_NORMAL]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR]]
-// CIR-FLAT: ^[[DTOR]]:
-// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR_EXIT:bb[0-9]+]]
-// CIR-FLAT: ^[[DTOR_EXIT]]:
-// CIR-FLAT-NEXT:   %[[DEST:.*]] = cir.load %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.switch.flat %[[DEST]] : !s32i, ^{{.*}} [
-// CIR-FLAT-NEXT:     0: ^[[DTOR_TO_BODY:bb[0-9]+]],
-// CIR-FLAT-NEXT:     1: ^[[DTOR_TO_DESTROY:bb[0-9]+]]
-// CIR-FLAT-NEXT:   ]
-// CIR-FLAT: ^[[DTOR_TO_BODY]]:
+// The resume path falls through trampolines into its own dtor copy.
+// CIR-FLAT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[AFTER_DTOR:bb[0-9]+]]
 
 // Destroy: after ~HasDtor, go on to the coroutine cleanup.
-// CIR-FLAT: ^[[DTOR_TO_DESTROY]]:
+// CIR-FLAT: ^[[DTOR_DESTROY]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[CORO_CLEANUP:bb[0-9]+]]
 
 // Resume: the end of the loop body, then the step.
@@ -1719,7 +1674,6 @@ VoidTask await_in_if_with_dtor(bool b) {
 // (slot 1) goes to the coroutine cleanup, like classic codegen below.
 
 // CIR-FLAT-LABEL: cir.func flattened_coroutine {{.*}} @_Z21await_in_if_with_dtorb(
-// CIR-FLAT:   %[[CLEANUP_DEST_SLOT:.*]] = cir.alloca "__cleanup_dest_slot"
 // CIR-FLAT:   cir.alloca "__coro_frame_addr"
 // CIR-FLAT:   %[[B:.*]] = cir.alloca "b"
 // CIR-FLAT:   %[[PROMISE:.*]] = cir.alloca "__promise"
@@ -1736,29 +1690,18 @@ VoidTask await_in_if_with_dtor(bool b) {
 // CIR-FLAT-NEXT:     0: ^[[USER_RESUME]],
 // CIR-FLAT-NEXT:     1: ^[[USER_DESTROY:bb[0-9]+]]
 // CIR-FLAT-NEXT:   ]
+// Each exit gets its own copy of the cleanup (no dest slot).
 // CIR-FLAT: ^[[USER_DESTROY]]:
-// CIR-FLAT-NEXT:   %[[DEST_DESTROY:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_DESTROY]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR:bb[0-9]+]]
+// CIR-FLAT-NEXT:   cir.br ^[[DTOR_DESTROY:bb[0-9]+]]
 // CIR-FLAT: ^[[USER_RESUME]]:
 // CIR-FLAT-NEXT:   cir.call @_ZNSt14suspend_always12await_resumeEv(%[[USER_AWAITER]])
-// CIR-FLAT:   %[[DEST_NORMAL:.*]] = cir.const #cir.int<0> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DEST_NORMAL]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR]]
-// CIR-FLAT: ^[[DTOR]]:
-// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
-// CIR-FLAT-NEXT:   cir.br ^[[DTOR_EXIT:bb[0-9]+]]
-// CIR-FLAT: ^[[DTOR_EXIT]]:
-// CIR-FLAT-NEXT:   %[[DEST:.*]] = cir.load %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.switch.flat %[[DEST]] : !s32i, ^{{.*}} [
-// CIR-FLAT-NEXT:     0: ^[[DTOR_TO_BODY:bb[0-9]+]],
-// CIR-FLAT-NEXT:     1: ^[[DTOR_TO_DESTROY:bb[0-9]+]]
-// CIR-FLAT-NEXT:   ]
-// CIR-FLAT: ^[[DTOR_TO_BODY]]:
+// The resume path falls through trampolines into its own dtor copy.
+// CIR-FLAT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[AFTER_DTOR:bb[0-9]+]]
 
 // Destroy: after ~HasDtor, go on to the coroutine cleanup.
-// CIR-FLAT: ^[[DTOR_TO_DESTROY]]:
+// CIR-FLAT: ^[[DTOR_DESTROY]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[LOCAL]])
 // CIR-FLAT-NEXT:   cir.br ^[[CORO_CLEANUP:bb[0-9]+]]
 
 // Resume: the end of the if, then the rest of the body.
@@ -1827,7 +1770,6 @@ folly::coro::Task<int> co_return_in_loop(int n) {
 // CIR: }, finalSuspend : {
 
 // CIR-FLAT-LABEL: cir.func flattened_coroutine {{.*}} @_Z17co_return_in_loopi(
-// CIR-FLAT:   %[[CLEANUP_DEST_SLOT:.*]] = cir.alloca "__cleanup_dest_slot"
 // CIR-FLAT:   %[[PROMISE:.*]] = cir.alloca "__promise"
 // CIR-FLAT:   %[[OUTER:.*]] = cir.alloca "outer"
 // CIR-FLAT:   %[[I:.*]] = cir.alloca "i"
@@ -1837,77 +1779,55 @@ folly::coro::Task<int> co_return_in_loop(int n) {
 // CIR-FLAT:   %[[EQ:.*]] = cir.cmp eq
 // CIR-FLAT-NEXT:   cir.brcond %[[EQ]] ^[[IF_THEN:bb[0-9]+]], ^{{.*}}
 
-// co_return i: slot 1 for the inner cleanup scope.
+// co_return i gets its own copies of the inner and outer cleanups.
 // CIR-FLAT: ^[[IF_THEN]]:
 // CIR-FLAT:   cir.call @_ZN5folly4coro4TaskIiE12promise_type12return_valueEi(%[[PROMISE]], %{{.*}})
-// CIR-FLAT-NEXT:   %[[RET_IN:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[RET_IN]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[INNER_DTOR:bb[0-9]+]]
+// CIR-FLAT-NEXT:   cir.br ^[[INNER_DTOR_RET:bb[0-9]+]]
 
-// The user await: destroy uses slot 2, resume slot 0.
+// The user await: destroy and resume each get their own inner cleanup.
 // CIR-FLAT:   %[[RES:.*]] = cir.coro.intrinsic.suspend
 // CIR-FLAT:   cir.switch.flat %[[RES]] : !s8i, ^{{.*}} [
 // CIR-FLAT-NEXT:     0: ^[[USER_RESUME:bb[0-9]+]],
 // CIR-FLAT-NEXT:     1: ^[[USER_DESTROY:bb[0-9]+]]
 // CIR-FLAT-NEXT:   ]
 // CIR-FLAT: ^[[USER_DESTROY]]:
-// CIR-FLAT-NEXT:   %[[DESTROY_IN:.*]] = cir.const #cir.int<2> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DESTROY_IN]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[INNER_DTOR]]
+// CIR-FLAT-NEXT:   cir.br ^[[INNER_DTOR_DESTROY:bb[0-9]+]]
 // CIR-FLAT: ^[[USER_RESUME]]:
 // CIR-FLAT-NEXT:   cir.call @_ZNSt14suspend_always12await_resumeEv
-// CIR-FLAT:   %[[NORMAL_IN:.*]] = cir.const #cir.int<0> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[NORMAL_IN]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[INNER_DTOR]]
-
-// ~inner, then dispatch: 0 continues the loop, 1 (co_return) and
-// 2 (destroy) leave it through ~outer.
-// CIR-FLAT: ^[[INNER_DTOR]]:
+// The resume path falls through trampolines into its own dtor copy.
+// CIR-FLAT:   cir.call @_ZN7HasDtorD1Ev(%[[INNER]])
+// CIR-FLAT-NEXT:   cir.br ^[[AFTER_INNER:bb[0-9]+]]
+// CIR-FLAT: ^[[INNER_DTOR_RET]]:
 // CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[INNER]])
-// CIR-FLAT-NEXT:   cir.br ^[[INNER_EXIT:bb[0-9]+]]
-// CIR-FLAT: ^[[INNER_EXIT]]:
-// CIR-FLAT-NEXT:   %[[DEST_IN:.*]] = cir.load %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.switch.flat %[[DEST_IN]] : !s32i, ^{{.*}} [
-// CIR-FLAT-NEXT:     0: ^{{.*}},
-// CIR-FLAT-NEXT:     1: ^[[INNER_TO_RET:bb[0-9]+]],
-// CIR-FLAT-NEXT:     2: ^[[INNER_TO_DESTROY:bb[0-9]+]]
-// CIR-FLAT-NEXT:   ]
-// CIR-FLAT: ^[[INNER_TO_RET]]:
-// CIR-FLAT-NEXT:   %[[RET_OUT:.*]] = cir.const #cir.int<1> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[RET_OUT]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[OUTER_DTOR:bb[0-9]+]]
-// CIR-FLAT: ^[[INNER_TO_DESTROY]]:
-// CIR-FLAT-NEXT:   %[[DESTROY_OUT:.*]] = cir.const #cir.int<2> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[DESTROY_OUT]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[OUTER_DTOR]]
+// CIR-FLAT-NEXT:   cir.br ^[[OUTER_FROM_RET:bb[0-9]+]]
+// CIR-FLAT: ^[[INNER_DTOR_DESTROY]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[INNER]])
+// CIR-FLAT-NEXT:   cir.br ^[[OUTER_FROM_DESTROY:bb[0-9]+]]
 
-// CIR-FLAT:   %[[I_VAL:.*]] = cir.load {{.*}}%[[I]]
+// CIR-FLAT: ^[[AFTER_INNER]]:
+// CIR-FLAT-NEXT:   cir.br ^[[BODY_END:bb[0-9]+]]
+// CIR-FLAT: ^[[BODY_END]]:
+// CIR-FLAT-NEXT:   cir.br ^[[STEP:bb[0-9]+]]
+// CIR-FLAT: ^[[STEP]]:
+// CIR-FLAT-NEXT:   %[[I_VAL:.*]] = cir.load {{.*}}%[[I]]
 // CIR-FLAT-NEXT:   cir.inc nsw %[[I_VAL]]
 // CIR-FLAT: ^[[LOOP_EXIT]]:
 // CIR-FLAT:   %[[MINUS_ONE:.*]] = cir.const #cir.int<-1> : !s32i
 // CIR-FLAT-NEXT:   cir.call @_ZN5folly4coro4TaskIiE12promise_type12return_valueEi(%[[PROMISE]], %[[MINUS_ONE]])
-// CIR-FLAT-NEXT:   %[[RET2_OUT:.*]] = cir.const #cir.int<3> : !s32i
-// CIR-FLAT-NEXT:   cir.store %[[RET2_OUT]], %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.br ^[[OUTER_DTOR]]
+// CIR-FLAT-NEXT:   cir.br ^[[OUTER_DTOR2:bb[0-9]+]]
 
-// ~outer, then both co_returns go to the final suspend and the destroy to
-// the coroutine cleanup.
-// CIR-FLAT: ^[[OUTER_DTOR]]:
+// ~outer runs once per exit; both co_returns go to the final suspend and
+// the destroy to the coroutine cleanup.
+// CIR-FLAT: ^[[OUTER_FROM_RET]]:
 // CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[OUTER]])
-// CIR-FLAT-NEXT:   cir.br ^[[OUTER_EXIT:bb[0-9]+]]
-// CIR-FLAT: ^[[OUTER_EXIT]]:
-// CIR-FLAT-NEXT:   %[[DEST_OUT:.*]] = cir.load %[[CLEANUP_DEST_SLOT]]
-// CIR-FLAT-NEXT:   cir.switch.flat %[[DEST_OUT]] : !s32i, ^{{.*}} [
-// CIR-FLAT-NEXT:     0: ^{{.*}},
-// CIR-FLAT-NEXT:     1: ^[[OUTER_TO_RET:bb[0-9]+]],
-// CIR-FLAT-NEXT:     2: ^[[OUTER_TO_DESTROY:bb[0-9]+]],
-// CIR-FLAT-NEXT:     3: ^[[OUTER_TO_RET2:bb[0-9]+]]
-// CIR-FLAT-NEXT:   ]
-// CIR-FLAT: ^[[OUTER_TO_RET]]:
 // CIR-FLAT-NEXT:   cir.br ^[[FINAL:bb[0-9]+]]
-// CIR-FLAT: ^[[OUTER_TO_DESTROY]]:
+// CIR-FLAT: ^[[OUTER_FROM_DESTROY]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[OUTER]])
 // CIR-FLAT-NEXT:   cir.br ^[[CORO_CLEANUP:bb[0-9]+]]
-// CIR-FLAT: ^[[OUTER_TO_RET2]]:
+// CIR-FLAT: ^[[OUTER_DTOR2]]:
+// CIR-FLAT-NEXT:   cir.call @_ZN7HasDtorD1Ev(%[[OUTER]])
+// CIR-FLAT-NEXT:   cir.br ^[[FINAL]]
+// CIR-FLAT: ^[[OUTER_FALLTHROUGH:bb[0-9]+]]:  // no predecessors
 // CIR-FLAT-NEXT:   cir.br ^[[FINAL]]
 // CIR-FLAT: ^[[FINAL]]:
 // CIR-FLAT-NEXT:   cir.call @_ZN5folly4coro4TaskIiE12promise_type13final_suspendEv(%[[PROMISE]])
