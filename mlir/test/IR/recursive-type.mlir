@@ -1,8 +1,16 @@
 // RUN: mlir-opt %s -test-recursive-types | FileCheck %s
+// RUN: mlir-opt %s -test-recursive-types | mlir-opt --verify-roundtrip
 
+// An alias reference is only correct where the alias definition is in the same
+// output. Round-tripping through both text and bytecode checks that: the
+// bytecode writer prints each type standalone with no alias table, so
+// shouldPrintTypeAsAliasReference must report false there and the body must be
+// written out in full.
+
+// CHECK: ![[$PREREC:.*]] = !test.test_rec_alias<prename, i32>
 // CHECK: !testrec = !test.test_rec<type_to_alias, test_rec<type_to_alias>>
 // CHECK: ![[$NAME:.*]] = !test.test_rec_alias<name, !test.test_rec_alias<name>>
-// CHECK: ![[$NAME5:.*]] = !test.test_rec_alias<name5, !test.test_rec_alias<name3, !test.test_rec_alias<name4, !test.test_rec_alias<name5>>>>
+// CHECK: ![[$NAME5:.*]] = !test.test_rec_alias<name5, !test.test_rec_alias<name3>>
 // CHECK: ![[$NAME2:.*]] = !test.test_rec_alias<name2, tuple<!test.test_rec_alias<name2>, i32>>
 // CHECK: ![[$NAME4:.*]] = !test.test_rec_alias<name4, !name5>
 // CHECK: ![[$NAME3:.*]] = !test.test_rec_alias<name3, !name4>
@@ -35,6 +43,13 @@ func.func @roundtrip() {
   "test.dummy_op_for_roundtrip"() : () -> !test.test_rec_alias<name3, !test.test_rec_alias<name4, !test.test_rec_alias<name5, !test.test_rec_alias<name3>>>>
   "test.dummy_op_for_roundtrip"() : () -> !test.test_rec_alias<name4, !test.test_rec_alias<name5, !test.test_rec_alias<name3, !test.test_rec_alias<name4>>>>
   "test.dummy_op_for_roundtrip"() : () -> !test.test_rec_alias<name5, !test.test_rec_alias<name3, !test.test_rec_alias<name4, !test.test_rec_alias<name5>>>>
+
+  // A body-less reference before its definition parses and both uses share
+  // the completed type.
+  // CHECK: () -> ![[$PREREC]]
+  // CHECK: () -> ![[$PREREC]]
+  "test.dummy_op_for_roundtrip"() : () -> !test.test_rec_alias<prename>
+  "test.dummy_op_for_roundtrip"() : () -> !test.test_rec_alias<prename, i32>
   return
 }
 
