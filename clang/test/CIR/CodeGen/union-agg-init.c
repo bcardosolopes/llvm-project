@@ -43,7 +43,7 @@ struct Anon anon = { 101, 1 };
 
 struct Bitfields { int a : 3; int b : 4; union PtrToIntUnion u; };
 struct Bitfields bitfields = { 1, 2, { 9 } };
-// CIR-DAG: cir.global external @bitfields = #cir.const_record<{#cir.int<17> : !u8i, #cir.const_record<{#cir.int<9> : !s32i}> : !rec_PtrToIntUnion}> : !rec_Bitfields align(8) loc(#loc42)
+// CIR-DAG: cir.global external @bitfields = #cir.const_record<{#cir.int<17> : !u8i, #cir.const_record<{#cir.int<9> : !s32i}> : !rec_PtrToIntUnion}> : !rec_Bitfields align(8) loc(#loc41)
 // LLVM-DAG: @bitfields = global { i8, [7 x i8], { i32, [4 x i8] } } { i8 17, [7 x i8] zeroinitializer, { i32, [4 x i8] } { i32 9, [4 x i8] zeroinitializer } }
 
 struct FamUnion { int n; union PtrToIntUnion u; char fam[]; };
@@ -62,10 +62,7 @@ typedef union vec3 {
   double component[3];
 } vec3;
 
-// LLVMCIR-DAG: @__const.ret_outer.__retval = {{.*}}%struct.outer { %union.needs_padding zeroinitializer, i32 1 }, align 8
 // OGCG-DAG: @__const.ret_outer.o = {{.*}}{ { i32, [4 x i8] }, i32, [4 x i8] } { { i32, [4 x i8] } zeroinitializer, i32 1, [4 x i8] zeroinitializer }, align 8
-
-// CIR-DAG: cir.global "private" constant cir_private @__const.ret_outer.__retval = #cir.const_record<{#cir.zero : !rec_needs_padding, #cir.int<1> : !s32i}> : !rec_outer align(8)
 
 // In C mode, this does do zero padding.
 vec3 ret_vec3() {
@@ -107,12 +104,14 @@ struct outer ret_outer() {
   return o;
 
   // CIR-LABEL: ret_outer
-  // CIR: %[[RET_ALLOCA:.*]] = cir.alloca "__retval" {{.*}} init : !cir.ptr<!rec_outer>
-  // CIR: %[[GET_GLOB:.*]] = cir.get_global @__const.ret_outer.__retval : !cir.ptr<!rec_outer>
-  // CIR: cir.copy %[[GET_GLOB]] to %[[RET_ALLOCA]] : !cir.ptr<!rec_outer>
+  // CIR: %[[RET_ALLOCA:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!rec_outer>
+  // CIR: %[[CONST:.*]] = cir.const #cir.const_record<{#cir.zero : !rec_needs_padding, #cir.int<1> : !s32i}> : !rec_outer
+  // CIR: cir.store %[[CONST]], %[[RET_ALLOCA]] : !rec_outer, !cir.ptr<!rec_outer>
 
   // LLVM-LABEL: define dso_local { i64, i32 } @ret_outer()
-  // LLVM: call void @llvm.memcpy.p0.p0.i64(ptr {{.*}}%[[RET_ALLOCA:.*]], ptr {{.*}}@__const.ret_outer.{{.*}}, i64 16, i1 false)
+  // LLVM: %[[RET_ALLOCA:.*]] = alloca %struct.outer, align 8
+  // LLVMCIR: store %struct.outer { %union.needs_padding zeroinitializer, i32 1 }, ptr %[[RET_ALLOCA]], align 8
+  // OGCG: call void @llvm.memcpy.p0.p0.i64(ptr align 8 %[[RET_ALLOCA]], ptr align 8 @__const.ret_outer.o, i64 16, i1 false)
   // LLVM: %[[RET:.*]] = load { i64, i32 }, ptr %[[RET_ALLOCA]], align 8
   // LLVM: ret { i64, i32 } %[[RET]]
 }

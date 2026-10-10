@@ -58,8 +58,5 @@ decltype(auto) returns_literal() {
 }
 
 // CIR: cir.func{{.*}} @_Z15returns_literalv() -> (!cir.ptr<!cir.array<!s8i x 5>>{{.*}})
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!cir.array<!s8i x 5>>>
 // CIR:   %[[STR_ADDR:.*]] = cir.get_global @[[STR5_GLOBAL]] : !cir.ptr<!cir.array<!s8i x 5>>
-// CIR:   cir.store{{.*}} %[[STR_ADDR]], %[[RET_ADDR]]
-// CIR:   %[[RET:.*]] = cir.load %[[RET_ADDR]]
-// CIR:   cir.return %[[RET]]
+// CIR:   cir.return %[[STR_ADDR]]

@@ -95,7 +95,6 @@ int main(void) {
 
 // CIR-LABEL: cir.func{{.*}} @baseline() -> !s32i
 // CIR-SAME: attributes {[[ATTRS]]} {
-// CIR-NEXT: %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR-NEXT: %[[CPU_FEAT2:.*]] = cir.get_global @__cpu_features2 : !cir.ptr<!cir.array<!u32i x 3>>
 // CIR-NEXT: %[[ONE:.*]] = cir.const #cir.int<1> : !u32i
 // CIR-NEXT: %[[FEAT2_ELT:.*]] = cir.get_element %[[CPU_FEAT2]][%[[ONE]] : !u32i] : !cir.ptr<!cir.array<!u32i x 3>> -> !cir.ptr<!u32i>
@@ -104,14 +103,11 @@ int main(void) {
 // CIR-NEXT: %[[AND:.*]] = cir.and %[[FEAT2_ELT_LOAD]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[RES:.*]] = cir.cmp eq %[[AND]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[CAST:.*]] = cir.cast bool_to_int %[[RES]] : !cir.bool -> !s32i
-// CIR-NEXT: cir.store %[[CAST]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR-NEXT: %[[LOAD_RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR-NEXT: cir.return %[[LOAD_RET]] : !s32i
+// CIR-NEXT: cir.return %[[CAST]] : !s32i
 
 // LLVM-LABEL: define dso_local i32 @baseline(
 // LLVM-SAME: ) #[[ATTR0]] {
 // OGCG-NEXT:  entry:
-// LLVMCIR-NEXT: [[RETVAL:%.*]] = alloca i32
 // LLVM-NEXT:    [[TMP0:%.*]] = load i32, ptr getelementptr inbounds nuw (i8, ptr @__cpu_features2, i64 4), align 4
 // LLVM-NEXT:    [[TMP1:%.*]] = and i32 [[TMP0]], -2147483648
 // LLVM-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], -2147483648
@@ -121,15 +117,12 @@ int main(void) {
 // OGCG-NEXT:    ret i32 [[CONV]]
 //
 // LLVMCIR-NEXT: [[EXT:%.*]] = zext i1 [[TMP2]] to i32
-// LLVMCIR-NEXT: store i32 [[EXT]], ptr [[RETVAL]]
-// LLVMCIR-NEXT: [[LOAD_RET:%.*]] = load i32, ptr [[RETVAL]]
-// LLVMCIR-NEXT: ret i32 [[LOAD_RET]]
+// LLVMCIR-NEXT: ret i32 [[EXT]]
 //
 int baseline() { return __builtin_cpu_supports("x86-64"); }
 
 // CIR-LABEL: cir.func{{.*}} @v2() -> !s32i
 // CIR-SAME: attributes {[[ATTRS]]} {
-// CIR-NEXT: %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR-NEXT: %[[CPU_FEAT2:.*]] = cir.get_global @__cpu_features2 : !cir.ptr<!cir.array<!u32i x 3>>
 // CIR-NEXT: %[[TWO:.*]] = cir.const #cir.int<2> : !u32i
 // CIR-NEXT: %[[FEAT2_ELT:.*]] = cir.get_element %[[CPU_FEAT2]][%[[TWO]] : !u32i] : !cir.ptr<!cir.array<!u32i x 3>> -> !cir.ptr<!u32i>
@@ -138,14 +131,11 @@ int baseline() { return __builtin_cpu_supports("x86-64"); }
 // CIR-NEXT: %[[AND:.*]] = cir.and %[[FEAT2_ELT_LOAD]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[RES:.*]] = cir.cmp eq %[[AND]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[CAST:.*]] = cir.cast bool_to_int %[[RES]] : !cir.bool -> !s32i
-// CIR-NEXT: cir.store %[[CAST]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR-NEXT: %[[LOAD_RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR-NEXT: cir.return %[[LOAD_RET]] : !s32i
+// CIR-NEXT: cir.return %[[CAST]] : !s32i
 
 // LLVM-LABEL: define dso_local i32 @v2(
 // LLVM-SAME: ) #[[ATTR0]] {
 // OGCG-NEXT:  entry:
-// LLVMCIR-NEXT: [[RETVAL:%.*]] = alloca i32
 // LLVM-NEXT:    [[TMP0:%.*]] = load i32, ptr getelementptr inbounds nuw (i8, ptr @__cpu_features2, i64 8), align 4
 // LLVM-NEXT:    [[TMP1:%.*]] = and i32 [[TMP0]], 1
 // LLVM-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], 1
@@ -155,15 +145,12 @@ int baseline() { return __builtin_cpu_supports("x86-64"); }
 // OGCG-NEXT:    ret i32 [[CONV]]
 //
 // LLVMCIR-NEXT: [[EXT:%.*]] = zext i1 [[TMP2]] to i32
-// LLVMCIR-NEXT: store i32 [[EXT]], ptr [[RETVAL]]
-// LLVMCIR-NEXT: [[LOAD_RET:%.*]] = load i32, ptr [[RETVAL]]
-// LLVMCIR-NEXT: ret i32 [[LOAD_RET]]
+// LLVMCIR-NEXT: ret i32 [[EXT]]
 //
 int v2() { return __builtin_cpu_supports("x86-64-v2"); }
 
 // CIR-LABEL: cir.func{{.*}} @v3() -> !s32i
 // CIR-SAME: attributes {[[ATTRS]]} {
-// CIR-NEXT: %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR-NEXT: %[[CPU_FEAT2:.*]] = cir.get_global @__cpu_features2 : !cir.ptr<!cir.array<!u32i x 3>>
 // CIR-NEXT: %[[TWO:.*]] = cir.const #cir.int<2> : !u32i
 // CIR-NEXT: %[[FEAT2_ELT:.*]] = cir.get_element %[[CPU_FEAT2]][%[[TWO]] : !u32i] : !cir.ptr<!cir.array<!u32i x 3>> -> !cir.ptr<!u32i>
@@ -172,14 +159,11 @@ int v2() { return __builtin_cpu_supports("x86-64-v2"); }
 // CIR-NEXT: %[[AND:.*]] = cir.and %[[FEAT2_ELT_LOAD]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[RES:.*]] = cir.cmp eq %[[AND]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[CAST:.*]] = cir.cast bool_to_int %[[RES]] : !cir.bool -> !s32i
-// CIR-NEXT: cir.store %[[CAST]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR-NEXT: %[[LOAD_RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR-NEXT: cir.return %[[LOAD_RET]] : !s32i
+// CIR-NEXT: cir.return %[[CAST]] : !s32i
 
 // LLVM-LABEL: define dso_local i32 @v3(
 // LLVM-SAME: ) #[[ATTR0]] {
 // OGCG-NEXT:  entry:
-// LLVMCIR-NEXT: [[RETVAL:%.*]] = alloca i32
 // LLVM-NEXT:    [[TMP0:%.*]] = load i32, ptr getelementptr inbounds nuw (i8, ptr @__cpu_features2, i64 8), align 4
 // LLVM-NEXT:    [[TMP1:%.*]] = and i32 [[TMP0]], 2
 // LLVM-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], 2
@@ -189,15 +173,12 @@ int v2() { return __builtin_cpu_supports("x86-64-v2"); }
 // OGCG-NEXT:    ret i32 [[CONV]]
 //
 // LLVMCIR-NEXT: [[EXT:%.*]] = zext i1 [[TMP2]] to i32
-// LLVMCIR-NEXT: store i32 [[EXT]], ptr [[RETVAL]]
-// LLVMCIR-NEXT: [[LOAD_RET:%.*]] = load i32, ptr [[RETVAL]]
-// LLVMCIR-NEXT: ret i32 [[LOAD_RET]]
+// LLVMCIR-NEXT: ret i32 [[EXT]]
 //
 int v3() { return __builtin_cpu_supports("x86-64-v3"); }
 
 // CIR-LABEL: cir.func{{.*}} @v4() -> !s32i
 // CIR-SAME: attributes {[[ATTRS]]} {
-// CIR-NEXT: %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR-NEXT: %[[CPU_FEAT2:.*]] = cir.get_global @__cpu_features2 : !cir.ptr<!cir.array<!u32i x 3>>
 // CIR-NEXT: %[[TWO:.*]] = cir.const #cir.int<2> : !u32i
 // CIR-NEXT: %[[FEAT2_ELT:.*]] = cir.get_element %[[CPU_FEAT2]][%[[TWO]] : !u32i] : !cir.ptr<!cir.array<!u32i x 3>> -> !cir.ptr<!u32i>
@@ -206,14 +187,11 @@ int v3() { return __builtin_cpu_supports("x86-64-v3"); }
 // CIR-NEXT: %[[AND:.*]] = cir.and %[[FEAT2_ELT_LOAD]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[RES:.*]] = cir.cmp eq %[[AND]], %[[MASK]] : !u32i
 // CIR-NEXT: %[[CAST:.*]] = cir.cast bool_to_int %[[RES]] : !cir.bool -> !s32i
-// CIR-NEXT: cir.store %[[CAST]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR-NEXT: %[[LOAD_RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR-NEXT: cir.return %[[LOAD_RET]] : !s32i
+// CIR-NEXT: cir.return %[[CAST]] : !s32i
 
 // LLVM-LABEL: define dso_local i32 @v4(
 // LLVM-SAME: ) #[[ATTR0]] {
 // OGCG-NEXT:  entry:
-// LLVMCIR-NEXT: [[RETVAL:%.*]] = alloca i32
 // LLVM-NEXT:    [[TMP0:%.*]] = load i32, ptr getelementptr inbounds nuw (i8, ptr @__cpu_features2, i64 8), align 4
 // LLVM-NEXT:    [[TMP1:%.*]] = and i32 [[TMP0]], 4
 // LLVM-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], 4
@@ -223,7 +201,5 @@ int v3() { return __builtin_cpu_supports("x86-64-v3"); }
 // OGCG-NEXT:    ret i32 [[CONV]]
 //
 // LLVMCIR-NEXT: [[EXT:%.*]] = zext i1 [[TMP2]] to i32
-// LLVMCIR-NEXT: store i32 [[EXT]], ptr [[RETVAL]]
-// LLVMCIR-NEXT: [[LOAD_RET:%.*]] = load i32, ptr [[RETVAL]]
-// LLVMCIR-NEXT: ret i32 [[LOAD_RET]]
+// LLVMCIR-NEXT: ret i32 [[EXT]]
 int v4() { return __builtin_cpu_supports("x86-64-v4"); }

@@ -32,12 +32,9 @@ int f1() {
 }
 
 // CHECK: cir.func{{.*}} @_Z2f1v() -> (!s32i {{.*}})
-// CHECK:    %[[RV:.*]] = cir.alloca "__retval" align(4) : !cir.ptr<!s32i>
 // CHECK:    %[[I_PTR:.*]] = cir.alloca "i" align(4) : !cir.ptr<!s32i>
 // CHECK:    %[[I:.*]] = cir.load{{.*}} %[[I_PTR]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.store{{.*}} %[[I]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.return %[[R]] : !s32i
+// CHECK:    cir.return %[[I]] : !s32i
 
 int f2() {
   const int i = 2;
@@ -45,40 +42,31 @@ int f2() {
 }
 
 // CHECK: cir.func{{.*}} @_Z2f2v() -> (!s32i {{.*}})
-// CHECK:    %[[RV:.*]] = cir.alloca "__retval" align(4) : !cir.ptr<!s32i>
 // CHECK:    %[[I_PTR:.*]] = cir.alloca "i" align(4) init const : !cir.ptr<!s32i>
 // CHECK:    %[[TWO:.*]] = cir.const #cir.int<2> : !s32i
 // CHECK:    cir.store{{.*}} %[[TWO]], %[[I_PTR]] : !s32i, !cir.ptr<!s32i>
 // CHECK:    %[[I:.*]] = cir.const #cir.int<2> : !s32i
-// CHECK:    cir.store{{.*}} %[[I]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.return %[[R]] : !s32i
+// CHECK:    cir.return %[[I]] : !s32i
 
 int f3(int i) {
   return i;
 }
 
 // CHECK: cir.func{{.*}} @_Z2f3i(%[[ARG:.*]]: !s32i {{.*}} loc({{.*}})) -> (!s32i {{.*}})
-// CHECK:   %[[RV:.*]] = cir.alloca "__retval" align(4) : !cir.ptr<!s32i>
 // CHECK:   %[[ARG_ALLOCA:.*]] = cir.alloca "i" align(4) init : !cir.ptr<!s32i>
 // CHECK:   cir.store{{.*}} %[[ARG]], %[[ARG_ALLOCA]] : !s32i, !cir.ptr<!s32i>
 // CHECK:   %[[ARG_VAL:.*]] = cir.load{{.*}} %[[ARG_ALLOCA]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.store{{.*}} %[[ARG_VAL]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:   %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.return %[[R]] : !s32i
+// CHECK:   cir.return %[[ARG_VAL]] : !s32i
 
 int f4(const int i) {
   return i;
 }
 
 // CHECK: cir.func{{.*}} @_Z2f4i(%[[ARG:.*]]: !s32i {{.*}} loc({{.*}})) -> (!s32i {{.*}})
-// CHECK:   %[[RV:.*]] = cir.alloca "__retval" align(4) : !cir.ptr<!s32i>
 // CHECK:   %[[ARG_ALLOCA:.*]] = cir.alloca "i" align(4) init const : !cir.ptr<!s32i>
 // CHECK:   cir.store{{.*}} %[[ARG]], %[[ARG_ALLOCA]] : !s32i, !cir.ptr<!s32i>
 // CHECK:   %[[ARG_VAL:.*]] = cir.load{{.*}} %[[ARG_ALLOCA]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.store{{.*}} %[[ARG_VAL]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:   %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.return %[[R]] : !s32i
+// CHECK:   cir.return %[[ARG_VAL]] : !s32i
 
 int *f5() {
   int *p = nullptr;
@@ -92,7 +80,6 @@ int *f5() {
 }
 
 // CHECK:      cir.func{{.*}} @_Z2f5v() -> (!cir.ptr<!s32i> {{.*}})
-// CHECK-NEXT:   %[[RET_ADDR:.*]] = cir.alloca "__retval" align(8) : !cir.ptr<!cir.ptr<!s32i>>
 // CHECK-NEXT:   %[[P_ADDR:.*]] = cir.alloca "p" align(8) init : !cir.ptr<!cir.ptr<!s32i>>
 // CHECK-NEXT:   %[[NULLPTR:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!s32i>
 // CHECK-NEXT:   cir.store{{.*}} %[[NULLPTR]], %[[P_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
@@ -109,9 +96,7 @@ int *f5() {
 // CHECK-NEXT:   %[[P:.*]] = cir.load deref{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
 // CHECK-NEXT:   cir.store{{.*}} %[[FOURTYTHREE]], %[[P]] : !s32i, !cir.ptr<!s32i>
 // CHECK-NEXT:   %[[P:.*]] = cir.load{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK-NEXT:   cir.store{{.*}} %[[P]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CHECK-NEXT:   %[[RET_VAL:.*]] = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK-NEXT:   cir.return %[[RET_VAL]] : !cir.ptr<!s32i>
+// CHECK-NEXT:   cir.return %[[P]] : !cir.ptr<!s32i>
 
 using size_type = unsigned long;
 using _Tp = unsigned long;
@@ -148,11 +133,8 @@ short &return_ref() {
 }
 
 // CHECK: cir.func{{.*}} @_Z10return_refv() -> (!cir.ptr<!s16i> {{.*}})
-// CHECK:   %[[RETVAL_ADDR:.*]] = cir.alloca "__retval" align(8) : !cir.ptr<!cir.ptr<!s16i>>
 // CHECK:   %[[GS_ADDR:.*]] = cir.get_global @gs : !cir.ptr<!s16i>
-// CHECK:   cir.store{{.*}} %[[GS_ADDR]], %[[RETVAL_ADDR]] : !cir.ptr<!s16i>, !cir.ptr<!cir.ptr<!s16i>>
-// CHECK:   %[[RETVAL:.*]] = cir.load{{.*}} %[[RETVAL_ADDR]] : !cir.ptr<!cir.ptr<!s16i>>, !cir.ptr<!s16i>
-// CHECK:   cir.return %[[RETVAL]] : !cir.ptr<!s16i>
+// CHECK:   cir.return %[[GS_ADDR]] : !cir.ptr<!s16i>
 
 void ref_local(short x) {
   short &y = x;

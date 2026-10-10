@@ -27,7 +27,6 @@ const int& test_cond_throw_false(bool flag) {
 // CIR-NEXT: }) : (!cir.bool) -> !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z21test_cond_throw_falseb(
-// LLVMCIR: %[[RET_ALLOCA:.*]] = alloca ptr
 // LLVMCIR: %[[FLAG_ALLOCA:.*]] = alloca i8
 // LLVMCIR: %[[A_ALLOCA:.*]] = alloca i32
 // LLVMCIR: %[[ZEXT:.*]] = zext i1 %{{.*}} to i8
@@ -47,9 +46,7 @@ const int& test_cond_throw_false(bool flag) {
 // LLVMCIR:   %[[PHI:.*]] = phi ptr [ %[[A_ALLOCA]], %[[TRUE_BB]] ]
 // LLVMCIR:   br label %[[CONT_BB:.*]]
 // LLVMCIR: [[CONT_BB]]:
-// LLVMCIR:   store ptr %[[PHI]], ptr %[[RET_ALLOCA]]
-// LLVMCIR:   %[[RET:.*]] = load ptr, ptr %[[RET_ALLOCA]]
-// LLVMCIR:   ret ptr %[[RET]]
+// LLVMCIR:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z21test_cond_throw_falseb(
 // OGCG: %{{.*}} = alloca i8
@@ -90,7 +87,6 @@ const int& test_cond_throw_true(bool flag) {
 // CIR-NEXT: }) : (!cir.bool) -> !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z20test_cond_throw_trueb(
-// LLVMCIR: %[[RET_ALLOCA:.*]] = alloca ptr
 // LLVMCIR: %[[FLAG_ALLOCA:.*]] = alloca i8
 // LLVMCIR: %[[A_ALLOCA:.*]] = alloca i32
 // LLVMCIR: %[[ZEXT:.*]] = zext i1 %{{.*}} to i8
@@ -110,9 +106,7 @@ const int& test_cond_throw_true(bool flag) {
 // LLVMCIR:   %[[PHI:.*]] = phi ptr [ %[[A_ALLOCA]], %[[FALSE_BB]] ]
 // LLVMCIR:   br label %[[CONT_BB:.*]]
 // LLVMCIR: [[CONT_BB]]:
-// LLVMCIR:   store ptr %[[PHI]], ptr %[[RET_ALLOCA]]
-// LLVMCIR:   %[[RET:.*]] = load ptr, ptr %[[RET_ALLOCA]]
-// LLVMCIR:   ret ptr %[[RET]]
+// LLVMCIR:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z20test_cond_throw_trueb(
 // OGCG: %{{.*}} = alloca i8
@@ -143,18 +137,14 @@ const int& test_cond_const_true_throw_false() {
 // CIR: cir.store{{.*}} %[[TWENTY]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // CIR-NOT: cir.ternary
 // CIR-NOT: cir.throw
-// CIR: cir.store %[[A]]
-// CIR: %[[RET:.*]] = cir.load
-// CIR: cir.return %[[RET]] : !cir.ptr<!s32i>
+// CIR: cir.return %[[A]] : !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z32test_cond_const_true_throw_falsev(
 // LLVMCIR: %[[A:.*]] = alloca i32
 // LLVMCIR: store i32 20, ptr %[[A]]
 // LLVMCIR-NOT: br i1
 // LLVMCIR-NOT: __cxa_throw
-// LLVMCIR: store ptr %[[A]]
-// LLVMCIR: %[[RET:.*]] = load ptr
-// LLVMCIR: ret ptr %[[RET]]
+// LLVMCIR: ret ptr %[[A]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z32test_cond_const_true_throw_falsev(
 // OGCG: %[[A:.*]] = alloca i32
@@ -175,18 +165,14 @@ const int& test_cond_const_false_throw_true() {
 // CIR: cir.store{{.*}} %[[THIRTY]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // CIR-NOT: cir.ternary
 // CIR-NOT: cir.throw
-// CIR: cir.store %[[A]]
-// CIR: %[[RET:.*]] = cir.load
-// CIR: cir.return %[[RET]] : !cir.ptr<!s32i>
+// CIR: cir.return %[[A]] : !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z32test_cond_const_false_throw_truev(
 // LLVMCIR: %[[A:.*]] = alloca i32
 // LLVMCIR: store i32 30, ptr %[[A]]
 // LLVMCIR-NOT: br i1
 // LLVMCIR-NOT: __cxa_throw
-// LLVMCIR: store ptr %[[A]]
-// LLVMCIR: %[[RET:.*]] = load ptr
-// LLVMCIR: ret ptr %[[RET]]
+// LLVMCIR: ret ptr %[[A]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z32test_cond_const_false_throw_truev(
 // OGCG: %[[A:.*]] = alloca i32
@@ -201,7 +187,6 @@ const int &test_cond_const_true_throw_true() {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z31test_cond_const_true_throw_truev(
-// CIR:  %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:  %[[A_ADDR:.*]] = cir.alloca "a" {{.*}} init const : !cir.ptr<!s32i>
 // CIR:  %[[CONST_30:.*]] = cir.const #cir.int<30> : !s32i
 // CIR:  cir.store{{.*}} %[[CONST_30]], %[[A_ADDR]] : !s32i, !cir.ptr<!s32i>
@@ -212,12 +197,9 @@ const int &test_cond_const_true_throw_true() {
 // CIR:  cir.unreachable
 // CIR: ^[[NO_PRED_LABEL:.*]]:
 // CIR:   %[[CONST_NULL:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!s32i>
-// CIR:   cir.store %[[CONST_NULL]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CIR:   %[[TMP_RET:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CIR:   cir.return %[[TMP_RET]] : !cir.ptr<!s32i>
+// CIR:   cir.return %[[CONST_NULL]] : !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z31test_cond_const_true_throw_truev(
-// LLVMCIR:  %[[RET_ADDR:.*]] = alloca ptr, align 8
 // LLVMCIR:  %[[A_ADDR:.*]] = alloca i32, align 4
 // LLVMCIR:  store i32 30, ptr %[[A_ADDR]], align 4
 // LLVMCIR:  %[[EXCEPTION:.*]] = call ptr @__cxa_allocate_exception(i64 4)
@@ -225,9 +207,7 @@ const int &test_cond_const_true_throw_true() {
 // LLVMCIR:  call void @__cxa_throw(ptr %[[EXCEPTION]], ptr @_ZTIi, ptr null)
 // LLVMCIR:  unreachable
 // LLVMCIR: [[NO_PRED_LABEL:.*]]:
-// LLVMCIR:  store ptr null, ptr %[[RET_ADDR]], align 8
-// LLVMCIR:  %[[TMP_RET:.*]] = load ptr, ptr %[[RET_ADDR]], align 8
-// LLVMCIR:  ret ptr %[[TMP_RET]]
+// LLVMCIR:  ret ptr null
 
 // OGCG-LABEL: define{{.*}} ptr @_Z31test_cond_const_true_throw_truev(
 // OGCG:  %[[A_ADDR:.*]] = alloca i32, align 4
@@ -740,7 +720,6 @@ int &test_ref_cond_throw(bool c, int &x) {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z19test_ref_cond_throwbRi(
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   %[[C:.*]] = cir.alloca "c" {{.*}} init : !cir.ptr<!cir.bool>
 // CIR:   %[[X_REF:.*]] = cir.alloca "x" {{.*}} init const : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   %[[C_VAL:.*]] = cir.load{{.*}} %[[C]] : !cir.ptr<!cir.bool>, !cir.bool
@@ -751,7 +730,7 @@ int &test_ref_cond_throw(bool c, int &x) {
 // CIR:     cir.throw {{.*}} @_ZTIi
 // CIR:     cir.unreachable
 // CIR-NEXT:   }) : (!cir.bool) -> !cir.ptr<!s32i>
-// CIR:   cir.store %[[RES]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR:   cir.return %[[RES]] : !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z19test_ref_cond_throwbRi(
 // LLVMCIR:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]
@@ -763,9 +742,7 @@ int &test_ref_cond_throw(bool c, int &x) {
 // LLVMCIR:   unreachable
 // LLVMCIR: [[PHI_BB]]:
 // LLVMCIR:   %[[PHI:.*]] = phi ptr [ %[[X_PTR]], %[[TRUE_BB]] ]
-// LLVMCIR:   store ptr %[[PHI]], ptr %[[RET_ALLOCA:.*]], align 8
-// LLVMCIR:   %[[RET:.*]] = load ptr, ptr %[[RET_ALLOCA]]
-// LLVMCIR:   ret ptr %[[RET]]
+// LLVMCIR:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z19test_ref_cond_throwbRi(
 // OGCG:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]
@@ -835,7 +812,7 @@ int &test_member_cond_throw(bool c, struct s6 *p) {
 // CIR:     cir.throw {{.*}} @_ZTIi
 // CIR:     cir.unreachable
 // CIR-NEXT:   }) : (!cir.bool) -> !cir.ptr<!s32i>
-// CIR:   cir.store %[[RES]], %{{.*}} : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR:   cir.return %[[RES]] : !cir.ptr<!s32i>
 
 // LLVMCIR-LABEL: define{{.*}} ptr @_Z22test_member_cond_throwbP2s6(
 // LLVMCIR:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]
@@ -847,7 +824,7 @@ int &test_member_cond_throw(bool c, struct s6 *p) {
 // LLVMCIR:   unreachable
 // LLVMCIR: [[PHI_BB]]:
 // LLVMCIR:   %[[PHI:.*]] = phi ptr [ %[[F0_PTR]], %[[TRUE_BB]] ]
-// LLVMCIR:   store ptr %[[PHI]], ptr %{{.*}}, align 8
+// LLVMCIR:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z22test_member_cond_throwbP2s6(
 // OGCG:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]

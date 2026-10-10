@@ -29,14 +29,10 @@ int test_convert_bool_to_int() {
 
 // CIR: cir.func {{.*}} @test_convert_bool_to_int()
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[RETVAL:.*]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[RET:.*]] = cir.load %[[RETVAL:.*]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[RET:.*]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test_convert_bool_to_int()
-// LLVM:   store i32 0, ptr %[[RETVAL:.*]]
-// LLVM:   %[[RET:.*]] = load i32, ptr %[[RETVAL:.*]]
-// LLVM:   ret i32 %[[RET:.*]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test_convert_bool_to_int()
 // OGCG:   ret i32 0

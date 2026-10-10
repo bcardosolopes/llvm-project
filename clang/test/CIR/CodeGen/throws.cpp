@@ -163,7 +163,6 @@ int rethrow_from_block(int a, int b) {
   return a / b;
 }
 
-// CIR:  %[[RES_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:  %[[A_ADDR:.*]] = cir.alloca "a" {{.*}} init : !cir.ptr<!s32i>
 // CIR:  %[[B_ADDR:.*]] = cir.alloca "b" {{.*}} init : !cir.ptr<!s32i>
 // CIR:  cir.store %{{.*}}, %[[A_ADDR]] : !s32i, !cir.ptr<!s32i>
@@ -180,11 +179,8 @@ int rethrow_from_block(int a, int b) {
 // CIR:  %[[TMP_A:.*]] = cir.load{{.*}} %[[A_ADDR]] : !cir.ptr<!s32i>, !s32i
 // CIR:  %[[TMP_B:.*]] = cir.load{{.*}} %[[B_ADDR]] : !cir.ptr<!s32i>, !s32i
 // CIR:  %[[DIV_A_B:.*]] = cir.div %[[TMP_A:.*]], %[[TMP_B:.*]] : !s32i
-// CIR:  cir.store %[[DIV_A_B]], %[[RES_ADDR]] : !s32i, !cir.ptr<!s32i>
-// CIR:  %[[RESULT:.*]] = cir.load %[[RES_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR:  cir.return %[[RESULT]] : !s32i
+// CIR:  cir.return %[[DIV_A_B]] : !s32i
 
-// LLVM: %[[RES_ADDR:.*]] = alloca i32, align 4
 // LLVM: %[[A_ADDR:.*]] = alloca i32, align 4
 // LLVM: %[[B_ADDR:.*]] = alloca i32, align 4
 // LLVM: store i32 %{{.*}}, ptr %[[A_ADDR]], align 4
@@ -203,9 +199,7 @@ int rethrow_from_block(int a, int b) {
 // LLVM:  %[[TMP_A:.*]] = load i32, ptr %[[A_ADDR]], align 4
 // LLVM:  %[[TMP_B:.*]] = load i32, ptr %[[B_ADDR]], align 4
 // LLVM:  %[[DIV_A_B:.*]] = sdiv i32 %[[TMP_A]], %[[TMP_B]]
-// LLVM:  store i32 %[[DIV_A_B]], ptr %[[RES_ADDR]], align 4
-// LLVM:  %[[RESULT:.*]] = load i32, ptr %[[RES_ADDR]], align 4
-// LLVM:  ret i32 %[[RESULT]]
+// LLVM:  ret i32 %[[DIV_A_B]]
 
 // OGCG: %[[A_ADDR:.*]] = alloca i32, align 4
 // OGCG: %[[B_ADDR:.*]] = alloca i32, align 4

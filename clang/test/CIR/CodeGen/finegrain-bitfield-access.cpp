@@ -46,18 +46,14 @@ unsigned read8_1() {
 }
 
 // CIR-LABEL: @_Z7read8_1v
-// CIR: [[MEMBER:%.*]] = cir.get_member %1[1] {name = "f3"} : !cir.ptr<!rec_S1> -> !cir.ptr<!u8i>
+// CIR: [[MEMBER:%.*]] = cir.get_member %0[1] {name = "f3"} : !cir.ptr<!rec_S1> -> !cir.ptr<!u8i>
 // CIR: [[BITFI:%.*]] = cir.get_bitfield align(1) (#bfi_f3, [[MEMBER]] : !cir.ptr<!u8i>) -> !u32i
-// CIR: cir.store [[BITFI]], {{.*}} : !u32i, !cir.ptr<!u32i>
-// CIR: [[RET:%.*]] = cir.load {{.*}} : !cir.ptr<!u32i>, !u32i
-// CIR: cir.return [[RET]] : !u32i
+// CIR: cir.return [[BITFI]] : !u32i
 
 // LLVM-LABEL: @_Z7read8_1v
 // LLVM:  [[MEMBER:%.*]] = load i8, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 1), align 1
 // LLVM:  [[BFCAST:%.*]] = zext i8 [[MEMBER]] to i32
-// LLVM:  store i32 [[BFCAST]], ptr {{.*}}, align 4
-// LLVM:  [[RET:%.*]] = load i32, ptr {{.*}}, align 4
-// LLVM:  ret i32 [[RET]]
+// LLVM:  ret i32 [[BFCAST]]
 
 // OGCG-LABEL: @_Z7read8_1v
 // OGCG: [[BFLOAD:%.*]] = load i8, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 1), align 1
@@ -89,18 +85,14 @@ unsigned read8_2() {
 // CIR-LABEL: @_Z7read8_2v
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[2] {name = "f5"} : !cir.ptr<!rec_S1> -> !cir.ptr<!u16i>
 // CIR: [[BITFI:%.*]] = cir.get_bitfield align(2) (#bfi_f5, [[MEMBER]] : !cir.ptr<!u16i>) -> !u32i
-// CIR: cir.store [[BITFI]], {{.*}} : !u32i, !cir.ptr<!u32i>
-// CIR: [[RET:%.*]] = cir.load {{.*}} : !cir.ptr<!u32i>, !u32i
-// CIR: cir.return [[RET]] : !u32i
+// CIR: cir.return [[BITFI]] : !u32i
 
 // LLVM-LABEL: @_Z7read8_2v
 // LLVM:  [[BFLOAD:%.*]] = load i16, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 2), align 2
 // LLVM:  [[BFLSHR:%.*]] = lshr i16 [[BFLOAD]], 4
 // LLVM:  [[BFCLEAR:%.*]] = and i16 [[BFLSHR]], 255
 // LLVM:  [[BFCAST:%.*]] = zext i16 [[BFCLEAR]] to i32
-// LLVM:  store i32 [[BFCAST]], ptr {{.*}}, align 4
-// LLVM:  [[RET:%.*]] = load i32, ptr {{.*}}, align 4
-// LLVM:  ret i32 [[RET]]
+// LLVM:  ret i32 [[BFCAST]]
 
 // OGCG-LABEL: @_Z7read8_2v
 // OGCG: [[BFLOAD:%.*]] = load i16, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 2), align 2
@@ -140,17 +132,13 @@ unsigned read16_1() {
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[0] {name = "f1"} : !cir.ptr<!rec_S2> -> !cir.ptr<!u16i>
 // CIR: [[BITFI:%.*]] = cir.get_bitfield align(8) (#bfi_f1, [[MEMBER]] : !cir.ptr<!u16i>) -> !u64i
 // CIR: [[BFCAST:%.*]] = cir.cast integral [[BITFI]] : !u64i -> !u32i
-// CIR: cir.store [[BFCAST]], {{.*}} : !u32i, !cir.ptr<!u32i>
-// CIR: [[RET:%.*]] = cir.load {{.*}} : !cir.ptr<!u32i>, !u32i
-// CIR: cir.return [[RET]] : !u32i
+// CIR: cir.return [[BFCAST]] : !u32i
 
 // LLVM-LABEL: @_Z8read16_1v
 // LLVM:  [[BFLOAD:%.*]] = load i16, ptr {{.*}}, align 8
 // LLVM:  [[BFCAST:%.*]] = zext i16 [[BFLOAD]] to i64
 // LLVM:  [[BF:%.*]] = trunc i64 [[BFCAST]] to i32
-// LLVM:  store i32 [[BF]], ptr {{.*}}, align 4
-// LLVM:  [[RET:%.*]] = load i32, ptr {{.*}}, align 4
-// LLVM:  ret i32 [[RET]]
+// LLVM:  ret i32 [[BF]]
 
 // OGCG-LABEL: @_Z8read16_1v
 // OGCG: [[BFLOAD:%.*]] = load i16, ptr {{.*}}, align 8
@@ -166,17 +154,13 @@ unsigned read16_2() {
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[1] {name = "f2"} : !cir.ptr<!rec_S2> -> !cir.ptr<!u16i>
 // CIR: [[BITFI:%.*]] = cir.get_bitfield align(2) (#bfi_f2, [[MEMBER]] : !cir.ptr<!u16i>) -> !u64i
 // CIR: [[BFCAST:%.*]] = cir.cast integral [[BITFI]] : !u64i -> !u32i
-// CIR: cir.store [[BFCAST]], {{.*}} : !u32i, !cir.ptr<!u32i>
-// CIR: [[RET:%.*]] = cir.load {{.*}} : !cir.ptr<!u32i>, !u32i
-// CIR: cir.return [[RET]] : !u32i
+// CIR: cir.return [[BFCAST]] : !u32i
 
 // LLVM-LABEL: @_Z8read16_2v
 // LLVM:  [[BFLOAD:%.*]] = load i16, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 2), align 2
 // LLVM:  [[BFCAST:%.*]] = zext i16 [[BFLOAD]] to i64
 // LLVM:  [[BF:%.*]] = trunc i64 [[BFCAST]] to i32
-// LLVM:  store i32 [[BF]], ptr {{.*}}, align 4
-// LLVM:  [[RET:%.*]] = load i32, ptr {{.*}}, align 4
-// LLVM:  ret i32 [[RET]]
+// LLVM:  ret i32 [[BF]]
 
 // OGCG-LABEL: @_Z8read16_2v
 // OGCG: [[BFLOAD:%.*]] = load i16, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 2), align 2
@@ -229,17 +213,13 @@ unsigned read32_1() {
 // CIR: [[MEMBER:%.*]] = cir.get_member {{.*}}[1] {name = "f3"} : !cir.ptr<!rec_S3> -> !cir.ptr<!u32i>
 // CIR: [[BITFI:%.*]] = cir.get_bitfield align(4) (#bfi_f3_1, [[MEMBER]] : !cir.ptr<!u32i>) -> !u64i
 // CIR: [[BFCAST:%.*]] = cir.cast integral [[BITFI]] : !u64i -> !u32i
-// CIR: cir.store [[BFCAST]], {{.*}} : !u32i, !cir.ptr<!u32i>
-// CIR: [[RET:%.*]] = cir.load {{.*}} : !cir.ptr<!u32i>, !u32i
-// CIR: cir.return [[RET]] : !u32i
+// CIR: cir.return [[BFCAST]] : !u32i
 
 // LLVM-LABEL: @_Z8read32_1v
 // LLVM: [[BFLOAD:%.*]] = load i32, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 4), align 4
 // LLVM: [[BFCAST:%.*]] = zext i32 [[BFLOAD]] to i64
 // LLVM: [[BF:%.*]] = trunc i64 [[BFCAST]] to i32
-// LLVM: store i32 [[BF]], ptr {{.*}}, align 4
-// LLVM: [[RET:%.*]] = load i32, ptr {{.*}}, align 4
-// LLVM: ret i32 [[RET]]
+// LLVM: ret i32 [[BF]]
 
 // OGCG-LABEL: @_Z8read32_1v
 // OGCG: [[BFLOAD:%.*]] = load i32, ptr getelementptr inbounds nuw (i8, ptr {{.*}}, i64 4), align 4

@@ -864,23 +864,30 @@ void CIRGenFunction::generateThunk(cir::FuncOp fn, SourceRange fnLoc,
   // Create lexical scope - must stay alive for entire thunk generation.
   // startFunction() requires currLexScope to be set.
   SourceLocRAIIObject locRAII(*this, fnLoc);
-  LexicalScope lexScope{*this, fn.getLoc(), entryBb};
+  {
+    LexicalScope lexScope{*this, fn.getLoc(), entryBb};
 
-  startThunk(fn, gd, fnInfo, isUnprototyped);
-  assert(!cir::MissingFeatures::generateDebugInfo());
+    startThunk(fn, gd, fnInfo, isUnprototyped);
+    assert(!cir::MissingFeatures::generateDebugInfo());
 
-  // Get our callee. Use a placeholder type if this method is unprototyped so
-  // that CIRGenModule doesn't try to set attributes.
-  mlir::Type ty;
-  if (isUnprototyped)
-    cgm.errorNYI("unprototyped thunk placeholder type");
-  else
-    ty = cgm.getTypes().getFunctionType(fnInfo);
+    // Get our callee. Use a placeholder type if this method is unprototyped
+    // so that CIRGenModule doesn't try to set attributes.
+    mlir::Type ty;
+    if (isUnprototyped)
+      cgm.errorNYI("unprototyped thunk placeholder type");
+    else
+      ty = cgm.getTypes().getFunctionType(fnInfo);
 
-  cir::FuncOp calleeOp = cgm.getAddrOfFunction(gd, ty, /*forVTable=*/true);
+    cir::FuncOp calleeOp = cgm.getAddrOfFunction(gd, ty, /*forVTable=*/true);
 
-  // Make the call and return the result.
-  emitCallAndReturnForThunk(calleeOp, fnLoc, &thunk, isUnprototyped);
+    // Make the call and return the result.
+    emitCallAndReturnForThunk(calleeOp, fnLoc, &thunk, isUnprototyped);
+  }
+
+  // Scope closed: every return is emitted, safe to elide a single
+  // store/load pair through the return slot (usually a no-op: thunks
+  // return call results directly).
+  tryElideRetAlloca();
 }
 
 static bool shouldEmitVTableThunk(CIRGenModule &cgm, const CXXMethodDecl *md,

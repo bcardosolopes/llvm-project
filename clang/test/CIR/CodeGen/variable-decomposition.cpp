@@ -20,7 +20,6 @@ float function() {
 // LLVM-DAG: @[[FUNC_CONST:.*]] = private constant %struct.some_struct { i32 1, float 2.000000e+00 }
 
 // CIR-LABEL: cir.func {{.*}} @_Z8functionv() -> (!cir.float {llvm.noundef})
-// CIR:  %[[RETVAL:.+]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.float>
 // CIR:  %[[STRUCT:.+]] = cir.alloca "" {{.*}} init : !cir.ptr<!rec_some_struct>
 // CIR:  %[[CONST:.+]] = cir.get_global @[[FUNC_CONST]] : !cir.ptr<!rec_some_struct>
 // CIR:  cir.copy %[[CONST]] to %[[STRUCT]]
@@ -30,12 +29,9 @@ float function() {
 // CIR:  %[[MEMBER_B:.+]] = cir.get_member %[[STRUCT]][1] {name = "b"} : !cir.ptr<!rec_some_struct> -> !cir.ptr<!cir.float>
 // CIR:  %[[LOAD_B:.+]] = cir.load align(4) %[[MEMBER_B]] : !cir.ptr<!cir.float>, !cir.float
 // CIR:  %[[ADD:.+]] = cir.fadd %[[CAST_A]], %[[LOAD_B]] : !cir.float
-// CIR:  cir.store %[[ADD]], %[[RETVAL]] : !cir.float, !cir.ptr<!cir.float>
-// CIR:  %[[RET:.+]] = cir.load %[[RETVAL]] : !cir.ptr<!cir.float>, !cir.float
-// CIR:  cir.return %[[RET]] : !cir.float
+// CIR:  cir.return %[[ADD]] : !cir.float
 
 // LLVM-LABEL: define dso_local noundef float @_Z8functionv()
-// LLVM:  %[[RETVAL:.+]] = alloca float, 
 // LLVM:  %[[STRUCT:.+]] = alloca %struct.some_struct, 
 // LLVM:  call void @llvm.memcpy{{.*}}(ptr align 4 %[[STRUCT]], ptr align 4 @[[FUNC_CONST]], i64 8, i1 false)
 // LLVM:  %[[GEP_A:.+]] = getelementptr inbounds nuw %struct.some_struct, ptr %[[STRUCT]], i32 0, i32 0
@@ -44,9 +40,7 @@ float function() {
 // LLVM:  %[[GEP_B:.+]] = getelementptr inbounds nuw %struct.some_struct, ptr %[[STRUCT]], i32 0, i32 1
 // LLVM:  %[[LOAD_B:.+]] = load float, ptr %[[GEP_B]]
 // LLVM:  %[[ADD:.+]] = fadd float %[[CAST_A]], %[[LOAD_B]]
-// LLVM:  store float %[[ADD]], ptr %[[RETVAL]]
-// LLVM:  %[[RET:.+]] = load float, ptr %[[RETVAL]]
-// LLVM:  ret float %[[RET]]
+// LLVM:  ret float %[[ADD]]
 
 // OGCG: @__const._Z8functionv.{{.*}} = private unnamed_addr constant %struct.some_struct { i32 1, float 2.000000e+00 }
 // OGCG-LABEL: define dso_local noundef float @_Z8functionv()

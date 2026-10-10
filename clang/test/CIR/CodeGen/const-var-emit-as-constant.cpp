@@ -29,16 +29,15 @@ int non_captured() {
 }
 
 // CIR-LABEL: cir.func {{.*}} @_Z12non_capturedv()
-// CIR:         %[[RV:.*]] = cir.alloca "__retval"
 // CIR:         %[[N:.*]] = cir.alloca "n"
 // CIR:         %[[FOUR:.*]] = cir.const #cir.int<4> : !s32i
 // CIR:         cir.store {{.*}}%[[FOUR]], %[[N]]
 // CIR:         %[[FOUR2:.*]] = cir.const #cir.int<4> : !s32i
-// CIR:         cir.store {{.*}}%[[FOUR2]], %[[RV]]
+// CIR:         cir.return %[[FOUR2]]
 
 // LLVM-OGCG-LABEL: define {{.*}}i32 @_Z12non_capturedv()
 // LLVM-OGCG:         store i32 4, ptr %{{.*}}
-// LLVM:              store i32 4, ptr %{{.*}}
+// LLVM:              ret i32 4
 // OGCG:              ret i32 4
 
 int constexpr_var() {
@@ -54,7 +53,7 @@ int constexpr_var() {
 // CIR:         cir.mul nsw %[[SEVEN]], %[[TWO]] : !s32i
 
 // LLVM-OGCG-LABEL: define {{.*}}i32 @_Z13constexpr_varv()
-// LLVM:              store i32 14, ptr %{{.*}}
+// LLVM:              ret i32 14
 // OGCG:              ret i32 14
 
 _Complex float complex_var() {
@@ -63,11 +62,11 @@ _Complex float complex_var() {
 }
 
 // CIR-LABEL: cir.func {{.*}} @_Z11complex_varv()
-// CIR:         %[[RV:.*]] = cir.alloca "__retval"
+// CIR:         %[[COERCE:.*]] = cir.alloca "coerce"
 // CIR:         %[[Z_ADDR:.*]] = cir.alloca "z"
 // CIR:         cir.store {{.*}}, %[[Z_ADDR]]
 // CIR:         %[[Z:.*]] = cir.const #cir.const_complex<#cir.fp<1.000000e+00> : !cir.float, #cir.fp<0.000000e+00> : !cir.float> : !cir.complex<!cir.float>
-// CIR:         cir.store {{.*}}%[[Z]], %[[RV]]
+// CIR:         cir.store {{.*}}%[[Z]], %[[COERCE]]
 
 // LLVM-OGCG-LABEL: define {{.*}} @_Z11complex_varv()
 // LLVM:              store { float, float } { float 1.000000e+00, float 0.000000e+00 }, ptr %{{.*}}
@@ -199,7 +198,7 @@ float static_member(S s) { return s.kf; }
 
 // LLVM-OGCG-LABEL: define {{.*}}float @_Z13static_member1S(
 // LLVM-OGCG-NOT:     load float
-// LLVM:              store float 1.500000e+00
+// LLVM:              ret float 1.500000e+00
 // OGCG:              ret float 1.500000e+00
 
 // Negative cases: the value is loaded from the variable.

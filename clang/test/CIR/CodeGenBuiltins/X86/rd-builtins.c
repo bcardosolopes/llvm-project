@@ -10,12 +10,10 @@
 unsigned long long test_rdpmc(int a) {
     // CIR-LABEL: test_rdpmc
     // CIR: cir.call @__rdpmc
-    // CIR: cir.store %{{.*}}, %{{.*}} : !u64i, !cir.ptr<!u64i>
     // CIR: cir.return %{{.*}} : !u64i
     
     // LLVM-LABEL: @test_rdpmc
     // LLVM: call i64 @llvm.x86.rdpmc
-    // LLVM: store i64 %{{.*}}, ptr %{{.*}}, align 8
     // LLVM: ret i64 %{{.*}}
 
     // OGCG-LABEL: @test_rdpmc

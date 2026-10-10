@@ -1333,20 +1333,15 @@ int while_cond_var_extended_return(int n) {
 // LLVM:       [[MAKE_CONT]]:
 // LLVM:         store i8 1, ptr %[[FLAG]]
 // LLVM:         store i32 %{{.*}}, ptr %[[RETVAL:.*]], align 4
-// LLVM-NEXT:    store i32 [[RET_DEST:[0-9]+]], ptr %[[DEST:.*]], align 4
-// LLVM-NEXT:    br label %[[CLEANUP:.*]]
+// LLVM-NEXT:    br label %[[RET_CLEANUP:.*]]
 // LLVM:         invoke void @_Z3useR1S(
-// LLVM:       [[CLEANUP]]:
-// LLVM:         %[[ACTIVE:.*]] = load i8, ptr %[[FLAG]]
-// LLVM:         %[[ACTIVE_BOOL:.*]] = trunc i8 %[[ACTIVE]] to i1
-// LLVM:         br i1 %[[ACTIVE_BOOL]], label %[[DTOR:.*]], label %{{.*}}
-// LLVM:       [[DTOR]]:
+// LLVM:       [[RET_CLEANUP]]:
+// LLVM:         %[[RACTIVE:.*]] = load i8, ptr %[[FLAG]]
+// LLVM:         %[[RACTIVE_BOOL:.*]] = trunc i8 %[[RACTIVE]] to i1
+// LLVM:         br i1 %[[RACTIVE_BOOL]], label %[[RDTOR:.*]], label %{{.*}}
+// LLVM:       [[RDTOR]]:
 // LLVM-NEXT:    call void @_ZN1SD1Ev(ptr {{.*}} %[[TMP]])
-// LLVM:         %[[SEL:.*]] = load i32, ptr %[[DEST]]
-// LLVM:         switch i32 %[[SEL]], label %{{.*}} [
-// LLVM:           i32 [[RET_DEST]], label %[[RETURN:.*]]
-// LLVM:       [[RETURN]]:
-// LLVM-NEXT:    %[[RV:.*]] = load i32, ptr %[[RETVAL]]
+// LLVM:         %[[RV:.*]] = load i32, ptr %[[RETVAL]]
 // LLVM-NEXT:    ret i32 %[[RV]]
 // LLVM:       [[LPAD]]:
 // LLVM:         landingpad { ptr, i32 }

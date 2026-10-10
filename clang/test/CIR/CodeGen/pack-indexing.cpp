@@ -15,35 +15,23 @@ auto pack_indexing(auto... p) { return p...[0]; }
 
 int pack_indexing_scalar() { return pack_indexing(1, 2, 3); }
 
-// CIR: %[[RET_VAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR: %[[RESULT:.*]] = cir.call @_Z13pack_indexingIJiiiEEDaDpT_({{.*}}, {{.*}}, {{.*}}) : (!s32i {llvm.noundef}, !s32i {llvm.noundef}, !s32i {llvm.noundef}) -> (!s32i {llvm.noundef})
-// CIR: cir.store %[[RESULT]], %[[RET_VAL]] : !s32i, !cir.ptr<!s32i>
-// CIR: %[[TMP:.*]] = cir.load %[[RET_VAL]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.return %[[TMP]] : !s32i
+// CIR: cir.return %[[RESULT]] : !s32i
 
-// CIR: %[[RET_VAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR: %[[P_0:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!s32i>
 // CIR: %[[P_1:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!s32i>
 // CIR: %[[P_2:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!s32i>
 // CIR: %[[RESULT:.*]] = cir.load{{.*}} %[[P_0]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.store %[[RESULT]], %[[RET_VAL]] : !s32i, !cir.ptr<!s32i>
-// CIR: %[[TMP:.*]] = cir.load %[[RET_VAL]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.return %[[TMP]] : !s32i
+// CIR: cir.return %[[RESULT]] : !s32i
 
-// LLVM: %[[RET_VAL:.*]] = alloca i32, align 4
 // LLVM: %[[RESULT:.*]] = call noundef i32 @_Z13pack_indexingIJiiiEEDaDpT_(i32 noundef 1, i32 noundef 2, i32 noundef 3)
-// LLVM: store i32 %[[RESULT]], ptr %[[RET_VAL]], align 4
-// LLVM: %[[TMP:.*]] = load i32, ptr %[[RET_VAL]], align 4
-// LLVM: ret i32 %[[TMP]]
+// LLVM: ret i32 %[[RESULT]]
 
-// LLVM: %[[RET_VAL:.*]] = alloca i32, align 4
 // LLVM: %[[P_0:.*]] = alloca i32, align 4
 // LLVM: %[[P_1:.*]] = alloca i32, align 4
 // LLVM: %[[P_2:.*]] = alloca i32, align 4
 // LLVM: %[[RESULT:.*]] = load i32, ptr %[[P_0]], align 4
-// LLVM: store i32 %[[RESULT]], ptr %[[RET_VAL]], align 4
-// LLVM: %[[TMP:.*]] = load i32, ptr %[[RET_VAL]], align 4
-// LLVM: ret i32 %[[TMP]]
+// LLVM: ret i32 %[[RESULT]]
 
 // OGCG-DAG: %[[CALL:.*]] = call noundef i32 @_Z13pack_indexingIJiiiEEDaDpT_(i32 noundef 1, i32 noundef 2, i32 noundef 3)
 // OGCG-DAG-NEXT: ret i32 %[[RESULT]]
@@ -54,7 +42,10 @@ float _Complex pack_indexing_complex() {
 }
 
 // CIR: cir.func {{.*}} @_Z21pack_indexing_complexv()
-// CIR:   %[[RET_VAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.complex<!cir.float>>
+// CIR:   %[[R_SLOT:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!cir.vector<2 x !cir.float>>
+// CIR:   %[[A1:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!cir.complex<!cir.float>>
+// CIR:   %[[A0:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!cir.complex<!cir.float>>
+// CIR:   %[[RET_SLOT:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!cir.complex<!cir.float>>
 // CIR:   %[[COMPLEX_0:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!cir.complex<!cir.float>>
 // CIR:   %[[COMPLEX_1:.*]] = cir.alloca "coerce" {{.*}} : !cir.ptr<!cir.complex<!cir.float>>
 // CIR:   %[[CONST_COMPLEX_0:.*]] = cir.const #cir.const_complex<#cir.fp<1.000000e+00> : !cir.float, #cir.fp<2.000000e+00> : !cir.float> : !cir.complex<!cir.float>
@@ -73,15 +64,16 @@ float _Complex pack_indexing_complex() {
 // CIR:   cir.store %[[RESULT]], %[[R_SLOT:.*]] : !cir.vector<2 x !cir.float>, !cir.ptr<!cir.vector<2 x !cir.float>>
 // CIR:   %[[R_PTR:.*]] = cir.cast bitcast %[[R_SLOT]] : !cir.ptr<!cir.vector<2 x !cir.float>> -> !cir.ptr<!cir.complex<!cir.float>>
 // CIR:   %[[R_CPLX:.*]] = cir.load %[[R_PTR]] : !cir.ptr<!cir.complex<!cir.float>>, !cir.complex<!cir.float>
-// CIR:   cir.store {{.*}} %[[R_CPLX]], %[[RET_VAL]] : !cir.complex<!cir.float>, !cir.ptr<!cir.complex<!cir.float>>
-// CIR:   %[[TMP_RET:.*]] = cir.load %[[RET_VAL]] : !cir.ptr<!cir.complex<!cir.float>>, !cir.complex<!cir.float>
-// CIR:   cir.store %[[TMP_RET]], %[[RET_SLOT:.*]] : !cir.complex<!cir.float>, !cir.ptr<!cir.complex<!cir.float>>
+// CIR:   cir.store %[[R_CPLX]], %[[RET_SLOT:.*]] : !cir.complex<!cir.float>, !cir.ptr<!cir.complex<!cir.float>>
 // CIR:   %[[RET_PTR:.*]] = cir.cast bitcast %[[RET_SLOT]] : !cir.ptr<!cir.complex<!cir.float>> -> !cir.ptr<!cir.vector<2 x !cir.float>>
 // CIR:   %[[RET_VEC:.*]] = cir.load %[[RET_PTR]] : !cir.ptr<!cir.vector<2 x !cir.float>>, !cir.vector<2 x !cir.float>
 // CIR:   cir.return %[[RET_VEC]] : !cir.vector<2 x !cir.float>
 
 // LLVM: define {{.*}} <2 x float> @_Z21pack_indexing_complexv()
-// LLVM:   %[[RET_VAL:.*]] = alloca { float, float }, align 4
+// LLVM:   %[[R_SLOT:.*]] = alloca <2 x float>, align 8
+// LLVM:   %[[A1:.*]] = alloca { float, float }, align 8
+// LLVM:   %[[A0:.*]] = alloca { float, float }, align 8
+// LLVM:   %[[RET_SLOT:.*]] = alloca { float, float }, align 8
 // LLVM:   %[[COMPLEX_0:.*]] = alloca { float, float }, align 4
 // LLVM:   %[[COMPLEX_1:.*]] = alloca { float, float }, align 4
 // LLVM:   store { float, float } { float 1.000000e+00, float 2.000000e+00 }, ptr %[[COMPLEX_0]], align 4
@@ -95,9 +87,7 @@ float _Complex pack_indexing_complex() {
 // LLVM:   %[[RESULT:.*]] = call noundef <2 x float> @_Z13pack_indexingIJCfS0_EEDaDpT_(<2 x float> noundef %[[A0_VEC]], <2 x float> noundef %[[A1_VEC]])
 // LLVM:   store <2 x float> %[[RESULT]], ptr %[[R_SLOT:.*]], align 8
 // LLVM:   %[[R_CPLX:.*]] = load { float, float }, ptr %[[R_SLOT]], align 4
-// LLVM:   store { float, float } %[[R_CPLX]], ptr %[[RET_VAL]], align 4
-// LLVM:   %[[TMP_RET:.*]] = load { float, float }, ptr %[[RET_VAL]], align 4
-// LLVM:   store { float, float } %[[TMP_RET]], ptr %[[RET_SLOT:.*]], align 4
+// LLVM:   store { float, float } %[[R_CPLX]], ptr %[[RET_SLOT:.*]], align 4
 // LLVM:   %[[RET_VEC:.*]] = load <2 x float>, ptr %[[RET_SLOT]], align 8
 // LLVM:   ret <2 x float> %[[RET_VEC]]
 
@@ -147,13 +137,10 @@ void pack_indexing_lvalue() {
 // CIR:   cir.return
 
 // CIR: cir.func {{.*}} @_Z27pack_indexing_lvalue_helperIJiEERDaDpRT_(%[[ARG0:.*]]: !cir.ptr<!s32i> {{.*}}) -> (!cir.ptr<!s32i> {{.*}})
-// CIR:   %[[RET_VAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   %[[P_ADDR:.*]] = cir.alloca "p" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   cir.store %[[ARG0]], %[[P_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   %[[P_LOAD:.*]] = cir.load %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CIR:   cir.store %[[P_LOAD]], %[[RET_VAL]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CIR:   %[[RET_LOAD:.*]] = cir.load %[[RET_VAL]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CIR:   cir.return %[[RET_LOAD]] : !cir.ptr<!s32i>
+// CIR:   cir.return %[[P_LOAD]] : !cir.ptr<!s32i>
 
 // LLVM: define {{.*}} void @_Z20pack_indexing_lvaluev()
 // LLVM:   %[[A_ADDR:.*]] = alloca i32, align 4
@@ -164,13 +151,10 @@ void pack_indexing_lvalue() {
 // LLVM:   ret void
 
 // LLVM: define {{.*}} ptr @_Z27pack_indexing_lvalue_helperIJiEERDaDpRT_(ptr {{.*}} %[[ARG0:.*]])
-// LLVM:   %[[RET_VAL:.*]] = alloca ptr, align 8
 // LLVM:   %[[P_ADDR:.*]] = alloca ptr, align 8
 // LLVM:   store ptr %[[ARG0]], ptr %[[P_ADDR]], align 8
 // LLVM:   %[[P_LOAD:.*]] = load ptr, ptr %[[P_ADDR]], align 8
-// LLVM:   store ptr %[[P_LOAD]], ptr %[[RET_VAL]], align 8
-// LLVM:   %[[RET_LOAD:.*]] = load ptr, ptr %[[RET_VAL]], align 8
-// LLVM:   ret ptr %[[RET_LOAD]]
+// LLVM:   ret ptr %[[P_LOAD]]
 
 // OGCG: define {{.*}} void @_Z20pack_indexing_lvaluev()
 // OGCG:   %[[A_ADDR:.*]] = alloca i32, align 4

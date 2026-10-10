@@ -44,7 +44,7 @@ void *testBuiltinMemmove(void *dst, const void *src, unsigned long size) {
   // CHECK-LABEL: cir.func {{.*}} @testBuiltinMemmove(
   // CHECK: %[[DST:.+]] = cir.load {{.*}} : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
   // CHECK: cir.libc.memmove %{{.+}} bytes from %{{.+}} align(1) to %[[DST]] align(1) : !cir.ptr<!void>, !u64i
-  // CHECK: cir.store %[[DST]], %{{.+}} : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
+  // CHECK: cir.return %[[DST]] : !cir.ptr<!void>
   // LLVM-LABEL: define {{.*}} ptr @testBuiltinMemmove(
   // LLVM: call void @llvm.memmove.p0.p0.i64(ptr {{.*}}, ptr {{.*}}, i64 {{.*}}, i1 false)
 }
@@ -56,7 +56,7 @@ void *testBuiltinMemset(void *dst, int val, unsigned long size) {
   // CHECK: %[[VAL:.+]] = cir.load {{.*}} : !cir.ptr<!s32i>, !s32i
   // CHECK: %[[BYTE:.+]] = cir.cast integral %[[VAL]] : !s32i -> !u8i
   // CHECK: cir.libc.memset %{{.+}} bytes at %[[DST]] align(1) to %[[BYTE]] : !cir.ptr<!void>, !u8i, !u64i
-  // CHECK: cir.store %[[DST]], %{{.+}} : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
+  // CHECK: cir.return %[[DST]] : !cir.ptr<!void>
   // LLVM-LABEL: define {{.*}} ptr @testBuiltinMemset(
   // LLVM: [[VAL:%.*]] = load i32, ptr
   // LLVM: [[BYTE:%.*]] = trunc i32 [[VAL]] to i8

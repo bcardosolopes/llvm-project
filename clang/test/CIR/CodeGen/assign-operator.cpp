@@ -69,7 +69,6 @@ void copy_c(C &c1, C &c2) {
 // Implicit assignment operator for C.
 
 // CIR: cir.func {{.*}} @_ZN1CaSERKS_(%arg0: !cir.ptr<!rec_C> {{.*}}, %arg1: !cir.ptr<!rec_C> {{.*}}) -> (!cir.ptr<!rec_C>{{.*}})
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!rec_C>>
 // CIR:   %[[THIS_ADDR:.*]] = cir.alloca "this" {{.*}} init : !cir.ptr<!cir.ptr<!rec_C>>
 // CIR:   %[[ARG1_ADDR:.*]] = cir.alloca "" {{.*}} init const : !cir.ptr<!cir.ptr<!rec_C>>
 // CIR:   cir.store %arg0, %[[THIS_ADDR]]
@@ -86,12 +85,9 @@ void copy_c(C &c1, C &c2) {
 // CIR:   %[[B_VOID_PTR_2:.*]] = cir.cast bitcast %[[B_MEMBER_2]] : !cir.ptr<!cir.array<!rec_B x 16>> -> !cir.ptr<!void>
 // CIR:   %[[SIZE:.*]] = cir.const #cir.int<64> : !u64i
 // CIR:   cir.libc.memcpy %[[SIZE]] bytes from %[[B_VOID_PTR_2]] align(4) to %[[B_VOID_PTR]] align(4)
-// CIR:   cir.store %[[THIS]], %[[RET_ADDR]]
-// CIR:   %[[RET_VAL:.*]] = cir.load{{.*}} %[[RET_ADDR]]
-// CIR:   cir.return %[[RET_VAL]]
+// CIR:   cir.return %[[THIS]]
 
 // LLVM: define {{.*}} ptr @_ZN1CaSERKS_(ptr {{.*}} %[[THIS:.*]], ptr {{.*}} %[[ARG:.*]])
-// LLVM:   %[[RETVAL_ADDR:.*]] = alloca ptr
 // LLVM:   %[[THIS_ADDR:.*]] = alloca ptr
 // LLVM:   %[[ARG_ADDR:.*]] = alloca ptr
 // LLVM:   store ptr %[[THIS]], ptr %[[THIS_ADDR]]
