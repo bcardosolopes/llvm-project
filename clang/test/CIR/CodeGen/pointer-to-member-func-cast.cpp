@@ -89,17 +89,13 @@ auto memfunc_reinterpret(void (Foo::*func)(int)) -> void (Bar::*)() {
 // CIR-AFTER: cir.func {{.*}} @_Z19memfunc_reinterpretM3FooFviE
 // CIR-AFTER:   cir.store %{{.*}}, %[[FUNC_ADDR:.*]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
 // CIR-AFTER:   %[[FUNC:.*]] = cir.load{{.*}} %[[FUNC_ADDR]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.store %[[FUNC]], %[[RET_ADDR:.*]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
-// CIR-AFTER:   %[[RET:.*]] = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.return %[[RET]] : !rec_anon_struct
+// CIR-AFTER:   cir.return %[[FUNC]] : !rec_anon_struct
 
 // LLVM-X86: define dso_local { i64, i64 } @_Z19memfunc_reinterpretM3FooFviE(i64 %{{[^,)]+}}, i64 %{{[^,)]+}})
 // LLVM-ARM: define dso_local { i64, i64 } @_Z19memfunc_reinterpretM3FooFviE({ i64, i64 } %{{[^,)]+}})
 // LLVM:   store { i64, i64 } %{{.*}}, ptr %[[FUNC_ADDR:.*]], align 8
 // LLVM:   %[[FUNC:.*]] = load { i64, i64 }, ptr %[[FUNC_ADDR]]
-// LLVM:   store { i64, i64 } %[[FUNC]], ptr %[[RET_ADDR:.*]]
-// LLVM:   %[[RET:.*]] = load { i64, i64 }, ptr %[[RET_ADDR]]
-// LLVM:   ret { i64, i64 } %[[RET]]
+// LLVM:   ret { i64, i64 } %[[FUNC]]
 
 // OGCG-X86: define dso_local { i64, i64 } @_Z19memfunc_reinterpretM3FooFviE(i64 %{{[^,)]+}}, i64 %{{[^,)]+}})
 // OGCG-ARM: define dso_local [2 x i64] @_Z19memfunc_reinterpretM3FooFviE([2 x i64] %{{[^,)]+}})
@@ -139,20 +135,15 @@ DerivedMemFunc base_to_derived_zero_offset(Base1MemFunc ptr) {
 
 // CIR-AFTER: cir.func {{.*}} @_Z27base_to_derived_zero_offsetM5Base1FviE
 // CIR-AFTER:   %[[PTR:.*]] = cir.alloca "ptr" {{.*}} init : !cir.ptr<!rec_anon_struct>
-// CIR-AFTER:   %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!rec_anon_struct>
 // CIR-AFTER:   cir.store %{{.*}}, %[[PTR]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
 // CIR-AFTER:   %[[TMP:.*]] = cir.load{{.*}} %[[PTR]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.store %[[TMP]], %[[RET]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
-// CIR-AFTER:   %[[RET_VAL:.*]] = cir.load %[[RET]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.return %[[RET_VAL]] : !rec_anon_struct
+// CIR-AFTER:   cir.return %[[TMP]] : !rec_anon_struct
 
 // LLVM-X86: define dso_local { i64, i64 } @_Z27base_to_derived_zero_offsetM5Base1FviE(i64 %{{[^,)]+}}, i64 %{{[^,)]+}})
 // LLVM-ARM: define dso_local { i64, i64 } @_Z27base_to_derived_zero_offsetM5Base1FviE({ i64, i64 } %{{[^,)]+}})
 // LLVM:   store { i64, i64 } %{{.*}}, ptr %[[ARG_ADDR:.*]], align 8
 // LLVM:   %[[TMP:.*]] = load { i64, i64 }, ptr %[[ARG_ADDR]]
-// LLVM:   store { i64, i64 } %[[TMP]], ptr %[[RET_ADDR:.*]], align 8
-// LLVM:   %[[RET:.*]] = load { i64, i64 }, ptr %[[RET_ADDR]]
-// LLVM:   ret { i64, i64 } %[[RET]]
+// LLVM:   ret { i64, i64 } %[[TMP]]
 
 // OGCG-X86: define dso_local { i64, i64 } @_Z27base_to_derived_zero_offsetM5Base1FviE(i64 %{{[^,)]+}}, i64 %{{[^,)]+}})
 // OGCG-ARM: define dso_local [2 x i64] @_Z27base_to_derived_zero_offsetM5Base1FviE([2 x i64] %{{[^,)]+}})
@@ -208,20 +199,15 @@ Base1MemFunc derived_to_base_zero_offset(DerivedMemFunc ptr) {
 
 // CIR-AFTER: cir.func {{.*}} @_Z27derived_to_base_zero_offsetM7DerivedFviE
 // CIR-AFTER:   %[[PTR:.*]] = cir.alloca "ptr" {{.*}} init : !cir.ptr<!rec_anon_struct>
-// CIR-AFTER:   %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!rec_anon_struct>
 // CIR-AFTER:   cir.store %{{.*}}, %[[PTR]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
 // CIR-AFTER:   %[[TMP:.*]] = cir.load{{.*}} %[[PTR]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.store %[[TMP]], %[[RET]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
-// CIR-AFTER:   %[[RET_VAL:.*]] = cir.load %[[RET]] : !cir.ptr<!rec_anon_struct>, !rec_anon_struct
-// CIR-AFTER:   cir.return %[[RET_VAL]] : !rec_anon_struct
+// CIR-AFTER:   cir.return %[[TMP]] : !rec_anon_struct
 
 // LLVM-X86: define dso_local { i64, i64 } @_Z27derived_to_base_zero_offsetM7DerivedFviE(i64 %{{[^,)]+}}, i64 %{{[^,)]+}})
 // LLVM-ARM: define dso_local { i64, i64 } @_Z27derived_to_base_zero_offsetM7DerivedFviE({ i64, i64 } %{{[^,)]+}})
 // LLVM:   store { i64, i64 } %{{.*}}, ptr %[[ARG_ADDR:.*]], align 8
 // LLVM:   %[[TMP:.*]] = load { i64, i64 }, ptr %[[ARG_ADDR]]
-// LLVM:   store { i64, i64 } %[[TMP]], ptr %[[RET_ADDR:.*]], align 8
-// LLVM:   %[[RET:.*]] = load { i64, i64 }, ptr %[[RET_ADDR]]
-// LLVM:   ret { i64, i64 } %[[RET]]
+// LLVM:   ret { i64, i64 } %[[TMP]]
 
 // OGCG-X86: define dso_local { i64, i64 } @_Z27derived_to_base_zero_offsetM7DerivedFviE(i64 %{{[^,)]+}}, i64 %{{[^,)]+}})
 // OGCG-ARM: define dso_local [2 x i64] @_Z27derived_to_base_zero_offsetM7DerivedFviE([2 x i64] %{{[^,)]+}})

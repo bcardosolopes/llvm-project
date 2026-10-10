@@ -72,13 +72,10 @@ Base *returnBaseFromDerived(Derived* derived) {
 
 // CIR: cir.func {{.*}} @_Z21returnBaseFromDerivedP7Derived(%[[DERIVED_ARG:.*]]: !cir.ptr<!rec_Derived> {{.*}}) -> (!cir.ptr<!rec_Base>{{.*}})
 // CIR:   %[[DERIVED_ADDR:.*]] = cir.alloca "derived" {{.*}} init : !cir.ptr<!cir.ptr<!rec_Derived>>
-// CIR:   %[[BASE_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!rec_Base>>
 // CIR:   cir.store %[[DERIVED_ARG]], %[[DERIVED_ADDR]]
 // CIR:   %[[DERIVED:.*]] = cir.load{{.*}} %[[DERIVED_ADDR]]
 // CIR:   %[[DERIVED_BASE:.*]] = cir.base_class_addr nonnull %[[DERIVED]] [0] : !cir.ptr<!rec_Derived> -> !cir.ptr<!rec_Base>
-// CIR:   cir.store %[[DERIVED_BASE]], %[[BASE_ADDR]]
-// CIR:   %[[BASE:.*]] = cir.load{{.*}} %[[BASE_ADDR]]
-// CIR:   cir.return %[[BASE]] : !cir.ptr<!rec_Base>
+// CIR:   cir.return %[[DERIVED_BASE]] : !cir.ptr<!rec_Base>
 
 // LLVM: define {{.*}} ptr @_Z21returnBaseFromDerivedP7Derived(ptr {{.*}} %[[DERIVED_ARG:.*]])
 // LLVM:   %[[DERIVED_ADDR:.*]] = alloca ptr

@@ -48,17 +48,11 @@ int test1(void) {
 }
 
 // CIR: cir.func {{.*}} @test1() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test1()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 0, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test1()
 // OGCG:   ret i32 0
@@ -72,17 +66,11 @@ int test2(void) {
 }
 
 // CIR: cir.func {{.*}} @test2() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test2()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 0, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test2()
 // OGCG:   ret i32 0
@@ -94,17 +82,11 @@ int test3(void) {
 }
 
 // CIR: cir.func {{.*}} @test3() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test3()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 0, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test3()
 // OGCG:   ret i32 0
@@ -118,17 +100,11 @@ int test4(void) {
 }
 
 // CIR: cir.func {{.*}} @test4() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test4()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 0, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test4()
 // OGCG:   ret i32 0
@@ -142,17 +118,11 @@ int test5(void) {
 }
 
 // CIR: cir.func {{.*}} @test5() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
-// CIR:   cir.store %[[ONE]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ONE]] : !s32i
 
 // LLVM: define{{.*}} i32 @test5()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 1, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 1
 
 // OGCG: define{{.*}} i32 @test5()
 // OGCG:   ret i32 1
@@ -187,17 +157,11 @@ int test7(void) {
 }
 
 // CIR: cir.func {{.*}} @test7() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
-// CIR:   cir.store %[[ONE]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ONE]] : !s32i
 
 // LLVM: define{{.*}} i32 @test7()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 1, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 1
 
 // OGCG: define{{.*}} i32 @test7()
 // OGCG:   ret i32 1
@@ -207,17 +171,11 @@ int test8(void) {
 }
 
 // CIR: cir.func {{.*}} @test8() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test8()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 0, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test8()
 // OGCG:   ret i32 0
@@ -229,17 +187,11 @@ int test9(void) {
 }
 
 // CIR: cir.func {{.*}} @test9() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVM: define{{.*}} i32 @test9()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 0, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} i32 @test9()
 // OGCG:   ret i32 0
@@ -249,17 +201,11 @@ int test10(void) {
 }
 
 // CIR: cir.func {{.*}} @test10() -> !s32i
-// CIR:   %[[TMP1:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
-// CIR:   cir.store %[[ONE]], %[[TMP1]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP2:.*]] = cir.load %[[TMP1]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP2]] : !s32i
+// CIR:   cir.return %[[ONE]] : !s32i
 
 // LLVM: define{{.*}} i32 @test10()
-// LLVM:   %[[TMP1:.*]] = alloca i32
-// LLVM:   store i32 1, ptr %[[TMP1]]
-// LLVM:   %[[TMP2:.*]] = load i32, ptr %[[TMP1]]
-// LLVM:   ret i32 %[[TMP2]]
+// LLVM:   ret i32 1
 
 // OGCG: define{{.*}} i32 @test10()
 // OGCG:   ret i32 1

@@ -684,6 +684,62 @@ void CIRGenFunction::finishFunction(SourceLocation endLoc) {
          "FullExprCleanupScope");
 
   emitEndEHSpec(curCodeDecl);
+
+  // NOTE: __retval elision (tryElideRetAlloca) deliberately does NOT run
+  // here. LexicalScope cleanups -- including deferred `cir.return`
+  // emission, which loads the slot -- still run after this returns. Each
+  // top-level generate* entry calls tryElideRetAlloca itself once its
+  // outermost scope has closed and every return is emitted.
+}
+
+void CIRGenFunction::tryElideRetAlloca() {
+  // Mirror classic codegen's dominating-store elision (CGCall.cpp): a
+  // single store/load pair through __retval is just a roundabout way to
+  // return the stored value. Delete the triple when it is the only use of
+  // the slot.
+  if (!fnRetAlloca)
+    return;
+  auto allocaOp =
+      mlir::dyn_cast_or_null<cir::AllocaOp>(fnRetAlloca->getDefiningOp());
+  if (!allocaOp)
+    return;
+  cir::StoreOp storeOp = nullptr;
+  cir::LoadOp loadOp = nullptr;
+  for (mlir::OpOperand &use : fnRetAlloca->getUses()) {
+    mlir::Operation *user = use.getOwner();
+    if (auto store = mlir::dyn_cast<cir::StoreOp>(user)) {
+      // Must store *into* the slot, exactly once.
+      if (storeOp || store->getOperand(1) != *fnRetAlloca)
+        return;
+      storeOp = store;
+    } else if (auto load = mlir::dyn_cast<cir::LoadOp>(user)) {
+      // Must load *from* the slot, exactly once.
+      if (loadOp || load->getOperand(0) != *fnRetAlloca)
+        return;
+      loadOp = load;
+    } else {
+      return;
+    }
+  }
+  if (!storeOp || !loadOp)
+    return;
+  if (storeOp->getBlock() != loadOp->getBlock() ||
+      !storeOp->isBeforeInBlock(loadOp))
+    return;
+  if (storeOp->getOperand(0).getType() != loadOp->getResult(0).getType())
+    return;
+  // Volatile-qualified returns keep the slot: the memory traffic is
+  // (potentially) observable.
+  if (const auto *fd = dyn_cast_if_present<FunctionDecl>(curGD.getDecl()))
+    if (!fd->getReturnType().isNull() &&
+        fd->getReturnType().isVolatileQualified())
+      return;
+  loadOp->getResult(0).replaceAllUsesWith(storeOp->getOperand(0));
+  loadOp.erase();
+  storeOp.erase();
+  allocaOp.erase();
+  fnRetAlloca = std::nullopt;
+  returnValue = Address::invalid();
 }
 
 mlir::LogicalResult CIRGenFunction::emitFunctionBody(const clang::Stmt *body) {
@@ -832,6 +888,11 @@ cir::FuncOp CIRGenFunction::generateCode(clang::GlobalDecl gd, cir::FuncOp fn,
     if (mlir::failed(fn.verifyBody()))
       return nullptr;
   }
+
+  // The outermost LexicalScope above has closed, so every `cir.return`
+  // (including deferred and implicit fall-off returns) is emitted and the
+  // slot's use list is complete: safe to elide a single store/load pair.
+  tryElideRetAlloca();
 
   if (getLangOpts().OpenCL && funcDecl->hasAttr<DeviceKernelAttr>())
     cgm.emitOpenCLKernelArgMetadata(fn, funcDecl);

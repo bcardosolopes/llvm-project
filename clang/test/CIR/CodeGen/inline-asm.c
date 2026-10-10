@@ -109,8 +109,6 @@ void empty6(int x) {
 // CIR-NEXT: cir.store{{.*}} %[[ASM_RES]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // LLVM: define{{.*}}@add1
 // LLVM: %[[X:.*]] = alloca i32
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i32
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: %[[X_LOAD:.*]] = load i32, ptr %[[X]]
 // LLVM: %[[ASM_RES:.*]] = call i32 asm "addl $$42, $1", "=r,r,~{dirflag},~{fpsr},~{flags}"(i32 %[[X_LOAD]])
@@ -201,8 +199,6 @@ void add4(int *x) {
 // LLVM: define{{.*}}@add5
 // LLVM: %[[X:.*]] = alloca float
 // LLVM: %[[Y:.*]] = alloca float
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca float
 // LLVM: %[[R:.*]] = alloca float
 // LLVM: %[[X_LOAD:.*]] = load float, ptr %[[X]]
 // LLVM: %[[Y_LOAD:.*]] = load float, ptr %[[Y]]
@@ -428,8 +424,6 @@ void t10(int r) {
 // CIR-NEXT: cir.store align(4) %[[ASM_RES]], %[[OUTPUT]] : !u32i, !cir.ptr<!u32i>
 // LLVM: define{{.*}}@t11
 // LLVM: %[[INPUT:.*]] = alloca i8
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i32
 // LLVM: %[[OUTPUT:.*]] = alloca i32
 // LLVM: %[[INPUT_LOAD:.*]] = load i8, ptr %[[INPUT]]
 // The two IR forms disagree as to whether this should be a zero or sign extend.
@@ -460,8 +454,6 @@ unsigned t11(signed char input) {
 // CIR-NEXT: cir.store align(1) %[[ASM_RES_INT]], %[[OUTPUT]] : !u8i, !cir.ptr<!u8i>
 // LLVM: define{{.*}}@t12
 // LLVM: %[[INPUT:.*]] = alloca i32
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i8
 // LLVM: %[[OUTPUT:.*]] = alloca i8
 // LLVM: %[[INPUT_LOAD:.*]] = load i32, ptr %[[INPUT]]
 // LLVM: %[[ASM_RES:.*]] = call i32 asm "xyz", "={ax},0,~{dirflag},~{fpsr},~{flags}"(i32 %[[INPUT_LOAD]])
@@ -488,8 +480,6 @@ unsigned char t12(unsigned input) {
 // CIR-NEXT: cir.store align(1) %[[ASM_RES_INT]], %[[OUTPUT]] : !u8i, !cir.ptr<!u8i>
 // LLVM: define{{.*}}@t13
 // LLVM: %[[INPUT:.*]] = alloca i32
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i8
 // LLVM: %[[OUTPUT:.*]] = alloca i8
 // LLVM: %[[INPUT_LOAD:.*]] = load i32, ptr %[[INPUT]]
 // LLVM: %[[ASM_RES:.*]] = call i32 asm "xyz $1", "={ax},0,~{dirflag},~{fpsr},~{flags}"(i32 %[[INPUT_LOAD]])
@@ -560,8 +550,6 @@ unsigned long t15(int x, struct large *P) {
 // CIR-NEXT:                     {"nop;" "=%{cx},r,~{dirflag},~{fpsr},~{flags}"}) -> !s32i
 // CIR-NEXT: cir.store align(4) %[[ASM_RES]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // LLVM: define{{.*}}@t16
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i32
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: %[[B:.*]] = alloca i32
 // LLVM: %[[B_LOAD:.*]] = load i32, ptr %[[B]]
@@ -611,8 +599,6 @@ void t17(void) {
 // CIR-NEXT: cir.store align(4) %[[GM_SEC_LOAD]], %[[B]] : !s32i, !cir.ptr<!s32i>
 // LLVM: define{{.*}}@t18
 // LLVM: %[[DATA:.*]] = alloca i32
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i32
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: %[[B:.*]] = alloca i32
 //
@@ -654,8 +640,6 @@ int t18(unsigned data) {
 // CIR-NEXT: cir.store align(4) %[[ASM_RES]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // LLVM: define{{.*}}@t19
 // LLVM: %[[DATA:.*]] = alloca i32
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca i32
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: %[[B:.*]] = alloca i32
 // LLVM: %[[DATA_LOAD:.*]] = load i32, ptr %[[DATA]]
@@ -746,8 +730,6 @@ unsigned char t23(unsigned char a, unsigned char b) {
 // CIR-NEXT: cir.store align(8) %[[ASM_RES]], %[[ADDR]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
 // LLVM: define{{.*}}@t24
 // LLVM: %[[C:.*]] = alloca i8
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca ptr
 // LLVM: %[[ADDR:.*]] = alloca ptr
 // LLVM: %[[C_LOAD:.*]] = load i8, ptr %[[C]]
 // The two IR forms disagree as to whether this should be a zero or sign extend.
@@ -880,8 +862,6 @@ void t31(int len) {
 // CIR-NEXT: cir.store align(8) %[[ASM_RES]], %[[RET]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
 // LLVM: define{{.*}}@t33
 // LLVM: %[[PTR:.*]] = alloca ptr
-// Classic codegen doesn't alloca for a return slot.
-// CIRLLVMONLY: alloca ptr
 // LLVM: %[[RET:.*]] = alloca ptr
 // LLVM: %[[PTR_LOAD:.*]] = load ptr, ptr %[[PTR]]
 // LLVM: %[[ASM_RES:.*]] = call ptr asm "lea $1, $0", "=r,p,~{dirflag},~{fpsr},~{flags}"(ptr %[[PTR_LOAD]])

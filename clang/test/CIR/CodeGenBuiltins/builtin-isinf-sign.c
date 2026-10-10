@@ -15,7 +15,7 @@ int test_float_isinf_sign(float x) {
   // CIR: %[[C_m1:.*]] = cir.const #cir.int<-1> : !s32i
   // CIR: %[[SIGN:.*]] = cir.select if %[[IS_NEG]] then %[[C_m1]] else %[[C_1]] : (!cir.bool, !s32i, !s32i) -> !s32i
   // CIR: %[[RET:.*]] = cir.select if %[[IS_INF]] then %[[SIGN]] else %[[C_0]] : (!cir.bool, !s32i, !s32i) -> !s32i
-  // CIR: cir.store %[[RET]], %{{.*}} : !s32i, !cir.ptr<!s32i>
+  // CIR: cir.return %[[RET]] : !s32i
 
   // LLVM-LABEL: test_float_isinf_sign
   // LLVM: %[[ARG:.*]] = load float, ptr %{{.*}}
@@ -24,7 +24,7 @@ int test_float_isinf_sign(float x) {
   // LLVM: %[[IS_NEG:.*]] = icmp slt i32 %[[BITCAST]], 0
   // LLVM: %[[SIGN:.*]] = select i1 %[[IS_NEG]], i32 -1, i32 1
   // LLVM: %[[RET:.*]] = select i1 %[[IS_INF]], i32 %[[SIGN]], i32 0
-  // LLVM: store i32 %[[RET]], ptr %{{.*}}, align 4
+  // LLVM: ret i32 %[[RET]]
 
   // OGCG-LABEL: test_float_isinf_sign
   // OGCG: %[[ARG:.*]] = load float, ptr %{{.*}}

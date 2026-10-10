@@ -17,18 +17,14 @@
 int main(void) {
 }
 
+// The prologue zero-store plus the single implicit-return load fold into a
+// direct constant return (__retval elision).
 // CIR-LABEL: cir.func{{.*}} @main
-// CIR:         %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:         %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:         cir.store %[[ZERO]], %[[RET]] : !s32i, !cir.ptr<!s32i>
-// CIR:         %[[LOAD:.*]] = cir.load %[[RET]] : !cir.ptr<!s32i>, !s32i
-// CIR:         cir.return %[[LOAD]] : !s32i
+// CIR:         cir.return %[[ZERO]] : !s32i
 
 // LLVM-LABEL: define{{.*}} i32 @main(
-// LLVM:         %[[RET:.*]] = alloca i32
-// LLVM:         store i32 0, ptr %[[RET]]
-// LLVM:         %[[LOAD:.*]] = load i32, ptr %[[RET]]
-// LLVM:         ret i32 %[[LOAD]]
+// LLVM:         ret i32 0
 
 // OGCG-LABEL: define{{.*}} i32 @main(
 // OGCG:         ret i32 0

@@ -84,17 +84,14 @@ auto base_to_derived_zero_offset(int Base1::*ptr) -> int Derived::* {
 
 // CIR-AFTER: cir.func {{.*}} @_Z27base_to_derived_zero_offsetM5Base1i
 // CIR-AFTER:   %[[PTR:.*]] = cir.load{{.*}} %{{.*}} : !cir.ptr<!s64i>, !s64i
-// CIR-AFTER:   cir.store %[[PTR]], %{{.*}} : !s64i, !cir.ptr<!s64i>
+// CIR-AFTER:   cir.return %[[PTR]] : !s64i
 
 // No LLVM instructions emitted for performing a zero-offset cast.
 
 // LLVM:      define {{.*}} i64 @_Z27base_to_derived_zero_offsetM5Base1i
 // LLVM-NEXT:   %[[PTR_ADDR:.*]] = alloca i64
-// LLVM-NEXT:   %[[RETVAL:.*]] = alloca i64
 // LLVM-NEXT:   store i64 %{{.*}}, ptr %[[PTR_ADDR]]
-// LLVM-NEXT:   %[[TEMP:.*]] = load i64, ptr %[[PTR_ADDR]]
-// LLVM-NEXT:   store i64 %[[TEMP]], ptr %[[RETVAL]]
-// LLVM-NEXT:   %[[RET:.*]] = load i64, ptr %[[RETVAL]]
+// LLVM-NEXT:   %[[RET:.*]] = load i64, ptr %[[PTR_ADDR]]
 // LLVM-NEXT:   ret i64 %[[RET]]
 
 // OGCG:      define {{.*}} i64 @_Z27base_to_derived_zero_offsetM5Base1i
@@ -114,17 +111,14 @@ auto derived_to_base_zero_offset(int Derived::*ptr) -> int Base1::* {
 
 // CIR-AFTER: cir.func {{.*}} @_Z27derived_to_base_zero_offsetM7Derivedi
 // CIR-AFTER:   %[[PTR:.*]] = cir.load{{.*}} %{{.*}} : !cir.ptr<!s64i>, !s64i
-// CIR-AFTER:   cir.store %[[PTR]], %{{.*}} : !s64i, !cir.ptr<!s64i>
+// CIR-AFTER:   cir.return %[[PTR]] : !s64i
 
 // No LLVM instructions emitted for performing a zero-offset cast.
 
 // LLVM:      define {{.*}} i64 @_Z27derived_to_base_zero_offsetM7Derivedi
 // LLVM-NEXT:   %[[PTR_ADDR:.*]] = alloca i64
-// LLVM-NEXT:   %[[RETVAL:.*]] = alloca i64
 // LLVM-NEXT:   store i64 %{{.*}}, ptr %[[PTR_ADDR]]
-// LLVM-NEXT:   %[[TEMP:.*]] = load i64, ptr %[[PTR_ADDR]]
-// LLVM-NEXT:   store i64 %[[TEMP]], ptr %[[RETVAL]]
-// LLVM-NEXT:   %[[RET:.*]] = load i64, ptr %[[RETVAL]]
+// LLVM-NEXT:   %[[RET:.*]] = load i64, ptr %[[PTR_ADDR]]
 // LLVM-NEXT:   ret i64 %[[RET]]
 
 // OGCG:      define {{.*}} i64 @_Z27derived_to_base_zero_offsetM7Derivedi
@@ -172,18 +166,13 @@ auto bitcast(int Foo::*x) {
 
 // CIR-AFTER: cir.func {{.*}} @_Z7bitcastM3Fooi(%[[ARG0:.*]]: !s64i
 // CIR-AFTER:   %[[X_ADDR:.*]] = cir.alloca "x" align(8) init : !cir.ptr<!s64i>
-// CIR-AFTER:   %[[RET_ADDR:.*]] = cir.alloca "__retval" align(8) : !cir.ptr<!s64i>
 // CIR-AFTER:   cir.store %[[ARG0]], %[[X_ADDR]]
 // CIR-AFTER:   %[[X:.*]] = cir.load{{.*}} %[[X_ADDR]]
-// CIR-AFTER:   cir.store %[[X]], %[[RET_ADDR]]
-// CIR-AFTER:   %[[RET:.*]] = cir.load %[[RET_ADDR]]
-// CIR-AFTER:   cir.return %[[RET]] : !s64i
+// CIR-AFTER:   cir.return %[[X]] : !s64i
 
 // LLVM: define {{.*}} i64 @_Z7bitcastM3Fooi
 // LLVM:   %[[X:.*]] = load i64, ptr %{{.*}}
-// LLVM:   store i64 %[[X]], ptr %[[RET_ADDR:.*]]
-// LLVM:   %[[RET:.*]] = load i64, ptr %[[RET_ADDR:.*]]
-// LLVM:   ret i64 %[[RET]]
+// LLVM:   ret i64 %[[X]]
 
 // OGCG: define {{.*}} i64 @_Z7bitcastM3Fooi
 // OGCG:   %[[X:.*]] = load i64, ptr %{{.*}}

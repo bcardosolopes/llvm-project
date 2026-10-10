@@ -12,12 +12,11 @@ float &at(AS3 float *p, long i) {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z2atPU3AS3fl(
-// CIR:   %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!cir.float>>
 // CIR:   %[[P:.*]] = cir.load{{.*}} : !cir.ptr<!cir.ptr<!cir.float, target_address_space(3)>>, !cir.ptr<!cir.float, target_address_space(3)>
 // CIR:   %[[G:.*]] = cir.cast address_space %[[P]] : !cir.ptr<!cir.float, target_address_space(3)> -> !cir.ptr<!cir.float>
 // CIR:   %[[ELT:.*]] = cir.ptr_stride %[[G]], %{{.*}} : (!cir.ptr<!cir.float>, !s64i) -> !cir.ptr<!cir.float>
 // CIR-NOT: cir.cast bitcast
-// CIR:   cir.store %[[ELT]], %[[RETVAL]] : !cir.ptr<!cir.float>, !cir.ptr<!cir.ptr<!cir.float>>
+// CIR:   cir.return %[[ELT]] : !cir.ptr<!cir.float>
 
 // LLVM-LABEL: define {{.*}}@_Z2atPU3AS3fl(
 // LLVM:   %[[G:.*]] = addrspacecast ptr addrspace(3) %{{.*}} to ptr

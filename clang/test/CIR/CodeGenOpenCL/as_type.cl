@@ -16,13 +16,10 @@ char4 f4(int x) {
 
 // CIR: cir.func {{.*}} @f4
 // CIR:   %[[X_ADDR:.*]] = cir.alloca "x" {{.*}} init : !cir.ptr<!s32i>
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.vector<4 x !s8i>>
 // CIR:   cir.store %{{.*}}, %[[X_ADDR]] : !s32i, !cir.ptr<!s32i>
 // CIR:   %[[TMP_X:.*]] = cir.load {{.*}} %[[X_ADDR]] : !cir.ptr<!s32i>, !s32i
 // CIR:   %[[X_V4_I8:.*]] = cir.cast bitcast %[[TMP_X]] : !s32i -> !cir.vector<4 x !s8i>
-// CIR:   cir.store %[[X_V4_I8]], %[[RET_ADDR]] : !cir.vector<4 x !s8i>, !cir.ptr<!cir.vector<4 x !s8i>>
-// CIR:   %[[TMP_RET:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!cir.vector<4 x !s8i>>, !cir.vector<4 x !s8i>
-// CIR:   cir.return %[[TMP_RET]] : !cir.vector<4 x !s8i>
+// CIR:   cir.return %[[X_V4_I8]] : !cir.vector<4 x !s8i>
 
 // LLVM: define {{.*}} <4 x i8> @f4
 // LLVM:  %[[RET:.*]] = bitcast i32 %{{.*}} to <4 x i8>
@@ -34,13 +31,10 @@ int f6(char4 x) {
 
 // CIR: cir.func {{.*}} @f6
 // CIR:   %[[X_ADDR:.*]] = cir.alloca "x" {{.*}} init : !cir.ptr<!cir.vector<4 x !s8i>>
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   cir.store %{{.*}}, %[[X_ADDR]] : !cir.vector<4 x !s8i>, !cir.ptr<!cir.vector<4 x !s8i>>
 // CIR:   %[[TMP_X:.*]] = cir.load {{.*}} %[[X_ADDR]] : !cir.ptr<!cir.vector<4 x !s8i>>, !cir.vector<4 x !s8i>
 // CIR:   %[[X_S32I:.*]] = cir.cast bitcast %[[TMP_X]] : !cir.vector<4 x !s8i> -> !s32i
-// CIR:   cir.store %[[X_S32I]], %[[RET_ADDR]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[TMP_RET:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[TMP_RET]] : !s32i
+// CIR:   cir.return %[[X_S32I]] : !s32i
 
 // LLVM: define {{.*}} i32 @f6
 // LLVM:  %[[RET:.*]] = bitcast <4 x i8> %{{.*}} to i32
@@ -52,13 +46,10 @@ int* int_to_ptr(int x) {
 
 // CIR: cir.func {{.*}} @int_to_ptr
 // CIR:   %[[X_ADDR:.*]] = cir.alloca "x" {{.*}} init : !cir.ptr<!s32i>
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   cir.store %{{.*}}, %[[X_ADDR]] : !s32i, !cir.ptr<!s32i>
 // CIR:   %[[TMP_X:.*]] = cir.load {{.*}} %[[X_ADDR]] : !cir.ptr<!s32i>, !s32i
 // CIR:   %[[X_PTR:.*]] = cir.cast int_to_ptr %[[TMP_X]] : !s32i -> !cir.ptr<!s32i>
-// CIR:   cir.store %[[X_PTR]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CIR:   %[[TMP_RET]] = cir.load %[[RET_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CIR:   cir.return %[[TMP_RET]] : !cir.ptr<!s32i>
+// CIR:   cir.return %[[X_PTR]] : !cir.ptr<!s32i>
 
 // LLVM: define {{.*}} ptr @int_to_ptr
 // LLVM:   %[[INT_TO_PTR:.*]] = inttoptr i32 %{{.*}} to ptr
@@ -70,14 +61,11 @@ char3 vec4_to_vec_3(char4 x) {
 
 // CIR: cir.func {{.*}} @vec4_to_vec_3
 // CIR:   %[[X_ADDR:.*]] = cir.alloca "x" {{.*}} init : !cir.ptr<!cir.vector<4 x !s8i>>
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.vector<3 x !s8i>>
 // CIR:   cir.store %{{.*}}, %[[X_ADDR]] : !cir.vector<4 x !s8i>, !cir.ptr<!cir.vector<4 x !s8i>>
 // CIR:   %[[TMP_X:.*]] = cir.load {{.*}} %[[X_ADDR]] : !cir.ptr<!cir.vector<4 x !s8i>>, !cir.vector<4 x !s8i>
 // CIR:   %[[POISON:.*]] = cir.const #cir.poison : !cir.vector<4 x !s8i>
 // CIR:   %[[RESULT:.*]] = cir.vec.shuffle(%[[TMP_X]], %[[POISON]] : !cir.vector<4 x !s8i>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i] : !cir.vector<3 x !s8i>
-// CIR:   cir.store %[[RESULT]], %[[RET_ADDR]] : !cir.vector<3 x !s8i>, !cir.ptr<!cir.vector<3 x !s8i>>
-// CIR:   %[[TMP_RET:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!cir.vector<3 x !s8i>>, !cir.vector<3 x !s8i>
-// CIR:   cir.return %[[TMP_RET]] : !cir.vector<3 x !s8i>
+// CIR:   cir.return %[[RESULT]] : !cir.vector<3 x !s8i>
 
 // LLVM: define {{.*}} <3 x i8> @vec4_to_vec_3
 // LLVM:  %[[RESULT:.*]] = shufflevector <4 x i8> %{{.*}}, <4 x i8> poison, <3 x i32> <i32 0, i32 1, i32 2>

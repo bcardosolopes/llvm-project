@@ -378,10 +378,9 @@ void foo9() {
 // LLVM: define dso_local noundef ptr @{{.*foo10.*}}()
 // FIXME: CIR lowering has an extra load here.
 // CIR-LABEL: cir.func no_inline dso_local @_Z5foo10v()
-// CIR: %[[RET_ALLOCA:.*]] = cir.alloca "__retval" align(8) : !cir.ptr<!cir.ptr<!s32i>>
 // CIR: %[[GET_GLOB:.*]] = cir.get_global @_ZL4arr1 : !cir.ptr<!cir.array<!s32i x 3>>
 // CIR: %[[GLOB_DECAY:.*]] = cir.cast array_to_ptrdecay %[[GET_GLOB]] : !cir.ptr<!cir.array<!s32i x 3>> -> !cir.ptr<!s32i>
-// CIR: cir.store %[[GLOB_DECAY]], %[[RET_ALLOCA]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR: cir.return %[[GLOB_DECAY]] : !cir.ptr<!s32i>
 const int* foo10() {
   return arr1;
 }
@@ -480,10 +479,9 @@ A foo13() {
 // LLVM: define dso_local noundef ptr @{{.*foo14.*}}()
 // LLVM: ret ptr 
 // CIR-LABEL: cir.func no_inline dso_local @_Z5foo14v()
-// CIR: %[[RET_ALLOCA:.*]] = cir.alloca "__retval" align(8) : !cir.ptr<!cir.ptr<!s32i>>
 // CIR: %[[GET_GLOB:.*]] = cir.get_global @_ZL4arr4 : !cir.ptr<!cir.array<!s32i x 1>>
-// CIR: %[[GLOB_DECAY]] = cir.cast array_to_ptrdecay %[[GET_GLOB]] : !cir.ptr<!cir.array<!s32i x 1>> -> !cir.ptr<!s32i>
-// CIR: cir.store %[[GLOB_DECAY]], %[[RET_ALLOCA]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR: %[[GLOB_DECAY:.*]] = cir.cast array_to_ptrdecay %[[GET_GLOB]] : !cir.ptr<!cir.array<!s32i x 1>> -> !cir.ptr<!s32i>
+// CIR: cir.return %[[GLOB_DECAY]] : !cir.ptr<!s32i>
 const int* foo14() {
   return arr4;
 }
@@ -491,10 +489,9 @@ const int* foo14() {
 // LLVM: define dso_local noundef ptr @{{.*foo15.*}}()
 // LLVM: ret ptr 
 // CIR-LABEL: cir.func {{.*}}@_Z5foo15v()
-// CIR: %[[RET_ALLOCA:.*]] = cir.alloca "__retval" align(8) : !cir.ptr<!cir.ptr<!s32i>>
 // CIR: %[[GET_GLOB:.*]] = cir.get_global @_ZL4arr5 : !cir.ptr<!cir.array<!s32i x 2>>
 // CIR: %[[GLOB_DECAY:.*]] = cir.cast array_to_ptrdecay %[[GET_GLOB]] : !cir.ptr<!cir.array<!s32i x 2>> -> !cir.ptr<!s32i>
-// CIR: cir.store %[[GLOB_DECAY]], %[[RET_ALLOCA]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR: cir.return %[[GLOB_DECAY]] : !cir.ptr<!s32i>
 const int* foo15() {
   return arr5;
 }

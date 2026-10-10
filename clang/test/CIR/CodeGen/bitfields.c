@@ -102,7 +102,6 @@ int load_field(S* s) {
 
 // LLVM: define dso_local i32 @load_field
 // LLVM:   [[TMP0:%.*]] = alloca ptr, align 8
-// LLVM:   [[TMP1:%.*]] = alloca i32, align 4
 // LLVM:   [[TMP2:%.*]] = load ptr, ptr [[TMP0]], align 8
 // LLVM:   [[TMP3:%.*]] = getelementptr inbounds nuw %struct.S, ptr [[TMP2]], i32 0, i32 0
 // LLVM:   [[TMP4:%.*]] = load i64, ptr [[TMP3]], align 4

@@ -28,7 +28,6 @@ const int& test_cond_throw_false(bool flag) {
 
 // LLVM-LABEL: define{{.*}} ptr @_Z21test_cond_throw_falseb(
 // LLVM: %[[FLAG_ALLOCA:.*]] = alloca i8
-// LLVM: %[[RET_ALLOCA:.*]] = alloca ptr
 // LLVM: %[[A_ALLOCA:.*]] = alloca i32
 // LLVM: %[[ZEXT:.*]] = zext i1 %{{.*}} to i8
 // LLVM: store i8 %[[ZEXT]], ptr %[[FLAG_ALLOCA]]
@@ -47,9 +46,7 @@ const int& test_cond_throw_false(bool flag) {
 // LLVM:   %[[PHI:.*]] = phi ptr [ %[[A_ALLOCA]], %[[TRUE_BB]] ]
 // LLVM:   br label %[[CONT_BB:.*]]
 // LLVM: [[CONT_BB]]:
-// LLVM:   store ptr %[[PHI]], ptr %[[RET_ALLOCA]]
-// LLVM:   %[[RET:.*]] = load ptr, ptr %[[RET_ALLOCA]]
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z21test_cond_throw_falseb(
 // OGCG: %{{.*}} = alloca i8
@@ -91,7 +88,6 @@ const int& test_cond_throw_true(bool flag) {
 
 // LLVM-LABEL: define{{.*}} ptr @_Z20test_cond_throw_trueb(
 // LLVM: %[[FLAG_ALLOCA:.*]] = alloca i8
-// LLVM: %[[RET_ALLOCA:.*]] = alloca ptr
 // LLVM: %[[A_ALLOCA:.*]] = alloca i32
 // LLVM: %[[ZEXT:.*]] = zext i1 %{{.*}} to i8
 // LLVM: store i8 %[[ZEXT]], ptr %[[FLAG_ALLOCA]]
@@ -110,9 +106,7 @@ const int& test_cond_throw_true(bool flag) {
 // LLVM:   %[[PHI:.*]] = phi ptr [ %[[A_ALLOCA]], %[[FALSE_BB]] ]
 // LLVM:   br label %[[CONT_BB:.*]]
 // LLVM: [[CONT_BB]]:
-// LLVM:   store ptr %[[PHI]], ptr %[[RET_ALLOCA]]
-// LLVM:   %[[RET:.*]] = load ptr, ptr %[[RET_ALLOCA]]
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z20test_cond_throw_trueb(
 // OGCG: %{{.*}} = alloca i8
@@ -143,18 +137,14 @@ const int& test_cond_const_true_throw_false() {
 // CIR: cir.store{{.*}} %[[TWENTY]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // CIR-NOT: cir.ternary
 // CIR-NOT: cir.throw
-// CIR: cir.store %[[A]]
-// CIR: %[[RET:.*]] = cir.load
-// CIR: cir.return %[[RET]] : !cir.ptr<!s32i>
+// CIR: cir.return %[[A]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}} ptr @_Z32test_cond_const_true_throw_falsev(
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: store i32 20, ptr %[[A]]
 // LLVM-NOT: br i1
 // LLVM-NOT: __cxa_throw
-// LLVM: store ptr %[[A]]
-// LLVM: %[[RET:.*]] = load ptr
-// LLVM: ret ptr %[[RET]]
+// LLVM: ret ptr %[[A]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z32test_cond_const_true_throw_falsev(
 // OGCG: %[[A:.*]] = alloca i32
@@ -175,18 +165,14 @@ const int& test_cond_const_false_throw_true() {
 // CIR: cir.store{{.*}} %[[THIRTY]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // CIR-NOT: cir.ternary
 // CIR-NOT: cir.throw
-// CIR: cir.store %[[A]]
-// CIR: %[[RET:.*]] = cir.load
-// CIR: cir.return %[[RET]] : !cir.ptr<!s32i>
+// CIR: cir.return %[[A]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}} ptr @_Z32test_cond_const_false_throw_truev(
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: store i32 30, ptr %[[A]]
 // LLVM-NOT: br i1
 // LLVM-NOT: __cxa_throw
-// LLVM: store ptr %[[A]]
-// LLVM: %[[RET:.*]] = load ptr
-// LLVM: ret ptr %[[RET]]
+// LLVM: ret ptr %[[A]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z32test_cond_const_false_throw_truev(
 // OGCG: %[[A:.*]] = alloca i32
@@ -201,7 +187,6 @@ const int &test_cond_const_true_throw_true() {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z31test_cond_const_true_throw_truev(
-// CIR:  %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:  %[[A_ADDR:.*]] = cir.alloca "a" {{.*}} init const : !cir.ptr<!s32i>
 // CIR:  %[[CONST_30:.*]] = cir.const #cir.int<30> : !s32i
 // CIR:  cir.store{{.*}} %[[CONST_30]], %[[A_ADDR]] : !s32i, !cir.ptr<!s32i>
@@ -212,12 +197,9 @@ const int &test_cond_const_true_throw_true() {
 // CIR:  cir.unreachable
 // CIR: ^[[NO_PRED_LABEL:.*]]:
 // CIR:   %[[CONST_NULL:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!s32i>
-// CIR:   cir.store %[[CONST_NULL]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CIR:   %[[TMP_RET:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CIR:   cir.return %[[TMP_RET]] : !cir.ptr<!s32i>
+// CIR:   cir.return %[[CONST_NULL]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}} ptr @_Z31test_cond_const_true_throw_truev(
-// LLVM:  %[[RET_ADDR:.*]] = alloca ptr, align 8
 // LLVM:  %[[A_ADDR:.*]] = alloca i32, align 4
 // LLVM:  store i32 30, ptr %[[A_ADDR]], align 4
 // LLVM:  %[[EXCEPTION:.*]] = call ptr @__cxa_allocate_exception(i64 4)
@@ -225,9 +207,7 @@ const int &test_cond_const_true_throw_true() {
 // LLVM:  call void @__cxa_throw(ptr %[[EXCEPTION]], ptr @_ZTIi, ptr null)
 // LLVM:  unreachable
 // LLVM: [[NO_PRED_LABEL:.*]]:
-// LLVM:  store ptr null, ptr %[[RET_ADDR]], align 8
-// LLVM:  %[[TMP_RET:.*]] = load ptr, ptr %[[RET_ADDR]], align 8
-// LLVM:  ret ptr %[[TMP_RET]]
+// LLVM:  ret ptr null
 
 // OGCG-LABEL: define{{.*}} ptr @_Z31test_cond_const_true_throw_truev(
 // OGCG:  %[[A_ADDR:.*]] = alloca i32, align 4
@@ -751,7 +731,6 @@ int &test_ref_cond_throw(bool c, int &x) {
 // CIR-LABEL: cir.func{{.*}} @_Z19test_ref_cond_throwbRi(
 // CIR:   %[[C:.*]] = cir.alloca "c" {{.*}} init : !cir.ptr<!cir.bool>
 // CIR:   %[[X_REF:.*]] = cir.alloca "x" {{.*}} init const : !cir.ptr<!cir.ptr<!s32i>>
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!s32i>>
 // CIR:   %[[C_VAL:.*]] = cir.load{{.*}} %[[C]] : !cir.ptr<!cir.bool>, !cir.bool
 // CIR:   %[[RES:.*]] = cir.ternary(%[[C_VAL]], true {
 // CIR:     %[[X_PTR:.*]] = cir.load %[[X_REF]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
@@ -760,7 +739,7 @@ int &test_ref_cond_throw(bool c, int &x) {
 // CIR:     cir.throw {{.*}} @_ZTIi
 // CIR:     cir.unreachable
 // CIR-NEXT:   }) : (!cir.bool) -> !cir.ptr<!s32i>
-// CIR:   cir.store %[[RES]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR:   cir.return %[[RES]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}} ptr @_Z19test_ref_cond_throwbRi(
 // LLVM:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]
@@ -772,9 +751,8 @@ int &test_ref_cond_throw(bool c, int &x) {
 // LLVM:   unreachable
 // LLVM: [[PHI_BB]]:
 // LLVM:   %[[PHI:.*]] = phi ptr [ %[[X_PTR]], %[[TRUE_BB]] ]
-// LLVM:   store ptr %[[PHI]], ptr %[[RET_ALLOCA:.*]], align 8
-// LLVM:   %[[RET:.*]] = load ptr, ptr %[[RET_ALLOCA]]
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   br label %{{.*}}
+// LLVM:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z19test_ref_cond_throwbRi(
 // OGCG:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]
@@ -844,7 +822,7 @@ int &test_member_cond_throw(bool c, struct s6 *p) {
 // CIR:     cir.throw {{.*}} @_ZTIi
 // CIR:     cir.unreachable
 // CIR-NEXT:   }) : (!cir.bool) -> !cir.ptr<!s32i>
-// CIR:   cir.store %[[RES]], %{{.*}} : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR:   cir.return %[[RES]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}} ptr @_Z22test_member_cond_throwbP2s6(
 // LLVM:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]
@@ -856,7 +834,8 @@ int &test_member_cond_throw(bool c, struct s6 *p) {
 // LLVM:   unreachable
 // LLVM: [[PHI_BB]]:
 // LLVM:   %[[PHI:.*]] = phi ptr [ %[[F0_PTR]], %[[TRUE_BB]] ]
-// LLVM:   store ptr %[[PHI]], ptr %{{.*}}, align 8
+// LLVM:   br label %{{.*}}
+// LLVM:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z22test_member_cond_throwbP2s6(
 // OGCG:   br i1 %{{.*}}, label %[[TRUE_BB:.*]], label %[[FALSE_BB:.*]]

@@ -26,14 +26,10 @@ int test_trivially_copyable_as_bool() {
 
 // CIR: cir.func {{.*}} @_Z31test_trivially_copyable_as_boolv()
 // CIR:   %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
-// CIR:   cir.store %[[ZERO]], %[[RETVAL:.*]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[RET:.*]] = cir.load %[[RETVAL:.*]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[RET:.*]] : !s32i
+// CIR:   cir.return %[[ZERO]] : !s32i
 
 // LLVMCIR: define{{.*}} i32 @_Z31test_trivially_copyable_as_boolv()
-// LLVMCIR:   store i32 0, ptr %[[RETVAL:.*]]
-// LLVMCIR:   %[[RET:.*]] = load i32, ptr %[[RETVAL:.*]]
-// LLVMCIR:   ret i32 %[[RET:.*]]
+// LLVMCIR:   ret i32 0
 
 // OGCG: define{{.*}} i32 @_Z31test_trivially_copyable_as_boolv()
 // OGCG:   ret i32 0

@@ -20,7 +20,6 @@ int test() {
 // CIR-NEXT:   cir.store{{.*}} %[[TEMP_SLOT]], %[[X]]
 
 // LLVM: define {{.*}} i32 @_Z4testv()
-// LLVM:   %[[RETVAL:.*]] = alloca i32
 // LLVM:   %[[TEMP_SLOT:.*]] = alloca i32
 // LLVM:   %[[X:.*]] = alloca ptr
 // LLVM:   %[[TEMP_VALUE:.*]] = call noundef i32 @_Z8make_intv()
@@ -59,7 +58,6 @@ int test_scoped() {
 // LLVM: define {{.*}} i32 @_Z11test_scopedv()
 // LLVM:   %[[TEMP_SLOT:.*]] = alloca i32
 // LLVM:   %[[Y_ADDR:.*]] = alloca ptr
-// LLVM:   %[[RETVAL:.*]] = alloca i32
 // LLVM:   %[[X:.*]] = alloca i32
 // LLVM:   %[[TEMP_VALUE1:.*]] = call noundef i32 @_Z8make_intv()
 // LLVM:   store i32 %[[TEMP_VALUE1]], ptr %[[X]]
@@ -91,7 +89,6 @@ int test_rvalue_reference(int&& ri) {
 
 //      CIR: cir.func {{.*}} @_Z21test_rvalue_referenceOi({{.*}})
 //      CIR:   %[[RI:.*]] = cir.alloca "ri" {{.*}} init const : !cir.ptr<!cir.ptr<!s32i>>
-// CIR-NEXT:   %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR-NEXT:   %[[TEMP_SLOT:.*]] = cir.alloca "ref.tmp0" {{.*}} : !cir.ptr<!s32i>
 // CIR-NEXT:   cir.store{{.*}} {{.*}}, %[[RI]]
 // CIR-NEXT:   %[[RI_REF:.*]] = cir.load %[[RI]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
@@ -103,7 +100,6 @@ int test_rvalue_reference(int&& ri) {
 
 // LLVM: define {{.*}} i32 @_Z21test_rvalue_referenceOi({{.*}})
 // LLVM:   %[[RI:.*]] = alloca ptr
-// LLVM:   %[[RETVAL:.*]] = alloca i32
 // LLVM:   %[[TEMP_SLOT:.*]] = alloca i32
 // LLVM:   store ptr {{.*}}, ptr %[[RI]]
 // LLVM:   %[[RI_REF:.*]] = load ptr, ptr %[[RI]]
