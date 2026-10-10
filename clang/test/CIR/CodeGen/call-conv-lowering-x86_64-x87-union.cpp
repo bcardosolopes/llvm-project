@@ -205,7 +205,7 @@ Value call_ret_ptr(Value (*f)(const Value *), const Value *p) { return f(p); }
 
 // CIR-LABEL: cir.func {{.*}} @_Z12call_ret_ptrPF5ValuePKS_ES1_(
 // CIR:   %[[SLOT:.+]] = cir.alloca "coerce" align(16) : !cir.ptr<!rec_anon_struct>
-// CIR:   %[[RETVAL:.+]] = cir.alloca "__retval" align(16) : !cir.ptr<!rec_Value>
+// CIR:   %[[RETVAL:.+]] = cir.alloca "coerce" align(16) : !cir.ptr<!rec_Value>
 // CIR:   %[[RES:.+]] = cir.call %{{[^(]+}}(%{{[^,)]+}}) : (!cir.ptr<!cir.func<(!cir.ptr<!rec_Value>) -> !rec_anon_struct>>, !cir.ptr<!rec_Value> {llvm.noundef}) -> !rec_anon_struct
 // CIR:   cir.store %[[RES]], %[[SLOT]] : !rec_anon_struct, !cir.ptr<!rec_anon_struct>
 // CIR:   %[[VIEW:.+]] = cir.cast bitcast %[[SLOT]] : !cir.ptr<!rec_anon_struct> -> !cir.ptr<!rec_Value>

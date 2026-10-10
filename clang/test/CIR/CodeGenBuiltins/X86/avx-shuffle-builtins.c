@@ -17,8 +17,8 @@
 
 __m256d test0_mm256_insertf128_pd(__m256d a, __m128d b) {
   // CIR-LABEL: @test0_mm256_insertf128_pd(
-  // CIR: [[A:%.*]] = cir.load align(32) %1 : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
-  // CIR: [[B:%.*]] = cir.load align(16) %2 : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
+  // CIR: [[A:%.*]] = cir.load align(32) %0 : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
+  // CIR: [[B:%.*]] = cir.load align(16) %1 : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
   // CIR: %{{.*}} = cir.vec.shuffle([[B]], %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR-NEXT: %{{.*}} = cir.vec.shuffle([[A]], %{{.*}} : !s32i, #cir.int<5> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR: cir.return %{{.*}} : !cir.vector<4 x !cir.double>
@@ -41,8 +41,8 @@ __m256d test0_mm256_insertf128_pd(__m256d a, __m128d b) {
 
 __m256d test1_mm256_insertf128_pd(__m256d a, __m128d b) {
   // CIR-LABEL: @test1_mm256_insertf128_pd(
-  // CIR: [[A:%.*]] = cir.load align(32) %1 : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
-  // CIR: [[B:%.*]] = cir.load align(16) %2 : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
+  // CIR: [[A:%.*]] = cir.load align(32) %0 : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
+  // CIR: [[B:%.*]] = cir.load align(16) %1 : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
   // CIR: %{{.*}} = cir.vec.shuffle([[B]], %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR-NEXT: %{{.*}} = cir.vec.shuffle([[A]], %{{.*}} : !cir.vector<4 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR: cir.return %{{.*}} : !cir.vector<4 x !cir.double>
@@ -322,10 +322,10 @@ __m256d test_mm256_permute2f128_pd_b_zero_overwritte(__m256d a, __m256d b) {
 
 __m256d test_mm256_permute2f128_pd_ab_zero_overwritte(__m256d a, __m256d b) {
     //CIR-LABEL: test_mm256_permute2f128_pd_ab_zero_overwritte
-    //CIR: {{.*}} = cir.const #cir.zero : !cir.vector<4 x !cir.double> 
+    //CIR: {{.*}} = cir.const #cir.zero : !cir.vector<4 x !cir.double>
     //CIR: cir.return {{.*}} : !cir.vector<4 x !cir.double>
 
-    //LLVM: store <4 x double> zeroinitializer
+    //LLVM: ret <4 x double> zeroinitializer
 
     //OGCG: ret <4 x double> zeroinitializer
     return _mm256_permute2f128_pd(a, b, 0xA8);
@@ -333,11 +333,11 @@ __m256d test_mm256_permute2f128_pd_ab_zero_overwritte(__m256d a, __m256d b) {
 
 __m256d test_mm256_permute2f128_pd_a_zero_b_zero(__m256d a, __m256d b) {
     //CIR-LABEL: test_mm256_permute2f128_pd_a_zero_b_zero
-    //CIR: {{.*}} = cir.const #cir.zero : !cir.vector<4 x !cir.double> 
+    //CIR: {{.*}} = cir.const #cir.zero : !cir.vector<4 x !cir.double>
     //CIR: cir.return {{.*}} : !cir.vector<4 x !cir.double>
 
-    //LLVM: store <4 x double> zeroinitializer
- 
+    //LLVM: ret <4 x double> zeroinitializer
+
     //OGCG: ret <4 x double> zeroinitializer
     return _mm256_permute2f128_pd(a, b, 0x88);
 }

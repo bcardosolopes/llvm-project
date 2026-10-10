@@ -22,9 +22,7 @@ __m512 test_mm512_undefined(void) {
   // CIR: cir.return %{{.*}} : !cir.vector<16 x !cir.float>
 
   // LLVM-LABEL: test_mm512_undefined
-  // LLVM: store <16 x float> zeroinitializer, ptr %[[A:.*]], align 64
-  // LLVM: %{{.*}} = load <16 x float>, ptr %[[A]], align 64
-  // LLVM: ret <16 x float> %{{.*}}
+  // LLVM: ret <16 x float> zeroinitializer
 
   // OGCG-LABEL: test_mm512_undefined
   // OGCG: ret <16 x float> zeroinitializer
@@ -38,9 +36,7 @@ __m512 test_mm512_undefined_ps(void) {
   // CIR: cir.return %{{.*}} : !cir.vector<16 x !cir.float>
 
   // LLVM-LABEL: test_mm512_undefined_ps
-  // LLVM: store <16 x float> zeroinitializer, ptr %[[A:.*]], align 64
-  // LLVM: %{{.*}} = load <16 x float>, ptr %[[A]], align 64
-  // LLVM: ret <16 x float> %{{.*}}
+  // LLVM: ret <16 x float> zeroinitializer
 
   // OGCG-LABEL: test_mm512_undefined_ps
   // OGCG: ret <16 x float> zeroinitializer
@@ -53,9 +49,7 @@ __m512d test_mm512_undefined_pd(void) {
   // CIR: cir.return %{{.*}} : !cir.vector<8 x !cir.double>
 
   // LLVM-LABEL: test_mm512_undefined_pd
-  // LLVM: store <8 x double> zeroinitializer, ptr %[[A:.*]], align 64
-  // LLVM: %{{.*}} = load <8 x double>, ptr %[[A]], align 64
-  // LLVM: ret <8 x double> %{{.*}}
+  // LLVM: ret <8 x double> zeroinitializer
 
   // OGCG-LABEL: test_mm512_undefined_pd
   // OGCG: ret <8 x double> zeroinitializer
@@ -69,9 +63,7 @@ __m512i test_mm512_undefined_epi32(void) {
   // CIR: cir.return %{{.*}} : !cir.vector<8 x !s64i>
 
   // LLVM-LABEL: test_mm512_undefined_epi32
-  // LLVM: store <8 x i64> zeroinitializer, ptr %[[A:.*]], align 64
-  // LLVM: %{{.*}} = load <8 x i64>, ptr %[[A]], align 64
-  // LLVM: ret <8 x i64> %{{.*}}
+  // LLVM: ret <8 x i64> zeroinitializer
 
   // OGCG-LABEL: test_mm512_undefined_epi32
   // OGCG: ret <8 x i64> zeroinitializer
@@ -1052,9 +1044,7 @@ __m256i test_mm512_cvtepi64_epi32(__m512i __A) {
   // CIR-LABEL: test_mm512_cvtepi64_epi32
   // CIR: %[[TRUNC:.*]] = cir.cast integral {{.*}} : !cir.vector<8 x !s64i> -> !cir.vector<8 x !s32i>
   // CIR: %[[RETBC:.*]] = cir.cast bitcast {{.*}} : !cir.vector<8 x !s32i> -> !cir.vector<4 x !s64i>
-  // CIR: cir.store %[[RETBC]], %[[RETPTR:.*]] : !cir.vector<4 x !s64i>, !cir.ptr<!cir.vector<4 x !s64i>>
-  // CIR: %[[RETLOAD:.*]] = cir.load %[[RETPTR]] : !cir.ptr<!cir.vector<4 x !s64i>>, !cir.vector<4 x !s64i>
-  // CIR: cir.return %[[RETLOAD]] : !cir.vector<4 x !s64i>
+  // CIR: cir.return %[[RETBC]] : !cir.vector<4 x !s64i>
   
   // LLVM-LABEL: test_mm512_cvtepi64_epi32
   // LLVM: %[[TRUNC:.*]] = trunc <8 x i64> %{{.*}} to <8 x i32>
@@ -1072,9 +1062,7 @@ __m256i test_mm512_mask_cvtepi64_epi32(__m256i __O, __mmask8 __M, __m512i __A) {
   // CIR: %[[MASK_VEC:.*]] = cir.cast bitcast {{.*}} : !u8i -> !cir.vector<8 x !cir.int<s, 1>>
   // CIR: %[[TER:.*]] = cir.vec.ternary(%[[MASK_VEC]], %[[TRUNC]], {{.*}}) : !cir.vector<8 x !cir.int<s, 1>>, !cir.vector<8 x !s32i>
   // CIR: %[[RETBC:.*]] = cir.cast bitcast %[[TER]] : !cir.vector<8 x !s32i> -> !cir.vector<4 x !s64i>
-  // CIR: cir.store %[[RETBC]], %[[RETPTR:.*]] : !cir.vector<4 x !s64i>, !cir.ptr<!cir.vector<4 x !s64i>>
-  // CIR: %[[RETLOAD:.*]] = cir.load %[[RETPTR]] : !cir.ptr<!cir.vector<4 x !s64i>>, !cir.vector<4 x !s64i>
-  // CIR: cir.return %[[RETLOAD]] : !cir.vector<4 x !s64i>
+  // CIR: cir.return %[[RETBC]] : !cir.vector<4 x !s64i>
   
   // LLVM-LABEL: test_mm512_mask_cvtepi64_epi32
   // LLVM: %[[TRUNC:.*]] = trunc <8 x i64> %{{.*}} to <8 x i32>
@@ -1093,9 +1081,7 @@ __m256i test_mm512_mask_cvtepi64_epi32(__m256i __O, __mmask8 __M, __m512i __A) {
 __m256i test_mm512_maskz_cvtepi64_epi32(__mmask8 __M, __m512i __A) {
   // CIR-LABEL: test_mm512_maskz_cvtepi64_epi32
   // CIR: %[[CALL:.*]] = cir.call {{.*}} : (!u8i{{.*}}, !cir.vector<8 x !s64i>{{.*}}) -> {{\(?}}!cir.vector<4 x !s64i>{{.*\)?}}
-  // CIR: cir.store %[[CALL]], %[[RETPTR:.*]] : !cir.vector<4 x !s64i>, !cir.ptr<!cir.vector<4 x !s64i>>
-  // CIR: %[[RETLOAD:.*]] = cir.load %[[RETPTR]] : !cir.ptr<!cir.vector<4 x !s64i>>, !cir.vector<4 x !s64i>
-  // CIR: cir.return %[[RETLOAD]] : !cir.vector<4 x !s64i>
+  // CIR: cir.return %[[CALL]] : !cir.vector<4 x !s64i>
   
   // LLVM-LABEL: test_mm512_maskz_cvtepi64_epi32
   // LLVM: %[[TRUNC:.*]] = trunc <8 x i64> %{{.*}} to <8 x i32>

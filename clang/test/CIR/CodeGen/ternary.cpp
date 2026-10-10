@@ -11,7 +11,6 @@ int x(int y) {
 
 // CIR-LABEL: cir.func{{.*}} @_Z1xi(
 // CIR-SAME: %[[ARG0:.*]]: !s32i {{.*}}) -> (!s32i{{.*}}) attributes {{{.*}}nothrow, optnone} {
-// CIR: [[RETVAL:%.+]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR: [[Y:%.+]] = cir.alloca "y" {{.*}} init : !cir.ptr<!s32i>
 // CIR: cir.store %[[ARG0]], [[Y]] : !s32i, !cir.ptr<!s32i>
 // CIR: [[YVAL:%.+]] = cir.load{{.*}} [[Y]] : !cir.ptr<!s32i>, !s32i
@@ -20,21 +19,16 @@ int x(int y) {
 // CIR: [[THREE:%.+]] = cir.const #cir.int<3> : !s32i
 // CIR: [[FIVE:%.+]] = cir.const #cir.int<5> : !s32i
 // CIR: [[SELECT_RES:%.+]] = cir.select if [[CMP]] then [[THREE]] else [[FIVE]] : (!cir.bool, !s32i, !s32i) -> !s32i
-// CIR: cir.store [[SELECT_RES]], [[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR: [[RETVAL_VAL:%.+]] = cir.load [[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.return [[RETVAL_VAL]] : !s32i
+// CIR: cir.return [[SELECT_RES]] : !s32i
 
 // LLVM-LABEL: define{{.*}} i32 @_Z1xi(
 // LLVM-SAME: i32 {{.*}} %[[ARG0:.+]])
-// LLVM: %[[RETVAL:.*]] = alloca i32
 // LLVM: %[[Y:.*]] = alloca i32
 // LLVM: store i32 %[[ARG0]], ptr %[[Y]]
 // LLVM: %[[YVAL:.*]] = load i32, ptr %[[Y]]
 // LLVM: %[[CMP:.*]] = icmp sgt i32 %[[YVAL]], 0
 // LLVM: %[[SELECT:.*]] = select i1 %[[CMP]], i32 3, i32 5
-// LLVM: store i32 %[[SELECT]], ptr %[[RETVAL]]
-// LLVM: %[[RESULT:.*]] = load i32, ptr %[[RETVAL]]
-// LLVM: ret i32 %[[RESULT]]
+// LLVM: ret i32 %[[SELECT]]
 
 // OGCG-LABEL: define{{.*}} i32 @_Z1xi(
 // OGCG-SAME: i32 {{.*}} %[[ARG0:.+]])
@@ -53,6 +47,7 @@ int foo(int a, int b) {
 
 // CIR-LABEL: cir.func{{.*}} @_Z3fooii(
 // CIR-SAME: %[[ARG0:.*]]: !s32i {{.*}}, %[[ARG1:.*]]: !s32i {{.*}}) -> (!s32i{{.*}}) attributes {{{.*}}nothrow, optnone} {
+// CIR: [[RETVAL:%.+]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR: [[A:%.+]] = cir.alloca "a" {{.*}} init : !cir.ptr<!s32i>
 // CIR: [[B:%.+]] = cir.alloca "b" {{.*}} init : !cir.ptr<!s32i>
 // CIR: cir.store %[[ARG0]], [[A]] : !s32i, !cir.ptr<!s32i>
@@ -208,9 +203,7 @@ int& test_cond_lvalue_ref(bool cond, int x, int y) {
 // CIR: }, false {
 // CIR:   cir.yield %[[Y]] : !cir.ptr<!s32i>
 // CIR: }) : (!cir.bool) -> !cir.ptr<!s32i>
-// CIR: cir.store %[[REF_PTR]]
-// CIR: %[[RET_VAL:.*]] = cir.load
-// CIR: cir.return %[[RET_VAL]] : !cir.ptr<!s32i>
+// CIR: cir.return %[[REF_PTR]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}} ptr @_Z20test_cond_lvalue_refbii(
 // LLVM: %[[COND:.*]] = alloca i8
@@ -227,9 +220,7 @@ int& test_cond_lvalue_ref(bool cond, int x, int y) {
 // LLVM:   %[[PHI:.*]] = phi ptr [ %[[Y]], %[[FALSE_BB]] ], [ %[[X]], %[[TRUE_BB]] ]
 // LLVM:   br label %[[CONT:.*]]
 // LLVM: [[CONT]]:
-// LLVM:   store ptr %[[PHI]]
-// LLVM:   %[[RET:.*]] = load ptr
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z20test_cond_lvalue_refbii(
 // OGCG: %[[COND:.*]] = alloca i8

@@ -72,8 +72,8 @@ int use_base() {
 // CIR: cir.func{{.*}} @_Z8use_basev
 // CIR:   %[[D_ADDR:.*]] = cir.alloca "d" {{.*}} : !cir.ptr<!rec_Derived>
 // CIR:   %[[BASE_ADDR:.*]] cir.base_class_addr nonnull %[[D_ADDR]] [0] : !cir.ptr<!rec_Derived> -> !cir.ptr<!rec_Base>
-// CIR:   %[[D_A_ADDR:.*]] = cir.get_member %2[0] {name = "a"} : !cir.ptr<!rec_Base> -> !cir.ptr<!s32i>
-// CIR:   %[[D_A:.*]] = cir.load align(4) %3 : !cir.ptr<!s32i>, !s32i
+// CIR:   %[[D_A_ADDR:.*]] = cir.get_member %1[0] {name = "a"} : !cir.ptr<!rec_Base> -> !cir.ptr<!s32i>
+// CIR:   %[[D_A:.*]] = cir.load align(4) %2 : !cir.ptr<!s32i>, !s32i
 
 // LLVM: define{{.*}} i32 @_Z8use_basev
 // LLVM:   %[[D:.*]] = alloca %class.Derived

@@ -787,6 +787,15 @@ public:
 
   void finishFunction(SourceLocation endLoc);
 
+  /// If the __retval slot has exactly one store and one load in the same
+  /// block with the store first, return the stored value directly and delete
+  /// the store/load/alloca triple. Multi-return functions keep the slot.
+  /// Must only be called once every `cir.return` is emitted (i.e. after the
+  /// outermost LexicalScope closes): deferred and implicit fall-off returns
+  /// load the slot, so eliding earlier both undercounts uses and leaves
+  /// later emission reading an erased slot.
+  void tryElideRetAlloca();
+
   /// Determine whether the given initializer is trivial in the sense
   /// that it requires no code to be generated.
   bool isTrivialInitializer(const Expr *init);

@@ -14,15 +14,9 @@ int f0(void) {
   return __builtin_omp_required_simd_align(struct s0);
 }
 
-// CIR: %[[RET_ADDR:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR: %[[CONST_16:.*]] = cir.const #cir.int<16> : !s32i
-// CIR: cir.store %[[CONST_16]], %[[RET_ADDR]] : !s32i, !cir.ptr<!s32i>
-// CIR: %[[TMP_RET:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.return %[[TMP_RET]] : !s32i
+// CIR: cir.return %[[CONST_16]] : !s32i
 
-// LLVM: %[[RET_ADDR:.*]] = alloca i32
-// LLVM: store i32 16, ptr %[[RET_ADDR]], align 4
-// LLVM: %[[TMP_RET:.*]] = load i32, ptr %[[RET_ADDR]], align 4
-// LLVM: ret i32 %[[TMP_RET]]
+// LLVM: ret i32 16
 
 // OGCG: ret i32 16

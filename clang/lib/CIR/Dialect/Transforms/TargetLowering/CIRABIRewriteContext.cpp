@@ -1352,10 +1352,18 @@ insertArgCoercion(mlir::FunctionOpInterface funcOp,
 /// return statement, and every such load reads the single `__retval`
 /// alloca (CIR does not merge returns into a shared epilogue block).  The
 /// alloca is therefore rewired to the sret pointer once; each cir.return is
-/// then collapsed to a bare return and its now-dead load erased.  This
-/// `cir.return (cir.load <alloca>)` shape is an invariant guaranteed by
-/// CIRGen, so it is asserted via `cast<>` rather than guarded with a
-/// fallback.
+/// then collapsed to a bare return and its now-dead load erased.
+///
+/// Two shapes carry no rewireable alloca and are instead stored into the
+/// sret slot directly.  First, when the function has a single store/load
+/// pair through `__retval`, CIRGen elides the slot (dominating-store
+/// elision, mirroring classic CodeGen) and the return carries the stored
+/// SSA value directly.  Second, the return may load from non-alloca memory
+/// such as a byval parameter.  Elision only fires for plain store/load
+/// pairs -- never when a constructor call targets the slot -- so in both
+/// shapes the value is already fully materialized and the direct store is
+/// exactly equivalent to the rewired store; the SSO concern above does
+/// not apply.
 void insertSRetStores(mlir::FunctionOpInterface funcOp, mlir::Type origRetTy,
                       mlir::OpBuilder &builder) {
   mlir::Value sretPtr = funcOp.getArguments()[0];
@@ -1365,31 +1373,45 @@ void insertSRetStores(mlir::FunctionOpInterface funcOp, mlir::Type origRetTy,
 
   cir::AllocaOp retAlloca = nullptr;
   for (cir::ReturnOp retOp : returnOps) {
-    // Every cir.return in an sret function must carry the loaded return
-    // value -- a bare return would mean the sret slot was never written.
+    // Every cir.return in an sret function must carry the return value --
+    // a bare return would mean the sret slot was never written.
     assert(!retOp.getInput().empty() &&
            "cir.return in sret function must have an operand");
 
+    mlir::Value retVal = retOp.getInput()[0];
     cir::LoadOp retLoad =
-        mlir::cast<cir::LoadOp>(retOp.getInput()[0].getDefiningOp());
-
-    // Rewire the shared `__retval` alloca to the sret pointer once.
-    // replaceAllUsesWith updates every load of the alloca (including those
-    // feeding the other cir.return ops) to read from sretPtr instead, so
-    // all returns are covered by this single rewiring.  Only then is the
-    // now-unused alloca safe to erase.
-    if (!retAlloca) {
-      retAlloca = mlir::cast<cir::AllocaOp>(retLoad.getAddr().getDefiningOp());
-      retAlloca.getResult().replaceAllUsesWith(sretPtr);
-      retAlloca->erase();
+        mlir::dyn_cast_or_null<cir::LoadOp>(retVal.getDefiningOp());
+    cir::AllocaOp addrAlloca = retLoad ? mlir::dyn_cast_or_null<cir::AllocaOp>(
+                                             retLoad.getAddr().getDefiningOp())
+                                       : nullptr;
+    builder.setInsertionPoint(retOp);
+    if (addrAlloca) {
+      // Rewire the shared `__retval` alloca to the sret pointer once.
+      // replaceAllUsesWith updates every load of the alloca (including
+      // those feeding the other cir.return ops) to read from sretPtr
+      // instead, so all returns are covered by this single rewiring.
+      // Only then is the now-unused alloca safe to erase.
+      if (!retAlloca) {
+        retAlloca = addrAlloca;
+        retAlloca.getResult().replaceAllUsesWith(sretPtr);
+        retAlloca->erase();
+      }
+    } else if (!retLoad || retLoad.getAddr() != sretPtr) {
+      // No rewireable alloca: either a value-fed return (CIRGen elided the
+      // `__retval` slot) or a load from non-alloca memory (e.g. a byval
+      // parameter). Either way the value is fully materialized, so store
+      // it into the sret slot; this is exactly equivalent to the rewired
+      // store above. (A load already reading sretPtr -- rewired on an
+      // earlier iteration -- needs no store, just the collapse below.)
+      cir::StoreOp::create(builder, retOp.getLoc(), retVal, sretPtr, {}, {}, {},
+                           {}, {});
     }
 
     // The sret slot now holds the return value directly; replace the
     // value-carrying return with a void return (no operand).
-    builder.setInsertionPoint(retOp);
     cir::ReturnOp::create(builder, retOp.getLoc());
     retOp->erase();
-    if (retLoad.use_empty())
+    if (retLoad && retLoad.use_empty())
       retLoad->erase();
   }
 }

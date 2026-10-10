@@ -180,7 +180,7 @@ Derived *ptr_cast_always_fail(Base2 *ptr) {
 //      CIR: cir.func {{.*}} @_Z20ptr_cast_always_failP5Base2
 //      CIR:   %{{.+}} = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!rec_Base2>>, !cir.ptr<!rec_Base2>
 // CIR-NEXT:   %[[RESULT:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!rec_Derived>
-// CIR-NEXT:   cir.store %[[RESULT]], %{{.*}} : !cir.ptr<!rec_Derived>, !cir.ptr<!cir.ptr<!rec_Derived>>
+// CIR-NEXT:   cir.return %[[RESULT]] : !cir.ptr<!rec_Derived>
 
 //      LLVM: define {{.*}} ptr @_Z20ptr_cast_always_failP5Base2
 // LLVM-NEXT:   ret ptr null

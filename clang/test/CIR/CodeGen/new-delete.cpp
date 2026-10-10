@@ -13,7 +13,6 @@ A *a() {
 }
 
 // CIR: cir.func {{.*}} @_Z1av() -> !cir.ptr<!rec_A>{{.*}} {
-// CIR:   %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!rec_A>>
 // CIR:   %[[NEW_RESULT:.*]] = cir.alloca "__new_result" {{.*}} : !cir.ptr<!cir.ptr<!rec_A>>
 // CIR:   %[[ALLOC_SIZE:.*]] = cir.const #cir.int<8> : !u64i
 // CIR:   %[[PTR:.*]] = cir.call @_Znwm(%[[ALLOC_SIZE]]) {{{.*}}builtin}
@@ -29,7 +28,6 @@ A *a() {
 // CIR:   }
 
 // LLVM: define {{.*}} ptr @_Z1av() {{.*}} personality ptr @__gxx_personality_v0 {
-// LLVM:   %[[RETVAL:.*]] = alloca ptr
 // LLVM:   %[[NEW_RESULT:.*]] = alloca ptr
 // LLVM:   %[[PTR:.*]] = call nonnull ptr @_Znwm(i64 8) #[[ATTR_BUILTIN_NEW:.*]]
 // LLVM:   br label %[[EH_SCOPE:.*]]
@@ -54,9 +52,7 @@ A *a() {
 // LLVM:   resume { ptr, i32 } %[[EXN_INSERT_2]]
 // LLVM: [[EH_SCOPE_END]]:
 // LLVM:   %[[LOAD:.*]] = load ptr, ptr %[[NEW_RESULT]]
-// LLVM:   store ptr %[[LOAD]], ptr %[[RETVAL]]
-// LLVM:   %[[RET:.*]] = load ptr, ptr %[[RETVAL]]
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[LOAD]]
 
 // OGCG: define {{.*}} ptr @_Z1av() {{.*}} personality ptr @__gxx_personality_v0 {
 // OGCG:   %[[EXN_SLOT:.*]] = alloca ptr
@@ -88,7 +84,6 @@ A *b() {
 }
 
 // CIR: cir.func {{.*}} @_Z1bv() -> !cir.ptr<!rec_A>{{.*}} {
-// CIR:   %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!rec_A>>
 // CIR:   %[[NEW_RESULT:.*]] = cir.alloca "__new_result" {{.*}} : !cir.ptr<!cir.ptr<!rec_A>>
 // CIR:   %[[ALLOC_SIZE:.*]] = cir.const #cir.int<8> : !u64i
 // CIR:   %[[PTR:.*]] = cir.call @_Znwm(%[[ALLOC_SIZE]]) {{{.*}}builtin}
@@ -104,7 +99,6 @@ A *b() {
 // CIR:   }
 
 // LLVM: define {{.*}} ptr @_Z1bv() {{.*}} personality ptr @__gxx_personality_v0 {
-// LLVM:   %[[RETVAL:.*]] = alloca ptr
 // LLVM:   %[[NEW_RESULT:.*]] = alloca ptr
 // LLVM:   %[[PTR:.*]] = call nonnull ptr @_Znwm(i64 8) #[[ATTR_BUILTIN_NEW]]
 // LLVM:   br label %[[EH_SCOPE:.*]]
@@ -132,9 +126,7 @@ A *b() {
 // LLVM:   resume { ptr, i32 } %[[EXN_INSERT_2]]
 // LLVM: [[EH_SCOPE_END]]:
 // LLVM:   %[[LOAD:.*]] = load ptr, ptr %[[NEW_RESULT]]
-// LLVM:   store ptr %[[LOAD]], ptr %[[RETVAL]]
-// LLVM:   %[[RET:.*]] = load ptr, ptr %[[RETVAL]]
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[LOAD]]
 
 // OGCG: define {{.*}} ptr @_Z1bv() {{.*}} personality ptr @__gxx_personality_v0 {
 // OGCG:   %[[EXN_SLOT:.*]] = alloca ptr
@@ -178,7 +170,6 @@ B *c() {
 }
 
 // CIR: cir.func {{.*}} @_Z1cv() -> !cir.ptr<!rec_B>{{.*}} {
-// CIR:   %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!rec_B>>
 // CIR:   %[[NEW_RESULT:.*]] = cir.alloca "__new_result" {{.*}} : !cir.ptr<!cir.ptr<!rec_B>>
 // CIR:   %[[ALLOC_SIZE:.*]] = cir.const #cir.int<4> : !u64i
 // CIR:   %[[PTR:.*]] = cir.call @_ZN1BnwEm(%[[ALLOC_SIZE]]) : (!u64i) -> !cir.ptr<!void>
@@ -194,7 +185,6 @@ B *c() {
 // CIR:   }
 
 // LLVM: define {{.*}} ptr @_Z1cv() {{.*}} personality ptr @__gxx_personality_v0 {
-// LLVM:   %[[RETVAL:.*]] = alloca ptr
 // LLVM:   %[[NEW_RESULT:.*]] = alloca ptr
 // LLVM:   %[[PTR:.*]] = call ptr @_ZN1BnwEm(i64 4)
 // LLVM:   br label %[[EH_SCOPE:.*]]
@@ -219,9 +209,7 @@ B *c() {
 // LLVM:   resume { ptr, i32 } %[[EXN_INSERT_2]]
 // LLVM: [[EH_SCOPE_END]]:
 // LLVM:   %[[LOAD:.*]] = load ptr, ptr %[[NEW_RESULT]]
-// LLVM:   store ptr %[[LOAD]], ptr %[[RETVAL]]
-// LLVM:   %[[RET:.*]] = load ptr, ptr %[[RETVAL]]
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[LOAD]]
 
 // OGCG: define {{.*}} ptr @_Z1cv() {{.*}} personality ptr @__gxx_personality_v0 {
 // OGCG:   %[[EXN_SLOT:.*]] = alloca ptr

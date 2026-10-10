@@ -470,7 +470,6 @@ union VI passVI(const union VI *p) { return takeVI(*p); }
 // CIR-LABEL: cir.func {{.*}} @passVI(%arg0: !cir.ptr<!rec_VI> {llvm.noundef} loc({{[^)]+}})) -> !rec_anon_struct1
 // CIR:   %[[RSLOT:.+]] = cir.alloca "coerce" align(16) : !cir.ptr<!rec_anon_struct1>
 // CIR:   %[[TMP:.+]] = cir.alloca "coerce" align(16) : !cir.ptr<!rec_VI>
-// CIR:   %[[RETVAL:.+]] = cir.alloca "__retval" align(16) : !cir.ptr<!rec_VI>
 // CIR:   cir.copy %{{[^ ]+}} align(16) to %[[TMP]] align(16) : !cir.ptr<!rec_VI>
 // CIR:   %[[VIEW:.+]] = cir.cast bitcast %[[TMP]] : !cir.ptr<!rec_VI> -> !cir.ptr<!rec_anon_struct1>
 // CIR:   %[[LOP:.+]] = cir.get_member %[[VIEW]][0] {name = ""} : !cir.ptr<!rec_anon_struct1> -> !cir.ptr<!u64i>
@@ -480,7 +479,9 @@ union VI passVI(const union VI *p) { return takeVI(*p); }
 // CIR:   %[[RES:.+]] = cir.call @takeVI(%[[LO]], %[[HI]]) : (!u64i, !cir.double) -> !rec_anon_struct1
 // CIR:   cir.store %[[RES]], %[[RSLOT]] : !rec_anon_struct1, !cir.ptr<!rec_anon_struct1>
 // CIR:   %[[RVIEW:.+]] = cir.cast bitcast %[[RSLOT]] : !cir.ptr<!rec_anon_struct1> -> !cir.ptr<!rec_VI>
-// CIR:   cir.copy %[[RVIEW]] align(16) to %[[RETVAL]] align(16) : !cir.ptr<!rec_VI>
+// CIR:   %[[RVIEW2:.+]] = cir.cast bitcast %[[RVIEW]] : !cir.ptr<!rec_VI> -> !cir.ptr<!rec_anon_struct1>
+// CIR:   %[[RET:.+]] = cir.load align(16) %[[RVIEW2]] : !cir.ptr<!rec_anon_struct1>, !rec_anon_struct1
+// CIR:   cir.return %[[RET]] : !rec_anon_struct1
 
 // LLVM-LABEL: define dso_local { i64, double } @passVI(ptr noundef %{{[^,)]+}})
 // LLVM:   call { i64, double } @takeVI(i64 %{{[^,)]+}}, double %{{[^,)]+}})

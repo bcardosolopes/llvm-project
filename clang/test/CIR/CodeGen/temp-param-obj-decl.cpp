@@ -26,18 +26,14 @@ const auto *ptr = get_ptr<HasMem{3}>();
 template<HasMem m>
 int get_x() { return m.x; }
 // CIR-LABEL: cir.func {{.*}}@_Z5get_xIXtl6HasMemLi1EEEEiv()
-// CIR: %[[RET_ALLOCA:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // Note: This is emitted as an 'ignored' expression, but we cannot omit it,
 // since it might be used in an example like below.
 // CIR: %[[GET_GLOB:.*]] = cir.get_global @_ZTAXtl6HasMemLi1EEE : !cir.ptr<!rec_HasMem>
 // CIR: %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
-// CIR: cir.store %[[ONE]], %[[RET_ALLOCA]] : !s32i, !cir.ptr<!s32i>
+// CIR: cir.return %[[ONE]] : !s32i
 //
 // LLVM-BOTH-LABEL: define {{.*}}@_Z5get_xIXtl6HasMemLi1EEEEiv()
-// LLVM: %[[RET_ALLOCA:.*]] = alloca i32
-// LLVM: store i32 1, ptr %[[RET_ALLOCA]]
-// LLVM: %[[LOAD_RET:.*]] = load i32, ptr %[[RET_ALLOCA]]
-// LLVM: ret i32 %[[LOAD_RET]]
+// LLVM: ret i32 1
 // OGCG: ret i32 1
 
 template<HasMem m>

@@ -30,9 +30,9 @@ void use() {
 
 // CIR: cir.func{{.*}} @_ZN12_GLOBAL__N_114internalCalledEv
 // CIR:   %[[ONE:.*]] = cir.const #cir.int<1>
-// CIR:   cir.store %[[ONE]], %[[RET_ADDR:.*]]
+// CIR:   cir.return %[[ONE]] : !s32i
 
 // CIR: cir.func{{.*}} @_ZN1S12inlineCalledEv
 // CIR:   %[[THIS:.*]] = cir.alloca "this" {{.*}} init : !cir.ptr<!cir.ptr<!rec_S>>
 // CIR:   %[[THREE:.*]] = cir.const #cir.int<3>
-// CIR:   cir.store %[[THREE]], %[[RET_ADDR:.*]]
+// CIR:   cir.return %[[THREE]] : !s32i

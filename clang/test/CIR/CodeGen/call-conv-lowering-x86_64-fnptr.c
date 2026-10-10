@@ -2,10 +2,10 @@
 // RUN: FileCheck --check-prefix=CIR --input-file=%t.cir %s
 // RUN: FileCheck --check-prefix=CIRGLOBAL --input-file=%t.cir %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -fclangir-call-conv-lowering -emit-llvm %s -o %t-cir.ll
-// RUN: FileCheck --check-prefixes=LLVM,LLVM-CIR --input-file=%t-cir.ll %s
+// RUN: FileCheck --check-prefixes=LLVM --input-file=%t-cir.ll %s
 // RUN: FileCheck --check-prefix=DECL --input-file=%t-cir.ll %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %s -o %t.ll
-// RUN: FileCheck --check-prefixes=LLVM,LLVM-OGCG --input-file=%t.ll %s
+// RUN: FileCheck --check-prefixes=LLVM --input-file=%t.ll %s
 // RUN: FileCheck --check-prefix=DECL --input-file=%t.ll %s
 
 // Module-level items, which the two backends order differently against the
@@ -41,13 +41,10 @@ BigFP get_big(void) { return make_big; }
 // CIR-LABEL: cir.func{{.*}} @get_big() -> !cir.ptr<!cir.func<(!s32i) -> !rec_Big>>
 // CIR:         %[[G:[0-9]+]] = cir.get_global @make_big : !cir.ptr<!cir.func<(!cir.ptr<!rec_Big>, !s32i)>>
 // CIR-NEXT:    %[[C:[0-9]+]] = cir.cast bitcast %[[G]] : !cir.ptr<!cir.func<(!cir.ptr<!rec_Big>, !s32i)>> -> !cir.ptr<!cir.func<(!s32i) -> !rec_Big>>
-// CIR-NEXT:    cir.store %[[C]], %{{[0-9]+}} :
+// CIR-NEXT:    cir.return %[[C]] : !cir.ptr<!cir.func<(!s32i) -> !rec_Big>>
 
 // LLVM-LABEL: define dso_local ptr @get_big()
-// LLVM-CIR:     store ptr @make_big, ptr %[[SLOT:[a-zA-Z0-9._]+]], align 8
-// LLVM-CIR:     %[[FP:[a-zA-Z0-9._]+]] = load ptr, ptr %[[SLOT]], align 8
-// LLVM-CIR:     ret ptr %[[FP]]
-// LLVM-OGCG:    ret ptr @make_big{{$}}
+// LLVM:         ret ptr @make_big{{$}}
 
 // An 8-byte return is coerced into a register, changing the return type.
 PairFP get_pair(void) { return make_pair; }
@@ -57,8 +54,7 @@ PairFP get_pair(void) { return make_pair; }
 // CIR-NEXT:    %[[C:[0-9]+]] = cir.cast bitcast %[[G]] : !cir.ptr<!cir.func<(!s32i) -> !u64i>> -> !cir.ptr<!cir.func<(!s32i) -> !rec_Pair2>>
 
 // LLVM-LABEL: define dso_local ptr @get_pair()
-// LLVM-CIR:     store ptr @make_pair, ptr %{{[a-zA-Z0-9._]+}}, align 8
-// LLVM-OGCG:    ret ptr @make_pair{{$}}
+// LLVM:         ret ptr @make_pair{{$}}
 
 // The address of a definition, whose body the sret rewrite also rewires.
 Big make_big_def(int n) { Big b = {n, n, n, n}; return b; }
@@ -71,8 +67,7 @@ BigFP get_def(void) { return make_big_def; }
 
 // LLVM-LABEL: define dso_local void @make_big_def(ptr dead_on_unwind noalias writable sret(%struct.Big) align 8 %{{.+}}, i32 noundef %{{.+}})
 // LLVM-LABEL: define dso_local ptr @get_def()
-// LLVM-CIR:     store ptr @make_big_def, ptr %{{[a-zA-Z0-9._]+}}, align 8
-// LLVM-OGCG:    ret ptr @make_big_def{{$}}
+// LLVM:         ret ptr @make_big_def{{$}}
 
 // Calling through the address reaches the callee at its rewritten signature.
 Big call_local(int n) {

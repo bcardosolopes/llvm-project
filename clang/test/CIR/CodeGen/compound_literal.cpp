@@ -13,7 +13,6 @@ int foo() {
 // CIR-DAG: cir.global "private" constant cir_private @[[FOO4_P:.*]] = #cir.const_record<{#cir.int<5> : !s32i, #cir.int<10> : !s32i}> : !rec_Point
 // LLVM-DAG: @[[FOO4_P:.*]] = private constant %struct.Point { i32 5, i32 10 }
 
-// CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR: %[[INIT:.*]] = cir.alloca "e" {{.*}} init : !cir.ptr<!s32i>
 // CIR: %[[COMPOUND:.*]] = cir.alloca ".compoundliteral" {{.*}} init : !cir.ptr<!s32i>
 // CIR: %[[VALUE:.*]] = cir.const #cir.int<1> : !s32i
@@ -21,20 +20,15 @@ int foo() {
 // CIR: %[[TMP:.*]] = cir.load{{.*}} %[[COMPOUND]] : !cir.ptr<!s32i>, !s32i
 // CIR: cir.store{{.*}}  %[[TMP]], %[[INIT]] : !s32i, !cir.ptr<!s32i>
 // CIR: %[[TMP_2:.*]] = cir.load{{.*}} %[[INIT]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.store %[[TMP_2]], %[[RET]] : !s32i, !cir.ptr<!s32i>
-// CIR: %[[TMP_3:.*]] = cir.load %[[RET]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.return %[[TMP_3]] : !s32i
+// CIR: cir.return %[[TMP_2]] : !s32i
 
-// LLVM: %[[RET:.*]] = alloca i32, align 4
 // LLVM: %[[INIT:.*]] = alloca i32, align 4
 // LLVM: %[[COMPOUND:.*]] = alloca i32, align 4
 // LLVM: store i32 1, ptr %[[COMPOUND]], align 4
 // LLVM: %[[TMP:.*]] = load i32, ptr %[[COMPOUND]], align 4
 // LLVM: store i32 %[[TMP]], ptr %[[INIT]], align 4
 // LLVM: %[[TMP_2:.*]] = load i32, ptr %[[INIT]], align 4
-// LLVM: store i32 %[[TMP_2]], ptr %[[RET]], align 4
-// LLVM: %[[TMP_3:.*]] = load i32, ptr %[[RET]], align 4
-// LLVM: ret i32 %[[TMP_3]]
+// LLVM: ret i32 %[[TMP_2]]
 
 // OGCG: %[[INIT:.*]] = alloca i32, align 4
 // OGCG: %[[COMPOUND:.*]] = alloca i32, align 4

@@ -1,20 +1,19 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir -mmlir --mlir-print-ir-before=cir-lowering-prepare %s -o %t.cir 2> %t-before.cir
 // RUN: FileCheck %s --input-file=%t-before.cir --check-prefixes=CIR
 // RUN: FileCheck %s --input-file=%t.cir --check-prefixes=CIR
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefixes=LLVM,LLVM_CIR
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %s -o - | FileCheck %s --check-prefixes=LLVM,LLVM_OG
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefixes=LLVM
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %s -o - | FileCheck %s --check-prefixes=LLVM
 
 typedef void *vptr;
 typedef int(*fptr)(int, double);
 
 vptr vptr_add(vptr p) {
   // CIR-LABEL: vptr_add
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<3> : !s32i
   // CIR: %[[STRIDE:.*]] = cir.ptr_stride %[[ARG_LOAD]], %[[OFFSET]]
-  // CIR: cir.store {{.*}}%[[STRIDE]], %[[RET]]
+  // CIR: cir.return %[[STRIDE]] : !cir.ptr<!void>
 
   // LLVM-LABEL: vptr_add
   // LLVM_CIR: %[[RET:.*]] = alloca ptr
@@ -28,12 +27,11 @@ vptr vptr_add(vptr p) {
 
 vptr vptr_sub(vptr p) {
   // CIR-LABEL: vptr_sub
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<-2> : !s32i
   // CIR: %[[STRIDE:.*]] = cir.ptr_stride %[[ARG_LOAD]], %[[OFFSET]]
-  // CIR: cir.store {{.*}}%[[STRIDE]], %[[RET]]
+  // CIR: cir.return %[[STRIDE]] : !cir.ptr<!void>
 
   // LLVM-LABEL: vptr_sub
   // LLVM_CIR: %[[RET:.*]] = alloca ptr
@@ -47,7 +45,6 @@ vptr vptr_sub(vptr p) {
 
 vptr vptr_inc(vptr p) {
   // CIR-LABEL: vptr_inc
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<1> : !s32i
@@ -65,12 +62,11 @@ vptr vptr_inc(vptr p) {
 }
 vptr vptr_dec(vptr p) {
   // CIR-LABEL: vptr_dec
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!cir.ptr<!void>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<-1> : !s32i
   // CIR: %[[STRIDE:.*]] = cir.ptr_stride %[[ARG_LOAD]], %[[OFFSET]]
-  // CIR: cir.store {{.*}}%[[STRIDE]], %[[RET]]
+  // CIR: cir.store {{.*}}%[[STRIDE]], %[[ARG]]
 
   // LLVM-LABEL: vptr_dec
   // LLVM_CIR: %[[RET:.*]] = alloca ptr
@@ -84,12 +80,11 @@ vptr vptr_dec(vptr p) {
 
 fptr fptr_add(fptr p) {
   // CIR-LABEL: fptr_add
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init :  !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>, !cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<3> : !s32i
   // CIR: %[[STRIDE:.*]] = cir.ptr_stride %[[ARG_LOAD]], %[[OFFSET]]
-  // CIR: cir.store {{.*}}%[[STRIDE]], %[[RET]]
+  // CIR: cir.return %[[STRIDE]] : !cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>
 
   // LLVM-LABEL: fptr_add
   // LLVM_CIR: %[[RET:.*]] = alloca ptr
@@ -103,12 +98,11 @@ fptr fptr_add(fptr p) {
 
 fptr fptr_sub(fptr p) {
   // CIR-LABEL: fptr_sub
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} :  !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init :  !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>, !cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<-2> : !s32i
   // CIR: %[[STRIDE:.*]] = cir.ptr_stride %[[ARG_LOAD]], %[[OFFSET]]
-  // CIR: cir.store {{.*}}%[[STRIDE]], %[[RET]]
+  // CIR: cir.return %[[STRIDE]] : !cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>
 
   // LLVM-LABEL: fptr_sub
   // LLVM_CIR: %[[RET:.*]] = alloca ptr
@@ -122,7 +116,6 @@ fptr fptr_sub(fptr p) {
 
 fptr fptr_inc(fptr p) {
   // CIR-LABEL: fptr_inc
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>, !cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<1> : !s32i
@@ -139,12 +132,11 @@ fptr fptr_inc(fptr p) {
 }
 fptr fptr_dec(fptr p) {
   // CIR-LABEL: fptr_dec
-  // CIR: %[[RET:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG:.*]] = cir.alloca "p" {{.*}} init : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>
   // CIR: %[[ARG_LOAD:.*]] = cir.load {{.*}}%[[ARG]] : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>>, !cir.ptr<!cir.func<(!s32i, !cir.double) -> !s32i>>
   // CIR: %[[OFFSET:.*]] = cir.const #cir.int<-1> : !s32i
   // CIR: %[[STRIDE:.*]] = cir.ptr_stride %[[ARG_LOAD]], %[[OFFSET]]
-  // CIR: cir.store {{.*}}%[[STRIDE]], %[[RET]]
+  // CIR: cir.store {{.*}}%[[STRIDE]], %[[ARG]]
 
   // LLVM-LABEL: fptr_dec
   // LLVM_CIR: %[[RET:.*]] = alloca ptr
