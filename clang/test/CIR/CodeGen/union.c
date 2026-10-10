@@ -74,25 +74,19 @@ int f2(void) {
 }
 
 // CIR:      cir.func{{.*}} @f2() -> !s32i
-// CIR-NEXT:   %[[RETVAL_ADDR:.*]] = cir.alloca "__retval" align(4) : !cir.ptr<!s32i>
 // CIR-NEXT:   %[[U:.*]] = cir.alloca "u" align(4) : !cir.ptr<!rec_U1>
 // CIR-NEXT:   %[[I:.*]] = cir.const #cir.int<42> : !s32i
 // CIR-NEXT:   %[[N:.*]] = cir.get_member %[[U]][0] {name = "n"} : !cir.ptr<!rec_U1> -> !cir.ptr<!s32i>
 // CIR-NEXT:   cir.store{{.*}} %[[I]], %[[N]] : !s32i, !cir.ptr<!s32i>
 // CIR-NEXT:   %[[N2:.*]] = cir.get_member %[[U]][0] {name = "n"} : !cir.ptr<!rec_U1> -> !cir.ptr<!s32i>
 // CIR-NEXT:   %[[VAL:.*]] = cir.load{{.*}} %[[N2]] : !cir.ptr<!s32i>, !s32i
-// CIR-NEXT:   cir.store{{.*}} %[[VAL]], %[[RETVAL_ADDR]] : !s32i, !cir.ptr<!s32i>
-// CIR-NEXT:   %[[RET:.*]] = cir.load{{.*}} %[[RETVAL_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR-NEXT:   cir.return %[[RET]] : !s32i
+// CIR-NEXT:   cir.return %[[VAL]] : !s32i
 
 // LLVM:      define{{.*}} i32 @f2()
-// LLVM-NEXT:   %[[RETVAL:.*]] = alloca i32, align 4
 // LLVM-NEXT:   %[[U:.*]] = alloca %union.U1, align 4
 // LLVM-NEXT:   store i32 42, ptr %[[U]], align 4
 // LLVM-NEXT:   %[[N_VAL:.*]] = load i32, ptr %[[U]], align 4
-// LLVM-NEXT:   store i32 %[[N_VAL]], ptr %[[RETVAL]], align 4
-// LLVM-NEXT:   %[[RET:.*]] = load i32, ptr %[[RETVAL]], align 4
-// LLVM-NEXT:   ret i32 %[[RET]]
+// LLVM-NEXT:   ret i32 %[[N_VAL]]
 
 //      OGCG: define{{.*}} i32 @f2()
 // OGCG-NEXT: entry:

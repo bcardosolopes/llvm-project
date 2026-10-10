@@ -29,14 +29,12 @@ B::~B() { }
 // CIRRET-LABEL: cir.func {{.*}} @_ZN1BC2EPi(
 // CIRRET-SAME:    %[[THIS_ARG:[^:]*]]: !cir.ptr<!rec_B> {{{[^}]*}}llvm.returned{{[^}]*}}}
 // CIRRET-SAME:    -> (!cir.ptr<!rec_B> {llvm.noundef})
-// CIRRET:         %[[RETVAL:.*]] = cir.alloca "__retval"
+// CIRRET-NOT:     cir.alloca "__retval"
 // CIRRET:         %[[THIS_ADDR:.*]] = cir.alloca "this"
 // CIRRET:         cir.store %[[THIS_ARG]], %[[THIS_ADDR]]
 // CIRRET:         %[[THIS:.*]] = cir.load %[[THIS_ADDR]]
-// CIRRET-NEXT:    cir.store {{.*}}%[[THIS]], %[[RETVAL]]
 // CIRRET:         cir.call @_ZN1AC2Ev({{.*}}) : ({{.*}}) -> (!cir.ptr<!rec_A> {llvm.noundef})
-// CIRRET:         %[[RET:.*]] = cir.load %[[RETVAL]]
-// CIRRET-NEXT:    cir.return implicit %[[RET]] : !cir.ptr<!rec_B>
+// CIRRET:         cir.return implicit %[[THIS]] : !cir.ptr<!rec_B>
 // CIRRET-LABEL: cir.func {{.*}} @_ZN1BC1EPi(
 // CIRRET-SAME:    llvm.returned
 // CIRRET:         cir.call @_ZN1BC2EPi({{.*}}) : ({{.*}}) -> (!cir.ptr<!rec_B> {llvm.noundef})

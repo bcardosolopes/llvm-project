@@ -205,9 +205,7 @@ void C::f(int x, ...) {}
 // CIR:   %[[T2_ADJUSTED:.*]] = cir.ptr_stride %[[T2_CAST]], %[[T2_OFFSET]] : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
 // CIR:   %[[T2_RESULT:.*]] = cir.cast bitcast %[[T2_ADJUSTED]] : !cir.ptr<!u8i> -> !cir.ptr<
 // CIR:   %[[T2_RET:.*]] = cir.call @_ZN5Test21C1gEv(%[[T2_RESULT]])
-// CIR:   cir.store {{.*}} %[[T2_RET]]
-// CIR:   %[[T2_RET_VAL:.*]] = cir.load
-// CIR:   cir.return %[[T2_RET_VAL]]
+// CIR:   cir.return %[[T2_RET]]
 
 // --- Test3: destructor thunks ---
 

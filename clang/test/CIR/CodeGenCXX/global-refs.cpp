@@ -179,10 +179,9 @@ consteval const int &get_ref(const int &x) {
 const int &test_return() {
   // CIR-LABEL: cir.func {{.*}} @_Z11test_returnv
   // CIR: %[[VAL_ADDR:.*]] = cir.const #cir.global_view<@_ZL3val> : !cir.ptr<!s32i>
-  // CIR: cir.store{{.*}} %[[VAL_ADDR]], %[[RET_ADDR:.*]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+  // CIR: cir.return %[[VAL_ADDR]] : !cir.ptr<!s32i>
   // LLVM-LABEL: define {{.*}} @_Z11test_returnv
-  // LLVMCIR: store ptr @_ZL3val
-  // LLVMCIR: ret ptr
+  // LLVMCIR: ret ptr @_ZL3val
   // OGCG: ret ptr @_ZL3val
   return get_ref(val);
 }

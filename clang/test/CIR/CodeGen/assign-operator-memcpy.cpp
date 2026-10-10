@@ -117,8 +117,7 @@ void copyTrivial(Trivial &a, Trivial &b) { a = b; }
 // CIR-NEXT:    %[[TR_DST_VOID:.*]] = cir.cast bitcast %[[TR_DST]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
 // CIR-NEXT:    %[[TR_SRC_VOID:.*]] = cir.cast bitcast %[[TR_SRC]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
 // CIR-NEXT:    cir.libc.memcpy %[[TR_SIZE]] bytes from %[[TR_SRC_VOID]] align(8) to %[[TR_DST_VOID]] align(8)
-// CIR-NEXT:    cir.store %[[TR_THIS]], %{{.*}}
-// CIR:         cir.return
+// CIR-NEXT:    cir.return %[[TR_THIS]]
 
 // LLVM-LABEL: define {{.*}} @_ZN7TrivialaSERKS_(
 // LLVM:         [[TR_THIS:%.*]] = load ptr, ptr {{.*}}
@@ -226,8 +225,7 @@ struct HasPadding {
 // CIR-NEXT:    %[[HP_DST_VOID:.*]] = cir.cast bitcast %[[HP_DST]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
 // CIR-NEXT:    %[[HP_SRC_VOID:.*]] = cir.cast bitcast %[[HP_SRC]] : !cir.ptr<!s32i> -> !cir.ptr<!void>
 // CIR-NEXT:    cir.libc.memcpy %[[HP_SIZE]] bytes from %[[HP_SRC_VOID]] align(8) to %[[HP_DST_VOID]] align(8)
-// CIR-NEXT:    cir.store %[[HP_THIS]], %{{.*}}
-// CIR:         cir.return
+// CIR-NEXT:    cir.return %[[HP_THIS]]
 
 // LLVM-LABEL: define {{.*}} @_Z11resetPaddedP10HasPadding(
 // LLVM:         [[RP_TMP:%.*]] = alloca %struct.HasPadding, align 8

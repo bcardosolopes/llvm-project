@@ -17,9 +17,7 @@ S get_s();
 int test_instance_call(S s) {
   // CIR: %[[ARG:.*]] = cir.const #cir.int<42> : !s32i
   // CIR: %[[CALL:.*]] = cir.call @_ZN1S11static_funcEi(%[[ARG]]) : (!s32i {{.*}}) -> (!s32i {{.*}})
-  // CIR: cir.store %[[CALL]], %[[RET:.*]] : !s32i, !cir.ptr<!s32i>
-  // CIR: %[[RES:.*]] = cir.load %[[RET]] : !cir.ptr<!s32i>, !s32i
-  // CIR: cir.return %[[RES]] : !s32i
+  // CIR: cir.return %[[CALL]] : !s32i
 
   // LLVM: %[[CALL_LLVM:.*]] = call {{.*}}i32 @_ZN1S11static_funcEi(i32 {{.*}}42)
   // LLVM: ret i32 %{{.*}}
@@ -35,9 +33,7 @@ int test_instance_call(S s) {
 int test_arrow_call(S *p) {
   // CIR: %[[ARG:.*]] = cir.const #cir.int<100> : !s32i
   // CIR: %[[CALL:.*]] = cir.call @_ZN1S11static_funcEi(%[[ARG]]) : (!s32i {{.*}}) -> (!s32i {{.*}})
-  // CIR: cir.store %[[CALL]], %[[RET:.*]] : !s32i, !cir.ptr<!s32i>
-  // CIR: %[[RES:.*]] = cir.load %[[RET]] : !cir.ptr<!s32i>, !s32i
-  // CIR: cir.return %[[RES]] : !s32i
+  // CIR: cir.return %[[CALL]] : !s32i
 
   // LLVM: %[[CALL_LLVM:.*]] = call {{.*}}i32 @_ZN1S11static_funcEi(i32 {{.*}}100)
   // LLVM: ret i32 %{{.*}}

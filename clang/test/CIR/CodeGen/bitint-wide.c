@@ -52,28 +52,26 @@ _BitInt(129) local_var(int a) {
 // CIR-SAME: %[[RET_ARG:.*]]: !cir.ptr<!cir.int<s, 129, bitint>>
 // CIR-SAME: %[[A_ARG:.*]]: !s32i
 // CIR: %[[A:.*]] = cir.alloca "a" align(4) init : !cir.ptr<!s32i>
-// CIR: %[[X:.*]] = cir.alloca "x" align(8) init : !cir.ptr<!cir.int<s, 129, bitint>>
 // CIR: cir.store %[[A_ARG]], %[[A]] : !s32i, !cir.ptr<!s32i>
 // CIR: %[[A_LOAD:.*]] = cir.load align(4) %[[A]] : !cir.ptr<!s32i>, !s32i
 // CIR: %[[CAST:.*]] = cir.cast integral %[[A_LOAD:.*]] : !s32i -> !cir.int<s, 129, bitint>
-// CIR: cir.store align(8) %[[CAST]], %[[X]] : !cir.int<s, 129, bitint>, !cir.ptr<!cir.int<s, 129, bitint>>
-// CIR: %[[X_LOAD:.*]] = cir.load align(8) %[[X]] : !cir.ptr<!cir.int<s, 129, bitint>>, !cir.int<s, 129, bitint>
-// CIR: cir.store %[[X_LOAD]], %[[RET_ARG]] : !cir.int<s, 129, bitint>, !cir.ptr<!cir.int<s, 129, bitint>>
+// CIR: cir.store align(8) %[[CAST]], %[[RET_ARG]] : !cir.int<s, 129, bitint>, !cir.ptr<!cir.int<s, 129, bitint>>
 
 // LLVM-LABEL: define{{.*}}@local_var
 // LLVM-SAME: ptr{{.*}} %[[RET_ARG:.*]],
 // LLVM-SAME: i32{{.*}} %[[ARG:.*]])
 // LLVM: %[[A:.*]] = alloca i32, align 4
-// LLVM: %[[X:.*]] = alloca [24 x i8], align 8
+// OGCG: %[[X:.*]] = alloca [24 x i8], align 8
 // LLVM: store i32 %[[ARG]], ptr %[[A]], align 4
 // LLVM: %[[LOAD_A:.*]] = load i32, ptr %[[A]], align 4
 // LLVM: %[[EXT_A:.*]] = sext i32 %[[LOAD_A]] to i129
 // LLVM: %[[PAD_A:.*]] = sext i129 %[[EXT_A]] to i192
-// LLVM: store i192 %[[PAD_A]], ptr %[[X]], align 8
-// LLVM: %[[LOAD_X:.*]] = load i192, ptr %[[X]], align 8
-// LLVM: %[[TRUNC_X:.*]] = trunc i192 %[[LOAD_X]] to i129
-// LLVM: %[[EXT_X:.*]] = sext i129 %[[TRUNC_X]] to i192
-// LLVM: store i192 %[[EXT_X]], ptr %[[RET_ARG]], align 8
+// CIRONLY: store i192 %[[PAD_A]], ptr %[[RET_ARG]], align 8
+// OGCG: store i192 %[[PAD_A]], ptr %[[X]], align 8
+// OGCG: %[[LOAD_X:.*]] = load i192, ptr %[[X]], align 8
+// OGCG: %[[TRUNC_X:.*]] = trunc i192 %[[LOAD_X]] to i129
+// OGCG: %[[EXT_X:.*]] = sext i129 %[[TRUNC_X]] to i192
+// OGCG: store i192 %[[EXT_X]], ptr %[[RET_ARG]], align 8
 
 _BitInt(129) local_arr(void) {
   signed _BitInt(129) arr[2] = {-1, -2};
@@ -116,10 +114,7 @@ return x;
 // CIR-SAME: %[[RET_ARG:[^:]*]]: !cir.ptr<!cir.int<s, 129, bitint>>
 // CIR-SAME: %[[ARG:.*]]: !cir.ptr<!cir.int<s, 129, bitint>>
 // CIR: %[[LOAD_ARG:.*]] = cir.load %[[ARG]] : !cir.ptr<!cir.int<s, 129, bitint>>, !cir.int<s, 129, bitint>
-// CIR: %[[ALLOCA_X:.*]] = cir.alloca "x" align(8) init : !cir.ptr<!cir.int<s, 129, bitint>>
-// CIR: cir.store %[[LOAD_ARG]], %[[ALLOCA_X]] : !cir.int<s, 129, bitint>, !cir.ptr<!cir.int<s, 129, bitint>>
-// CIR: %[[LOAD_X:.*]] = cir.load align(8) %[[ALLOCA_X]] : !cir.ptr<!cir.int<s, 129, bitint>>, !cir.int<s, 129, bitint>
-// CIR: cir.store %[[LOAD_X]], %[[RET_ARG]] : !cir.int<s, 129, bitint>, !cir.ptr<!cir.int<s, 129, bitint>>
+// CIR: cir.store %[[LOAD_ARG]], %[[RET_ARG]] : !cir.int<s, 129, bitint>, !cir.ptr<!cir.int<s, 129, bitint>>
 
 // LLVM-LABEL: define{{.*}}@take_param
 // LLVM-SAME: ptr{{.*}} %[[RET_ARG:.*]], 
@@ -127,13 +122,14 @@ return x;
 // OGCG: %[[X:.*]] = alloca [24 x i8], align 8
 // LLVM: %[[LOAD_ARG:.*]] = load i192, ptr %[[ARG]], align 8
 // LLVM: %[[TRUNC_ARG:.*]] = trunc i192 %[[LOAD_ARG]] to i129
-// CIRONLY: %[[X:.*]] = alloca [24 x i8], align 8
-// LLVM: %[[EXT_TRUNC_ARG:.*]] = sext i129 %[[TRUNC_ARG]] to i192
-// LLVM: store i192 %[[EXT_TRUNC_ARG]], ptr %[[X]], align 8
-// LLVM: %[[LOAD_X:.*]] = load i192, ptr %[[X]], align 8
-// LLVM: %[[TRUNC_X:.*]] = trunc i192 %[[LOAD_X]] to i129
-// LLVM: %[[EXT_X:.*]] = sext i129 %[[TRUNC_X]] to i192
-// LLVM: store i192 %[[EXT_X]], ptr %[[RET_ARG]], align 8
+// CIRONLY: %[[EXT_TRUNC_ARG:.*]] = sext i129 %[[TRUNC_ARG]] to i192
+// CIRONLY: store i192 %[[EXT_TRUNC_ARG]], ptr %[[RET_ARG]], align 8
+// OGCG: %[[EXT_TRUNC_ARG:.*]] = sext i129 %[[TRUNC_ARG]] to i192
+// OGCG: store i192 %[[EXT_TRUNC_ARG]], ptr %[[X]], align 8
+// OGCG: %[[LOAD_X:.*]] = load i192, ptr %[[X]], align 8
+// OGCG: %[[TRUNC_X:.*]] = trunc i192 %[[LOAD_X]] to i129
+// OGCG: %[[EXT_X:.*]] = sext i129 %[[TRUNC_X]] to i192
+// OGCG: store i192 %[[EXT_X]], ptr %[[RET_ARG]], align 8
 
 signed _BitInt(129) ret_wide(void) { return 1; }
 

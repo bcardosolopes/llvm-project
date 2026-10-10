@@ -73,7 +73,7 @@ int noproto_args2(int, int, int) __attribute__((alias("noproto_args_target2")));
 
 // CIR-LABEL: cir.func no_inline dso_local @noproto_args_use2() -> !s32i
 // CIR: %[[GET_NPA:.*]] = cir.get_global @noproto_args2 : !cir.ptr<!cir.func<(!s32i, !s32i, !s32i) -> !s32i>>
-// CIR: cir.call %4(%{{.*}}, %{{.*}}, %{{.*}}) : (!cir.ptr<!cir.func<(!s32i, !s32i, !s32i) -> !s32i>>, !s32i {llvm.noundef}, !s32i {llvm.noundef}, !s32i {llvm.noundef}) -> !s32i
+// CIR: cir.call %[[GET_NPA]](%{{.*}}, %{{.*}}, %{{.*}}) : (!cir.ptr<!cir.func<(!s32i, !s32i, !s32i) -> !s32i>>, !s32i {llvm.noundef}, !s32i {llvm.noundef}, !s32i {llvm.noundef}) -> !s32i
 //
 // LLVM-LABEL: define dso_local i32 @noproto_args_use2()
 // LLVM: call i32 @noproto_args2(i32 noundef 1, i32 noundef 2, i32 noundef 3)

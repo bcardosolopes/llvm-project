@@ -54,7 +54,6 @@ inline int word_guard() {
 }
 
 // CIR: cir.func {{.*}} @_Z10word_guardv()
-// CIR:   %[[RETVAL:.*]] = cir.alloca "__retval" {{.*}} : !cir.ptr<!s32i>
 // CIR:   %[[B:.*]] = cir.get_global static_local @_ZZ10word_guardvE1b : !cir.ptr<!s32i>
 // CIR:   %[[GUARD:.*]] = cir.get_global @_ZGVZ10word_guardvE1b : !cir.ptr<!s64i>
 // CIR:   %[[GUARD_BYTE_PTR:.*]] = cir.cast bitcast %[[GUARD]] : !cir.ptr<!s64i> -> !cir.ptr<!s8i>
@@ -72,9 +71,7 @@ inline int word_guard() {
 // CIR:     cir.store %[[ONE]], %[[GUARD_BYTE_PTR2]] : !s8i, !cir.ptr<!s8i>
 // CIR:   }
 // CIR:   %[[LOAD_B:.*]] = cir.load{{.*}} %[[B]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.store %[[LOAD_B]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[LOAD_RETVAL:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[LOAD_RETVAL]] : !s32i
+// CIR:   cir.return %[[LOAD_B]] : !s32i
 
 // Note: The guard variable is a 64-bit value, but both the load/truncate and
 //       the mark-initialized store get folded to an i8 access on both LLVM
