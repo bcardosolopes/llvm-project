@@ -3454,19 +3454,21 @@ mlir::LogicalResult CIRToLLVMSwitchFlatOpLowering::matchAndRewrite(
   }
 
   llvm::SmallVector<mlir::Block *, 8> caseDestinations;
-  llvm::SmallVector<mlir::ValueRange, 8> caseOperands;
 
   for (mlir::Block *x : op.getCaseDestinations())
     caseDestinations.push_back(x);
 
-  for (mlir::OperandRange x : op.getCaseOperands())
-    caseOperands.push_back(x);
+  // Forward the converted successor operands, not the raw CIR ones: CFG
+  // passes such as mem2reg can thread values whose CIR type lowers to a
+  // different LLVM type (e.g. cir.ptr<struct>), which would otherwise
+  // mismatch the converted successor block arguments.
+  llvm::SmallVector<mlir::ValueRange> caseOperands = adaptor.getCaseOperands();
 
   // Set switch op to branch to the newly created blocks.
   rewriter.setInsertionPoint(op);
   rewriter.replaceOpWithNewOp<mlir::LLVM::SwitchOp>(
       op, adaptor.getCondition(), op.getDefaultDestination(),
-      op.getDefaultOperands(), caseValues, caseDestinations, caseOperands);
+      adaptor.getDefaultOperands(), caseValues, caseDestinations, caseOperands);
   return mlir::success();
 }
 

@@ -1,0 +1,25 @@
+// RUN: cir-opt %s --cir-to-llvm | FileCheck %s
+
+// switch.flat successor operands must be type-converted like any other
+// forwarded value: passes such as mem2reg thread CIR-typed values (here a
+// cir.ptr) along switch edges, and forwarding the raw operands would
+// mismatch the converted successor block arguments.
+
+!s32i = !cir.int<s, 32>
+!ptr = !cir.ptr<!s32i>
+
+module {
+  // CHECK-LABEL: llvm.func @switch_flat_ptr_operand
+  // CHECK:         llvm.switch {{.*}} : !llvm.ptr
+  cir.func @switch_flat_ptr_operand(%cond: !s32i, %p: !ptr) -> !s32i {
+    cir.switch.flat %cond : !s32i, ^default(%p : !ptr) [
+      0: ^case0(%p : !ptr)
+    ]
+  ^case0(%a: !ptr):
+    %v = cir.load %a : !ptr, !s32i
+    cir.return %v : !s32i
+  ^default(%d: !ptr):
+    %w = cir.load %d : !ptr, !s32i
+    cir.return %w : !s32i
+  }
+}
