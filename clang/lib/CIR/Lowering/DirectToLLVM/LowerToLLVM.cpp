@@ -2977,9 +2977,15 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewriteAlias(
   // Capture the context before replaceOpWithNewOp: the driver may erase
   // the root op immediately.
   mlir::MLIRContext *ctx = op.getContext();
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+  mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+  symbolTables.getSymbolTable(modOp).remove(op);
   auto aliasOp = rewriter.replaceOpWithNewOp<mlir::LLVM::AliasOp>(
       op, ty, convertLinkage(op.getLinkage()), op.getName(), op.getDsoLocal(),
       mlir::LLVM::ThreadLocalMode::NotThreadLocal, attributes);
+  symbolTables.getSymbolTable(modOp).insert(aliasOp);
 
   // Create the alias body
   mlir::OpBuilder builder(ctx);
@@ -3114,7 +3120,13 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
                                          &signatureConversion)))
     return mlir::failure();
 
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+  mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+  symbolTables.getSymbolTable(modOp).remove(op);
   rewriter.eraseOp(op);
+  symbolTables.getSymbolTable(modOp).insert(fn);
 
   return mlir::LogicalResult::success();
 }
@@ -3214,10 +3226,16 @@ void CIRToLLVMGlobalOpLowering::setupRegionInitializedLLVMGlobalOp(
   SmallVector<mlir::NamedAttribute> attributes =
       lowerGlobalAttributes(op, rewriter);
 
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+  mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+  symbolTables.getSymbolTable(modOp).remove(op);
   mlir::LLVM::GlobalOp newGlobalOp =
       rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
           op, llvmType, isConst, linkage, symbol, nullptr, alignment, addrSpace,
           isDsoLocal, threadLocalMode, comdatAttr, attributes);
+  symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
   newGlobalOp.getRegion().emplaceBlock();
   rewriter.setInsertionPointToEnd(newGlobalOp.getInitializerBlock());
 }
@@ -3305,8 +3323,14 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
     // Capture the context before replaceOpWithNewOp: the driver may erase
     // the root op immediately.
     mlir::MLIRContext *ctx = op.getContext();
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+    mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+    symbolTables.getSymbolTable(modOp).remove(op);
     auto aliasOp = rewriter.replaceOpWithNewOp<mlir::LLVM::AliasOp>(
         op, llvmType, linkage, symbol, isDsoLocal, threadLocalMode, attributes);
+    symbolTables.getSymbolTable(modOp).insert(aliasOp);
 
     mlir::OpBuilder builder(ctx);
     mlir::Block *block = builder.createBlock(&aliasOp.getInitializerRegion());
@@ -3344,10 +3368,15 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
         if (std::optional<mlir::Attribute> bulkInit = lowerConstArrayAttr(
                 constArr, symbolTables, typeConverter, modOp)) {
           mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
-          rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+          // The cached symbol table must be maintained explicitly: without
+          // pattern rollback the old op is erased immediately, so drop its
+          // entry before replacement and register the new op after.
+          symbolTables.getSymbolTable(modOp).remove(op);
+          auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
               op, llvmType, isConst, linkage, symbol, bulkInit.value(),
               alignment, addrSpace, isDsoLocal, threadLocalMode, comdatAttr,
               attributes);
+          symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
           return mlir::success();
         }
       }
@@ -3363,9 +3392,14 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
       if (std::optional<mlir::Attribute> bulkInit = lowerConstRecordAttr(
               constRecord, symbolTables, typeConverter, modOp)) {
         mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
-        rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+        // The cached symbol table must be maintained explicitly: without
+        // pattern rollback the old op is erased immediately, so drop its
+        // entry before replacement and register the new op after.
+        symbolTables.getSymbolTable(modOp).remove(op);
+        auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
             op, llvmType, isConst, linkage, symbol, bulkInit.value(), alignment,
             addrSpace, isDsoLocal, threadLocalMode, comdatAttr, attributes);
+        symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
         return mlir::success();
       }
       return matchAndRewriteRegionInitializedGlobal(op, init.value(), rewriter);
@@ -3388,10 +3422,16 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
   }
 
   mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
-  rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+  mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+  symbolTables.getSymbolTable(modOp).remove(op);
+  auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
       op, llvmType, isConst, linkage, symbol, init.value_or(mlir::Attribute()),
       alignment, addrSpace, isDsoLocal, threadLocalMode, comdatAttr,
       attributes);
+  symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
 
   return mlir::success();
 }
@@ -4124,31 +4164,54 @@ mlir::LogicalResult CIRToLLVMShiftOpLowering::matchAndRewrite(
 mlir::LogicalResult CIRToLLVMSelectOpLowering::matchAndRewrite(
     cir::SelectOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
-  auto getConstantBool = [](mlir::Value value) -> cir::BoolAttr {
-    auto definingOp = value.getDefiningOp<cir::ConstantOp>();
-    if (!definingOp)
-      return {};
-
-    auto constValue = definingOp.getValueAttr<cir::BoolAttr>();
-    if (!constValue)
-      return {};
-
-    return constValue;
+  // Recognize a boolean constant regardless of whether its producer has
+  // already been converted: without pattern rollback, uses are replaced
+  // immediately, so the producer may be an LLVM constant by the time this
+  // pattern runs.
+  auto getConstantBool = [](mlir::Value value) -> std::optional<bool> {
+    // Peel off driver-inserted materializations around an already-converted
+    // producer: without pattern rollback, uses are replaced immediately and
+    // the operand may be wrapped in an unrealized cast back to the CIR type.
+    while (auto cast =
+               value.getDefiningOp<mlir::UnrealizedConversionCastOp>()) {
+      if (cast.getNumOperands() != 1)
+        break;
+      value = cast.getOperand(0);
+    }
+    if (auto definingOp = value.getDefiningOp<cir::ConstantOp>()) {
+      if (auto constValue = definingOp.getValueAttr<cir::BoolAttr>())
+        return constValue.getValue();
+      return std::nullopt;
+    }
+    if (auto definingOp = value.getDefiningOp<mlir::LLVM::ConstantOp>()) {
+      mlir::Attribute constVal = definingOp.getValue();
+      if (auto boolAttr = mlir::dyn_cast<mlir::BoolAttr>(constVal))
+        return boolAttr.getValue();
+      if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constVal)) {
+        if (intAttr.getType().isInteger(/*width=*/1))
+          return intAttr.getValue().getBoolValue();
+      }
+      return std::nullopt;
+    }
+    return std::nullopt;
   };
 
   // Two special cases in the LLVMIR codegen of select op:
   // - select %0, %1, false => and %0, %1
   // - select %0, true, %1 => or %0, %1
-  if (mlir::isa<cir::BoolType>(op.getTrueValue().getType())) {
-    cir::BoolAttr trueValue = getConstantBool(op.getTrueValue());
-    cir::BoolAttr falseValue = getConstantBool(op.getFalseValue());
-    if (falseValue && !falseValue.getValue()) {
+  // The operand type may already be converted (i1) when uses are replaced
+  // immediately, or still be cir.bool when replacement is delayed.
+  mlir::Type trueValueTy = op.getTrueValue().getType();
+  if (mlir::isa<cir::BoolType>(trueValueTy) || trueValueTy.isInteger(1)) {
+    std::optional<bool> trueValue = getConstantBool(op.getTrueValue());
+    std::optional<bool> falseValue = getConstantBool(op.getFalseValue());
+    if (falseValue && !*falseValue) {
       // select %0, %1, false => and %0, %1
       rewriter.replaceOpWithNewOp<mlir::LLVM::AndOp>(op, adaptor.getCondition(),
                                                      adaptor.getTrueValue());
       return mlir::success();
     }
-    if (trueValue && trueValue.getValue()) {
+    if (trueValue && *trueValue) {
       // select %0, true, %1 => or %0, %1
       rewriter.replaceOpWithNewOp<mlir::LLVM::OrOp>(op, adaptor.getCondition(),
                                                     adaptor.getFalseValue());
@@ -4742,7 +4805,14 @@ void ConvertCIRToLLVMPass::runOnOperation() {
   ops.push_back(module);
   cir::collectUnreachable(module, ops);
 
-  if (failed(applyPartialConversion(ops, target, std::move(patterns))))
+  // One-shot conversion (no pattern rollback): rewrites materialize
+  // immediately, skipping the IRRewrite/value-mapping bookkeeping. All
+  // patterns in this pass are compatible: nothing dereferences the root op
+  // after replacement, and the cached symbol table is maintained
+  // explicitly at every module-symbol replacement.
+  mlir::ConversionConfig config;
+  config.allowPatternRollback = false;
+  if (failed(applyPartialConversion(ops, target, std::move(patterns), config)))
     signalPassFailure();
 
   // Drop the cir.ptr-keyed data-layout entries: they drove pointer-width
