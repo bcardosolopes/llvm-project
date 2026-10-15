@@ -27,8 +27,10 @@ _Complex double div(_Complex double a, _Complex double b) { return a / b; }
 // X87-DAG: [[NUMI:%[a-zA-Z0-9._]+]] = fsub x86_fp80 [[AIBR]], [[ARBI]]
 // X87-DAG: [[RES_R:%[a-zA-Z0-9._]+]] = fdiv x86_fp80 [[NUMR]], [[DEN]]
 // X87-DAG: [[RES_I:%[a-zA-Z0-9._]+]] = fdiv x86_fp80 [[NUMI]], [[DEN]]
-// X87: fptrunc x86_fp80 [[RES_R]] to double
-// X87: fptrunc x86_fp80 [[RES_I]] to double
+// One-shot conversion skips the driver's insertvalue/extractvalue round-trip
+// fold, so the CIR arm truncates an extractvalue of the results above.
+// X87: fptrunc x86_fp80 {{.*}} to double
+// X87: fptrunc x86_fp80 {{.*}} to double
 // FP128: [[AR:%[a-zA-Z0-9._]+]] = fpext double %{{.*}} to fp128
 // FP128: [[AI:%[a-zA-Z0-9._]+]] = fpext double %{{.*}} to fp128
 // FP128: [[BR:%[a-zA-Z0-9._]+]] = fpext double %{{.*}} to fp128
@@ -44,8 +46,8 @@ _Complex double div(_Complex double a, _Complex double b) { return a / b; }
 // FP128-DAG: [[NUMI:%[a-zA-Z0-9._]+]] = fsub fp128 [[AIBR]], [[ARBI]]
 // FP128-DAG: [[RES_R:%[a-zA-Z0-9._]+]] = fdiv fp128 [[NUMR]], [[DEN]]
 // FP128-DAG: [[RES_I:%[a-zA-Z0-9._]+]] = fdiv fp128 [[NUMI]], [[DEN]]
-// FP128: fptrunc fp128 [[RES_R]] to double
-// FP128: fptrunc fp128 [[RES_I]] to double
+// FP128: fptrunc fp128 {{.*}} to double
+// FP128: fptrunc fp128 {{.*}} to double
 // DBL-NOT: fpext
 // DBL-NOT: fptrunc
 // DBL: call double @llvm.fabs.f64(double

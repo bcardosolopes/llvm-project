@@ -45,10 +45,54 @@ bool isByteType(mlir::Type ty) {
   return intTy && intTy.getWidth() == 8;
 }
 
+// Resolve an LLVM GEP index to its 64-bit signed value, seeing through
+// ext/trunc chains the converter inserts around the stride constant.
+std::optional<int64_t> getLLVMIndexValue(mlir::Value index) {
+  mlir::Value v = index;
+  llvm::SmallVector<mlir::Operation *, 4> chain;
+  for (int i = 0; i < 8; ++i) {
+    mlir::Operation *def = v.getDefiningOp();
+    if (!def)
+      return std::nullopt;
+    if (mlir::isa<mlir::LLVM::ConstantOp>(def))
+      break;
+    if (!mlir::isa<mlir::LLVM::SExtOp, mlir::LLVM::ZExtOp, mlir::LLVM::TruncOp>(
+            def))
+      return std::nullopt;
+    chain.push_back(def);
+    v = def->getOperand(0);
+  }
+  auto constOp = v.getDefiningOp<mlir::LLVM::ConstantOp>();
+  auto intAttr =
+      constOp ? mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue()) : nullptr;
+  if (!intAttr)
+    return std::nullopt;
+  llvm::APInt val = intAttr.getValue();
+  for (mlir::Operation *op : llvm::reverse(chain)) {
+    unsigned width =
+        mlir::cast<mlir::IntegerType>(op->getResultTypes()[0]).getWidth();
+    if (mlir::isa<mlir::LLVM::SExtOp>(op))
+      val = val.sext(width);
+    else if (mlir::isa<mlir::LLVM::ZExtOp>(op))
+      val = val.zext(width);
+    else
+      val = val.trunc(width);
+  }
+  return val.sextOrTrunc(64).getSExtValue();
+}
+
 bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
                            mlir::SymbolTableCollection &symbolTables,
                            std::string &str) {
   int64_t offset = 0;
+  // Without pattern rollback the producers may already be converted, in
+  // which case the operand is wrapped in an unrealized cast back to the
+  // CIR type. Peel it and continue on the converted value below.
+  while (auto cast = ptr.getDefiningOp<mlir::UnrealizedConversionCastOp>()) {
+    if (cast.getNumOperands() != 1)
+      break;
+    ptr = cast.getOperand(0);
+  }
   while (mlir::Operation *def = ptr.getDefiningOp()) {
     if (auto cast = mlir::dyn_cast<cir::CastOp>(def)) {
       if (cast.getKind() != cir::CastKind::array_to_ptrdecay &&
@@ -73,14 +117,63 @@ bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
     }
   }
 
-  auto getGlobal = ptr.getDefiningOp<cir::GetGlobalOp>();
-  if (!getGlobal)
-    return false;
+  // Resolve the base to a global name, either from the original CIR chain
+  // or from the converted LLVM chain (addressof through casts and constant
+  // byte GEPs).
+  llvm::StringRef globalName;
+  if (auto getGlobal = ptr.getDefiningOp<cir::GetGlobalOp>())
+    globalName = getGlobal.getName();
+  else {
+    mlir::Value llvmPtr = ptr;
+    while (mlir::Operation *def = llvmPtr.getDefiningOp()) {
+      if (auto addrOf = mlir::dyn_cast<mlir::LLVM::AddressOfOp>(def)) {
+        globalName = addrOf.getGlobalName();
+        break;
+      }
+      if (mlir::isa<mlir::LLVM::AddrSpaceCastOp, mlir::LLVM::BitcastOp>(def)) {
+        llvmPtr = def->getOperand(0);
+        continue;
+      }
+      if (auto gep = mlir::dyn_cast<mlir::LLVM::GEPOp>(def)) {
+        // Fold byte steps only. A leading zero step descends into an i8
+        // array (array_to_ptrdecay plus a constant element); anything else
+        // needs a data layout.
+        mlir::Type elemTy = gep.getElemType();
+        bool firstIdx = true;
+        for (auto idx : gep.getIndices()) {
+          std::optional<int64_t> step;
+          if (llvm::isa<mlir::IntegerAttr>(idx))
+            step = llvm::cast<mlir::IntegerAttr>(idx).getValue().getSExtValue();
+          else
+            step = getLLVMIndexValue(llvm::cast<mlir::Value>(idx));
+          if (!step)
+            return false;
+          if (firstIdx && *step == 0) {
+            if (auto arrTy = mlir::dyn_cast<mlir::LLVM::LLVMArrayType>(elemTy))
+              elemTy = arrTy.getElementType();
+            else if (!elemTy.isInteger(8))
+              return false;
+          } else {
+            if (!elemTy.isInteger(8))
+              return false;
+            if (llvm::AddOverflow(offset, *step, offset))
+              return false;
+          }
+          firstIdx = false;
+        }
+        llvmPtr = gep.getBase();
+        continue;
+      }
+      break;
+    }
+    if (globalName.empty())
+      return false;
+  }
 
   // The global may or may not have been converted already.
   std::string data;
-  mlir::Operation *symbol =
-      symbolTables.lookupSymbolIn(mod, getGlobal.getNameAttr());
+  mlir::Operation *symbol = symbolTables.lookupSymbolIn(
+      mod, mlir::StringAttr::get(mod.getContext(), globalName));
   if (auto global = mlir::dyn_cast_if_present<cir::GlobalOp>(symbol)) {
     std::optional<mlir::Attribute> init = global.getInitialValue();
     auto arrayTy = mlir::dyn_cast<cir::ArrayType>(global.getSymType());

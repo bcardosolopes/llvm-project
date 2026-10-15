@@ -491,6 +491,19 @@ static mlir::Value getLLVMIntCast(mlir::ConversionPatternRewriter &rewriter,
   return mlir::LLVM::TruncOp::create(rewriter, loc, llvmDstIntTy, llvmSrc);
 }
 
+// Transient attribute stashing a CIR global's original symbol type on its
+// lowered LLVM global. One-shot conversion erases CIR globals immediately,
+// so a GlobalView lowered later finds only the LLVM global — whose type may
+// have been adjusted from the CIR type (e.g. trailing-zeros arrays packed
+// into structs). CIR indices address the original layout, so
+// getAddressOfSymbol recovers it here instead of using the adjusted type.
+// Stripped after conversion (runOnOperation); never reaches translation.
+constexpr llvm::StringLiteral kOrigSymTypeAttrName = "cir.original_sym_type";
+
+static void setOriginalSymType(mlir::LLVM::GlobalOp global, mlir::Type ty) {
+  global->setAttr(kOrigSymTypeAttrName, mlir::TypeAttr::get(ty));
+}
+
 class CIRAttrToValue {
 public:
   CIRAttrToValue(mlir::Location parentLoc, mlir::ModuleOp parentModule,
@@ -1082,15 +1095,17 @@ CIRAttrToValue::getAddressOfSymbol(mlir::FlatSymbolRefAttr symbol) {
   mlir::Operation *sourceSymbol =
       symbolTables.lookupSymbolIn(parentModule, symbol);
   if (auto llvmSymbol = dyn_cast<mlir::LLVM::GlobalOp>(sourceSymbol)) {
-    if (mlir::Type preType =
-            preConversionTypes.lookup(llvmSymbol.getSymName())) {
-      originalType = preType;
-      sourceType = convertTypeForMemory(*converter, dataLayout, originalType);
-    } else {
-      sourceType = llvmSymbol.getType();
-    }
     symName = llvmSymbol.getSymName();
     addrSpace = llvmSymbol.getAddrSpace();
+    // Prefer the stashed original CIR type: the LLVM global's type may have
+    // been adjusted (see above), but CIR indices address the original layout.
+    // Globals created directly (string literals, etc.) carry no stash.
+    if (auto origTy =
+            llvmSymbol->getAttrOfType<mlir::TypeAttr>(kOrigSymTypeAttrName))
+      sourceType =
+          convertTypeForMemory(*converter, dataLayout, origTy.getValue());
+    else
+      sourceType = llvmSymbol.getType();
   } else if (auto cirSymbol = dyn_cast<cir::GlobalOp>(sourceSymbol)) {
     originalType = cirSymbol.getSymType();
     sourceType = convertTypeForMemory(*converter, dataLayout, originalType);
@@ -2646,8 +2661,8 @@ static mlir::LogicalResult rewriteCallOrInvoke(
 
   mlir::LLVM::CConv cconv = convertCallingConv(call.getCallingConv());
 
-  // The replace below erases the root op, so read what the CallOp branch
-  // needs first.
+  // Capture everything needed from the root op before
+  // replaceOpWithNewOp: the driver may erase it immediately.
   const bool mustTail = op->hasAttr(CIRDialect::getMustTailAttrName());
   const std::optional<cir::InlineKind> inlineKind = call.getInlineKind();
   if (landingPadBlock) {
@@ -3189,6 +3204,9 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewriteAlias(
         mlir::LLVM::AddressOfOp::create(rewriter, loc, ptrTy, aliasee);
     mlir::LLVM::ReturnOp::create(rewriter, loc, addrOp);
   }
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
   symbolTables.getSymbolTable(modOp).remove(op);
   rewriter.replaceOp(op, aliasOp);
   symbolTables.getSymbolTable(modOp).insert(aliasOp);
@@ -3331,6 +3349,10 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
   symbolTables.getSymbolTable(modOp).remove(op);
   rewriter.inlineRegionBefore(op.getBody(), fn.getBody(), fn.end());
 
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+  symbolTables.getSymbolTable(modOp).remove(op);
   rewriter.eraseOp(op);
   symbolTables.getSymbolTable(modOp).insert(fn);
 
@@ -3439,10 +3461,19 @@ CIRToLLVMGlobalOpLowering::setupRegionInitializedLLVMGlobalOp(
   SmallVector<mlir::NamedAttribute> attributes =
       lowerGlobalAttributes(op, rewriter);
 
+// Create beside the old op: the caller keeps it alive (and in the
+  // table) during the initializer visit, then swaps the table and erases
+  // it on success. Comdat stays empty here; the caller attaches it only
+  // after the visit succeeds.
+  mlir::Type origSymType = op.getSymType();
+  const bool unnamedAddr = op.getUnnamedAddr();
   mlir::LLVM::GlobalOp newGlobalOp = mlir::LLVM::GlobalOp::create(
       rewriter, op.getLoc(), llvmType, isConst, linkage, symbol, nullptr,
       alignment, addrSpace, isDsoLocal, threadLocalMode, mlir::SymbolRefAttr{},
       attributes);
+  setOriginalSymType(newGlobalOp, origSymType);
+  setUnnamedAddrFromCIR(unnamedAddr, newGlobalOp);
+
   rewriter.createBlock(&newGlobalOp.getRegion());
   rewriter.setInsertionPointToEnd(newGlobalOp.getInitializerBlock());
   return newGlobalOp;
@@ -3595,6 +3626,9 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
           mlir::LLVM::AddressOfOp::create(rewriter, loc, ptrTy, *aliasee);
       mlir::LLVM::ReturnOp::create(rewriter, loc, addrOp);
     }
+    // The cached symbol table must be maintained explicitly: without
+    // pattern rollback the old op is erased immediately, so drop its
+    // entry before replacement and register the new op after.
     symbolTables.getSymbolTable(modOp).remove(op);
     rewriter.replaceOp(op, aliasOp);
     symbolTables.getSymbolTable(modOp).insert(aliasOp);
@@ -3627,9 +3661,16 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
                 lowerConstArrayAttr(constArr, symbolTables, typeConverter,
                                     preConversionTypes, modOp)) {
           mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
-          replaceCirGlobal(symbolTables, op, llvmType, isConst, linkage, symbol,
-                           bulkInit.value(), alignment, addrSpace, isDsoLocal,
-                           threadLocalMode, comdatAttr, attributes, rewriter);
+          // The cached symbol table must be maintained explicitly: without
+          // pattern rollback the old op is erased immediately, so drop its
+          // entry before replacement and register the new op after.
+          symbolTables.getSymbolTable(modOp).remove(op);
+          auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+              op, llvmType, isConst, linkage, symbol, bulkInit.value(),
+              alignment, addrSpace, isDsoLocal, threadLocalMode, comdatAttr,
+              attributes);
+          symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
+          setOriginalSymType(newGlobalOp, op.getSymType());
           return mlir::success();
         }
       }
@@ -3646,9 +3687,15 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
               lowerConstRecordAttr(constRecord, symbolTables, typeConverter,
                                    preConversionTypes, modOp)) {
         mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
-        replaceCirGlobal(symbolTables, op, llvmType, isConst, linkage, symbol,
-                         bulkInit.value(), alignment, addrSpace, isDsoLocal,
-                         threadLocalMode, comdatAttr, attributes, rewriter);
+        // The cached symbol table must be maintained explicitly: without
+        // pattern rollback the old op is erased immediately, so drop its
+        // entry before replacement and register the new op after.
+        symbolTables.getSymbolTable(modOp).remove(op);
+        auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+            op, llvmType, isConst, linkage, symbol, bulkInit.value(), alignment,
+            addrSpace, isDsoLocal, threadLocalMode, comdatAttr, attributes);
+        symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
+        setOriginalSymType(newGlobalOp, op.getSymType());
         return mlir::success();
       }
       return matchAndRewriteRegionInitializedGlobal(op, init.value(), rewriter);
@@ -3671,10 +3718,17 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
   }
 
   mlir::SymbolRefAttr comdatAttr = getComdatAttr(op, rewriter);
-  replaceCirGlobal(symbolTables, op, llvmType, isConst, linkage, symbol,
-                   init.value_or(mlir::Attribute()), alignment, addrSpace,
-                   isDsoLocal, threadLocalMode, comdatAttr, attributes,
-                   rewriter);
+  // The cached symbol table must be maintained explicitly: without
+  // pattern rollback the old op is erased immediately, so drop its
+  // entry before replacement and register the new op after.
+  mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+  symbolTables.getSymbolTable(modOp).remove(op);
+  auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
+      op, llvmType, isConst, linkage, symbol, init.value_or(mlir::Attribute()),
+      alignment, addrSpace, isDsoLocal, threadLocalMode, comdatAttr,
+      attributes);
+  symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
+  setOriginalSymType(newGlobalOp, op.getSymType());
 
   return mlir::success();
 }
@@ -4401,19 +4455,54 @@ mlir::LogicalResult CIRToLLVMShiftOpLowering::matchAndRewrite(
 mlir::LogicalResult CIRToLLVMSelectOpLowering::matchAndRewrite(
     cir::SelectOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
+  // Recognize a boolean constant regardless of whether its producer has
+  // already been converted: without pattern rollback, uses are replaced
+  // immediately, so the producer may be an LLVM constant by the time this
+  // pattern runs.
+  auto getConstantBool = [](mlir::Value value) -> std::optional<bool> {
+    // Peel off driver-inserted materializations around an already-converted
+    // producer: without pattern rollback, uses are replaced immediately and
+    // the operand may be wrapped in an unrealized cast back to the CIR type.
+    while (auto cast =
+               value.getDefiningOp<mlir::UnrealizedConversionCastOp>()) {
+      if (cast.getNumOperands() != 1)
+        break;
+      value = cast.getOperand(0);
+    }
+    if (auto definingOp = value.getDefiningOp<cir::ConstantOp>()) {
+      if (auto constValue = definingOp.getValueAttr<cir::BoolAttr>())
+        return constValue.getValue();
+      return std::nullopt;
+    }
+    if (auto definingOp = value.getDefiningOp<mlir::LLVM::ConstantOp>()) {
+      mlir::Attribute constVal = definingOp.getValue();
+      if (auto boolAttr = mlir::dyn_cast<mlir::BoolAttr>(constVal))
+        return boolAttr.getValue();
+      if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constVal)) {
+        if (intAttr.getType().isInteger(/*width=*/1))
+          return intAttr.getValue().getBoolValue();
+      }
+      return std::nullopt;
+    }
+    return std::nullopt;
+  };
+
   // Two special cases in the LLVMIR codegen of select op:
   // - select %0, %1, false => and %0, %1
   // - select %0, true, %1 => or %0, %1
-  // Match the (possibly already converted) adaptor operands: without pattern
-  // rollback the producer may be an LLVM constant by the time this runs.
-  if (mlir::isa<cir::BoolType>(op.getType())) {
-    if (mlir::matchPattern(adaptor.getFalseValue(), mlir::m_Zero())) {
+  // The operand type may already be converted (i1) when uses are replaced
+  // immediately, or still be cir.bool when replacement is delayed.
+  mlir::Type trueValueTy = op.getTrueValue().getType();
+  if (mlir::isa<cir::BoolType>(trueValueTy) || trueValueTy.isInteger(1)) {
+    std::optional<bool> trueValue = getConstantBool(op.getTrueValue());
+    std::optional<bool> falseValue = getConstantBool(op.getFalseValue());
+    if (falseValue && !*falseValue) {
       // select %0, %1, false => and %0, %1
       rewriter.replaceOpWithNewOp<mlir::LLVM::AndOp>(op, adaptor.getCondition(),
                                                      adaptor.getTrueValue());
       return mlir::success();
     }
-    if (mlir::matchPattern(adaptor.getTrueValue(), mlir::m_One())) {
+    if (trueValue && *trueValue) {
       // select %0, true, %1 => or %0, %1
       rewriter.replaceOpWithNewOp<mlir::LLVM::OrOp>(op, adaptor.getCondition(),
                                                     adaptor.getFalseValue());
@@ -5038,10 +5127,24 @@ void ConvertCIRToLLVMPass::runOnOperation() {
   ops.push_back(module);
   cir::collectUnreachable(module, ops);
 
-  if (failed(applyPartialConversion(ops, target, std::move(patterns)))) {
+  // One-shot conversion (no pattern rollback): rewrites materialize
+  // immediately, skipping the IRRewrite/value-mapping bookkeeping. All
+  // patterns in this pass are compatible: nothing dereferences the root op
+  // after replacement, and the cached symbol table is maintained
+  // explicitly at every module-symbol replacement.
+  mlir::ConversionConfig config;
+  config.allowPatternRollback = false;
+  if (failed(applyPartialConversion(ops, target, std::move(patterns), config))) {
     signalPassFailure();
     return;
   }
+
+  // Drop the transient original-type attributes (see kOrigSymTypeAttrName):
+  // they served GlobalView lowering during conversion and must not reach
+  // translation.
+  module.walk([&](mlir::LLVM::GlobalOp global) {
+    global->removeAttr(kOrigSymTypeAttrName);
+  });
 
   // Drop the cir.ptr-keyed data-layout entries: they drove pointer-width
   // queries up to this point, but the LLVM IR exporter rejects CIR types.
