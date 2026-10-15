@@ -328,7 +328,12 @@ void TargetLoweringPass::runOnOperation() {
   ops.push_back(mod);
   cir::collectUnreachable(mod, ops);
 
-  if (failed(mlir::applyPartialConversion(ops, target, std::move(patterns))))
+  // One-shot conversion (no pattern rollback): rewrites materialize
+  // immediately, skipping the IRRewrite/value-mapping bookkeeping.
+  mlir::ConversionConfig config;
+  config.allowPatternRollback = false;
+  if (failed(mlir::applyPartialConversion(ops, target, std::move(patterns),
+                                          config)))
     signalPassFailure();
 
   typeConverter.restoreRecordTypeNames();

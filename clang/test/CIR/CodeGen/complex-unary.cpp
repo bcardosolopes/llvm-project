@@ -420,8 +420,12 @@ void foo9() {
 // LLVM: %[[A_IMAG:.*]] = extractvalue { half, half } %[[TMP_A]], 1
 // LLVM: %[[A_REAL_F32:.*]] = fpext half %[[A_REAL]] to float
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
-// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[A_REAL_F32]] to half
-// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[A_IMAG_F32]] to half
+// LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
+// LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
+// LLVM: %[[A_REAL_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 0
+// LLVM: %[[A_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 1
+// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[A_REAL_F32_EX]] to half
+// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[A_IMAG_F32_EX]] to half
 // LLVM: %[[TMP_RESULT_COMPLEX_F16:.*]] = insertvalue { half, half } {{.*}}, half %[[A_REAL_F16]], 0
 // LLVM: %[[RESULT_COMPLEX_F16:.*]] = insertvalue { half, half } %[[TMP_RESULT_COMPLEX_F16]], half %[[A_IMAG_F16]], 1
 // LLVM: store { half, half } %[[RESULT_COMPLEX_F16]], ptr %[[B_ADDR]], align 2
@@ -487,12 +491,16 @@ void foo10() {
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
 // LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
 // LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
-// LLVM: %[[RESULT_REAL_F32:.*]] = fneg float %[[A_REAL_F32]]
-// LLVM: %[[RESULT_IMAG_F32:.*]] = fneg float %[[A_IMAG_F32]]
+// LLVM: %[[A_REAL_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 0
+// LLVM: %[[A_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 1
+// LLVM: %[[RESULT_REAL_F32:.*]] = fneg float %[[A_REAL_F32_EX]]
+// LLVM: %[[RESULT_IMAG_F32:.*]] = fneg float %[[A_IMAG_F32_EX]]
 // LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[RESULT_REAL_F32]], 0
 // LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[RESULT_IMAG_F32]], 1
-// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[RESULT_REAL_F32]] to half
-// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[RESULT_IMAG_F32]] to half
+// LLVM: %[[RESULT_REAL_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 0
+// LLVM: %[[RESULT_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 1
+// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[RESULT_REAL_F32_EX]] to half
+// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[RESULT_IMAG_F32_EX]] to half
 // LLVM: %[[TMP_RESULT_COMPLEX_F16:.*]] = insertvalue { half, half } {{.*}}, half %[[A_REAL_F16]], 0
 // LLVM: %[[RESULT_COMPLEX_F16:.*]] = insertvalue { half, half } %[[TMP_RESULT_COMPLEX_F16]], half %[[A_IMAG_F16]], 1
 // LLVM: store { half, half } %[[RESULT_COMPLEX_F16]], ptr %[[B_ADDR]], align 2
