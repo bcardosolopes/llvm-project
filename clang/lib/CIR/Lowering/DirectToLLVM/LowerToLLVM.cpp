@@ -3139,12 +3139,15 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewriteAlias(
     return mlir::failure();
 
   mlir::Location loc = op.getLoc();
+  // Capture the context before replaceOpWithNewOp: the driver may erase
+  // the root op immediately.
+  mlir::MLIRContext *ctx = op.getContext();
   auto aliasOp = rewriter.replaceOpWithNewOp<mlir::LLVM::AliasOp>(
       op, ty, convertLinkage(op.getLinkage()), op.getName(), op.getDsoLocal(),
       mlir::LLVM::ThreadLocalMode::NotThreadLocal, attributes);
 
   // Create the alias body
-  mlir::OpBuilder builder(op.getContext());
+  mlir::OpBuilder builder(ctx);
   mlir::Block *block = builder.createBlock(&aliasOp.getInitializerRegion());
   builder.setInsertionPointToStart(block);
   cir::CIRDataLayout cirDataLayout(aliasOp->getParentOfType<mlir::ModuleOp>());
@@ -3481,10 +3484,13 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
   // If this is a variable alias, lower it to llvm.mlir.alias.
   if (std::optional<llvm::StringRef> aliasee = op.getAliasee()) {
     mlir::Location loc = op.getLoc();
+    // Capture the context before replaceOpWithNewOp: the driver may erase
+    // the root op immediately.
+    mlir::MLIRContext *ctx = op.getContext();
     auto aliasOp = rewriter.replaceOpWithNewOp<mlir::LLVM::AliasOp>(
         op, llvmType, linkage, symbol, isDsoLocal, threadLocalMode, attributes);
 
-    mlir::OpBuilder builder(op.getContext());
+    mlir::OpBuilder builder(ctx);
     mlir::Block *block = builder.createBlock(&aliasOp.getInitializerRegion());
     builder.setInsertionPointToStart(block);
     mlir::Type ptrTy =
