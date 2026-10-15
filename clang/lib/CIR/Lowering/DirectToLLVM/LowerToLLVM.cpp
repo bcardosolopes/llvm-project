@@ -2624,6 +2624,10 @@ static mlir::LogicalResult rewriteCallOrInvoke(
 
   mlir::LLVM::CConv cconv = convertCallingConv(call.getCallingConv());
 
+  // Capture everything needed from the root op before
+  // replaceOpWithNewOp: the driver may erase it immediately.
+  const bool mustTail = op->hasAttr(CIRDialect::getMustTailAttrName());
+  const std::optional<cir::InlineKind> inlineKind = call.getInlineKind();
   if (landingPadBlock) {
     assert(!cir::MissingFeatures::opCallInvokeAttrs());
     auto newOp = rewriter.replaceOpWithNewOp<mlir::LLVM::InvokeOp>(
@@ -2641,10 +2645,10 @@ static mlir::LogicalResult rewriteCallOrInvoke(
     newOp.setNoUnwind(noUnwind);
     newOp.setWillReturn(willReturn);
     newOp.setNoreturn(noReturn);
-    if (op->hasAttr(CIRDialect::getMustTailAttrName()))
+    if (mustTail)
       newOp.setTailCallKind(mlir::LLVM::TailCallKind::MustTail);
 
-    if (std::optional<cir::InlineKind> inlineKind = call.getInlineKind()) {
+    if (inlineKind) {
       newOp.setNoInline(*inlineKind == cir::InlineKind::NoInline);
       newOp.setInlineHint(*inlineKind == cir::InlineKind::InlineHint);
       newOp.setAlwaysInline(*inlineKind == cir::InlineKind::AlwaysInline);
