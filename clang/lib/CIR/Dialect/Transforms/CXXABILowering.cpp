@@ -848,6 +848,15 @@ public:
       return convertType(abiType);
     });
   }
+
+protected:
+  // Only data-member and method types change under this converter; every
+  // other type converts to itself. Overriding this lets the base class skip
+  // the record-rebuild path (name mangling + uniquer lookups) for the vast
+  // majority of records that cannot change.
+  bool typeMayChange(mlir::Type type) const override {
+    return mlir::isa<cir::DataMemberType, cir::MethodType>(type);
+  }
 };
 } // namespace
 
@@ -886,6 +895,31 @@ populateCXXABIConversionTarget(mlir::ConversionTarget &target,
                              return typeConverter.isLegal(&region);
                            });
       });
+
+  // No-op casts that always fold stay illegal so the driver folds them
+  // before patterns run. With precise type legality their types convert to
+  // themselves, so without this carve-out the fold would never fire and the
+  // dead casts would survive into later passes.
+  target.addDynamicallyLegalOp<cir::CastOp>([&typeConverter](cir::CastOp op) {
+    if (op.getSrc().getType() == op.getType()) {
+      switch (op.getKind()) {
+      case cir::CastKind::bitcast:
+      case cir::CastKind::address_space:
+      case cir::CastKind::float_complex:
+      case cir::CastKind::int_complex:
+        return false;
+      default:
+        break;
+      }
+    }
+    if (!typeConverter.isLegal(op.getOperation()))
+      return false;
+    return areCXXABIInherentAttrsLegal(op, typeConverter) &&
+           std::all_of(op->getRegions().begin(), op->getRegions().end(),
+                       [&typeConverter](mlir::Region &region) {
+                         return typeConverter.isLegal(&region);
+                       });
+  });
 
   // Some CIR ops needs special checking for legality
   target.addDynamicallyLegalOp<cir::FuncOp>([&typeConverter](cir::FuncOp op) {
