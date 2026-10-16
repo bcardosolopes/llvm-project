@@ -899,7 +899,7 @@ cir::FuncOp CIRGenFunction::generateCode(clang::GlobalDecl gd, cir::FuncOp fn,
     // specification try) before verifying so the try body is terminated.
     finishFunction(bodyRange.getEnd());
 
-    if (mlir::failed(fn.verifyBody()))
+    if (cgm.isVerifierEnabled() && mlir::failed(fn.verifyBody()))
       return nullptr;
   }
 

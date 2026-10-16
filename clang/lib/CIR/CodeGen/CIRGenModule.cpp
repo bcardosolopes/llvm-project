@@ -85,10 +85,10 @@ static CIRGenCXXABI *createCXXABI(CIRGenModule &cgm) {
 CIRGenModule::CIRGenModule(mlir::MLIRContext &mlirContext,
                            clang::ASTContext &astContext,
                            const clang::CodeGenOptions &cgo,
-                           DiagnosticsEngine &diags)
+                           DiagnosticsEngine &diags, bool enableVerifier)
     : builder(mlirContext, *this), astContext(astContext),
-      langOpts(astContext.getLangOpts()), atomicOpts(astContext.getLangOpts()),
-      codeGenOpts(cgo),
+      enableVerifier(enableVerifier), langOpts(astContext.getLangOpts()),
+      atomicOpts(astContext.getLangOpts()), codeGenOpts(cgo),
       theModule{mlir::ModuleOp::create(mlir::UnknownLoc::get(&mlirContext))},
       diags(diags), target(astContext.getTargetInfo()),
       abi(createCXXABI(*this)), genTypes(*this), vtables(*this) {

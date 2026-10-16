@@ -45,6 +45,10 @@ class CIRGenerator : public clang::ASTConsumer {
 
   const clang::CodeGenOptions &codeGenOpts;
 
+  /// Whether IR verification runs (emission bodies, pre-pass module check).
+  /// False with -clangir-disable-verifier, forced false in asserts-off builds.
+  const bool enableVerifier;
+
   unsigned handlingTopLevelDecls;
 
   /// Use this when emitting decls to block re-entrant decl emission. It will
@@ -74,7 +78,7 @@ private:
 public:
   CIRGenerator(clang::DiagnosticsEngine &diags,
                llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
-               const clang::CodeGenOptions &cgo);
+               const clang::CodeGenOptions &cgo, bool enableVerifier);
   ~CIRGenerator() override;
   void Initialize(clang::ASTContext &astContext) override;
   bool HandleTopLevelDecl(clang::DeclGroupRef group) override;
