@@ -36,6 +36,7 @@
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Verifier.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
@@ -7049,18 +7050,30 @@ void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP,
         mlir::LLVM::createLLVMSimplifyCFGPass());
 }
 
-std::unique_ptr<llvm::Module>
-lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
-                             bool enableOpenMP, StringRef mlirSaveTempsOutFile,
-                             llvm::vfs::FileSystem *fs,
-                             bool enableOptimizations, bool enableMem2Reg) {
+std::unique_ptr<llvm::Module> lowerDirectlyFromCIRToLLVMIR(
+    mlir::ModuleOp mlirModule, LLVMContext &llvmCtx, bool enableOpenMP,
+    StringRef mlirSaveTempsOutFile, llvm::vfs::FileSystem *fs,
+    bool enableOptimizations, bool enableMem2Reg, bool enableVerifier) {
   llvm::TimeTraceScope scope("lower from CIR to LLVM directly");
+
+  // Verify the post-C2C CIR before lowering. This brackets the C2C pipeline
+  // (verify in/out): the later checks are LLVM-IR-level and cannot catch
+  // invalid CIR that still lowers to valid-looking LLVM IR.
+  if (enableVerifier && mlir::failed(mlir::verify(mlirModule)))
+    return nullptr;
 
   mlir::MLIRContext *mlirCtx = mlirModule.getContext();
 
   mlir::PassManager pm(mlirCtx);
   populateCIRToLLVMPasses(pm, enableOpenMP, enableOptimizations, enableMem2Reg);
 
+  // Disable inter-pass verification in the lowering pipeline. The CIR module
+  // is already verified before lowering (when enableVerifier is set), and
+  // with it the resulting LLVM module after translation. The MLIR LLVM
+  // dialect intermediate verification is redundant and has O(N^2) cost due
+  // to SymbolTable::lookupNearestSymbolFrom linear scans in comdat
+  // verification.
+  pm.enableVerifier(false);
   (void)mlir::applyPassManagerCLOptions(pm);
 
   // The failing pass has already reported its error through the MLIR
@@ -7083,8 +7096,13 @@ lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
   llvm::TimeTraceScope translateScope("translateModuleToLLVMIR");
 
   StringRef moduleName = mlirModule.getName().value_or("CIRToLLVMModule");
+  // Skip LLVM's own module verification when CIR verification is disabled:
+  // classic CodeGen never verifies its emitted LLVM IR, and this duplicate
+  // check costs ~0.7s on large TUs (CIRDialect.cpp). MLIR-side verification
+  // (CIR pre-lowering, LLVM dialect) is unaffected.
   std::unique_ptr<llvm::Module> llvmModule = mlir::translateModuleToLLVMIR(
-      mlirModule, llvmCtx, moduleName, /*disableVerification=*/false, fs);
+      mlirModule, llvmCtx, moduleName, /*disableVerification=*/!enableVerifier,
+      fs);
 
   return llvmModule;
 }

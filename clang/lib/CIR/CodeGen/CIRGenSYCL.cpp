@@ -66,7 +66,7 @@ void CIRGenFunction::emitSYCLKernelCaller(
                   loc, bodyRange.getBegin());
     if (mlir::failed(emitFunctionBody(body)))
       return;
-    if (mlir::failed(funcOp.verifyBody()))
+    if (cgm.isVerifierEnabled() && mlir::failed(funcOp.verifyBody()))
       return;
     finishFunction(body->getEndLoc());
   }

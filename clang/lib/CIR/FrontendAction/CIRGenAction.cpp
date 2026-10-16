@@ -70,10 +70,10 @@ static std::unique_ptr<llvm::Module> lowerFromCIRToLLVMIR(
     mlir::ModuleOp MLIRModule, llvm::LLVMContext &LLVMCtx, bool EnableOpenMP,
     llvm::StringRef mlirSaveTempsOutFile = {},
     llvm::vfs::FileSystem *fs = nullptr, bool enableOptimizations = false,
-    bool EnableMem2Reg = false) {
+    bool EnableMem2Reg = false, bool EnableVerifier = true) {
   return direct::lowerDirectlyFromCIRToLLVMIR(
       MLIRModule, LLVMCtx, EnableOpenMP, mlirSaveTempsOutFile, fs,
-      enableOptimizations, EnableMem2Reg);
+      enableOptimizations, EnableMem2Reg, EnableVerifier);
 }
 
 // Print \p MLIRModule the way -emit-cir does, so that CIR emitted from source
@@ -182,11 +182,11 @@ static void emitCIRModuleOutput(
     // keeps its raw shape.
     const bool EnableMem2Reg = CI.getFrontendOpts().ClangIREnableMem2Reg &&
                                (CGO.OptimizationLevel > 0);
-    std::unique_ptr<llvm::Module> LLVMModule =
-        lowerFromCIRToLLVMIR(MlirModule, LLVMCtx, EnableOpenMP,
-                             mlirSaveTempsOutFile, &CI.getVirtualFileSystem(),
-                             /*enableOptimizations=*/CGO.OptimizationLevel > 0,
-                             EnableMem2Reg);
+    std::unique_ptr<llvm::Module> LLVMModule = lowerFromCIRToLLVMIR(
+        MlirModule, LLVMCtx, EnableOpenMP, mlirSaveTempsOutFile,
+        &CI.getVirtualFileSystem(),
+        /*enableOptimizations=*/CGO.OptimizationLevel > 0, EnableMem2Reg,
+        !CI.getFrontendOpts().ClangIRDisableCIRVerifier);
     if (!LLVMModule) {
       // Lowering errors are already routed through the MLIR diagnostic
       // handler. Only emit the generic error if nothing was reported.
@@ -271,8 +271,9 @@ public:
                  SmallVectorImpl<::clang::LinkModule> &LinkModules)
       : Action(Action), CI(CI), OutputStream(std::move(OS)),
         FS(&CI.getVirtualFileSystem()),
-        Gen(std::make_unique<CIRGenerator>(CI.getDiagnostics(), std::move(FS),
-                                           CI.getCodeGenOpts())),
+        Gen(std::make_unique<CIRGenerator>(
+            CI.getDiagnostics(), std::move(FS), CI.getCodeGenOpts(),
+            !CI.getFrontendOpts().ClangIRDisableCIRVerifier)),
         FEOptions(CI.getFrontendOpts()), CGO(CGO), LLVMCtx(LLVMCtx),
         LinkModules(LinkModules),
         DiagConsumer(CI.getDiagnostics(), CI.getCodeGenOpts()) {}
@@ -332,10 +333,10 @@ public:
       // Setup and run CIR pipeline.
       const bool EnableLibOpt =
           FEOptions.ClangIRLibOptEnabled && (CGO.OptimizationLevel > 0);
-      if (runCIRToCIRPasses(
-              MlirModule, MlirCtx, !FEOptions.ClangIRDisableCIRVerifier,
-              FEOptions.ClangIREnableIdiomRecognizer, CGO.OptimizationLevel > 0,
-              EnableLibOpt, LibOptOptions, FEOptions.ClangIRCallConvLowering)
+      if (runCIRToCIRPasses(MlirModule, MlirCtx,
+                            FEOptions.ClangIREnableIdiomRecognizer,
+                            CGO.OptimizationLevel > 0, EnableLibOpt,
+                            LibOptOptions, FEOptions.ClangIRCallConvLowering)
               .failed()) {
         // Pass-side errors already routed through ClangIRDiagnosticHandler.
         // Skip the generic catch-all if a specific diagnostic was emitted.

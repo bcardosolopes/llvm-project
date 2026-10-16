@@ -70,7 +70,9 @@ class CIRGenModule : public CIRGenTypeCache {
 public:
   CIRGenModule(mlir::MLIRContext &mlirContext, clang::ASTContext &astContext,
                const clang::CodeGenOptions &cgo,
-               clang::DiagnosticsEngine &diags);
+               clang::DiagnosticsEngine &diags, bool enableVerifier);
+
+  bool isVerifierEnabled() const { return enableVerifier; }
 
   ~CIRGenModule();
 
@@ -81,6 +83,10 @@ private:
 
   /// Hold Clang AST information.
   clang::ASTContext &astContext;
+
+  /// Whether IR verification runs. False with -clangir-disable-verifier,
+  /// forced false in asserts-off builds.
+  bool enableVerifier = true;
 
   const clang::LangOptions &langOpts;
 

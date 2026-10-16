@@ -35,7 +35,7 @@ std::unique_ptr<llvm::Module> lowerDirectlyFromCIRToLLVMIR(
     mlir::ModuleOp mlirModule, llvm::LLVMContext &llvmCtx, bool enableOpenMP,
     llvm::StringRef mlirSaveTempsOutFile = {},
     llvm::vfs::FileSystem *fs = nullptr, bool enableOptimizations = false,
-    bool enableMem2Reg = false);
+    bool enableMem2Reg = false, bool enableVerifier = true);
 } // namespace direct
 } // namespace cir
 

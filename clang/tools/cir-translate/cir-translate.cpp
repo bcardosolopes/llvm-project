@@ -176,7 +176,8 @@ void registerToLLVMTranslation() {
             cir::direct::lowerDirectlyFromCIRToLLVMIR(
                 cirModule, llvmContext, enableOpenMP,
                 /*mlirSaveTempsOutFile=*/{}, /*fs=*/nullptr,
-                /*enableOptimizations=*/false, enableMem2Reg);
+                /*enableOptimizations=*/false, enableMem2Reg,
+                /*enableVerifier=*/true);
         if (!llvmModule)
           return mlir::failure();
         llvmModule->renumberMetadataForAssembly();
