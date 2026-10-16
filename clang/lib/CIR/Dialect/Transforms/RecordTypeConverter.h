@@ -54,8 +54,12 @@ protected:
 
 private:
   bool recordNeedsConversion(cir::RecordType type);
+  // \p visitDepth maps the types on the current DFS path to their depths
+  // (insertion order). \p subtreeMinPrune is an out-param receiving the
+  // minimum depth pruned while computing this subtree (UINT_MAX if none).
   bool reachesChangingType(mlir::Type type,
-                           llvm::SmallPtrSetImpl<mlir::Type> &visiting) const;
+                           llvm::DenseMap<mlir::Type, unsigned> &visitDepth,
+                           unsigned depth, unsigned &subtreeMinPrune) const;
   cir::RecordType convertRecordType(cir::RecordType type);
   llvm::SmallVector<mlir::Type> convertRecordMemberTypes(cir::RecordType type);
   llvm::SmallVector<cir::RecordType> &getCurrentThreadRecursiveStack();
@@ -76,9 +80,11 @@ private:
   llvm::SmallVector<cir::RecordType> convertedRecordTypes;
   llvm::sys::SmartRWMutex<true> recordTypeMutex;
 
-  // Cached results of recordNeedsConversion().
-  llvm::DenseMap<mlir::Type, bool> recordNeedsConversionCache;
-  llvm::sys::SmartRWMutex<true> recordNeedsConversionMutex;
+  // Cached reachability results, populated for nested records too (see the
+  // depth guard in reachesChangingType). Logically const: shared across
+  // queries, guarded by the mutex below.
+  mutable llvm::DenseMap<mlir::Type, bool> recordNeedsConversionCache;
+  mutable llvm::sys::SmartRWMutex<true> recordNeedsConversionMutex;
 };
 
 } // namespace cir

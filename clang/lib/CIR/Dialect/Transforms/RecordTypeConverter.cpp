@@ -109,49 +109,74 @@ RecordRewritingTypeConverter::convertRecordMemberTypes(cir::RecordType type) {
 }
 
 bool RecordRewritingTypeConverter::reachesChangingType(
-    mlir::Type type, llvm::SmallPtrSetImpl<mlir::Type> &visiting) const {
+    mlir::Type type, llvm::DenseMap<mlir::Type, unsigned> &visitDepth,
+    unsigned depth, unsigned &subtreeMinPrune) const {
   if (typeMayChange(type))
     return true;
 
   // The sub-element walk skips record members. Stop on cycles.
-  if (auto rt = mlir::dyn_cast<cir::RecordType>(type)) {
-    if (!visiting.insert(type).second)
+  if (mlir::isa<cir::RecordType>(type)) {
+    {
+      std::shared_lock<decltype(recordNeedsConversionMutex)> lock(
+          recordNeedsConversionMutex);
+      auto it = recordNeedsConversionCache.find(type);
+      if (it != recordNeedsConversionCache.end())
+        return it->second;
+    }
+    auto [it, inserted] = visitDepth.try_emplace(type, depth);
+    if (!inserted) {
+      // Cycle back-edge: record the pruned node's own depth for the memo
+      // guard below.
+      subtreeMinPrune = std::min(subtreeMinPrune, it->second);
       return false;
-    for (mlir::Type member : rt.getMembers())
-      if (reachesChangingType(member, visiting))
-        return true;
-    if (auto u = mlir::dyn_cast<cir::UnionType>(type))
-      if (mlir::Type pad = u.getPadding())
-        return reachesChangingType(pad, visiting);
-    return false;
+    }
+    bool result = false;
+    auto rt = mlir::cast<cir::RecordType>(type);
+    for (mlir::Type member : rt.getMembers()) {
+      unsigned childMinPrune = UINT_MAX;
+      if (reachesChangingType(member, visitDepth, depth + 1, childMinPrune))
+        result = true;
+      subtreeMinPrune = std::min(subtreeMinPrune, childMinPrune);
+      if (result)
+        break;
+    }
+    if (!result)
+      if (auto u = mlir::dyn_cast<cir::UnionType>(type))
+        if (mlir::Type pad = u.getPadding()) {
+          unsigned childMinPrune = UINT_MAX;
+          result =
+              reachesChangingType(pad, visitDepth, depth + 1, childMinPrune);
+          subtreeMinPrune = std::min(subtreeMinPrune, childMinPrune);
+        }
+    visitDepth.erase(type);
+    // Memoize unless a prune strictly above this node occurred: prunes
+    // at-or-below are self-contained cycles whose least fixpoint this
+    // computation already captures, but a prune above would make the result
+    // relative to the current query path.
+    if (subtreeMinPrune >= depth) {
+      std::unique_lock<decltype(recordNeedsConversionMutex)> lock(
+          recordNeedsConversionMutex);
+      recordNeedsConversionCache[type] = result;
+    }
+    return result;
   }
 
   bool found = false;
-  type.walkImmediateSubElements([](mlir::Attribute) {},
-                                [&](mlir::Type sub) {
-                                  found = found ||
-                                          reachesChangingType(sub, visiting);
-                                });
+  type.walkImmediateSubElements(
+      [](mlir::Attribute) {},
+      [&](mlir::Type sub) {
+        unsigned childMinPrune = UINT_MAX;
+        found = found ||
+                reachesChangingType(sub, visitDepth, depth + 1, childMinPrune);
+        subtreeMinPrune = std::min(subtreeMinPrune, childMinPrune);
+      });
   return found;
 }
 
 bool RecordRewritingTypeConverter::recordNeedsConversion(cir::RecordType type) {
-  {
-    std::shared_lock<decltype(recordNeedsConversionMutex)> lock(
-        recordNeedsConversionMutex);
-    auto it = recordNeedsConversionCache.find(type);
-    if (it != recordNeedsConversionCache.end())
-      return it->second;
-  }
-
-  // Nested results may be partial inside a cycle, so cache only this one.
-  llvm::SmallPtrSet<mlir::Type, 8> visiting;
-  bool result = reachesChangingType(type, visiting);
-
-  std::unique_lock<decltype(recordNeedsConversionMutex)> lock(
-      recordNeedsConversionMutex);
-  recordNeedsConversionCache[type] = result;
-  return result;
+  llvm::DenseMap<mlir::Type, unsigned> visitDepth;
+  unsigned minPrune = UINT_MAX;
+  return reachesChangingType(type, visitDepth, /*depth=*/0, minPrune);
 }
 
 cir::RecordType
