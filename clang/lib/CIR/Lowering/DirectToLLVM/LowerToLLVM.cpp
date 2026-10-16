@@ -3056,7 +3056,12 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
   if (cir::MemoryEffectsAttr effects = op.getMemoryEffectsAttr())
     fn.setMemoryEffectsAttr(convertMemoryEffects(fn.getContext(), effects));
 
-  if (op->hasAttr(CIRDialect::getNoUnwindAttrName()))
+  // CIR spells two separate cannot-unwind facts, nothrow for a callee
+  // declared not to throw and nounwind for one whose effects rule out
+  // unwinding. LLVM has only nounwind, so either one sets it (mirrors call
+  // lowering in convertCallEffects).
+  if (op->hasAttr(CIRDialect::getNoUnwindAttrName()) ||
+      op->hasAttr(CIRDialect::getNoThrowAttrName()))
     fn.setNoUnwind(true);
   if (op->hasAttr(CIRDialect::getWillReturnAttrName()))
     fn.setWillReturn(true);
