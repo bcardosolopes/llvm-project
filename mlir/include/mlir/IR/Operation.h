@@ -686,17 +686,22 @@ public:
   using dialect_attr_range = iterator_range<dialect_attr_iterator>;
 
   /// Return a range corresponding to the dialect attributes for this operation.
+  /// Dialect attributes (dotted names) can only live in discardable
+  /// attributes: ODS property names are C++ identifiers, and ops without
+  /// properties store everything discardable. Iterate the raw dictionary
+  /// directly instead of materializing the full sorted dictionary via
+  /// getAttrs(), which costs a sort+unique per call.
   dialect_attr_range getDialectAttrs() {
-    auto attrs = getAttrs();
+    auto attrs = getRawDictionaryAttrs().getValue();
     return {dialect_attr_iterator(attrs.begin(), attrs.end()),
             dialect_attr_iterator(attrs.end(), attrs.end())};
   }
   dialect_attr_iterator dialect_attr_begin() {
-    auto attrs = getAttrs();
+    auto attrs = getRawDictionaryAttrs().getValue();
     return dialect_attr_iterator(attrs.begin(), attrs.end());
   }
   dialect_attr_iterator dialect_attr_end() {
-    auto attrs = getAttrs();
+    auto attrs = getRawDictionaryAttrs().getValue();
     return dialect_attr_iterator(attrs.end(), attrs.end());
   }
 
