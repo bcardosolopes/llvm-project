@@ -1874,9 +1874,120 @@ void CIRGenModule::addReplacement(StringRef name, mlir::Operation *op) {
   replacements[name] = op;
 }
 
+namespace {
+// Like mlir::SymbolUserMap, but prunes CIR type subtrees when collecting
+// symbol uses. CIR types (see CIRTypes.td) only contain nested types, name
+// strings, memory-space attributes and bit-field descriptors, so no symbol
+// reference can hide in them — yet MLIR's generic walk descends into every
+// nested record of every function signature, costing ~1s on big C++ TUs.
+// Types from any other dialect are still walked fully, so this stays correct
+// if non-CIR types with attribute parameters ever show up here.
+class CIRSymbolUserMap {
+public:
+  CIRSymbolUserMap(mlir::SymbolTableCollection &symbolTables,
+                   mlir::Operation *module)
+      : symbolTables(symbolTables) {
+    cirDialect = module->getContext()->getLoadedDialect<cir::CIRDialect>();
+    llvm::SmallVector<mlir::Operation *> symbols;
+    auto walkFn = [&](mlir::Operation *tableOp, bool /*allUsesVisible*/) {
+      for (mlir::Operation &op : tableOp->getRegion(0).getOps())
+        collectFromOp(&op, tableOp, symbols);
+    };
+    // A root with no containing block has no symbol users in enclosing IR.
+    mlir::SymbolTable::walkSymbolTables(module, !module->getBlock(), walkFn);
+  }
+
+  llvm::ArrayRef<mlir::Operation *> getUsers(mlir::Operation *symbol) const {
+    auto it = symbolToUsers.find(symbol);
+    return it != symbolToUsers.end() ? it->second.getArrayRef()
+                                     : llvm::ArrayRef<mlir::Operation *>();
+  }
+
+  void replaceAllUsesWith(mlir::Operation *symbol,
+                          mlir::StringAttr newSymbolName) {
+    auto it = symbolToUsers.find(symbol);
+    if (it == symbolToUsers.end())
+      return;
+
+    // Replace the uses within the users of `symbol`.
+    for (mlir::Operation *user : it->second)
+      (void)mlir::SymbolTable::replaceAllSymbolUses(symbol, newSymbolName,
+                                                    user);
+
+    // Move the current users of `symbol` to the new symbol if it is in the
+    // symbol table.
+    mlir::Operation *newSymbol =
+        symbolTables.lookupSymbolIn(symbol->getParentOp(), newSymbolName);
+    if (newSymbol != symbol) {
+      // Transfer over the users to the new symbol.  The reference to the old
+      // one is fetched again as the iterator is invalidated during the
+      // insertion.
+      auto newIt = symbolToUsers.try_emplace(newSymbol);
+      auto oldIt = symbolToUsers.find(symbol);
+      assert(oldIt != symbolToUsers.end() && "missing old users list");
+      if (newIt.second)
+        newIt.first->second = oldIt->second;
+      else
+        newIt.first->second.set_union(oldIt->second);
+      symbolToUsers.erase(oldIt);
+    }
+  }
+
+private:
+  void collectFromOp(mlir::Operation *op, mlir::Operation *tableOp,
+                     llvm::SmallVectorImpl<mlir::Operation *> &symbols) {
+    currentOp = op;
+    auto visit = [&](mlir::Attribute attr) { visitAttr(attr); };
+    visit(op->getRawDictionaryAttrs());
+    op->getName().walkInherentAttrs(
+        op, [&](llvm::StringRef, mlir::Attribute &attr) { visit(attr); });
+    for (auto [userOp, ref] : pendingUses) {
+      symbols.clear();
+      (void)symbolTables.lookupSymbolIn(tableOp, ref, symbols);
+      for (mlir::Operation *symbolOp : symbols)
+        symbolToUsers[symbolOp].insert(userOp);
+    }
+    pendingUses.clear();
+
+    // Recurse like mlir::walkSymbolUses: a symbol table defines a new scope.
+    if (op->hasTrait<mlir::OpTrait::SymbolTable>())
+      return;
+    for (mlir::Region &region : op->getRegions())
+      for (mlir::Operation &nested : region.getOps())
+        collectFromOp(&nested, tableOp, symbols);
+  }
+
+  void visitAttr(mlir::Attribute attr) {
+    if (auto ref = mlir::dyn_cast<mlir::SymbolRefAttr>(attr)) {
+      pendingUses.emplace_back(currentOp, ref);
+      // Don't walk nested references.
+      return;
+    }
+    attr.walkImmediateSubElements([&](mlir::Attribute sub) { visitAttr(sub); },
+                                  [&](mlir::Type type) { visitType(type); });
+  }
+
+  void visitType(mlir::Type type) {
+    // Prune: audited above, CIR types hold no symbol references.
+    if (cirDialect && &type.getDialect() == cirDialect)
+      return;
+    type.walkImmediateSubElements([&](mlir::Attribute sub) { visitAttr(sub); },
+                                  [&](mlir::Type sub) { visitType(sub); });
+  }
+
+  mlir::SymbolTableCollection &symbolTables;
+  cir::CIRDialect *cirDialect = nullptr;
+  mlir::Operation *currentOp = nullptr;
+  llvm::SmallVector<std::pair<mlir::Operation *, mlir::SymbolRefAttr>>
+      pendingUses;
+  llvm::DenseMap<mlir::Operation *, llvm::SetVector<mlir::Operation *>>
+      symbolToUsers;
+};
+} // namespace
+
 #ifndef NDEBUG
 static bool verifyPointerTypeArgs(cir::FuncOp oldF, cir::FuncOp newF,
-                                  mlir::SymbolUserMap &userMap) {
+                                  CIRSymbolUserMap &userMap) {
   for (mlir::Operation *user : userMap.getUsers(oldF)) {
     auto call = mlir::dyn_cast<cir::CallOp>(user);
     if (!call)
@@ -1900,8 +2011,11 @@ void CIRGenModule::applyReplacements() {
   // Build a symbol user map once — this walks the module O(M) one time.
   // Previously, each replaceAllSymbolUses call walked the entire module,
   // giving O(R × M) quadratic behavior for R replacements.
+  // CIRSymbolUserMap additionally prunes CIR type subtrees (see above):
+  // MLIR's generic walk descends into every nested record of every function
+  // signature even though no symbol reference can hide there.
   mlir::SymbolTableCollection symbolTableCollection;
-  mlir::SymbolUserMap userMap(symbolTableCollection, getModule());
+  CIRSymbolUserMap userMap(symbolTableCollection, getModule());
 
   for (auto &i : replacements) {
     StringRef mangledName = i.first;
