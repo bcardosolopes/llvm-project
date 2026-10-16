@@ -39,6 +39,10 @@ def LLVM_Dialect : Dialect {
     static StringRef getModuleFlags() { return "llvm.module.flags"; }
     static StringRef getCommandlineAttrName() { return "llvm.commandline"; }
     static StringRef getMmraAttrName() { return "llvm.mmra"; }
+    /// Names of the two MemProf metadata kinds. LLVM allows them on any
+    /// `CallBase`, so they ride as discardable dialect attributes.
+    static StringRef getMemProfAttrName() { return "llvm.memprof"; }
+    static StringRef getCallsiteAttrName() { return "llvm.callsite"; }
 
     /// Names of llvm parameter attributes.
     static StringRef getAlignAttrName() { return "llvm.align"; }
