@@ -28,7 +28,7 @@ S *test(S *source, S *dest, size_t count) {
 // CIR:         %[[DEST_VOID:.*]] = cir.cast bitcast %[[DEST]] : !cir.ptr<!rec_S> -> !cir.ptr<!void>
 // CIR:         %[[SOURCE_VOID:.*]] = cir.cast bitcast %[[SOURCE]] : !cir.ptr<!rec_S> -> !cir.ptr<!void>
 // CIR:         cir.libc.memmove %[[SIZE]] bytes from %[[SOURCE_VOID]] align(4) to %[[DEST_VOID]] align(4)
-// CIR:         cir.store %[[DEST]], %{{.*}} : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
+// CIR:         cir.return %[[DEST]] : !cir.ptr<!rec_S>
 
 // LLVM-LABEL: define {{.*}} ptr @_Z4testP1SS0_m(
 // LLVM:         [[DEST:%.*]] = load ptr, ptr
