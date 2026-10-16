@@ -71,11 +71,12 @@ getX86ABICompatInfo(const llvm::Triple &triple,
   return abiCompat;
 }
 
-mlir::LogicalResult
-runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
-                  bool enableVerifier, bool enableIdiomRecognizer,
-                  bool enableCIRSimplify, bool enableLibOpt,
-                  llvm::StringRef libOptOptions, bool enableCallConvLowering) {
+mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
+                                      mlir::MLIRContext &mlirContext,
+                                      bool enableIdiomRecognizer,
+                                      bool enableCIRSimplify, bool enableLibOpt,
+                                      llvm::StringRef libOptOptions,
+                                      bool enableCallConvLowering) {
 
   llvm::TimeTraceScope scope("CIR To CIR Passes");
 
@@ -149,7 +150,14 @@ runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
     }
   }
 
-  pm.enableVerifier(enableVerifier);
+  // Disable inter-pass verification. The CIR module is verified once before
+  // this pipeline runs (in HandleTranslationUnit), and the resulting LLVM
+  // module is verified again by LLVM's own verifier after translation, so
+  // verifying after every pass is redundant. Per-pass verification walks the
+  // whole module including symbol tables (notably
+  // SymbolTable::lookupNearestSymbolFrom linear scans in comdat
+  // verification), costing ~1.5s across this pipeline on SemaExpr.cpp.
+  pm.enableVerifier(false);
   (void)mlir::applyPassManagerCLOptions(pm);
   return pm.run(theModule);
 }

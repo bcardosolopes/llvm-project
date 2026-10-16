@@ -6786,6 +6786,12 @@ lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
   mlir::PassManager pm(mlirCtx);
   populateCIRToLLVMPasses(pm, enableOpenMP, enableMem2Reg);
 
+  // Disable inter-pass verification in the lowering pipeline. The CIR module
+  // is already verified before lowering, and the resulting LLVM module is
+  // verified by LLVM's own verifier after translation. The MLIR LLVM dialect
+  // intermediate verification is redundant and has O(N^2) cost due to
+  // SymbolTable::lookupNearestSymbolFrom linear scans in comdat verification.
+  pm.enableVerifier(false);
   (void)mlir::applyPassManagerCLOptions(pm);
 
   // The failing pass has already reported its error through the MLIR
