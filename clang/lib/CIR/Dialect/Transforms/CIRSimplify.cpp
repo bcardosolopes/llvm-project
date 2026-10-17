@@ -420,6 +420,9 @@ struct CIRSimplifyPass : public impl::CIRSimplifyBase<CIRSimplifyPass> {
   using CIRSimplifyBase::CIRSimplifyBase;
 
   void runOnOperation() override;
+
+private:
+  void runSimplifyConstantLoad(llvm::SmallVectorImpl<Operation *> &loadOps);
 };
 
 void populateMergeCleanupPatterns(RewritePatternSet &patterns,
@@ -442,19 +445,42 @@ void CIRSimplifyPass::runOnOperation() {
   RewritePatternSet patterns(&getContext());
   populateMergeCleanupPatterns(patterns, domInfo);
 
-  // Collect operations to apply patterns.
+  // Collect operations to apply patterns. Both op lists come from one
+  // walk: the first-phase patterns create no LoadOps (Select/Not/
+  // Constant only) and erase none, so the load set is the same before
+  // and after they run.
   llvm::SmallVector<Operation *, 16> ops;
+  llvm::SmallVector<Operation *, 16> loadOps;
   getOperation()->walk([&](Operation *op) {
     if (isa<TernaryOp, SelectOp, SwitchOp, VecSplatOp, LoadOp>(op))
       ops.push_back(op);
+    else if (isa<LoadOp>(op))
+      loadOps.push_back(op);
   });
 
   // Apply patterns. Scope the rewrite to the body region, which encloses
   // the common ancestor the driver would otherwise search for.
   GreedyRewriteConfig config;
   config.setScope(&getOperation()->getRegion(0));
-  config.setListener(&domInfo);
   if (applyOpPatternsGreedily(ops, std::move(patterns), config).failed())
+    signalPassFailure();
+
+  // SimplifyConstantLoad needs to query dominance information, which could be
+  // invalidated by other rewrite patterns. Thus we run it separately after
+  // other patterns have been applied.
+  runSimplifyConstantLoad(loadOps);
+}
+
+void CIRSimplifyPass::runSimplifyConstantLoad(
+    llvm::SmallVectorImpl<Operation *> &loadOps) {
+  RewritePatternSet patterns(&getContext());
+  patterns.add<SimplifyConstantLoad>(patterns.getContext());
+
+  // Scope the rewrite to the body region, which encloses the common
+  // ancestor the driver would otherwise search for.
+  GreedyRewriteConfig config;
+  config.setScope(&getOperation()->getRegion(0));
+  if (applyOpPatternsGreedily(loadOps, std::move(patterns), config).failed())
     signalPassFailure();
 }
 
