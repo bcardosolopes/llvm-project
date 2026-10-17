@@ -396,7 +396,7 @@ struct CIRSimplifyPass : public impl::CIRSimplifyBase<CIRSimplifyPass> {
   void runOnOperation() override;
 
 private:
-  void runSimplifyConstantLoad();
+  void runSimplifyConstantLoad(llvm::SmallVectorImpl<Operation *> &loadOps);
 };
 
 void populateMergeCleanupPatterns(RewritePatternSet &patterns) {
@@ -415,11 +415,17 @@ void CIRSimplifyPass::runOnOperation() {
   RewritePatternSet patterns(&getContext());
   populateMergeCleanupPatterns(patterns);
 
-  // Collect operations to apply patterns.
+  // Collect operations to apply patterns. Both op lists come from one
+  // walk: the first-phase patterns create no LoadOps (Select/Not/
+  // Constant only) and erase none, so the load set is the same before
+  // and after they run.
   llvm::SmallVector<Operation *, 16> ops;
+  llvm::SmallVector<Operation *, 16> loadOps;
   getOperation()->walk([&](Operation *op) {
     if (isa<TernaryOp, SelectOp, SwitchOp, VecSplatOp>(op))
       ops.push_back(op);
+    else if (isa<LoadOp>(op))
+      loadOps.push_back(op);
   });
 
   // Apply patterns.
@@ -429,19 +435,15 @@ void CIRSimplifyPass::runOnOperation() {
   // SimplifyConstantLoad needs to query dominance information, which could be
   // invalidated by other rewrite patterns. Thus we run it separately after
   // other patterns have been applied.
-  runSimplifyConstantLoad();
+  runSimplifyConstantLoad(loadOps);
 }
 
-void CIRSimplifyPass::runSimplifyConstantLoad() {
+void CIRSimplifyPass::runSimplifyConstantLoad(
+    llvm::SmallVectorImpl<Operation *> &loadOps) {
   RewritePatternSet patterns(&getContext());
   patterns.add<SimplifyConstantLoad>(patterns.getContext());
 
-  llvm::SmallVector<Operation *, 16> ops;
-  getOperation()->walk([&](Operation *op) {
-    if (isa<LoadOp>(op))
-      ops.push_back(op);
-  });
-  if (applyOpPatternsGreedily(ops, std::move(patterns)).failed())
+  if (applyOpPatternsGreedily(loadOps, std::move(patterns)).failed())
     signalPassFailure();
 }
 
