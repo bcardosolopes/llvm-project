@@ -225,6 +225,16 @@ private:
 /// an empty region.
 using BlockIndexCache = DenseMap<Block *, DenseMap<Block *, size_t>>;
 
+/// Presence of the promotable interfaces per op TypeID, shared across all
+/// slot promotions in the pass. Interface resolution depends only on the
+/// op's TypeID, so entries never need invalidation however much promotion
+/// erases and creates ops (unlike an Operation*-keyed cache, which would go
+/// stale). Absent key = not yet queried.
+struct PromotableInterfaceCache {
+  DenseMap<TypeID, bool> memOpResults;
+  DenseMap<TypeID, bool> regionOpResults;
+};
+
 /// The MemorySlotPromoter handles the state of promoting a memory slot. It
 /// wraps a slot and its associated allocator. This will perform the mutation of
 /// IR.
@@ -234,7 +244,8 @@ public:
                      OpBuilder &builder, DominanceInfo &dominance,
                      const DataLayout &dataLayout, MemorySlotPromotionInfo info,
                      const Mem2RegStatistics &statistics,
-                     BlockIndexCache &blockIndexCache);
+                     BlockIndexCache &blockIndexCache,
+                     PromotableInterfaceCache &interfaceCache);
 
   /// Actually promotes the slot by mutating IR. Promoting a slot DOES
   /// invalidate the MemorySlotPromotionInfo of other slots. Preparation of
@@ -289,6 +300,13 @@ private:
   /// no store has been executed. This function may mutate IR.
   Value getOrCreateDefaultValue();
 
+  /// Cached `dyn_cast` of the promotable interfaces. `promoteInBlock` queries
+  /// these for every op in every visited block of every promoted slot; the
+  /// interface-map lookup (including the promised-interface slow path on
+  /// misses) dominates that loop, so memoize presence per op TypeID.
+  PromotableMemOpInterface getMemOpInterface(Operation *op);
+  PromotableRegionOpInterface getRegionOpInterface(Operation *op);
+
   MemorySlot slot;
   PromotableAllocationOpInterface allocator;
   OpBuilder &builder;
@@ -321,6 +339,10 @@ private:
   /// Cache entries are *NOT* invalidated if all the blocks of the corresponding
   /// region are moved to an empty region.
   BlockIndexCache &blockIndexCache;
+
+  /// Shared cache of promotable-interface presence per op TypeID. Never needs
+  /// invalidation: interface resolution is a pure function of TypeID.
+  PromotableInterfaceCache &interfaceCache;
 };
 
 } // namespace
@@ -329,10 +351,10 @@ MemorySlotPromoter::MemorySlotPromoter(
     MemorySlot slot, PromotableAllocationOpInterface allocator,
     OpBuilder &builder, DominanceInfo &dominance, const DataLayout &dataLayout,
     MemorySlotPromotionInfo info, const Mem2RegStatistics &statistics,
-    BlockIndexCache &blockIndexCache)
+    BlockIndexCache &blockIndexCache, PromotableInterfaceCache &interfaceCache)
     : slot(slot), allocator(allocator), builder(builder), dominance(dominance),
       dataLayout(dataLayout), info(std::move(info)), statistics(statistics),
-      blockIndexCache(blockIndexCache) {
+      blockIndexCache(blockIndexCache), interfaceCache(interfaceCache) {
 #ifndef NDEBUG
   auto isResultOrNewBlockArgument = [&]() {
     if (BlockArgument arg = dyn_cast<BlockArgument>(slot.ptr))
@@ -353,6 +375,30 @@ Value MemorySlotPromoter::getOrCreateDefaultValue() {
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointToStart(&slot.ptr.getParentRegion()->front());
   return defaultValue = allocator.getDefaultValue(slot, builder);
+}
+
+PromotableMemOpInterface MemorySlotPromoter::getMemOpInterface(Operation *op) {
+  TypeID id = op->getName().getTypeID();
+  auto it = interfaceCache.memOpResults.find(id);
+  if (it != interfaceCache.memOpResults.end())
+    return it->second ? cast<PromotableMemOpInterface>(op)
+                      : PromotableMemOpInterface(nullptr);
+  PromotableMemOpInterface memOp = dyn_cast<PromotableMemOpInterface>(op);
+  interfaceCache.memOpResults[id] = static_cast<bool>(memOp);
+  return memOp;
+}
+
+PromotableRegionOpInterface
+MemorySlotPromoter::getRegionOpInterface(Operation *op) {
+  TypeID id = op->getName().getTypeID();
+  auto it = interfaceCache.regionOpResults.find(id);
+  if (it != interfaceCache.regionOpResults.end())
+    return it->second ? cast<PromotableRegionOpInterface>(op)
+                      : PromotableRegionOpInterface(nullptr);
+  PromotableRegionOpInterface regionOp =
+      dyn_cast<PromotableRegionOpInterface>(op);
+  interfaceCache.regionOpResults[id] = static_cast<bool>(regionOp);
+  return regionOp;
 }
 
 LogicalResult MemorySlotPromotionAnalyzer::computeBlockingUses(
@@ -588,7 +634,7 @@ Value MemorySlotPromoter::promoteInBlock(Block *block, Value reachingDef) {
     blockOps.push_back(&op);
   for (Operation *op : blockOps) {
     // Promote operations that interact with the slot's memory.
-    if (auto memOp = dyn_cast<PromotableMemOpInterface>(op)) {
+    if (auto memOp = getMemOpInterface(op)) {
       if (info.userToBlockingUses[memOp->getParentRegion()].contains(memOp))
         reachingDefs.insert({memOp, reachingDef});
 
@@ -633,8 +679,12 @@ Value MemorySlotPromoter::promoteInBlock(Block *block, Value reachingDef) {
     }
 
     // Promote regions that contain operations that interact with the slot's
-    // memory.
-    if (auto promotableRegionOp = dyn_cast<PromotableRegionOpInterface>(op)) {
+    // memory. Regionless ops can never need region promotion (there is no
+    // region to look up in regionsToPromote below), so skip the interface
+    // query for them entirely.
+    if (op->getNumRegions() == 0)
+      continue;
+    if (auto promotableRegionOp = getRegionOpInterface(op)) {
       bool needsPromotion = false;
       bool hasValueStores = false;
       for (Region &region : op->getRegions()) {
@@ -1050,6 +1100,12 @@ LogicalResult mlir::tryToPromoteMemorySlots(
   // lazily and cached to avoid expensive recomputation.
   BlockIndexCache blockIndexCache;
 
+  // A cache of promotable-interface presence per op TypeID. Every slot
+  // promotion walks every op of every visited block querying two interfaces;
+  // memoizing per TypeID (which needs no invalidation) avoids repeating the
+  // interface-map lookups once per slot.
+  PromotableInterfaceCache interfaceCache;
+
   SmallVector<PromotableAllocationOpInterface> workList(allocators);
 
   SmallVector<PromotableAllocationOpInterface> newWorkList;
@@ -1068,7 +1124,7 @@ LogicalResult mlir::tryToPromoteMemorySlots(
           std::optional<PromotableAllocationOpInterface> newAllocator =
               MemorySlotPromoter(slot, allocator, builder, dominance,
                                  dataLayout, std::move(*info), statistics,
-                                 blockIndexCache)
+                                 blockIndexCache, interfaceCache)
                   .promoteSlot();
           changedAllocator = true;
           // Add newly created allocators to the worklist for further
