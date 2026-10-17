@@ -1067,10 +1067,40 @@ void CallConvLoweringPass::runOnOperation() {
   // rewritten.  A key must never come from an op created during the rewrite:
   // a recycled address could match an unrelated entry.
   llvm::DenseMap<Operation *, FunctionClassification> variadicCallSites;
+  // A cir.get_global holding a function's address carries the signature the
+  // source wrote, which the verifier ties to the callee, so it goes stale when
+  // that callee is rewritten.  A function address in a global initializer is a
+  // GlobalViewAttr instead, whose recorded type the verifier does not tie to
+  // the callee and which is dropped at opaque-pointer lowering, so it needs no
+  // counterpart.  Collected in the same walk as the callers below: the two
+  // collections are mutually independent (neither reads the other's map, and
+  // only the call half can fail), so one preorder walk produces both with
+  // identical diagnostics.
+  llvm::DenseMap<cir::FuncOp, SmallVector<cir::GetGlobalOp>> addressTakers;
+
   moduleOp.walk([&](Operation *op) {
-    auto call = dyn_cast<cir::CIRCallOpInterface>(op);
-    if (!call)
+    // Only cir.call and cir.try_call implement CIRCallOpInterface (both via
+    // CIR_CallOpBase in CIROps.td), so filter on the concrete types: a
+    // per-op interface query pays a map lookup plus the promised-interface
+    // slow path for the ~99% of ops that implement nothing.
+    if (!isa<cir::CallOp, cir::TryCallOp>(op)) {
+      // A call op is never a get_global, so the address-taker half below sees
+      // exactly the ops the old second walk saw, in the same preorder.
+      auto getGlobal = dyn_cast<cir::GetGlobalOp>(op);
+      if (!getGlobal)
+        return;
+      auto ptrTy = cast<cir::PointerType>(getGlobal.getAddr().getType());
+      if (!isa<cir::FuncType>(ptrTy.getPointee()))
+        return;
+      // A get_global's pointee must equal the named symbol's type, and the
+      // GlobalOp verifier rejects a function type there, so this names a
+      // cir.func.
+      auto callee =
+          cast<cir::FuncOp>(symbolTable.lookup(getGlobal.getName()));
+      addressTakers[callee].push_back(getGlobal);
       return;
+    }
+    auto call = cast<cir::CIRCallOpInterface>(op);
     cir::FuncOp callee = lookupCallee(op, symbolTable);
     if (!callee)
       return;
@@ -1102,23 +1132,6 @@ void CallConvLoweringPass::runOnOperation() {
     return;
   }
 
-  // A cir.get_global holding a function's address carries the signature the
-  // source wrote, which the verifier ties to the callee, so it goes stale when
-  // that callee is rewritten.  A function address in a global initializer is a
-  // GlobalViewAttr instead, whose recorded type the verifier does not tie to
-  // the callee and which is dropped at opaque-pointer lowering, so it needs no
-  // counterpart.
-  llvm::DenseMap<cir::FuncOp, SmallVector<cir::GetGlobalOp>> addressTakers;
-  moduleOp.walk([&](cir::GetGlobalOp getGlobal) {
-    auto ptrTy = cast<cir::PointerType>(getGlobal.getAddr().getType());
-    if (!isa<cir::FuncType>(ptrTy.getPointee()))
-      return;
-    // A get_global's pointee must equal the named symbol's type, and the
-    // GlobalOp verifier rejects a function type there, so this names a
-    // cir.func.
-    auto callee = cast<cir::FuncOp>(symbolTable.lookup(getGlobal.getName()));
-    addressTakers[callee].push_back(getGlobal);
-  });
 
   // Restate every non-byval indirect parameter's slot alignment and route any
   // use of such a parameter as a call argument through a load of that slot,
