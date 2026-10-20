@@ -947,16 +947,11 @@ static mlir::Block *buildTerminateUnwindBlock(mlir::Location loc,
 // successors as well as goto edges (resolved to labels within the region).
 // Used to find dead blocks in cleanup scope bodies and catch handlers.
 static llvm::SmallPtrSet<mlir::Block *, 8>
-collectReachableBlocks(mlir::Region &region) {
+reachableBlocksWithLabels(mlir::Region &region,
+                          const llvm::StringMap<mlir::Block *> &labelBlocks) {
   llvm::SmallPtrSet<mlir::Block *, 8> reachable;
   if (region.empty())
     return reachable;
-
-  // Map labels to their blocks for goto edge resolution.
-  llvm::StringMap<mlir::Block *> labelBlocks;
-  for (mlir::Block &block : region)
-    for (cir::LabelOp labelOp : block.getOps<cir::LabelOp>())
-      labelBlocks[labelOp.getLabel()] = &block;
 
   llvm::SmallVector<mlir::Block *> worklist;
   reachable.insert(&region.front());
@@ -987,6 +982,17 @@ collectReachableBlocks(mlir::Region &region) {
   return reachable;
 }
 
+// Label-map-building wrapper for callers without a fused walk (catch
+// handlers). Cleanup scopes pass the fused map directly.
+static llvm::SmallPtrSet<mlir::Block *, 8>
+collectReachableBlocks(mlir::Region &region) {
+  llvm::StringMap<mlir::Block *> labelBlocks;
+  for (mlir::Block &block : region)
+    for (cir::LabelOp labelOp : block.getOps<cir::LabelOp>())
+      labelBlocks[labelOp.getLabel()] = &block;
+  return reachableBlocksWithLabels(region, labelBlocks);
+}
+
 class CIRCleanupScopeOpFlattening
     : public mlir::OpRewritePattern<cir::CleanupScopeOp> {
 public:
@@ -998,6 +1004,24 @@ public:
     mlir::Operation *exitOp;
 
     CleanupExit(mlir::Operation *op) : exitOp(op) {}
+  };
+
+  // Everything matchAndRewrite needs from one walk over a cleanup body.
+  // Collected together because bodies nest: separate walks would re-scan
+  // every nested body once per enclosing cleanup.
+  struct CleanupBodyFacts {
+    llvm::SmallVector<CleanupExit> exits;
+    llvm::SmallVector<cir::CleanupScopeOp> deadNested;
+    llvm::StringMap<mlir::Block *> labelBlocks;
+    llvm::SmallVector<cir::CallOp> throwingCalls;
+    llvm::SmallVector<cir::ThrowOp> throws;
+    llvm::SmallVector<cir::ResumeOp> resumeOps;
+    // Set when the walk is allowed to collect the EH lists.
+    bool collectThrowing = false;
+    bool collectResume = false;
+    // Any nested region-bearing op other than a dead cleanup (which is
+    // erased, not flattened) or a case op.
+    bool hasNestedWork = false;
   };
 
   // Determine whether a goto operation transfers control to a label that
@@ -1073,8 +1097,9 @@ public:
   // directly without running any cleanup, which is what the tail call means:
   // the frame those cleanups would run in no longer exists. CIRGen only emits
   // one when every cleanup it skips is redundant before a return.
-  void collectExits(mlir::Region &cleanupBodyRegion,
-                    llvm::SmallVectorImpl<CleanupExit> &exits) const {
+  void collectBodyFacts(mlir::Region &cleanupBodyRegion,
+                        CleanupBodyFacts &facts) const {
+    llvm::SmallVectorImpl<CleanupExit> &exits = facts.exits;
     // Collect yield terminators from the body region. We do this separately
     // because yields in nested operations, including those in nested cleanup
     // scopes, won't branch through the outer cleanup region.
@@ -1093,18 +1118,56 @@ public:
       return gotoOp && !gotoTargetsLabelInRegion(gotoOp, cleanupBodyRegion);
     };
 
+    // Shared per-op facts. Dead nested cleanups are recorded for erasure
+    // and their whole subtree skipped (the nesting check treats them as
+    // already gone, matching the old erase-then-check order).
+    auto collectFacts =
+        [&](mlir::Operation *op) -> std::optional<mlir::WalkResult> {
+      if (auto cleanup = dyn_cast<cir::CleanupScopeOp>(op)) {
+        if (mlir::isOpTriviallyDead(cleanup)) {
+          facts.deadNested.push_back(cleanup);
+          return mlir::WalkResult::skip();
+        }
+        facts.hasNestedWork = true;
+      } else if (op->getNumRegions() > 0 && !isa<cir::CaseOp>(op)) {
+        facts.hasNestedWork = true;
+      }
+      // Labels only from top-level blocks: the old map was built with
+      // `block.getOps` (non-recursive), and nested-region blocks must not
+      // leak into the reachability set.
+      if (isa<cir::LabelOp>(op) &&
+          op->getBlock()->getParent() == &cleanupBodyRegion)
+        facts.labelBlocks[cast<cir::LabelOp>(op).getLabel()] = op->getBlock();
+      if (facts.collectThrowing) {
+        if (auto callOp = dyn_cast<cir::CallOp>(op)) {
+          // A musttail call is never an invoke. LLVM has no musttail
+          // invoke, and the tail call replaces the frame the cleanup
+          // would have run in.
+          if (!callOp.getNothrow() && !callOp.getMusttail())
+            facts.throwingCalls.push_back(callOp);
+        } else if (auto throwOp = dyn_cast<cir::ThrowOp>(op)) {
+          facts.throws.push_back(throwOp);
+        }
+      }
+      if (facts.collectResume)
+        if (auto resumeOp = dyn_cast<cir::ResumeOp>(op))
+          facts.resumeOps.push_back(resumeOp);
+      return std::nullopt;
+    };
+
     // Lambda to walk a loop and collect only returns and gotos.
     // Break and continue inside loops are handled by the loop itself.
     // Loops don't require special handling for nested switch or cleanup scopes
     // because break and continue never branch out of the loop.
     auto collectExitsInLoop = [&](mlir::Operation *loopOp) {
       loopOp->walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation *nestedOp) {
+        if (auto skip = collectFacts(nestedOp))
+          return *skip;
         if (isa<cir::CoroCleanupOp>(nestedOp) ||
             isReturnThatExitsCleanup(nestedOp)) {
           exits.emplace_back(nestedOp);
         } else if (isGotoThatExitsCleanup(nestedOp)) {
           exits.emplace_back(nestedOp);
-        }
         }
         return mlir::WalkResult::advance();
       });
@@ -1118,6 +1181,8 @@ public:
     // not break (handled by switch). For nested loops/cleanups, recurses.
     collectExitsInSwitch = [&](mlir::Operation *switchOp) {
       switchOp->walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation *nestedOp) {
+        if (auto skip = collectFacts(nestedOp))
+          return *skip;
         if (isa<cir::CleanupScopeOp>(nestedOp)) {
           // Walk the nested cleanup, but ignore break statements because they
           // will be handled by the switch we are currently walking.
@@ -1125,7 +1190,8 @@ public:
               cast<cir::CleanupScopeOp>(nestedOp).getBodyRegion(),
               /*ignoreBreak=*/true);
           return mlir::WalkResult::skip();
-        } else if (isa<cir::LoopOpInterface>(nestedOp)) {
+        } else if (nestedOp->getNumRegions() > 0 &&
+                   isa<cir::LoopOpInterface>(nestedOp)) {
           collectExitsInLoop(nestedOp);
           return mlir::WalkResult::skip();
         } else if (isa<cir::ContinueOp, cir::CoReturnOp, cir::CoroCleanupOp>(
@@ -1134,7 +1200,6 @@ public:
           exits.emplace_back(nestedOp);
         } else if (isGotoThatExitsCleanup(nestedOp)) {
           exits.emplace_back(nestedOp);
-        }
         }
         return mlir::WalkResult::advance();
       });
@@ -1145,6 +1210,8 @@ public:
     // switches, and cleanups appropriately.
     collectExitsInCleanup = [&](mlir::Region &region, bool ignoreBreak) {
       region.walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation *op) {
+        if (auto skip = collectFacts(op))
+          return *skip;
         // We need special handling for break statements because if this cleanup
         // scope was nested within a switch op, break will be handled by the
         // switch operation and therefore won't exit the cleanup scope enclosing
@@ -1159,16 +1226,16 @@ public:
           exits.emplace_back(op);
         } else if (isGotoThatExitsCleanup(op)) {
           exits.emplace_back(op);
-        }
         } else if (isa<cir::CleanupScopeOp>(op)) {
           // Recurse into nested cleanup's body region.
           collectExitsInCleanup(cast<cir::CleanupScopeOp>(op).getBodyRegion(),
                                 /*ignoreBreak=*/ignoreBreak);
           return mlir::WalkResult::skip();
-        } else if (isa<cir::LoopOpInterface>(op)) {
+        } else if (op->getNumRegions() > 0 && isa<cir::LoopOpInterface>(op)) {
           // This kicks off a separate walk rather than continuing to dig deeper
           // in the current walk because we need to handle break and continue
-          // differently inside loops.
+          // differently inside loops. Region check first: the interface
+          // lookup is a map query, pointless for regionless ops.
           collectExitsInLoop(op);
           return mlir::WalkResult::skip();
         } else if (isa<cir::SwitchOp>(op)) {
@@ -1738,17 +1805,32 @@ public:
     // op's region, the branch would reference a block outside that region,
     // which is invalid. Fail the match so they are processed first.
     //
-    // Before checking, erase any trivially dead nested cleanup scopes. These
-    // arise from deactivated cleanups (e.g. partial-construction guards for
-    // lambda captures). The greedy rewriter may have already DCE'd them, but
-    // when a trivially dead nested op is erased first, the parent isn't always
+    // Fail fast when real nested work remains, before the expensive body
+    // walks below. Trivially dead nested cleanups don't count: they are
+    // erased (not flattened) on the success path. Failing here modifies
+    // nothing, which also respects the pattern rewriter contract.
+    bool hasEHCleanup = cleanupOp.getCleanupKindAttr().isEH();
+
+    // One fused walk over the body collects exits, dead nested cleanups,
+    // the label map, the EH lists, and whether nested work remains.
+    // Separate walks would re-scan every nested body once per enclosing
+    // cleanup; bodies nest thousands deep on machine-generated code.
+    CleanupBodyFacts facts;
+    facts.collectResume = hasEHCleanup;
+    facts.collectThrowing =
+        hasEHCleanup && (!isLifetimeMarkerOnly(cleanupOp.getCleanupRegion()) ||
+                         hasEnclosingEHRequirement(cleanupOp));
+    collectBodyFacts(cleanupOp.getBodyRegion(), facts);
+    // Fail before modifying anything when nested work remains.
+    if (facts.hasNestedWork)
+      return mlir::failure();
+
+    // Erase any trivially dead nested cleanup scopes. These arise from
+    // deactivated cleanups (e.g. partial-construction guards for lambda
+    // captures). The greedy rewriter may have already DCE'd them, but when
+    // a trivially dead nested op is erased first, the parent isn't always
     // re-added to the worklist, so we handle it here.
-    llvm::SmallVector<cir::CleanupScopeOp> deadNestedOps;
-    cleanupOp.getBodyRegion().walk([&](cir::CleanupScopeOp nested) {
-      if (mlir::isOpTriviallyDead(nested))
-        deadNestedOps.push_back(nested);
-    });
-    for (auto op : deadNestedOps)
+    for (auto op : facts.deadNested)
       rewriter.eraseOp(op);
 
     // Erase dead continuation blocks: CIRGen leaves an empty block after a
@@ -1757,22 +1839,30 @@ public:
     // scope. Only yield-only blocks without predecessors are erased, so no
     // other block can reference them and no labels or values are lost.
     llvm::SmallPtrSet<mlir::Block *, 8> reachable =
-        collectReachableBlocks(cleanupOp.getBodyRegion());
-    for (mlir::Block &block :
-         llvm::make_early_inc_range(cleanupOp.getBodyRegion())) {
-      if (!reachable.contains(&block) && block.hasNoPredecessors() &&
-          block.getOperations().size() == 1 && isa<cir::YieldOp>(block.front()))
-        rewriter.eraseBlock(&block);
+        reachableBlocksWithLabels(cleanupOp.getBodyRegion(), facts.labelBlocks);
+    {
+      // The fused walk above already collected yields from these blocks,
+      // so drop them from the exit list before erasing (the old code
+      // erased first and collected after; same resulting set).
+      llvm::SmallVector<mlir::Block *, 2> victims;
+      for (mlir::Block &block : cleanupOp.getBodyRegion()) {
+        if (!reachable.contains(&block) && block.hasNoPredecessors() &&
+            block.getOperations().size() == 1 &&
+            isa<cir::YieldOp>(block.front()))
+          victims.push_back(&block);
+      }
+      if (!victims.empty()) {
+        llvm::SmallPtrSet<mlir::Block *, 2> victimSet(victims.begin(),
+                                                      victims.end());
+        llvm::erase_if(facts.exits, [&](const CleanupExit &e) {
+          return victimSet.contains(e.exitOp->getBlock());
+        });
+        for (mlir::Block *block : victims)
+          rewriter.eraseBlock(block);
+      }
     }
 
-    if (hasNestedOpsToFlatten(cleanupOp.getBodyRegion()))
-      return mlir::failure();
-
-    bool hasEHCleanup = cleanupOp.getCleanupKindAttr().isEH();
-
-    // Collect all exits from the body region.
-    llvm::SmallVector<CleanupExit> exits;
-    collectExits(cleanupOp.getBodyRegion(), exits);
+    llvm::SmallVector<CleanupExit> &exits = facts.exits;
 
 #ifndef NDEBUG
     // A body with no exits is legitimate when control can never leave it
@@ -1786,26 +1876,10 @@ public:
              "cleanup scope body has no exit");
 #endif
 
-    // Collect non-nothrow calls and throws that need to be converted to
-    // try_call/try_throw. A marker-only cleanup must not introduce an unwind
-    // edge unless an enclosing handler or real EH cleanup requires one.
-    llvm::SmallVector<cir::CallOp> callsToRewrite;
-    llvm::SmallVector<cir::ThrowOp> throwsToRewrite;
-    if (hasEHCleanup && (!isLifetimeMarkerOnly(cleanupOp.getCleanupRegion()) ||
-                         hasEnclosingEHRequirement(cleanupOp))) {
-      collectThrowingCalls(cleanupOp.getBodyRegion(), callsToRewrite);
-      collectThrows(cleanupOp.getBodyRegion(), throwsToRewrite);
-    }
-
-    // Collect resume ops from already-flattened inner cleanup scopes that
-    // need to chain through this cleanup's EH handler, including lifetime
-    // markers even when they did not introduce any unwind edges themselves.
-    llvm::SmallVector<cir::ResumeOp> resumeOpsToChain;
-    if (hasEHCleanup)
-      collectResumeOps(cleanupOp.getBodyRegion(), resumeOpsToChain);
-
-    return flattenCleanup(cleanupOp, exits, callsToRewrite, throwsToRewrite,
-                          resumeOpsToChain, rewriter);
+    // Throwing calls, throws, and resume ops were collected by the fused
+    // walk above (gated on the same EH conditions).
+    return flattenCleanup(cleanupOp, exits, facts.throwingCalls, facts.throws,
+                          facts.resumeOps, rewriter);
   }
 };
 
