@@ -3194,6 +3194,15 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
   if (Args.hasArg(OPT_clangir_disable_verifier))
     Opts.ClangIRDisableCIRVerifier = true;
 
+  // Asserts-off builds run the MLIR side of the CIR pipeline unverified:
+  // every MLIR verifier on the path (emission bodies, pre-pass and
+  // pre-lowering module checks) honors this bit. LLVM-proper verifiers
+  // (translation, backend) are untouched and keep their own default.
+  // Asserts builds keep MLIR verification unless the flag above opts out.
+#ifdef NDEBUG
+  Opts.ClangIRDisableCIRVerifier = true;
+#endif
+
   if (Args.hasArg(OPT_clangir_lib_opt) || Args.hasArg(OPT_clangir_lib_opt_EQ))
     Opts.ClangIRLibOptEnabled = true;
 #endif // CLANG_ENABLE_CIR

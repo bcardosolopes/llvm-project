@@ -3531,7 +3531,8 @@ def clangir_disable_passes : Flag<["-"], "clangir-disable-passes">,
   MarshallingInfoFlag<FrontendOpts<"ClangIRDisablePasses">>;
 def clangir_disable_verifier : Flag<["-"], "clangir-disable-verifier">,
   Visibility<[ClangOption, CC1Option]>,
-  HelpText<"ClangIR: Disable MLIR module verifier">,
+  HelpText<"ClangIR: Disable MLIR-side verification (emission bodies, "
+           "pre-pass and pre-lowering module checks)">,
   MarshallingInfoFlag<FrontendOpts<"ClangIRDisableCIRVerifier">>;
 
 def clangir_enable_idiom_recognizer : Flag<["-"], "clangir-enable-idiom-recognizer">,

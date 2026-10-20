@@ -32,6 +32,7 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Verifier.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
@@ -6774,12 +6775,17 @@ void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP,
   }
 }
 
-std::unique_ptr<llvm::Module>
-lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
-                             bool enableOpenMP, bool enableMem2Reg,
-                             StringRef mlirSaveTempsOutFile,
-                             llvm::vfs::FileSystem *fs) {
+std::unique_ptr<llvm::Module> lowerDirectlyFromCIRToLLVMIR(
+    mlir::ModuleOp mlirModule, LLVMContext &llvmCtx, bool enableOpenMP,
+    bool enableMem2Reg, bool enableVerifier, StringRef mlirSaveTempsOutFile,
+    llvm::vfs::FileSystem *fs) {
   llvm::TimeTraceScope scope("lower from CIR to LLVM directly");
+
+  // Verify the post-C2C CIR before lowering. This brackets the C2C pipeline
+  // (verify in/out): the later checks are LLVM-IR-level and cannot catch
+  // invalid CIR that still lowers to valid-looking LLVM IR.
+  if (enableVerifier && mlir::failed(mlir::verify(mlirModule)))
+    return nullptr;
 
   mlir::MLIRContext *mlirCtx = mlirModule.getContext();
 

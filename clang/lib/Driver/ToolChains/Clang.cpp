@@ -5454,6 +5454,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                           ? "-fclangir-mem2reg"
                           : "-fno-clangir-mem2reg");
 
+  // Forward the holistic verifier toggle (without this the driver accepts
+  // and then drops it as unused, so cc1 never sees it).
+  if (Args.hasArg(options::OPT_clangir_disable_verifier))
+    CmdArgs.push_back("-clangir-disable-verifier");
+
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
     const llvm::Triple &HostTriple =

@@ -174,7 +174,8 @@ void registerToLLVMTranslation() {
         const bool enableOpenMP = mlir::omp::isOpenMPModule(cirModule);
         std::unique_ptr<llvm::Module> llvmModule =
             cir::direct::lowerDirectlyFromCIRToLLVMIR(
-                cirModule, llvmContext, enableOpenMP, enableMem2Reg);
+                cirModule, llvmContext, enableOpenMP, enableMem2Reg,
+                /*enableVerifier=*/true);
         if (!llvmModule)
           return mlir::failure();
         llvmModule->renumberMetadataForAssembly();

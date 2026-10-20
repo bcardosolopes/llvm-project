@@ -71,11 +71,11 @@ getBackendActionFromOutputType(CIRGenAction::OutputType Action) {
 
 static std::unique_ptr<llvm::Module>
 lowerFromCIRToLLVMIR(mlir::ModuleOp MLIRModule, llvm::LLVMContext &LLVMCtx,
-                     bool EnableOpenMP, bool EnableMem2Reg,
+                     bool EnableOpenMP, bool EnableMem2Reg, bool EnableVerifier,
                      llvm::StringRef mlirSaveTempsOutFile = {},
                      llvm::vfs::FileSystem *fs = nullptr) {
   return direct::lowerDirectlyFromCIRToLLVMIR(MLIRModule, LLVMCtx, EnableOpenMP,
-                                              EnableMem2Reg,
+                                              EnableMem2Reg, EnableVerifier,
                                               mlirSaveTempsOutFile, fs);
 }
 
@@ -183,9 +183,10 @@ static void emitCIRModuleOutput(
     // source allocas are the debuggable homes of every local.
     const bool EnableMem2Reg = CI.getFrontendOpts().ClangIREnableMem2Reg &&
                                (CGO.OptimizationLevel > 0);
-    std::unique_ptr<llvm::Module> LLVMModule = lowerFromCIRToLLVMIR(
-        MlirModule, LLVMCtx, EnableOpenMP, EnableMem2Reg, mlirSaveTempsOutFile,
-        &CI.getVirtualFileSystem());
+    std::unique_ptr<llvm::Module> LLVMModule =
+        lowerFromCIRToLLVMIR(MlirModule, LLVMCtx, EnableOpenMP, EnableMem2Reg,
+                             !CI.getFrontendOpts().ClangIRDisableCIRVerifier,
+                             mlirSaveTempsOutFile, &CI.getVirtualFileSystem());
     if (!LLVMModule) {
       // Lowering errors are already routed through the MLIR diagnostic
       // handler. Only emit the generic error if nothing was reported.
@@ -301,8 +302,9 @@ public:
                  SmallVectorImpl<::clang::LinkModule> &LinkModules)
       : Action(Action), CI(CI), OutputStream(std::move(OS)),
         FS(&CI.getVirtualFileSystem()),
-        Gen(std::make_unique<CIRGenerator>(CI.getDiagnostics(), std::move(FS),
-                                           CI.getCodeGenOpts())),
+        Gen(std::make_unique<CIRGenerator>(
+            CI.getDiagnostics(), std::move(FS), CI.getCodeGenOpts(),
+            !CI.getFrontendOpts().ClangIRDisableCIRVerifier)),
         FEOptions(CI.getFrontendOpts()), CGO(CGO), LLVMCtx(LLVMCtx),
         LinkModules(LinkModules),
         DiagConsumer(CI.getDiagnostics(), CI.getCodeGenOpts()) {}
