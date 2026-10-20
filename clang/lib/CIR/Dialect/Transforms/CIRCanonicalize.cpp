@@ -80,8 +80,14 @@ void CIRCanonicalizePass::runOnOperation() {
       ops.push_back(op);
   });
 
-  // Apply patterns.
-  if (applyOpPatternsGreedily(ops, std::move(patterns)).failed())
+  // Apply patterns. The collected ops span the whole op, so scope the
+  // rewrite to its body region explicitly: this skips the driver's
+  // common-ancestor search, which is O(levels x ops x depth) and
+  // dominates this pass on huge functions (it recomputes exactly this
+  // region). Debug builds assert every op is in scope.
+  GreedyRewriteConfig config;
+  config.setScope(&getOperation()->getRegion(0));
+  if (applyOpPatternsGreedily(ops, std::move(patterns), config).failed())
     signalPassFailure();
 }
 

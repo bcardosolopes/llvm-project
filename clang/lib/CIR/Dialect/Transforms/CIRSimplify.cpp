@@ -428,8 +428,11 @@ void CIRSimplifyPass::runOnOperation() {
       loadOps.push_back(op);
   });
 
-  // Apply patterns.
-  if (applyOpPatternsGreedily(ops, std::move(patterns)).failed())
+  // Apply patterns. Scope explicitly to skip the driver's
+  // common-ancestor search (see CIRCanonicalize).
+  GreedyRewriteConfig config;
+  config.setScope(&getOperation()->getRegion(0));
+  if (applyOpPatternsGreedily(ops, std::move(patterns), config).failed())
     signalPassFailure();
 
   // SimplifyConstantLoad needs to query dominance information, which could be
@@ -443,7 +446,9 @@ void CIRSimplifyPass::runSimplifyConstantLoad(
   RewritePatternSet patterns(&getContext());
   patterns.add<SimplifyConstantLoad>(patterns.getContext());
 
-  if (applyOpPatternsGreedily(loadOps, std::move(patterns)).failed())
+  GreedyRewriteConfig config;
+  config.setScope(&getOperation()->getRegion(0));
+  if (applyOpPatternsGreedily(loadOps, std::move(patterns), config).failed())
     signalPassFailure();
 }
 
