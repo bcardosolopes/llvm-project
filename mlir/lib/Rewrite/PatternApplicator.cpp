@@ -199,8 +199,13 @@ LogicalResult PatternApplicator::matchAndRewrite(
           rewriter.setInsertionPoint(op);
 #ifndef NDEBUG
           // Operation `op` may be invalidated after applying the rewrite
-          // pattern.
-          Operation *dumpRootOp = getDumpRootOp(op);
+          // pattern. Only computed when the success log below can fire:
+          // the walk is O(depth) per pattern attempt, which dominates
+          // assert-build rewrite time on deep IR.
+          Operation *dumpRootOp =
+              (llvm::DebugFlag && llvm::isCurrentDebugType(DEBUG_TYPE))
+                  ? getDumpRootOp(op)
+                  : nullptr;
 #endif
           if (pdlMatch) {
             result =
