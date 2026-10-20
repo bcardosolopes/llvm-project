@@ -321,6 +321,12 @@ private:
   /// Contains the reaching definition at the end of the blocks visited so far.
   DenseMap<Block *, Value> reachingAtBlockEnd;
 
+  /// Blocks that can interact with the slot: holders of a blocking use or
+  /// of a region op with a promoted region. All other blocks are pure
+  /// pass-through for the reaching definition, so `promoteInBlock` skips
+  /// their op scan (see `promoteSlot`).
+  DenseSet<Block *> blocksToScan;
+
   /// Regions visited by `promoteInRegion`, recorded in DFS post-order.
   /// Inner regions appear before their enclosing regions.
   llvm::SmallVector<Region *> regionsInPostOrder;
@@ -629,6 +635,13 @@ MemorySlotPromotionAnalyzer::computeInfo() {
 }
 
 Value MemorySlotPromoter::promoteInBlock(Block *block, Value reachingDef) {
+  // Fast path: blocks without slot interaction are pure pass-through (see
+  // `promoteSlot`). Merge-point block arguments and successor operands are
+  // created by `promoteInRegion`, not here, so skipping is safe for them.
+  if (!blocksToScan.contains(block)) {
+    reachingAtBlockEnd[block] = reachingDef;
+    return reachingDef;
+  }
   SmallVector<Operation *> blockOps;
   for (Operation &op : block->getOperations())
     blockOps.push_back(&op);
@@ -1052,6 +1065,20 @@ void MemorySlotPromoter::removeUnusedItems() {
 
 std::optional<PromotableAllocationOpInterface>
 MemorySlotPromoter::promoteSlot() {
+  // Collect the blocks that can interact with the slot: blocks holding a
+  // blocking use, and blocks holding a region op with a promoted region.
+  // Every other block is pure pass-through for the reaching definition:
+  // it holds no store (no reaching-def update, no `replacedValuesMap`
+  // entry) and no promoted region (no `setupPromotion`/`finalizePromotion`,
+  // hence no builder or IR effects at all), so `promoteInBlock` records
+  // the pass-through and skips its op scan. Without this, every slot pays
+  // a full-region walk even when its uses span a handful of blocks.
+  for (auto &[region, blockingUses] : info.userToBlockingUses)
+    for (auto &[op, _] : blockingUses)
+      blocksToScan.insert(op->getBlock());
+  for (auto &[region, _] : info.regionsToPromote)
+    blocksToScan.insert(region->getParentOp()->getBlock());
+
   // Step 1: perform the promotion recursively through nested regions. The
   // reaching definition starts with a null value that will be replaced by a
   // lazily-created default value if the value must be passed to a promotion
