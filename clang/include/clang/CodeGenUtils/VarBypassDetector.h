@@ -11,10 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_LIB_CODEGEN_VARBYPASSDETECTOR_H
-#define LLVM_CLANG_LIB_CODEGEN_VARBYPASSDETECTOR_H
+#ifndef LLVM_CLANG_CODEGENUTILS_VARBYPASSDETECTOR_H
+#define LLVM_CLANG_CODEGENUTILS_VARBYPASSDETECTOR_H
 
-#include "CodeGenModule.h"
 #include "clang/AST/Decl.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -25,9 +24,10 @@ namespace clang {
 
 class Decl;
 class Stmt;
+class StackExhaustionHandler;
 class VarDecl;
 
-namespace CodeGen {
+namespace CodeGenUtils {
 
 /// The class detects jumps which bypass local variables declaration:
 ///    goto L;
@@ -38,6 +38,9 @@ namespace CodeGen {
 ///  * Detects only jumps into the scope local variables.
 ///  * Does not detect jumps out of the scope of local variables.
 ///  * Not limited to variables with initializers, JumpScopeChecker is limited.
+///
+/// Shared by classic CodeGen and CIRGen so both agree on which locals can
+/// safely get lifetime markers (PR28267).
 class VarBypassDetector {
   // Scope information. Contains a parent scope and related variable
   // declaration.
@@ -56,7 +59,7 @@ class VarBypassDetector {
   bool AlwaysBypassed = false;
 
 public:
-  void Init(CodeGenModule &CGM, const Stmt *Body);
+  void Init(StackExhaustionHandler &StackHandler, const Stmt *Body);
 
   /// Returns true if the variable declaration was by bypassed by any goto or
   /// switch statement.
@@ -79,14 +82,14 @@ public:
   }
 
 private:
-  bool BuildScopeInformation(CodeGenModule &CGM, const Decl *D,
-                             unsigned &ParentScope);
-  bool BuildScopeInformation(CodeGenModule &CGM, const Stmt *S,
-                             unsigned &origParentScope);
+  bool BuildScopeInformation(StackExhaustionHandler &StackHandler,
+                             const Decl *D, unsigned &ParentScope);
+  bool BuildScopeInformation(StackExhaustionHandler &StackHandler,
+                             const Stmt *S, unsigned &origParentScope);
   void Detect();
   void Detect(unsigned From, unsigned To, const Stmt *Source);
 };
-}
-}
+} // namespace CodeGenUtils
+} // namespace clang
 
 #endif

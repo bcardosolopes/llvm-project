@@ -56,12 +56,13 @@ void g() {
 // LLVM:         call void @_ZN1SD1Ev(ptr {{.*}} %[[S]])
 // LLVM:         call void @llvm.lifetime.end.p0(ptr %[[S]])
 
-// A statement that can bypass a local's initialization -- switch, label, or
-// indirect goto -- miscompiles under stack coloring (PR28267). Lacking classic
-// CodeGen's per-decl bypass analysis, we conservatively drop lifetime markers
-// for the *whole* function whenever any such statement is present, even at -O2
-// and even for locals (like `x` below) that are not themselves bypassed.
+// A goto/switch that bypasses a local's initialization splits the lifetime
+// across IR regions and miscompiles under stack coloring (PR28267), so such
+// locals get no markers. Locals whose initialization is not bypassed keep
+// their markers, matching classic CodeGen's per-decl analysis.
 
+// `x` is declared before the switch, so the dispatch does not bypass its
+// initialization and it keeps its markers.
 void bypass_switch(int n) {
   int x;
   use(x);
@@ -72,11 +73,17 @@ void bypass_switch(int n) {
 }
 
 // CIR-LABEL: cir.func{{.*}}bypass_switch
-// CIR-NOT:     cir.lifetime
+// CIR:         %[[X:.*]] = cir.alloca "x" {{.*}} : !cir.ptr<!s32i>
+// CIR:         cir.lifetime.start %[[X]] : !cir.ptr<!s32i>
+// CIR:         cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
 
 // LLVM-LABEL: define{{.*}}bypass_switch
-// LLVM-NOT:    call void @llvm.lifetime
+// LLVM:         alloca i32
+// LLVM:         %[[X:.*]] = alloca i32
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[X]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[X]])
 
+// The backward goto does not bypass `x`'s initialization either.
 void bypass_label(int n) {
   int x;
   use(x);
@@ -86,7 +93,70 @@ target:
 }
 
 // CIR-LABEL: cir.func{{.*}}bypass_label
-// CIR-NOT:     cir.lifetime
+// CIR:         %[[X:.*]] = cir.alloca "x" {{.*}} : !cir.ptr<!s32i>
+// CIR:         cir.lifetime.start %[[X]] : !cir.ptr<!s32i>
+// CIR:         cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
+
+// LLVM-LABEL: define{{.*}}bypass_label
+// LLVM:         alloca i32
+// LLVM:         %[[X:.*]] = alloca i32
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[X]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[X]])
+
+// The switch dispatch jumps over `skipped`'s declaration to reach the case
+// labels, so `skipped` gets no markers while the non-bypassed `x` does.
+void switch_skips_init(int n) {
+  int x;
+  use(x);
+  switch (n) {
+    int skipped;
+    use(skipped);
+  case 0:
+    break;
+  }
+}
+
+// CIR-LABEL: cir.func{{.*}}switch_skips_init
+// CIR:         %[[X:.*]] = cir.alloca "x" {{.*}} : !cir.ptr<!s32i>
+// CIR:         cir.lifetime.start %[[X]] : !cir.ptr<!s32i>
+// CIR:         %[[S:.*]] = cir.alloca "skipped" {{.*}} : !cir.ptr<!s32i>
+// CIR-NOT:     cir.lifetime.start %[[S]]
+// CIR:         cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
+
+// LLVM-LABEL: define{{.*}}switch_skips_init
+// LLVM:         alloca i32
+// LLVM:         %[[X:.*]] = alloca i32
+// LLVM:         %[[S:.*]] = alloca i32
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[X]])
+// LLVM-NOT:     call void @llvm.lifetime.start.p0(ptr %[[S]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[X]])
+
+// The forward goto jumps over `skipped`'s declaration.
+void goto_skips_init(int n) {
+  int x;
+  use(x);
+  if (n)
+    goto skip;
+  int skipped;
+  use(skipped);
+skip:
+  use(n);
+}
+
+// CIR-LABEL: cir.func{{.*}}goto_skips_init
+// CIR:         %[[X:.*]] = cir.alloca "x" {{.*}} : !cir.ptr<!s32i>
+// CIR:         %[[S:.*]] = cir.alloca "skipped" {{.*}} : !cir.ptr<!s32i>
+// CIR:         cir.lifetime.start %[[X]] : !cir.ptr<!s32i>
+// CIR-NOT:     cir.lifetime.start %[[S]]
+// CIR:         cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
+
+// LLVM-LABEL: define{{.*}}goto_skips_init
+// LLVM:         alloca i32
+// LLVM:         %[[X:.*]] = alloca i32
+// LLVM:         %[[S:.*]] = alloca i32
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[X]])
+// LLVM-NOT:     call void @llvm.lifetime.start.p0(ptr %[[S]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[X]])
 
 void bypass_indirect_goto() {
   int x;

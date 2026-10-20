@@ -34,6 +34,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/Basic/OpenACCKinds.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Basic/StackExhaustionHandler.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CIR/Dialect/IR/CIROpsEnums.h"
 #include "llvm/ADT/SetVector.h"
@@ -103,6 +104,8 @@ private:
   mutable std::optional<cir::CIRDataLayout> dataLayout;
 
   clang::DiagnosticsEngine &diags;
+
+  clang::StackExhaustionHandler StackHandler;
 
   const clang::TargetInfo &target;
 
@@ -205,6 +208,9 @@ public:
   const clang::TargetInfo &getTarget() const { return target; }
   const clang::CodeGenOptions &getCodeGenOpts() const { return codeGenOpts; }
   clang::DiagnosticsEngine &getDiags() const { return diags; }
+  clang::StackExhaustionHandler &getStackExhaustionHandler() {
+    return StackHandler;
+  }
   CIRGenTypes &getTypes() { return genTypes; }
   const clang::LangOptions &getLangOpts() const { return langOpts; }
 

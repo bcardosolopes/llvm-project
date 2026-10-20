@@ -146,11 +146,9 @@ CIRGenFunction::emitAutoVarAlloca(const VarDecl &d,
       declare(address.getPointer(), &d, ty, getLoc(d.getSourceRange()),
               alignment);
       // A goto/switch that bypasses the init splits the lifetime across IR
-      // regions and miscompiles under stack coloring (PR28267). Lacking
-      // classic's per-decl bypass analysis, drop markers for the whole
-      // function if any such statement is present.
-      assert(!cir::MissingFeatures::lifetimeMarkersBypass());
-      if (shouldEmitLifetimeMarkersForAutoVar() && haveInsertPoint()) {
+      // regions and miscompiles under stack coloring (PR28267), so bypassed
+      // locals get no markers. Non-bypassed locals are unaffected.
+      if (shouldEmitLifetimeMarkersForAutoVar(&d) && haveInsertPoint()) {
         emission.useLifetimeMarkers = emitLifetimeStartOp(
             loc, address.getUnderlyingAllocaOp().getResult());
       }

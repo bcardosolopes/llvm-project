@@ -19,5 +19,6 @@ static_library("CodeGenUtils") {
     "RecordLayoutUtils.cpp",
     "StmtUtils.cpp",
     "TargetUtils.cpp",
+    "VarBypassDetector.cpp",
   ]
 }

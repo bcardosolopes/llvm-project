@@ -38,6 +38,7 @@
 #include "clang/CIR/TypeEvaluationKind.h"
 #include "clang/CodeGenUtils/CallUtils.h"
 #include "clang/CodeGenUtils/StmtUtils.h"
+#include "clang/CodeGenUtils/VarBypassDetector.h"
 #include "llvm/ADT/ScopedHashTable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
@@ -3105,12 +3106,13 @@ private:
   QualType getVarArgType(const Expr *arg);
 
   bool shouldEmitLifetimeMarkers = false;
-  /// Set when the current function has a goto/switch that may bypass a local's
-  /// init; lifetime markers are then suppressed. See functionMightHaveBypass.
-  bool fnHasBypassStmt = false;
+  /// Locals whose initialization can be bypassed by a goto/switch get no
+  /// lifetime markers (PR28267). Shared per-decl analysis with classic
+  /// CodeGen; only locals that are actually bypassed lose their markers.
+  clang::CodeGenUtils::VarBypassDetector Bypasses;
 
-  bool shouldEmitLifetimeMarkersForAutoVar() const {
-    return shouldEmitLifetimeMarkers && !fnHasBypassStmt;
+  bool shouldEmitLifetimeMarkersForAutoVar(const VarDecl *D) const {
+    return shouldEmitLifetimeMarkers && !Bypasses.IsBypassed(D);
   }
 
   class InlinedInheritingConstructorScope {

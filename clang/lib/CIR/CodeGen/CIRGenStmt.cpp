@@ -1167,7 +1167,7 @@ mlir::LogicalResult CIRGenFunction::emitForStmt(const ForStmt &s,
     bool needsCondCleanup =
         condVar &&
         (condVar->needsDestruction(getContext()) != QualType::DK_none ||
-         shouldEmitLifetimeMarkersForAutoVar() ||
+         shouldEmitLifetimeMarkersForAutoVar(condVar) ||
          !condVarExtendedTemporaries.empty());
     CapturedCleanups loopCondScope(*this, needsCondCleanup);
 
@@ -1314,7 +1314,7 @@ CIRGenFunction::emitWhileStmt(const WhileStmt &s,
     bool needsCondCleanup =
         condVar &&
         (condVar->needsDestruction(getContext()) != QualType::DK_none ||
-         shouldEmitLifetimeMarkersForAutoVar() ||
+         shouldEmitLifetimeMarkersForAutoVar(condVar) ||
          !condVarExtendedTemporaries.empty());
     CapturedCleanups loopCondScope(*this, needsCondCleanup);
 
