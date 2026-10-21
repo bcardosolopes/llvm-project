@@ -906,6 +906,8 @@ public:
   const CodeGenOptions &getCodeGenOpts() const { return CodeGenOpts; }
   llvm::Module &getModule() const { return TheModule; }
   DiagnosticsEngine &getDiags() const { return Diags; }
+
+  StackExhaustionHandler &getStackExhaustionHandler() { return StackHandler; }
   const llvm::DataLayout &getDataLayout() const {
     return TheModule.getDataLayout();
   }

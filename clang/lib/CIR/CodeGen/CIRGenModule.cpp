@@ -90,7 +90,7 @@ CIRGenModule::CIRGenModule(mlir::MLIRContext &mlirContext,
       enableVerifier(enableVerifier), langOpts(astContext.getLangOpts()),
       atomicOpts(astContext.getLangOpts()), codeGenOpts(cgo),
       theModule{mlir::ModuleOp::create(mlir::UnknownLoc::get(&mlirContext))},
-      diags(diags), target(astContext.getTargetInfo()),
+      diags(diags), StackHandler(diags), target(astContext.getTargetInfo()),
       abi(createCXXABI(*this)), genTypes(*this), vtables(*this) {
 
   // Classic CodeGen's CXX20ModuleInits: C++20 named modules get an

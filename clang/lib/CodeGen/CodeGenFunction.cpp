@@ -1587,7 +1587,7 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
         (CGM.getLangOpts().getTrivialAutoVarInit() !=
          LangOptions::TrivialAutoVarInitKind::Uninitialized);
     if (NeedsBypassDetection)
-      Bypasses.Init(CGM, Body);
+      Bypasses.Init(CGM.getStackExhaustionHandler(), Body);
   }
 
   // Emit the standard function prologue.

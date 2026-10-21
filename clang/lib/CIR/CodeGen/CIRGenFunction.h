@@ -39,6 +39,7 @@
 #include "clang/CodeGenUtils/CallUtils.h"
 #include "clang/CodeGenUtils/StmtUtils.h"
 #include "clang/CodeGenUtils/TargetUtils.h"
+#include "clang/CodeGenUtils/VarBypassDetector.h"
 #include "llvm/ADT/ScopedHashTable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
@@ -129,6 +130,18 @@ public:
 
   typedef void Destroyer(CIRGenFunction &cgf, Address addr, QualType ty);
 
+  /// Emits a cir.lifetime.end for the alloca backing a local or temporary.
+  /// The raw alloca value (in the alloca address space) is stored rather
+  /// than an Address, mirroring classic CodeGen's CallLifetimeEnd.
+  struct CallLifetimeEnd final : EHScopeStack::Cleanup {
+    mlir::Value addr;
+    CallLifetimeEnd(mlir::Value addr) : addr(addr) {}
+    bool isRedundantBeforeReturn() override { return true; }
+    void emit(CIRGenFunction &cgf, Flags flags) override {
+      cgf.emitLifetimeEndOp(addr.getLoc(), addr);
+    }
+  };
+
   class CapturedCleanups;
 
   /// A cleanup whose destructor call is not emitted where the cleanup is
@@ -141,9 +154,10 @@ public:
   /// at run time whether the object has been constructed, and guards the
   /// destructor call.
   ///
-  /// Currently only DestroyObject cleanups use this. When other cleanup types
-  /// are needed (e.g., CallLifetimeEnd), this struct can be extended with a
-  /// std::variant of cleanup data types.
+  /// DestroyObject cleanups use all fields. A null destroyer marks a
+  /// CallLifetimeEnd entry: only kind/addr are meaningful (the end marker is
+  /// emitted for the alloca underlying addr). If a future cleanup type needs
+  /// different data, extend this with a std::variant of cleanup data types.
   struct PendingCleanupEntry {
     CleanupKind kind;
     Address addr;
@@ -1365,6 +1379,55 @@ public:
     lifetimeExtendedCleanupStack.push_back({kind, addr, type, destroyer});
   }
 
+  /// Queue a cir.lifetime.end for a lifetime-extended temporary, emitted when
+  /// the enclosing scope ends. Cannot be conditional (like the destroyer
+  /// version above); callers must not be in a conditional branch.
+  void pushLifetimeEndAfterFullExpr(CleanupKind kind, Address addr,
+                                    const clang::ValueDecl *extendingDecl);
+
+  /// A cir.lifetime.end waiting for its full-expression to finish. Outside a
+  /// conditional the end is a plain op that needs no cleanup scope; only its
+  /// placement matters (after the full-expression's destructors). Recording
+  /// them here instead of opening one cleanup scope per temporary keeps the
+  /// scope nesting depth flat on destructor-heavy code.
+  struct PendingLifetimeEnd {
+    /// ID of the RunCleanupsScope that closes the full-expression.
+    unsigned scopeID;
+    mlir::Value alloca;
+  };
+  SmallVector<PendingLifetimeEnd, 16> pendingLifetimeEnds;
+  unsigned nextCleanupScopeID = 1;
+  unsigned currentCleanupScopeID = 0;
+
+  /// Emit the ends recorded for \p scopeID in LIFO order. Called from
+  /// forceCleanup once the scope's destructors have been popped.
+  void emitPendingLifetimeEnds(unsigned scopeID);
+
+  /// Push a cir.lifetime.end to run at the end of the current full-expression.
+  /// Safe against the possibility that we're currently inside a
+  /// conditionally-evaluated expression.
+  void pushFullExprLifetimeEnd(CleanupKind kind, Address addr) {
+    // Outside a conditional, record the end for deferred emission when the
+    // enclosing cleanup scope exits. With no scope active (function prologue
+    // and similar), fall back to opening a scope here.
+    if (!isInConditionalBranch()) {
+      if (currentCleanupScopeID != 0) {
+        pendingLifetimeEnds.push_back(
+            {currentCleanupScopeID, addr.getUnderlyingAllocaOp().getResult()});
+        return;
+      }
+      return ehStack.pushCleanup<CallLifetimeEnd>(
+          kind, addr.getUnderlyingAllocaOp().getResult());
+    }
+
+    // Inside a conditional, record the end marker for the scope that
+    // ConditionalEvaluation opened where the conditional began, guarded by a
+    // flag set only where the object is constructed.
+    Address activeFlag = createCleanupActiveFlag();
+    deferredConditionalCleanupStack.push_back(
+        {kind, addr, QualType(), /*destroyer=*/nullptr, activeFlag});
+  }
+
   /// Enters a new scope for capturing cleanups, all of which
   /// will be executed once the scope is exited.
   class RunCleanupsScope {
@@ -1377,6 +1440,9 @@ public:
       return deferLifetimeExtended ? cgf.lifetimeExtendedCleanupStack.size()
                                    : lifetimeExtendedCleanupStackSize;
     }
+
+    unsigned scopeID = 0;
+    unsigned savedScopeID = 0;
 
   protected:
     bool performCleanup;
@@ -1400,12 +1466,16 @@ public:
       cgf.didCallStackSave = false;
       oldCleanupStackDepth = cgf.currentCleanupStackDepth;
       cgf.currentCleanupStackDepth = cleanupStackDepth;
+      scopeID = cgf.nextCleanupScopeID++;
+      savedScopeID = cgf.currentCleanupScopeID;
+      cgf.currentCleanupScopeID = scopeID;
     }
 
     /// Exit this cleanup scope, emitting any accumulated cleanups.
     ~RunCleanupsScope() {
       if (performCleanup)
         forceCleanup();
+      cgf.currentCleanupScopeID = savedScopeID;
     }
 
     /// Force the emission of cleanups now, instead of waiting
@@ -1472,6 +1542,9 @@ public:
                              valuesToReload);
       }
 
+      // With the destructors popped, the full-expression's temporaries are
+      // dead: emit their deferred lifetime ends.
+      cgf.emitPendingLifetimeEnds(scopeID);
       performCleanup = false;
       cgf.currentCleanupStackDepth = oldCleanupStackDepth;
     }
@@ -1495,6 +1568,7 @@ public:
       assert(deactivateCleanups.deactivated &&
              "forceCleanupExceptLifetimeExtended() must be called first");
       cgf.popCleanupBlocks(cleanupStackDepth, oldLifetimeExtendedSize());
+      cgf.emitPendingLifetimeEnds(scopeID);
       performCleanup = false;
       cgf.currentCleanupStackDepth = oldCleanupStackDepth;
     }
@@ -3143,12 +3217,13 @@ private:
   QualType getVarArgType(const Expr *arg);
 
   bool shouldEmitLifetimeMarkers = false;
-  /// Set when the current function has a goto/switch that may bypass a local's
-  /// init; lifetime markers are then suppressed. See functionMightHaveBypass.
-  bool fnHasBypassStmt = false;
+  /// Locals whose initialization can be bypassed by a goto/switch get no
+  /// lifetime markers (PR28267). Shared per-decl analysis with classic
+  /// CodeGen; only locals that are actually bypassed lose their markers.
+  clang::CodeGenUtils::VarBypassDetector Bypasses;
 
-  bool shouldEmitLifetimeMarkersForAutoVar() const {
-    return shouldEmitLifetimeMarkers && !fnHasBypassStmt;
+  bool shouldEmitLifetimeMarkersForAutoVar(const VarDecl *D) const {
+    return shouldEmitLifetimeMarkers && !Bypasses.IsBypassed(D);
   }
 
   class InlinedInheritingConstructorScope {
