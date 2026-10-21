@@ -19,7 +19,6 @@
 #include "CodeGenModule.h"
 #include "EHScopeStack.h"
 #include "SanitizerHandler.h"
-#include "VarBypassDetector.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/CurrentSourceLocExprScope.h"
@@ -37,6 +36,7 @@
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGenUtils/CallUtils.h"
 #include "clang/CodeGenUtils/TargetUtils.h"
+#include "clang/CodeGenUtils/VarBypassDetector.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
@@ -302,7 +302,7 @@ public:
 
   // Stores variables for which we can't generate correct lifetime markers
   // because of jumps.
-  VarBypassDetector Bypasses;
+  CodeGenUtils::VarBypassDetector Bypasses;
 
   // Addresses of bypassed variables, for re-emitting their
   // trivial-auto-var-init at a jump that re-enters their scope.

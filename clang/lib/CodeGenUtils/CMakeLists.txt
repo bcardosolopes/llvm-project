@@ -18,6 +18,7 @@ add_clang_library(clangCodeGenUtils
   RecordLayoutUtils.cpp
   StmtUtils.cpp
   TargetUtils.cpp
+  VarBypassDetector.cpp
 
   LINK_LIBS
   clangAST

@@ -1,0 +1,86 @@
+// RUN: cir-opt %s -cir-flatten-cfg -o %t.cir
+// RUN: FileCheck --input-file=%t.cir %s
+
+!s32i = !cir.int<s, 32>
+
+// Marker-only cleanups splice their ends directly before each exit instead
+// of building dispatch blocks.
+cir.func @test_marker_yield() {
+  %0 = cir.alloca "x" align(4) init : !cir.ptr<!s32i>
+  cir.lifetime.start %0 : !cir.ptr<!s32i>
+  cir.cleanup.scope {
+    cir.call @use(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.yield
+  } cleanup normal {
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.yield
+  }
+  cir.return
+}
+
+// CHECK-LABEL: cir.func @test_marker_yield()
+// CHECK:         %[[X:.*]] = cir.alloca {{.*}} : !cir.ptr<!s32i>
+// CHECK:         cir.br ^[[BODY:bb[0-9]+]]
+// CHECK:       ^[[BODY]]:
+// CHECK:         cir.call @use(%[[X]])
+// CHECK-NEXT:    cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
+// CHECK-NEXT:    cir.br ^[[CONT:bb[0-9]+]]
+// CHECK:       ^[[CONT]]:
+// CHECK-NEXT:    cir.return
+
+// A valued return keeps its original order: the load stays put and the end
+// splices between the load and the return. Sinking the load below the end
+// would create a load-after-end that the optimizer folds to undef.
+cir.func @test_marker_return() -> !s32i {
+  %0 = cir.alloca "x" align(4) init : !cir.ptr<!s32i>
+  cir.lifetime.start %0 : !cir.ptr<!s32i>
+  cir.cleanup.scope {
+    %1 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %1 : !s32i
+  } cleanup normal {
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.yield
+  }
+  %c0 = cir.const #cir.int<0> : !s32i
+  cir.return %c0 : !s32i
+}
+
+// CHECK-LABEL: cir.func @test_marker_return()
+// CHECK:         %[[X:.*]] = cir.alloca {{.*}} : !cir.ptr<!s32i>
+// CHECK:         cir.br ^[[BODY:bb[0-9]+]]
+// CHECK:       ^[[BODY]]:
+// CHECK:         %[[V:.*]] = cir.load %[[X]] : !cir.ptr<!s32i>, !s32i
+// CHECK-NEXT:    cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
+// CHECK-NEXT:    cir.return %[[V]] : !s32i
+
+// A non-marker cleanup still uses the dispatch path, but a return-operand
+// load of an alloca ended in that cleanup must not sink below the end: it
+// spills to a temporary instead.
+cir.func @test_dtor_end_return() -> !s32i {
+  %0 = cir.alloca "x" align(4) init : !cir.ptr<!s32i>
+  cir.lifetime.start %0 : !cir.ptr<!s32i>
+  cir.cleanup.scope {
+    %1 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %1 : !s32i
+  } cleanup normal {
+    cir.call @dtor(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.yield
+  }
+  %c0 = cir.const #cir.int<0> : !s32i
+  cir.return %c0 : !s32i
+}
+
+// CHECK-LABEL: cir.func @test_dtor_end_return()
+// CHECK:         %[[TMP:.*]] = cir.alloca "__ret_operand_tmp" {{.*}} : !cir.ptr<!s32i>
+// CHECK:         %[[X:.*]] = cir.alloca {{.*}} : !cir.ptr<!s32i>
+// CHECK:         %[[V:.*]] = cir.load %[[X]] : !cir.ptr<!s32i>, !s32i
+// CHECK:         cir.store %[[V]], %[[TMP]] : !s32i, !cir.ptr<!s32i>
+// CHECK:         cir.call @dtor(%[[X]])
+// CHECK:         cir.lifetime.end %[[X]] : !cir.ptr<!s32i>
+// CHECK-NOT:     cir.load %[[X]]
+// CHECK:         %[[R:.*]] = cir.load %[[TMP]] : !cir.ptr<!s32i>, !s32i
+// CHECK:         cir.return %[[R]] : !s32i
+
+cir.func private @use(!cir.ptr<!s32i>) -> ()
+cir.func private @dtor(!cir.ptr<!s32i>) -> ()

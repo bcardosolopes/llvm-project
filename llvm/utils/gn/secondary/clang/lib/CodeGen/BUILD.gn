@@ -152,6 +152,5 @@ static_library("CodeGen") {
     "Targets/XCore.cpp",
     "Targets/Xtensa.cpp",
     "TrapReasonBuilder.cpp",
-    "VarBypassDetector.cpp",
   ]
 }
