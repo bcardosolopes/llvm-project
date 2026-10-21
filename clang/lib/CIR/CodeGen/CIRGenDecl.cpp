@@ -32,18 +32,6 @@
 using namespace clang;
 using namespace clang::CIRGen;
 
-struct CallLifetimeEnd final : EHScopeStack::Cleanup {
-  // The raw alloca pointer (in the alloca address space). Mirrors classic
-  // CodeGen's CallLifetimeEnd, which stores the llvm::Value pointer rather
-  // than an Address.
-  mlir::Value addr;
-  CallLifetimeEnd(mlir::Value addr) : addr(addr) {}
-  bool isRedundantBeforeReturn() override { return true; }
-  void emit(CIRGenFunction &cgf, Flags flags) override {
-    cgf.emitLifetimeEndOp(addr.getLoc(), addr);
-  }
-};
-
 CIRGenFunction::AutoVarEmission
 CIRGenFunction::emitAutoVarAlloca(const VarDecl &d,
                                   mlir::OpBuilder::InsertPoint ip) {
@@ -1353,13 +1341,34 @@ void CIRGenFunction::pushLifetimeExtendedDestroy(
   }
 }
 
+void CIRGenFunction::pushLifetimeEndAfterFullExpr(
+    CleanupKind kind, Address addr, const clang::ValueDecl *extendingDecl) {
+  lifetimeExtendedCleanupStack.push_back(
+      {kind, addr, QualType(), /*destroyer=*/nullptr});
+
+  // A temporary that a loop condition variable extends gets its end marker
+  // with the variable at the end of each iteration, in the loop's cleanup
+  // region.
+  if (lifetimeExtensionCapture &&
+      extendingDecl == lifetimeExtensionCapture->extendingDecl) {
+    PendingCleanupEntry &entry = lifetimeExtendedCleanupStack.back();
+    entry.activeFlag = lifetimeExtensionCapture->activeFlag;
+    entry.capturedBy = lifetimeExtensionCapture->cleanups;
+  }
+}
+
 void CIRGenFunction::pushPendingCleanupToEHStack(
     const PendingCleanupEntry &entry) {
   std::optional<CapturedCleanups::CaptureScope> capture;
   if (entry.capturedBy)
     capture.emplace(*entry.capturedBy);
-  ehStack.pushCleanup<DestroyObject>(entry.kind, entry.addr, entry.type,
-                                     entry.destroyer);
+  if (!entry.destroyer) {
+    ehStack.pushCleanup<CallLifetimeEnd>(
+        entry.kind, entry.addr.getUnderlyingAllocaOp().getResult());
+  } else {
+    ehStack.pushCleanup<DestroyObject>(entry.kind, entry.addr, entry.type,
+                                       entry.destroyer);
+  }
 
   if (entry.activeFlag.isValid()) {
     EHCleanupScope &scope = cast<EHCleanupScope>(*ehStack.begin());
@@ -1550,4 +1559,15 @@ void CIRGenFunction::emitLifetimeEndOp(mlir::Location loc, mlir::Value addr) {
          "Pointer should be in alloca address space");
 
   cir::LifetimeEndOp::create(builder, loc, addr);
+}
+
+void CIRGenFunction::emitPendingLifetimeEnds(unsigned scopeID) {
+  // Entries for a scope form a suffix of the vector: inner scopes emit and
+  // remove their entries before an outer scope exits. Emit in LIFO order.
+  while (!pendingLifetimeEnds.empty() &&
+         pendingLifetimeEnds.back().scopeID == scopeID) {
+    mlir::Value alloca = pendingLifetimeEnds.back().alloca;
+    pendingLifetimeEnds.pop_back();
+    emitLifetimeEndOp(alloca.getLoc(), alloca);
+  }
 }

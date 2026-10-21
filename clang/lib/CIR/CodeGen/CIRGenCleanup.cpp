@@ -258,6 +258,17 @@ static void closeConditionalCleanupScope(
 
     for (const CIRGenFunction::PendingCleanupEntry &entry :
          llvm::reverse(llvm::make_range(stack.begin() + base, stack.end()))) {
+      // A null destroyer marks a lifetime-end entry: emit cir.lifetime.end
+      // for the whole alloca instead of a (possibly per-element) destroy.
+      auto emitEntry = [&]() {
+        if (!entry.destroyer) {
+          mlir::Value allocaVal =
+              entry.addr.getUnderlyingAllocaOp().getResult();
+          cgf.emitLifetimeEndOp(allocaVal.getLoc(), allocaVal);
+        } else {
+          cgf.emitDestroy(entry.addr, entry.type, entry.destroyer);
+        }
+      };
       if (entry.activeFlag.isValid()) {
         // We may have hoisted this alloca out of the cleanup scope. If so, we
         // will have also hoisted any casts between it and the address that we
@@ -274,12 +285,11 @@ static void closeConditionalCleanupScope(
         cir::IfOp::create(builder, scope.getLoc(), flag,
                           /*withElseRegion=*/false,
                           [&](mlir::OpBuilder &b, mlir::Location loc) {
-                            cgf.emitDestroy(entry.addr, entry.type,
-                                            entry.destroyer);
+                            emitEntry();
                             builder.createYield(loc);
                           });
       } else {
-        cgf.emitDestroy(entry.addr, entry.type, entry.destroyer);
+        emitEntry();
       }
     }
     builder.createYield(scope.getLoc());

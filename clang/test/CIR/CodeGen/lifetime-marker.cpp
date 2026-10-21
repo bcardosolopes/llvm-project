@@ -348,9 +348,8 @@ void while_record_condvar() {
 
 LoopCond makeLoopCond();
 
-// Destroy the extended temporary before ending the reference's lifetime.
-// CIR does not emit lifetime markers for the temporary yet and are
-// therefore not checked here.
+// Destroy the extended temporary before ending the reference's lifetime;
+// the temporary's own end marker runs right after its destructor.
 void while_extended_condvar() {
   while (const LoopCond &c = makeLoopCond()) {}
 }
@@ -360,6 +359,7 @@ void while_extended_condvar() {
 // EXT-CIR:           %[[C:.*]] = cir.alloca "c" {{.*}} : !cir.ptr<!cir.ptr<!rec_LoopCond>>
 // EXT-CIR:           cir.while {
 // EXT-CIR-NEXT:        cir.lifetime.start %[[C]] : !cir.ptr<!cir.ptr<!rec_LoopCond>>
+// EXT-CIR:             cir.lifetime.start %[[TMP]] : !cir.ptr<!rec_LoopCond>
 // EXT-CIR:             cir.call @_Z12makeLoopCondv(%[[TMP]])
 // EXT-CIR:           } do {
 // EXT-CIR-NOEH:      } cleanup normal {
@@ -367,18 +367,24 @@ void while_extended_condvar() {
 // EXT-CIR:             cir.if %{{.*}} {
 // EXT-CIR-NEXT:          cir.call @_ZN8LoopCondD1Ev(%[[TMP]]){{.*}}
 // EXT-CIR-NEXT:        }
+// EXT-CIR:             cir.if %{{.*}} {
+// EXT-CIR-NEXT:          cir.lifetime.end %[[TMP]] : !cir.ptr<!rec_LoopCond>
+// EXT-CIR-NEXT:        }
 // EXT-CIR-NEXT:        cir.lifetime.end %[[C]] : !cir.ptr<!cir.ptr<!rec_LoopCond>>
 // EXT-CIR-NEXT:        cir.yield
 
 // EXT-LLVM-LABEL: define{{.*}} void @_Z22while_extended_condvarv
 // EXT-LLVM:         call void @llvm.lifetime.start.p0(ptr %[[C:.*]])
-// EXT-LLVM-NOEH:    call void @_Z12makeLoopCondv(ptr {{.*}} %[[TMP:[^)]*]])
-// EXT-LLVM-EH:      invoke void @_Z12makeLoopCondv(ptr {{.*}} %[[TMP:[^)]*]])
+// EXT-LLVM:         call void @llvm.lifetime.start.p0(ptr %[[TMP:.*]])
+// EXT-LLVM-NOEH:    call void @_Z12makeLoopCondv(ptr {{.*}} %[[TMP]])
+// EXT-LLVM-EH:      invoke void @_Z12makeLoopCondv(ptr {{.*}} %[[TMP]])
 // EXT-LLVM:         call void @_ZN8LoopCondD1Ev(ptr {{.*}} %[[TMP]])
+// EXT-LLVM:         call void @llvm.lifetime.end.p0(ptr %[[TMP]])
 // EXT-LLVM:         call void @llvm.lifetime.end.p0(ptr %[[C]])
 // EXT-LLVM-EH:      landingpad { ptr, i32 }
 // EXT-LLVM-EH-NEXT:        cleanup
 // EXT-LLVM-EH:      call void @_ZN8LoopCondD1Ev(ptr {{.*}} %[[TMP]])
+// EXT-LLVM-EH:      call void @llvm.lifetime.end.p0(ptr %[[TMP]])
 // EXT-LLVM-EH:      call void @llvm.lifetime.end.p0(ptr %[[C]])
 
 struct LoopCondHolder {
@@ -397,6 +403,7 @@ void while_extended_record_condvar() {
 // EXT-CIR:           %[[H:.*]] = cir.alloca "h" {{.*}} : !cir.ptr<!rec_LoopCondHolder>
 // EXT-CIR:           cir.while {
 // EXT-CIR-NEXT:        cir.lifetime.start %[[H]] : !cir.ptr<!rec_LoopCondHolder>
+// EXT-CIR:             cir.lifetime.start %[[TMP]] : !cir.ptr<!rec_LoopCond>
 // EXT-CIR-NOEH:      } cleanup normal {
 // EXT-CIR-EH:        } cleanup all {
 // EXT-CIR:             cir.if %{{.*}} {
@@ -405,19 +412,113 @@ void while_extended_record_condvar() {
 // EXT-CIR:             cir.if %{{.*}} {
 // EXT-CIR-NEXT:          cir.call @_ZN8LoopCondD1Ev(%[[TMP]]){{.*}}
 // EXT-CIR-NEXT:        }
+// EXT-CIR:             cir.if %{{.*}} {
+// EXT-CIR-NEXT:          cir.lifetime.end %[[TMP]] : !cir.ptr<!rec_LoopCond>
+// EXT-CIR-NEXT:        }
 // EXT-CIR-NEXT:        cir.lifetime.end %[[H]] : !cir.ptr<!rec_LoopCondHolder>
 // EXT-CIR-NEXT:        cir.yield
 
 // EXT-LLVM-LABEL: define{{.*}} void @_Z29while_extended_record_condvarv
 // EXT-LLVM:         call void @llvm.lifetime.start.p0(ptr %[[H:.*]])
+// EXT-LLVM:         call void @llvm.lifetime.start.p0(ptr %[[TMP:.*]])
 // EXT-LLVM:         call void @_ZN14LoopCondHolderD1Ev(ptr {{.*}} %[[H]])
-// EXT-LLVM:         call void @_ZN8LoopCondD1Ev(ptr {{.*}} %[[TMP:[^)]*]])
+// EXT-LLVM:         call void @_ZN8LoopCondD1Ev(ptr {{.*}} %[[TMP]])
+// EXT-LLVM:         call void @llvm.lifetime.end.p0(ptr %[[TMP]])
 // EXT-LLVM:         call void @llvm.lifetime.end.p0(ptr %[[H]])
 // EXT-LLVM-EH:      landingpad { ptr, i32 }
 // EXT-LLVM-EH-NEXT:        cleanup
 // EXT-LLVM-EH:      call void @_ZN14LoopCondHolderD1Ev(ptr {{.*}} %[[H]])
 // EXT-LLVM-EH:      call void @_ZN8LoopCondD1Ev(ptr {{.*}} %[[TMP]])
+// EXT-LLVM-EH:      call void @llvm.lifetime.end.p0(ptr %[[TMP]])
 // EXT-LLVM-EH:      call void @llvm.lifetime.end.p0(ptr %[[H]])
+
+struct Temp {
+  Temp(const char *);
+  ~Temp();
+  bool ok() const;
+};
+void useTemp(const Temp &);
+
+// A materialized temporary gets markers spanning the full expression; the
+// end marker runs after the destructor, like classic CodeGen.
+void full_expr_temp() {
+  useTemp(Temp("x"));
+}
+
+// CIR-LABEL: cir.func{{.*}} @_Z14full_expr_tempv
+// CIR:         %[[T:.*]] = cir.alloca "ref.tmp0" {{.*}} : !cir.ptr<!rec_Temp>
+// CIR:         cir.lifetime.start %[[T]] : !cir.ptr<!rec_Temp>
+// CIR:         cir.call @_ZN4TempD1Ev(%[[T]])
+// The end is deferred to the full-expression exit as a plain op; it must
+// not open its own cleanup scope (that would double the nesting depth on
+// destructor-heavy code).
+// CIR-NOT:     cir.cleanup.scope
+// CIR:         cir.lifetime.end %[[T]] : !cir.ptr<!rec_Temp>
+
+// LLVM-LABEL: define{{.*}} void @_Z14full_expr_tempv
+// LLVM:         %[[T:.*]] = alloca %struct.Temp
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[T]])
+// LLVM:         call void @_ZN4TempD1Ev(ptr {{.*}} %[[T]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[T]])
+
+// A lifetime-extended temporary's markers span the enclosing scope.
+void extended_temp() {
+  const Temp &r = Temp("x");
+  useTemp(r);
+}
+
+// CIR-LABEL: cir.func{{.*}} @_Z13extended_tempv
+// CIR:         %[[T:.*]] = cir.alloca "ref.tmp0" {{.*}} : !cir.ptr<!rec_Temp>
+// CIR:         %[[R:.*]] = cir.alloca "r" {{.*}} : !cir.ptr<!cir.ptr<!rec_Temp>>
+// CIR:         cir.lifetime.start %[[R]] : !cir.ptr<!cir.ptr<!rec_Temp>>
+// CIR:         cir.lifetime.start %[[T]] : !cir.ptr<!rec_Temp>
+// CIR:         cir.call @_ZN4TempD1Ev(%[[T]])
+// CIR:         cir.lifetime.end %[[T]] : !cir.ptr<!rec_Temp>
+// CIR:         cir.lifetime.end %[[R]] : !cir.ptr<!cir.ptr<!rec_Temp>>
+
+// LLVM-LABEL: define{{.*}} void @_Z13extended_tempv
+// LLVM:         %[[T:.*]] = alloca %struct.Temp
+// LLVM:         %[[R:.*]] = alloca ptr
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[R]])
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[T]])
+// LLVM:         call void @_ZN4TempD1Ev(ptr {{.*}} %[[T]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[T]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[R]])
+
+// An array temporary gets a single pair of markers for the whole alloca,
+// not one per element.
+void array_temp() {
+  const int (&a)[2] = {1, 2};
+  use(a[0] == 1);
+}
+
+// CIR-LABEL: cir.func{{.*}} @_Z10array_tempv
+// CIR:         %[[T:.*]] = cir.alloca "ref.tmp0" {{.*}} : !cir.ptr<!cir.array<!s32i x 2>>
+// CIR:         cir.lifetime.start %[[T]] : !cir.ptr<!cir.array<!s32i x 2>>
+// CIR:         cir.lifetime.end %[[T]] : !cir.ptr<!cir.array<!s32i x 2>>
+
+// LLVM-LABEL: define{{.*}} void @_Z10array_tempv
+// LLVM:         %[[T:.*]] = alloca [2 x i32]
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[T]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[T]])
+
+// A temporary constructed in a conditional branch gets a guarded end marker.
+void cond_temp(bool c) {
+  bool b = c && Temp("x").ok();
+  use(b);
+}
+
+// CIR-LABEL: cir.func{{.*}} @_Z9cond_tempb
+// CIR:         %[[T:.*]] = cir.alloca "ref.tmp0" {{.*}} : !cir.ptr<!rec_Temp>
+// CIR:         cir.lifetime.start %[[T]] : !cir.ptr<!rec_Temp>
+// CIR:         cir.if %{{.*}} {
+// CIR:           cir.lifetime.end %[[T]] : !cir.ptr<!rec_Temp>
+// CIR:         }
+
+// LLVM-LABEL: define{{.*}} void @_Z9cond_tempb
+// LLVM:         %[[T:.*]] = alloca %struct.Temp
+// LLVM:         call void @llvm.lifetime.start.p0(ptr %[[T]])
+// LLVM:         call void @llvm.lifetime.end.p0(ptr %[[T]])
 
 #ifdef __EXCEPTIONS
 

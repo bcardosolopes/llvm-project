@@ -2119,7 +2119,28 @@ LValue CIRGenFunction::emitMaterializeTemporaryExpr(
       emitAnyExprToMem(e, object, Qualifiers(), /*isInitializer=*/true);
     }
   } else {
-    assert(!cir::MissingFeatures::emitLifetimeMarkers());
+    // Emit lifetime markers for the temporary, like classic CodeGen: the end
+    // marker runs at the end of the full expression, or at the end of the
+    // enclosing scope for lifetime-extended temporaries.
+    if (cir::AllocaOp tempAlloca = object.getUnderlyingAllocaOp()) {
+      mlir::Location loc = getLoc(m->getSourceRange());
+      switch (m->getStorageDuration()) {
+      case SD_Automatic:
+        // Lifetime-extended cleanups cannot be conditional yet; skip markers
+        // rather than emitting an unguarded end for a conditional start.
+        if (!isInConditionalBranch() &&
+            emitLifetimeStartOp(loc, tempAlloca.getResult()))
+          pushLifetimeEndAfterFullExpr(NormalEHLifetimeMarker, object,
+                                       m->getExtendingDecl());
+        break;
+      case SD_FullExpression:
+        if (emitLifetimeStartOp(loc, tempAlloca.getResult()))
+          pushFullExprLifetimeEnd(NormalEHLifetimeMarker, object);
+        break;
+      default:
+        break;
+      }
+    }
     emitAnyExprToMem(e, object, Qualifiers(), /*isInitializer=*/true);
   }
   pushTemporaryCleanup(*this, m, e, object);
