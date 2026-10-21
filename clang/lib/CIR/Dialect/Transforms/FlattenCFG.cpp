@@ -1256,8 +1256,9 @@ public:
   // Check if an operand's defining op should be moved to the destination block.
   // We only sink constants and simple loads. Anything else should be saved
   // to a temporary alloca and reloaded at the destination block.
-  static bool shouldSinkReturnOperand(mlir::Value operand,
-                                      cir::ReturnOp returnOp) {
+  static bool shouldSinkReturnOperand(
+      mlir::Value operand, cir::ReturnOp returnOp,
+      const llvm::SmallPtrSet<mlir::Operation *, 4> &endedAllocas) {
     // Block arguments can't be moved
     mlir::Operation *defOp = operand.getDefiningOp();
     if (!defOp)
@@ -1284,11 +1285,15 @@ public:
       mlir::Block &funcEntryBlock = funcOp.getBody().front();
 
       // Check if it's an alloca in the function entry block
-      if (auto allocaOp =
-              mlir::dyn_cast_if_present<cir::AllocaOp>(ptr.getDefiningOp()))
-        return allocaOp->getBlock() == &funcEntryBlock;
+      auto allocaOp =
+          mlir::dyn_cast_if_present<cir::AllocaOp>(ptr.getDefiningOp());
+      if (!allocaOp || allocaOp->getBlock() != &funcEntryBlock)
+        return false;
 
-      return false;
+      // Sinking the load below a lifetime.end for the same alloca creates a
+      // load-after-end, which the optimizer folds to undef. Fall back to the
+      // spill path instead.
+      return !endedAllocas.contains(allocaOp);
     }
 
     // Make sure we only fall through to here with constants.
@@ -1300,17 +1305,18 @@ public:
   // dominate the dispatch block. This function handles that by either sinking
   // the operand's defining op to the dispatch block (for constants and simple
   // loads) or by storing to a temporary alloca and reloading it.
-  void
-  getReturnOpOperands(cir::ReturnOp returnOp, mlir::Operation *exitOp,
-                      mlir::Location loc, mlir::PatternRewriter &rewriter,
-                      llvm::SmallVectorImpl<mlir::Value> &returnValues) const {
+  void getReturnOpOperands(
+      cir::ReturnOp returnOp, mlir::Operation *exitOp, mlir::Location loc,
+      mlir::PatternRewriter &rewriter,
+      llvm::SmallVectorImpl<mlir::Value> &returnValues,
+      const llvm::SmallPtrSet<mlir::Operation *, 4> &endedAllocas) const {
     mlir::Block *destBlock = rewriter.getInsertionBlock();
     auto funcOp = exitOp->getParentOfType<cir::FuncOp>();
     assert(funcOp && "Return op has no function parent?");
     mlir::Block &funcEntryBlock = funcOp.getBody().front();
 
     for (mlir::Value operand : returnOp.getOperands()) {
-      if (shouldSinkReturnOperand(operand, returnOp)) {
+      if (shouldSinkReturnOperand(operand, returnOp, endedAllocas)) {
         // Sink the defining op to the dispatch block.
         mlir::Operation *defOp = operand.getDefiningOp();
         rewriter.moveOpBefore(defOp, destBlock, destBlock->end());
@@ -1359,10 +1365,10 @@ public:
   // block. For return ops with operands, this handles the dominance issue by
   // either moving the operand's defining op to the dispatch block (if it's a
   // trivial use) or by storing to a temporary alloca and loading it.
-  mlir::LogicalResult
-  createExitTerminator(mlir::Operation *exitOp, mlir::Location loc,
-                       mlir::Block *continueBlock,
-                       mlir::PatternRewriter &rewriter) const {
+  mlir::LogicalResult createExitTerminator(
+      mlir::Operation *exitOp, mlir::Location loc, mlir::Block *continueBlock,
+      mlir::PatternRewriter &rewriter,
+      const llvm::SmallPtrSet<mlir::Operation *, 4> &endedAllocas) const {
     return llvm::TypeSwitch<mlir::Operation *, mlir::LogicalResult>(exitOp)
         .Case<cir::YieldOp>([&](auto) {
           // Yield becomes a branch to continue block.
@@ -1398,7 +1404,8 @@ public:
           // branching through the outer cleanup.
           if (returnOp.hasOperand()) {
             llvm::SmallVector<mlir::Value, 2> returnValues;
-            getReturnOpOperands(returnOp, exitOp, loc, rewriter, returnValues);
+            getReturnOpOperands(returnOp, exitOp, loc, rewriter, returnValues,
+                                endedAllocas);
             cir::ReturnOp::create(rewriter, loc, returnValues);
           } else {
             cir::ReturnOp::create(rewriter, loc);
@@ -1591,6 +1598,16 @@ public:
     // cleanup, and the body can throw before reaching the tail call.
     bool emitNormalCleanup = hasNormalCleanup && !exits.empty();
 
+    // Allocas whose lifetime ends in this cleanup. Return-operand loads of
+    // these must not sink below the cleanup (load-after-end miscompiles), so
+    // they take the spill path instead. Computed before inlining empties the
+    // region.
+    llvm::SmallPtrSet<mlir::Operation *, 4> endedAllocas;
+    cleanupOp.getCleanupRegion().walk([&](cir::LifetimeEndOp endOp) {
+      if (auto allocaOp = cir::getUnderlyingAlloca(endOp.getPtr()))
+        endedAllocas.insert(allocaOp);
+    });
+
     // Get references to region blocks before inlining.
     mlir::Block *bodyEntry = &cleanupOp.getBodyRegion().front();
     mlir::Block *cleanupEntry = &cleanupOp.getCleanupRegion().front();
@@ -1642,10 +1659,18 @@ public:
     // Inline the body region.
     rewriter.inlineRegionBefore(cleanupOp.getBodyRegion(), normalInsertPt);
 
+    // Marker-only cleanups (just lifetime.ends) need no dispatch blocks on
+    // the normal path: the ends splice directly before each exit, preserving
+    // the original op order (in particular, return operands stay put instead
+    // of sinking below the ends). This keeps thousands of single-end scopes
+    // from materializing as many dispatch blocks.
+    bool useMarkerInline =
+        emitNormalCleanup && isLifetimeMarkerOnly(cleanupOp.getCleanupRegion());
+
     // Inline the cleanup region for the normal cleanup path. With multiple
     // exits each exit gets its own copy of the cleanup region instead (see
     // below), so inline the region only for the single-exit case.
-    if (emitNormalCleanup && !isMultiExit)
+    if (emitNormalCleanup && !isMultiExit && !useMarkerInline)
       rewriter.inlineRegionBefore(cleanupOp.getCleanupRegion(), normalInsertPt);
 
     // Branch from current block to body entry.
@@ -1655,7 +1680,21 @@ public:
     // Handle normal exits.
     mlir::LogicalResult result = mlir::success();
     if (emitNormalCleanup) {
-      if (isMultiExit) {
+      if (useMarkerInline) {
+        // Splice a copy of the end ops directly before each exit. No new
+        // blocks: yields become branches to the continue block and every
+        // other exit stays in place with the ends now preceding it.
+        mlir::Block &endBlock = cleanupOp.getCleanupRegion().front();
+        for (const CleanupExit &exit : exits) {
+          rewriter.setInsertionPoint(exit.exitOp);
+          for (mlir::Operation &endOp : endBlock.without_terminator())
+            rewriter.clone(endOp);
+          if (isa<cir::YieldOp>(exit.exitOp)) {
+            rewriter.setInsertionPoint(exit.exitOp);
+            rewriter.replaceOpWithNewOp<cir::BrOp>(exit.exitOp, continueBlock);
+          }
+        }
+      } else if (isMultiExit) {
         // Duplicate the cleanup region once per exit: each exit branches to
         // its own copy, which falls through to that exit's terminator. This
         // matches classic CodeGen (which emits cleanups inline at each
@@ -1682,8 +1721,8 @@ public:
                  "cloned cleanup exit is not a yield");
           rewriter.eraseOp(clonedYield);
           rewriter.setInsertionPointToEnd(clonedExit);
-          result =
-              createExitTerminator(exit.exitOp, loc, continueBlock, rewriter);
+          result = createExitTerminator(exit.exitOp, loc, continueBlock,
+                                        rewriter, endedAllocas);
 
           // Replace the original exit op with a branch to its cleanup copy.
           rewriter.setInsertionPoint(exit.exitOp);
@@ -1710,7 +1749,8 @@ public:
         // block.
         rewriter.setInsertionPointToEnd(exitBlock);
         mlir::Operation *exitOp = exits[0].exitOp;
-        result = createExitTerminator(exitOp, loc, continueBlock, rewriter);
+        result = createExitTerminator(exitOp, loc, continueBlock, rewriter,
+                                      endedAllocas);
 
         // Replace body exit with branch to cleanup entry.
         rewriter.setInsertionPoint(exitOp);
