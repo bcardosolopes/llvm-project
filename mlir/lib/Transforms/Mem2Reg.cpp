@@ -639,7 +639,11 @@ Value MemorySlotPromoter::promoteInBlock(Block *block, Value reachingDef) {
   // `promoteSlot`). Merge-point block arguments and successor operands are
   // created by `promoteInRegion`, not here, so skipping is safe for them.
   if (!blocksToScan.contains(block)) {
-    reachingAtBlockEnd[block] = reachingDef;
+    // Only region promotion reads this map (via `finalizePromotion`); skip
+    // the insert for region-free functions to avoid a DenseMap entry per
+    // block per slot.
+    if (!info.regionsToPromote.empty())
+      reachingAtBlockEnd[block] = reachingDef;
     return reachingDef;
   }
   SmallVector<Operation *> blockOps;
@@ -754,7 +758,9 @@ Value MemorySlotPromoter::promoteInBlock(Block *block, Value reachingDef) {
     }
   }
 
-  reachingAtBlockEnd[block] = reachingDef;
+  // See above: only region promotion reads this map.
+  if (!info.regionsToPromote.empty())
+    reachingAtBlockEnd[block] = reachingDef;
   return reachingDef;
 }
 
