@@ -13,14 +13,17 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/Parser/Parser.h"
+#include "mlir/Pass/PassManager.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/Basic/DiagnosticCodeGen.h"
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "clang/CIR/CIRGenerator.h"
 #include "clang/CIR/CIRToCIRPasses.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/InitAllDialects.h"
 #include "clang/CIR/LowerToLLVM.h"
+#include "clang/CIR/Passes.h"
 #include "clang/CodeGen/BackendUtil.h"
 #include "clang/CodeGen/ModuleLinker.h"
 #include "clang/CodeGenUtils/BackendDiagnosticHandler.h"
@@ -49,6 +52,7 @@ getBackendActionFromOutputType(CIRGenAction::OutputType Action) {
   switch (Action) {
   case CIRGenAction::OutputType::EmitCIR:
   case CIRGenAction::OutputType::EmitCIRBC:
+  case CIRGenAction::OutputType::EmitMLIR:
     assert(false &&
            "Unsupported output type for getBackendActionFromOutputType!");
     break; // Unreachable, but fall through to report that
@@ -77,6 +81,17 @@ lowerFromCIRToLLVMIR(mlir::ModuleOp MLIRModule, llvm::LLVMContext &LLVMCtx,
 
 // Print \p MLIRModule the way -emit-cir does, so that CIR emitted from source
 // and CIR printed back from ClangIR input use the same form.
+// -emit-mlir=cir-prepare stops the CIR-to-CIR pipeline before ABI lowering;
+// every other action runs what the module still needs whole.
+static std::optional<cir::CIRStage>
+getCIRToCIRStopAt(CIRGenAction::OutputType Action,
+                  const FrontendOptions &FEOpts) {
+  if (Action == CIRGenAction::OutputType::EmitMLIR &&
+      FEOpts.ClangIREmitMLIR == "cir-prepare")
+    return cir::CIRStage::Prepare;
+  return std::nullopt;
+}
+
 static void printCIRModule(mlir::ModuleOp MLIRModule, raw_ostream &OS) {
   mlir::OpPrintingFlags Flags;
   Flags.enableDebugInfo(/*enable=*/true, /*prettyForm=*/false);
@@ -105,9 +120,10 @@ static void embedSYCLDeviceBinary(CompilerInstance &CI, llvm::Module &M) {
 }
 
 // Emits the output requested by \p Action for \p MlirModule, a CIR module that
-// has been through the CIR-to-CIR pipeline. Language facts are read from the
-// module's #cir.lowering_lang_options and target facts from \p CI, so this
-// does not need an ASTContext and can also run on CIR loaded from a file.
+// has been through all or part of the CIR-to-CIR pipeline. Language facts
+// come from the module's #cir.lowering_lang_options and target facts from
+// \p CI, so this does not need an ASTContext and can also run on CIR loaded
+// from a file.
 // \p AddFunctionSourceLocations, if set, runs on the lowered LLVM module
 // before linking.
 static void emitCIRModuleOutput(
@@ -129,6 +145,68 @@ static void emitCIRModuleOutput(
         !CI.getDiagnostics().hasErrorOccurred())
       CI.getDiagnostics().Report(diag::err_cir_bc_write_failed);
     break;
+  case CIRGenAction::OutputType::EmitMLIR: {
+    if (!OutputStream || !MlirModule)
+      break;
+    StringRef kind = CI.getFrontendOpts().ClangIREmitMLIR;
+    const FrontendOptions &FEOpts = CI.getFrontendOpts();
+    // The CIR-to-CIR stage the requested output needs. Later kinds run the
+    // rest of the lowering below, from whatever the module records.
+    cir::CIRStage needed = cir::CIRStage::Prepare;
+    std::optional<cir::CIRStage> stopAt;
+    if (kind == "cir-prepare") {
+      stopAt = cir::CIRStage::Prepare;
+    } else if (kind == "cir-abi") {
+      needed = cir::CIRStage::ABI;
+    } else if (kind != "cir-flat" && kind != "llvm") {
+      llvm_unreachable("invalid -emit-mlir= kind");
+    }
+    auto stage = cir::getStage(MlirModule);
+    // If the pipeline that should have run by now was skipped, most often by
+    // -clangir-disable-passes, run what the output needs now: the output is
+    // defined by its stage, not by the flag.
+    if (!stage || *stage < needed) {
+      const bool EnableLibOpt =
+          FEOpts.ClangIRLibOptEnabled && (CGO.OptimizationLevel > 0);
+      if (runCIRToCIRPasses(MlirModule, *MlirModule.getContext(),
+                            !FEOpts.ClangIRDisableCIRVerifier,
+                            FEOpts.ClangIREnableIdiomRecognizer,
+                            CGO.OptimizationLevel > 0, EnableLibOpt,
+                            FEOpts.ClangIRLibOptOptions,
+                            FEOpts.ClangIRCallConvLowering && stage.has_value(),
+                            stage, stopAt)
+              .failed()) {
+        if (!CI.getDiagnostics().hasErrorOccurred())
+          CI.getDiagnostics().Report(diag::err_cir_to_cir_transform_failed);
+        break;
+      }
+    }
+    // If errors occurred while preparing the module, stop before lowering.
+    if (CI.getDiagnostics().hasErrorOccurred())
+      break;
+    if (kind == "cir-flat" || kind == "llvm") {
+      auto LangOptsAttr =
+          MlirModule->getAttrOfType<cir::LoweringLangOptionsAttr>(
+              cir::CIRDialect::getLoweringLangOptionsAttrName());
+      const bool EnableOpenMP = LangOptsAttr && LangOptsAttr.getOpenmp();
+      mlir::PassManager pm(MlirModule.getContext());
+      cir::direct::populateCIRToLLVMPasses(
+          pm, cir::getStage(MlirModule), EnableOpenMP,
+          kind == "cir-flat" ? std::optional<cir::CIRStage>(cir::CIRStage::Flat)
+                             : std::nullopt);
+      (void)mlir::applyPassManagerCLOptions(pm);
+      // The failing pass has already reported its error through the MLIR
+      // diagnostic engine. Only emit the generic error if nothing was
+      // reported.
+      if (mlir::failed(pm.run(MlirModule))) {
+        if (!CI.getDiagnostics().hasErrorOccurred())
+          CI.getDiagnostics().Report(diag::err_cir_to_llvm_lowering_failed);
+        break;
+      }
+    }
+    printCIRModule(MlirModule, *OutputStream);
+    break;
+  }
   case CIRGenAction::OutputType::EmitLLVM:
   case CIRGenAction::OutputType::EmitBC:
   case CIRGenAction::OutputType::EmitObj:
@@ -323,10 +401,13 @@ public:
       // Setup and run CIR pipeline.
       const bool EnableLibOpt =
           FEOptions.ClangIRLibOptEnabled && (CGO.OptimizationLevel > 0);
+      std::optional<cir::CIRStage> stopAt =
+          getCIRToCIRStopAt(Action, FEOptions);
       if (runCIRToCIRPasses(
               MlirModule, MlirCtx, !FEOptions.ClangIRDisableCIRVerifier,
               FEOptions.ClangIREnableIdiomRecognizer, CGO.OptimizationLevel > 0,
-              EnableLibOpt, LibOptOptions, FEOptions.ClangIRCallConvLowering)
+              EnableLibOpt, LibOptOptions, FEOptions.ClangIRCallConvLowering,
+              cir::getStage(MlirModule), stopAt)
               .failed()) {
         // Pass-side errors already routed through ClangIRDiagnosticHandler.
         // Skip the generic catch-all if a specific diagnostic was emitted.
@@ -447,10 +528,27 @@ void CIRGenAction::ExecuteAction() {
     return;
   }
 
-  // The CIR-to-CIR pipeline is not run: CIR printed by -emit-cir has already
-  // been through it, and its lowering passes are not idempotent.
-  // TODO: Decide from a pipeline-stage attribute on the module which passes
-  // still have to run, once -emit-cir can stop before ABI lowering.
+  // Run the CIR-to-CIR passes the module still needs, from its recorded
+  // stage. Hand-written CIR records none and skips only CallConvLowering.
+  std::optional<cir::CIRStage> from = cir::getStage(*Module);
+  if (!CI.getFrontendOpts().ClangIRDisablePasses &&
+      (!from || *from < cir::CIRStage::ABI)) {
+    const FrontendOptions &FEOptions = CI.getFrontendOpts();
+    const CodeGenOptions &CGO = CI.getCodeGenOpts();
+    const bool EnableLibOpt =
+        FEOptions.ClangIRLibOptEnabled && (CGO.OptimizationLevel > 0);
+    std::optional<cir::CIRStage> stopAt = getCIRToCIRStopAt(Action, FEOptions);
+    if (runCIRToCIRPasses(
+            *Module, MLIRContext, !FEOptions.ClangIRDisableCIRVerifier,
+            FEOptions.ClangIREnableIdiomRecognizer, CGO.OptimizationLevel > 0,
+            EnableLibOpt, FEOptions.ClangIRLibOptOptions,
+            FEOptions.ClangIRCallConvLowering && from.has_value(), from, stopAt)
+            .failed()) {
+      if (!Diags.hasErrorOccurred())
+        Diags.Report(diag::err_cir_to_cir_transform_failed);
+      return;
+    }
+  }
   BackendDiagnosticConsumer DiagConsumer(Diags, CI.getCodeGenOpts());
   DiagConsumer.setSourceManager(&SM);
   emitCIRModuleOutput(Action, CI, *Module, *Ctx, LinkModules, DiagConsumer,
@@ -467,6 +565,8 @@ getOutputStream(CompilerInstance &CI, StringRef InFile,
     return CI.createDefaultOutputFile(false, InFile, "cir");
   case CIRGenAction::OutputType::EmitCIRBC:
     return CI.createDefaultOutputFile(true, InFile, "cirbc");
+  case CIRGenAction::OutputType::EmitMLIR:
+    return CI.createDefaultOutputFile(false, InFile, "mlir");
   case CIRGenAction::OutputType::EmitLLVM:
     return CI.createDefaultOutputFile(false, InFile, "ll");
   case CIRGenAction::OutputType::EmitBC:
@@ -499,6 +599,9 @@ EmitCIRAction::EmitCIRAction() : CIRGenAction(OutputType::EmitCIR) {}
 
 void EmitCIRBCAction::anchor() {}
 EmitCIRBCAction::EmitCIRBCAction() : CIRGenAction(OutputType::EmitCIRBC) {}
+
+void EmitMLIRAction::anchor() {}
+EmitMLIRAction::EmitMLIRAction() : CIRGenAction(OutputType::EmitMLIR) {}
 
 void EmitLLVMAction::anchor() {}
 EmitLLVMAction::EmitLLVMAction() : CIRGenAction(OutputType::EmitLLVM) {}

@@ -5625,7 +5625,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-rewrite-objc");
       rewriteKind = RK_Fragile;
     } else if (JA.getType() == types::TY_CIR) {
-      CmdArgs.push_back("-emit-cir");
+      if (const Arg *A = Args.getLastArg(options::OPT_emit_mlir_EQ)) {
+        CmdArgs.push_back(
+            Args.MakeArgString(Twine("-emit-mlir=") + A->getValue()));
+      } else {
+        CmdArgs.push_back("-emit-cir");
+      }
     } else if (JA.getType() == types::TY_CIRBC) {
       CmdArgs.push_back("-emit-cir-bc");
     } else if (JA.getType() == types::TY_Image && IsAMDSPIRVForHIPDevice) {

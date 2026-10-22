@@ -2821,6 +2821,7 @@ static const auto &getFrontendActionTable() {
       {frontend::EmitBC, OPT_emit_llvm_bc},
       {frontend::EmitCIR, OPT_emit_cir},
       {frontend::EmitCIRBC, OPT_emit_cir_bc},
+      {frontend::EmitMLIR, OPT_emit_mlir_EQ},
       {frontend::EmitHTML, OPT_emit_html},
       {frontend::EmitLLVM, OPT_emit_llvm},
       {frontend::EmitLLVMOnly, OPT_emit_llvm_only},
@@ -2898,6 +2899,15 @@ static void GenerateFrontendArgs(const FrontendOptions &Opts,
            "Frontend action without option.");
     GenerateProgramAction = [&]() {
       GenerateArg(Consumer, OPT_plugin, Opts.ActionName);
+    };
+  }
+
+  if (Opts.ProgramAction == frontend::EmitMLIR) {
+    GenerateProgramAction = [&]() {
+      if (!Opts.ClangIREmitMLIR.empty())
+        GenerateArg(Consumer, OPT_emit_mlir_EQ, Opts.ClangIREmitMLIR);
+      else
+        GenerateArg(Consumer, OPT_emit_mlir_EQ, "llvm");
     };
   }
 
@@ -3184,7 +3194,7 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
   if (Opts.ProgramAction != frontend::GenerateModule && Opts.IsSystemModule)
     Diags.Report(diag::err_drv_argument_only_allowed_with) << "-fsystem-module"
                                                            << "-emit-module";
-  if (Args.hasArg(OPT_emit_cir, OPT_emit_cir_bc))
+  if (Args.hasArg(OPT_emit_cir, OPT_emit_cir_bc, OPT_emit_mlir_EQ))
     Opts.UseClangIRPipeline = true;
 
 #if CLANG_ENABLE_CIR
@@ -3196,6 +3206,15 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
 
   if (Args.hasArg(OPT_clangir_lib_opt) || Args.hasArg(OPT_clangir_lib_opt_EQ))
     Opts.ClangIRLibOptEnabled = true;
+
+  if (const Arg *A = Args.getLastArg(OPT_emit_mlir_EQ)) {
+    Opts.ClangIREmitMLIR = A->getValue();
+    if (Opts.ClangIREmitMLIR != "llvm" &&
+        Opts.ClangIREmitMLIR != "cir-prepare" &&
+        Opts.ClangIREmitMLIR != "cir-abi" && Opts.ClangIREmitMLIR != "cir-flat")
+      Diags.Report(diag::err_drv_invalid_value)
+          << A->getAsString(Args) << A->getValue();
+  }
 #endif // CLANG_ENABLE_CIR
 
   if (Args.hasArg(OPT_aux_target_cpu))
@@ -4755,6 +4774,7 @@ static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   case frontend::EmitCIR:
   case frontend::EmitCIRBC:
   case frontend::EmitHTML:
+  case frontend::EmitMLIR:
   case frontend::EmitLLVM:
   case frontend::EmitLLVMOnly:
   case frontend::EmitCodeGenOnly:
@@ -4797,6 +4817,7 @@ static bool isCodeGenAction(frontend::ActionKind Action) {
   case frontend::EmitCIR:
   case frontend::EmitCIRBC:
   case frontend::EmitHTML:
+  case frontend::EmitMLIR:
   case frontend::EmitLLVM:
   case frontend::EmitLLVMOnly:
   case frontend::EmitCodeGenOnly:

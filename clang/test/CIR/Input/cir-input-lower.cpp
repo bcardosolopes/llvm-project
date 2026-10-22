@@ -1,8 +1,7 @@
 // Lowering ClangIR input to LLVM IR, assembly, bitcode or an object gives the
-// same result as compiling the source directly. The CIR-to-CIR pipeline is not
-// run again on input printed by -emit-cir, whose lowering passes are not
-// idempotent; the code below exercises the calling convention, global
-// constructor and TLS wrapper lowering.
+// same result as compiling the source directly. Each input runs only the
+// passes past its recorded stage; the code below exercises the calling
+// convention, global constructor and TLS wrapper lowering.
 
 // REQUIRES: x86-registered-target
 
@@ -11,6 +10,15 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t.direct.ll
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %t.cir -o %t.ll
 // RUN: diff %t.direct.ll %t.ll
+
+// A cir-prepare input still needs call-conv lowering, a cir-flat one only
+// the conversion.
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-prepare %s -o %t.prepare.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %t.prepare.cir -o %t.prepare.ll
+// RUN: diff %t.direct.ll %t.prepare.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-flat %s -o %t.flat.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm %t.flat.cir -o %t.flat.ll
+// RUN: diff %t.direct.ll %t.flat.ll
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -S %s -o %t.direct.s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -S %t.cir -o %t.s

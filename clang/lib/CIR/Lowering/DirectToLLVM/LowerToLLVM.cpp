@@ -43,6 +43,7 @@
 #include "clang/CIR/Dialect/IR/CIRAttrs.h"
 #include "clang/CIR/Dialect/IR/CIRDataLayout.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
@@ -50,6 +51,7 @@
 #include "clang/CIR/MissingFeatures.h"
 #include "clang/CIR/Passes.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/Module.h"
@@ -4869,6 +4871,8 @@ void ConvertCIRToLLVMPass::processCIRAttrs(mlir::ModuleOp module) {
 
 void ConvertCIRToLLVMPass::runOnOperation() {
   llvm::TimeTraceScope scope("Convert CIR to LLVM Pass");
+  // Whichever way this returns, the module is no longer CIR.
+  auto dropStage = llvm::scope_exit([&] { cir::clearStage(getOperation()); });
 
   mlir::ModuleOp module = getOperation();
   mlir::DataLayout dl(module);
@@ -6642,8 +6646,17 @@ std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass() {
   return std::make_unique<ConvertCIRToLLVMPass>();
 }
 
-void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP) {
-  mlir::populateCIRPreLoweringPasses(pm);
+void populateCIRToLLVMPasses(mlir::OpPassManager &pm,
+                             std::optional<cir::CIRStage> from,
+                             bool enableOpenMP,
+                             std::optional<cir::CIRStage> stopAt) {
+  // Whether the module still has to reach `stage`.
+  auto before = [&](cir::CIRStage stage) { return !from || *from < stage; };
+  if (before(cir::CIRStage::Flat))
+    mlir::populateCIRPreLoweringPasses(pm);
+  if (stopAt == cir::CIRStage::Flat)
+    return;
+  assert(!stopAt && "only cir-flat is a stop inside this list");
   if (enableOpenMP)
     pm.addPass(mlir::omp::createMarkDeclareTargetPass());
   pm.addPass(createConvertCIRToLLVMPass());
@@ -6663,7 +6676,7 @@ lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
   mlir::MLIRContext *mlirCtx = mlirModule.getContext();
 
   mlir::PassManager pm(mlirCtx);
-  populateCIRToLLVMPasses(pm, enableOpenMP);
+  populateCIRToLLVMPasses(pm, cir::getStage(mlirModule), enableOpenMP);
 
   (void)mlir::applyPassManagerCLOptions(pm);
 

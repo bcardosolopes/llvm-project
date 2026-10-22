@@ -23,11 +23,13 @@
 #include "clang/CIR/Dialect/IR/CIRDataLayout.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/IR/CIROpsEnums.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
 #include "clang/CIR/Interfaces/ASTAttrInterfaces.h"
 #include "clang/CIR/MissingFeatures.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/Instructions.h"
@@ -3421,6 +3423,9 @@ void LoweringPreparePass::buildCUDARegisterVars(cir::CIRBaseBuilderTy &builder,
 }
 
 void LoweringPreparePass::runOnOperation() {
+  // Whichever way this returns, the module has been through it.
+  auto recordStage = llvm::scope_exit(
+      [&] { cir::advanceStage(getOperation(), cir::CIRStage::Prepare); });
   mlirModule = getOperation();
 
   lowerModule = cir::createLowerModule(mlirModule);

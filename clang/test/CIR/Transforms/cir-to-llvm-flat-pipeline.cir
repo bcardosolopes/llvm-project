@@ -1,0 +1,34 @@
+// --cir-to-llvm runs only the passes past from-stage=. The default is cirgen,
+// which schedules every step, like an unstaged module needs.
+//
+// RUN: cir-opt %s --cir-to-llvm -dump-pass-pipeline -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=HAND
+// HAND: Pass Manager with 5 passes:
+// HAND-NEXT: builtin.module(
+// HAND-NEXT:   cir-hoist-allocas,
+// HAND-NEXT:   cir-flatten-cfg,
+// HAND-NEXT:   cir-eh-abi-lowering,
+// HAND-NEXT:   cir-goto-solver,
+// HAND-NEXT:   cir-flat-to-llvm
+// HAND-NEXT: )
+//
+// Past the pre-lowering passes, only the conversion is scheduled again.
+// RUN: cir-opt %s --cir-to-llvm='from-stage=cir-flat' \
+// RUN:     -dump-pass-pipeline -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=FLAT
+// FLAT: Pass Manager with 1 passes:
+// FLAT-NEXT: builtin.module(
+// FLAT-NEXT:   cir-flat-to-llvm
+// FLAT-NEXT: )
+//
+// RUN: not cir-opt %s --cir-to-llvm='from-stage=bogus' -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=BAD
+// BAD: for the --from-stage option: Cannot find option named 'bogus'!
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @already_flat(%arg0: !s32i) -> !s32i {
+    cir.return %arg0 : !s32i
+  }
+}

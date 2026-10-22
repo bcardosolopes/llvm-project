@@ -44,6 +44,7 @@
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/MissingFeatures.h"
 #include "llvm/ABI/FunctionInfo.h"
@@ -989,6 +990,9 @@ cir::FuncOp lookupCallee(Operation *callOp, SymbolTable &symbolTable) {
 }
 
 void CallConvLoweringPass::runOnOperation() {
+  // Whichever way this returns, the module has been through it.
+  auto recordStage = llvm::scope_exit(
+      [&] { cir::advanceStage(getOperation(), cir::CIRStage::ABI); });
   ModuleOp moduleOp = getOperation();
   MLIRContext *ctx = &getContext();
 

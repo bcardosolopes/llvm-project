@@ -14,8 +14,10 @@
 #define CLANG_CIR_CIRTOCIRPASSES_H
 
 #include "mlir/Pass/Pass.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 
 #include <memory>
+#include <optional>
 
 namespace mlir {
 class MLIRContext;
@@ -24,12 +26,15 @@ class ModuleOp;
 
 namespace cir {
 
-// Run set of cleanup/prepare/etc passes CIR <-> CIR.
+// Run the CIR <-> CIR passes the module still needs, from \p from to
+// \p stopAt; see CIRStage.
 mlir::LogicalResult
 runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirCtx,
                   bool enableVerifier, bool enableIdiomRecognizer,
                   bool enableCIRSimplify, bool enableLibOpt,
-                  llvm::StringRef libOptOptions, bool enableCallConvLowering);
+                  llvm::StringRef libOptOptions, bool enableCallConvLowering,
+                  std::optional<CIRStage> from = std::nullopt,
+                  std::optional<CIRStage> stopAt = std::nullopt);
 
 } // namespace cir
 

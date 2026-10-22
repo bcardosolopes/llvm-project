@@ -72,6 +72,9 @@ enum ActionKind {
   /// Emit a .cirbc file (ClangIR bytecode).
   EmitCIRBC,
 
+  /// Emit MLIR output
+  EmitMLIR,
+
   /// Emit a .ll file.
   EmitLLVM,
 
@@ -439,6 +442,10 @@ public:
 
   /// Options to control ClangIR library optimization
   std::string ClangIRLibOptOptions;
+
+  /// Which MLIR to emit with -emit-mlir=: one of llvm, cir-prepare,
+  /// cir-abi, cir-flat.
+  std::string ClangIREmitMLIR;
 
   CodeCompleteOptions CodeCompleteOpts;
 

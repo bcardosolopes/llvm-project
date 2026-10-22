@@ -1,0 +1,51 @@
+// A pass that completes a stage moves the module to it, and never back.
+//
+// RUN: split-file %s %t
+// RUN: cir-opt %t/abi.cir -cir-goto-solver | FileCheck %s --check-prefix=ADVANCE
+// ADVANCE: module attributes {cir.stage = "cir-flat"}
+// RUN: cir-opt %t/flat.cir -cir-goto-solver | FileCheck %s --check-prefix=KEEP
+// KEEP: module attributes {cir.stage = "cir-flat"}
+// RUN: cir-opt %t/flat.cir -cir-cxxabi-lowering | FileCheck %s --check-prefix=KEEP
+// RUN: cir-opt %t/prepare.cir -cir-call-conv-lowering=target=x86_64 \
+// RUN:   | FileCheck %s --check-prefix=ADVANCEABI
+// ADVANCEABI: module attributes {cir.stage = "cir-abi"
+//
+// Only a known stage, and only on a module.
+// RUN: cir-opt %t/bad.cir -verify-diagnostics -split-input-file
+
+//--- abi.cir
+module attributes {cir.stage = "cir-abi"} {
+}
+
+//--- flat.cir
+module attributes {cir.stage = "cir-flat"} {
+}
+
+//--- prepare.cir
+module attributes {
+  cir.stage = "cir-prepare",
+  dlti.dl_spec = #dlti.dl_spec<
+    #dlti.dl_entry<i32, dense<32>: vector<2xi64>>,
+    #dlti.dl_entry<i64, dense<64>: vector<2xi64>>>
+} {
+}
+
+//--- bad.cir
+// expected-error@+1 {{'cir.stage' must be one of cirgen, cir-prepare, cir-abi, cir-flat}}
+module attributes {cir.stage = "cir-llvm"} {
+}
+
+// -----
+
+// expected-error@+1 {{'cir.stage' must be one of cirgen, cir-prepare, cir-abi, cir-flat}}
+module attributes {cir.stage = 1} {
+}
+
+// -----
+
+module {
+  // expected-error@+1 {{'cir.stage' belongs on a module}}
+  cir.func @f() attributes {cir.stage = "cir-abi"} {
+    cir.return
+  }
+}

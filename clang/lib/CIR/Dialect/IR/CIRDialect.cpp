@@ -14,6 +14,7 @@
 
 #include "clang/CIR/Dialect/IR/CIRAttrs.h"
 #include "clang/CIR/Dialect/IR/CIROpsEnums.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 
 #include "mlir/IR/Attributes.h"
@@ -358,7 +359,60 @@ cir::CIRDialect::verifyOperationAttribute(mlir::Operation *op,
                                        /*trailingZerosNum=*/0);
   }
 
+  if (attrName == getStageAttrName()) {
+    if (!mlir::isa<mlir::ModuleOp>(op))
+      return op->emitOpError()
+             << "'" << getStageAttrName() << "' belongs on a module";
+    auto stage = mlir::dyn_cast<mlir::StringAttr>(attr.getValue());
+    if (!stage || !symbolizeCIRStage(stage.getValue()))
+      return op->emitOpError()
+             << "'" << getStageAttrName()
+             << "' must be one of cirgen, cir-prepare, cir-abi, cir-flat";
+    return success();
+  }
+
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Pipeline stage
+//===----------------------------------------------------------------------===//
+
+static constexpr llvm::StringLiteral cirStageNames[] = {"cirgen", "cir-prepare",
+                                                        "cir-abi", "cir-flat"};
+
+llvm::StringRef cir::stringifyCIRStage(CIRStage stage) {
+  return cirStageNames[static_cast<unsigned>(stage)];
+}
+
+std::optional<cir::CIRStage> cir::symbolizeCIRStage(llvm::StringRef name) {
+  for (auto [idx, stageName] : llvm::enumerate(cirStageNames))
+    if (name == stageName)
+      return static_cast<CIRStage>(idx);
+  return std::nullopt;
+}
+
+std::optional<cir::CIRStage> cir::getStage(mlir::Operation *op) {
+  auto stage =
+      op->getAttrOfType<mlir::StringAttr>(CIRDialect::getStageAttrName());
+  if (!stage)
+    return std::nullopt;
+  return symbolizeCIRStage(stage.getValue());
+}
+
+void cir::advanceStage(mlir::Operation *op, CIRStage stage) {
+  if (!mlir::isa<mlir::ModuleOp>(op))
+    return;
+  std::optional<CIRStage> current = getStage(op);
+  if (current && *current >= stage)
+    return;
+  op->setAttr(
+      CIRDialect::getStageAttrName(),
+      mlir::StringAttr::get(op->getContext(), stringifyCIRStage(stage)));
+}
+
+void cir::clearStage(mlir::Operation *op) {
+  op->removeAttr(CIRDialect::getStageAttrName());
 }
 
 //===----------------------------------------------------------------------===//

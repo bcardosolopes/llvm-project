@@ -7,7 +7,9 @@
 //===----------------------------------------------------------------------===//
 #include "PassDetail.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/Passes.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -114,6 +116,9 @@ static void process(cir::FuncOp func,
 
 void GotoSolverPass::runOnOperation() {
   llvm::TimeTraceScope scope("Goto Solver");
+  // Whichever way this returns, the module has been through it.
+  auto recordStage = llvm::scope_exit(
+      [&] { cir::advanceStage(getOperation(), cir::CIRStage::Flat); });
 
   // Block addresses also appear in attributes: global initializers and
   // cir.const values. Collect, per target function and in walk order, the

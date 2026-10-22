@@ -37,6 +37,18 @@ struct CIRToLLVMPipelineOptions
       *this, "enable-openmp",
       llvm::cl::desc("Add OpenMP-specific CIR-to-LLVM lowering passes"),
       llvm::cl::init(false)};
+  Option<cir::CIRStage> fromStage{
+      *this, "from-stage",
+      llvm::cl::desc("Lower a module already at this pipeline stage, "
+                     "running only the passes it still needs"),
+      llvm::cl::init(cir::CIRStage::CIRGen),
+      llvm::cl::values(
+          clEnumValN(cir::CIRStage::CIRGen, "cirgen", "CIRGen output"),
+          clEnumValN(cir::CIRStage::Prepare, "cir-prepare",
+                     "After CXXABILowering and LoweringPrepare"),
+          clEnumValN(cir::CIRStage::ABI, "cir-abi", "After CallConvLowering"),
+          clEnumValN(cir::CIRStage::Flat, "cir-flat",
+                     "After the pre-lowering passes"))};
 };
 
 int main(int argc, char **argv) {
@@ -59,7 +71,10 @@ int main(int argc, char **argv) {
   mlir::PassPipelineRegistration<CIRToLLVMPipelineOptions> pipeline(
       "cir-to-llvm", "",
       [](mlir::OpPassManager &pm, const CIRToLLVMPipelineOptions &options) {
-        cir::direct::populateCIRToLLVMPasses(pm, options.enableOpenMP);
+        // The default is CIRGen, which schedules exactly what an unstaged
+        // module needs.
+        cir::direct::populateCIRToLLVMPasses(pm, options.fromStage,
+                                             options.enableOpenMP);
       });
 
   ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {

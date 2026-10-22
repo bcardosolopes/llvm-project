@@ -34,6 +34,7 @@ public:
     EmitAssembly,
     EmitCIR,
     EmitCIRBC,
+    EmitMLIR,
     EmitLLVM,
     EmitBC,
     EmitObj,
@@ -78,6 +79,13 @@ class EmitCIRBCAction : public CIRGenAction {
 
 public:
   EmitCIRBCAction();
+};
+
+class EmitMLIRAction : public CIRGenAction {
+  virtual void anchor();
+
+public:
+  EmitMLIRAction();
 };
 
 class EmitLLVMAction : public CIRGenAction {

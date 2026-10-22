@@ -14,17 +14,22 @@
 #define CLANG_CIR_PASSES_H
 
 #include "mlir/Pass/Pass.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 
 #include <memory>
+#include <optional>
 
 namespace cir {
 namespace direct {
 /// Create a pass that fully lowers CIR to the LLVMIR dialect.
 std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass();
 
-/// Adds passes that fully lower CIR to the LLVMIR dialect. When enableOpenMP
-/// is set (-fopenmp), the OpenMP lowering passes are also added.
-void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP);
+/// Adds the pre-lowering passes and the CIR to LLVMIR conversion, plus the
+/// OpenMP passes when enableOpenMP is set (-fopenmp). Only passes past the
+/// recorded \p from stage run; with \p stopAt the list ends at that stage.
+void populateCIRToLLVMPasses(mlir::OpPassManager &pm,
+                             std::optional<CIRStage> from, bool enableOpenMP,
+                             std::optional<CIRStage> stopAt = std::nullopt);
 
 } // namespace direct
 } // end namespace cir

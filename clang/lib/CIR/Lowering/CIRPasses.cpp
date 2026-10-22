@@ -14,6 +14,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/TargetParser/Triple.h"
@@ -74,9 +75,17 @@ mlir::LogicalResult
 runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
                   bool enableVerifier, bool enableIdiomRecognizer,
                   bool enableCIRSimplify, bool enableLibOpt,
-                  llvm::StringRef libOptOptions, bool enableCallConvLowering) {
+                  llvm::StringRef libOptOptions, bool enableCallConvLowering,
+                  std::optional<CIRStage> from,
+                  std::optional<CIRStage> stopAt) {
 
   llvm::TimeTraceScope scope("CIR To CIR Passes");
+
+  // This list covers CIRGen to cir-abi: lowering starts past CIRGen and
+  // cir-flat is past its end.
+  assert(
+      (!stopAt || *stopAt == CIRStage::Prepare || *stopAt == CIRStage::ABI) &&
+      "only cir-prepare and cir-abi are stops inside this list");
 
   auto tripleAttr = theModule->getAttrOfType<mlir::StringAttr>(
       cir::CIRDialect::getTripleAttrName());
@@ -86,44 +95,54 @@ runCIRToCIRPasses(mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
            << "' attribute";
   llvm::Triple triple(tripleAttr.getValue());
 
-  auto abiAttr = theModule->getAttrOfType<mlir::StringAttr>(
-      cir::CIRDialect::getTargetABIAttrName());
-  if (!abiAttr)
-    return theModule.emitError()
-           << "missing '" << cir::CIRDialect::getTargetABIAttrName()
-           << "' attribute";
+  // Whether the module still has to reach `stage`.
+  auto before = [&](CIRStage stage) { return !from || *from < stage; };
 
   mlir::PassManager pm(&mlirContext);
-  pm.addPass(mlir::createCIRCanonicalizePass());
+  if (before(CIRStage::Prepare)) {
+    pm.addPass(mlir::createCIRCanonicalizePass());
 
-  if (enableCIRSimplify)
-    pm.addPass(mlir::createCIRSimplifyPass());
+    if (enableCIRSimplify)
+      pm.addPass(mlir::createCIRSimplifyPass());
 
-  if (enableIdiomRecognizer)
-    pm.addPass(mlir::createIdiomRecognizerPass());
+    if (enableIdiomRecognizer)
+      pm.addPass(mlir::createIdiomRecognizerPass());
 
-  if (enableLibOpt) {
-    auto libOptPass = mlir::createLibOptPass();
-    auto errorHandler = [](const llvm::Twine &) -> mlir::LogicalResult {
-      return mlir::LogicalResult::failure();
-    };
+    if (enableLibOpt) {
+      auto libOptPass = mlir::createLibOptPass();
+      auto errorHandler = [](const llvm::Twine &) -> mlir::LogicalResult {
+        return mlir::LogicalResult::failure();
+      };
 
-    if (libOptPass->initializeOptions(libOptOptions, errorHandler).failed())
-      return mlir::failure();
+      if (libOptPass->initializeOptions(libOptOptions, errorHandler).failed())
+        return mlir::failure();
 
-    pm.addPass(std::move(libOptPass));
+      pm.addPass(std::move(libOptPass));
+    }
+
+    pm.addPass(mlir::createTargetLoweringPass());
+    pm.addPass(mlir::createCXXABILoweringPass());
+
+    // LoweringPrepare synthesizes calls to runtime helpers such as __divsc3,
+    // and outlines dynamic global initializers into functions.  It must run
+    // before CallConvLowering so the classifier sees them, otherwise their
+    // signatures go unclassified and caller and callee disagree on the ABI.
+    pm.addPass(mlir::createLoweringPreparePass());
   }
 
-  pm.addPass(mlir::createTargetLoweringPass());
-  pm.addPass(mlir::createCXXABILoweringPass());
-
-  // LoweringPrepare synthesizes calls to runtime helpers such as __divsc3, and
-  // outlines dynamic global initializers into functions.  It must run before
-  // CallConvLowering so the classifier sees them, otherwise their signatures
-  // go unclassified and caller and callee disagree on the ABI.
-  pm.addPass(mlir::createLoweringPreparePass());
-
-  if (enableCallConvLowering) {
+  // Stopping at cir-prepare leaves CallConvLowering out: the module is
+  // printed before ABI lowering.
+  if (stopAt == CIRStage::Prepare)
+    enableCallConvLowering = false;
+  if (enableCallConvLowering && before(CIRStage::ABI)) {
+    // Only CallConvLowering reads the target ABI, so only it requires it.
+    // CIR written by hand carries no target facts and skips this pass.
+    auto abiAttr = theModule->getAttrOfType<mlir::StringAttr>(
+        cir::CIRDialect::getTargetABIAttrName());
+    if (!abiAttr)
+      return theModule.emitError()
+             << "missing '" << cir::CIRDialect::getTargetABIAttrName()
+             << "' attribute";
     // CallConvLowering rewrites signatures and call sites using the classifier,
     // so it must run after CXXABILowering has lowered C++ ABI types to plain
     // records the classifier can handle.  Only the x86_64 System V classifier

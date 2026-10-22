@@ -33,6 +33,7 @@
 #include "clang/CIR/Dialect/IR/CIRAttrs.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/IR/CIROpsEnums.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/Interfaces/CIROpInterfaces.h"
 #include "clang/CIR/MissingFeatures.h"
@@ -166,6 +167,7 @@ CIRGenModule::CIRGenModule(mlir::MLIRContext &mlirContext,
   }
   getModule()->setAttr(cir::CIRDialect::getTripleAttrName(),
                        builder.getStringAttr(getTriple().str()));
+  cir::advanceStage(getModule(), cir::CIRStage::CIRGen);
   getModule()->setAttr(cir::CIRDialect::getTargetABIAttrName(),
                        builder.getStringAttr(getTarget().getABI()));
 

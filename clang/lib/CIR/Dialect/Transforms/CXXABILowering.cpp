@@ -21,10 +21,12 @@
 #include "clang/CIR/Dialect/IR/CIRDataLayout.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/IR/CIROpsEnums.h"
+#include "clang/CIR/Dialect/IR/CIRStage.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
 #include "clang/CIR/MissingFeatures.h"
 
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
@@ -935,6 +937,9 @@ populateCXXABIConversionTarget(mlir::ConversionTarget &target,
 //===----------------------------------------------------------------------===//
 
 void CXXABILoweringPass::runOnOperation() {
+  // Whichever way this returns, the module has been through it.
+  auto recordStage = llvm::scope_exit(
+      [&] { cir::advanceStage(getOperation(), cir::CIRStage::Prepare); });
   auto mod = mlir::cast<mlir::ModuleOp>(getOperation());
   mlir::MLIRContext *ctx = mod.getContext();
 
