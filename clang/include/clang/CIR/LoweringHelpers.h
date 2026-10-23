@@ -100,4 +100,20 @@ mlir::Type convertTypeForLoadStore(const mlir::TypeConverter &converter,
 mlir::Attribute getBitIntStorageAttr(mlir::ConversionPatternRewriter &rewriter,
                                      cir::IntAttr attr,
                                      const mlir::DataLayout &dataLayout);
+
+// Transient attribute holding a symbol's CIR type before lowering. Without
+// pattern rollback the driver no longer invalidates cached symbol tables, so
+// CIR maintains the table manually and lookups mid-conversion find the
+// already-lowered LLVM symbol. Its type may have been adjusted during
+// lowering (split rows, flexible array), so readers that need the unadjusted
+// CIR view use this stash. The pass strips it at the end, so it never
+// reaches the output.
+inline constexpr const char *kPreConversionSymType =
+    "cir.preconversion_sym_type";
+
+inline mlir::Type getPreConversionSymType(mlir::Operation *op) {
+  if (auto typeAttr = op->getAttrOfType<mlir::TypeAttr>(kPreConversionSymType))
+    return typeAttr.getValue();
+  return {};
+}
 #endif

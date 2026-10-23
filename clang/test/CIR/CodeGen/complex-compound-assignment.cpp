@@ -675,14 +675,17 @@ void foo12() {
 // LLVM: %[[TMP_A:.*]] = load { i32, i32 }, ptr %[[A_ADDR]], align 4
 // LLVM: %[[A_REAL:.*]] = extractvalue { i32, i32 } %[[TMP_A]], 0
 // LLVM: %[[A_IMAG:.*]] = extractvalue { i32, i32 } %[[TMP_A]], 1
-// LLVM: %[[MUL_AR_BR:.*]] = mul i32 %[[A_REAL]], %[[TMP_B]]
-// LLVM: %[[MUL_AI_BI:.*]] = mul i32 %[[A_IMAG]], 0
-// LLVM: %[[MUL_BR_BR:.*]] = mul i32 %[[TMP_B]], %[[TMP_B]]
+// LLVM: %[[B_REAL:.*]] = extractvalue { i32, i32 } %[[B_COMPLEX]], 0
+// LLVM: %[[B_IMAG:.*]] = extractvalue { i32, i32 } %[[B_COMPLEX]], 1
+// LLVM: %[[MUL_AR_BR:.*]] = mul i32 %[[A_REAL]], %[[B_REAL]]
+// LLVM: %[[MUL_AI_BI:.*]] = mul i32 %[[A_IMAG]], %[[B_IMAG]]
+// LLVM: %[[MUL_BR_BR:.*]] = mul i32 %[[B_REAL]], %[[B_REAL]]
+// LLVM: %[[MUL_BI_BI:.*]] = mul i32 %[[B_IMAG]], %[[B_IMAG]]
 // LLVM: %[[ADD_ARBR_AIBI:.*]] = add i32 %[[MUL_AR_BR]], %[[MUL_AI_BI]]
-// LLVM: %[[ADD_BRBR_BIBI:.*]] = add i32 %[[MUL_BR_BR]], 0
+// LLVM: %[[ADD_BRBR_BIBI:.*]] = add i32 %[[MUL_BR_BR]], %[[MUL_BI_BI]]
 // LLVM: %[[RESULT_REAL:.*]] = sdiv i32 %[[ADD_ARBR_AIBI]], %[[ADD_BRBR_BIBI]]
-// LLVM: %[[MUL_AI_BR:.*]] = mul i32 %[[A_IMAG]], %[[TMP_B]]
-// LLVM: %[[MUL_AR_BI:.*]] = mul i32 %[[A_REAL]], 0
+// LLVM: %[[MUL_AI_BR:.*]] = mul i32 %[[A_IMAG]], %[[B_REAL]]
+// LLVM: %[[MUL_AR_BI:.*]] = mul i32 %[[A_REAL]], %[[B_IMAG]]
 // LLVM: %[[SUB_AIBR_ARBI:.*]] = sub i32 %[[MUL_AI_BR]], %[[MUL_AR_BI]]
 // LLVM: %[[RESULT_IMAG:.*]] = sdiv i32 %[[SUB_AIBR_ARBI]], %[[ADD_BRBR_BIBI]]
 // LLVM: %[[TMP_RESULT:.*]] = insertvalue { i32, i32 } {{.*}}, i32 %[[RESULT_REAL]], 0
@@ -776,7 +779,11 @@ void foo13() {
 // LLVM: %[[B_IMAG_F32:.*]] = fpext half %[[B_IMAG]] to float
 // LLVM: %[[TMP_B_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[B_REAL_F32]], 0
 // LLVM: %[[B_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_B_COMPLEX_F32]], float %[[B_IMAG_F32]], 1
-// LLVM: %[[DIV_A_B_COERCED:.*]] = call <2 x float> @__divsc3(float %[[A_REAL_F32]], float %[[A_IMAG_F32]], float %[[B_REAL_F32]], float %[[B_IMAG_F32]])
+// LLVM: %[[A_REAL_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 0
+// LLVM: %[[A_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 1
+// LLVM: %[[B_REAL_F32_EX:.*]] = extractvalue { float, float } %[[B_COMPLEX_F32]], 0
+// LLVM: %[[B_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[B_COMPLEX_F32]], 1
+// LLVM: %[[DIV_A_B_COERCED:.*]] = call <2 x float> @__divsc3(float %[[A_REAL_F32_EX]], float %[[A_IMAG_F32_EX]], float %[[B_REAL_F32_EX]], float %[[B_IMAG_F32_EX]])
 // LLVM: store <2 x float> %[[DIV_A_B_COERCED]], ptr %[[SLOT_AB:.*]], align 8
 // LLVM: %[[DIV_A_B:.*]] = load { float, float }, ptr %[[SLOT_AB]], align 4
 // LLVM: %[[TMP_B:.*]] = load { half, half }, ptr %[[B_ADDR]], align 2
@@ -786,9 +793,11 @@ void foo13() {
 // LLVM: %[[B_IMAG_F32:.*]] = fpext half %[[B_IMAG]] to float
 // LLVM: %[[TMP_B_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[B_REAL_F32]], 0
 // LLVM: %[[B_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_B_COMPLEX_F32]], float %[[B_IMAG_F32]], 1
+// LLVM: %[[B_REAL_F32_EX:.*]] = extractvalue { float, float } %[[B_COMPLEX_F32]], 0
+// LLVM: %[[B_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[B_COMPLEX_F32]], 1
 // LLVM: %[[DIV_AB_REAL:.*]] = extractvalue { float, float } %[[DIV_A_B]], 0
 // LLVM: %[[DIV_AB_IMAG:.*]] = extractvalue { float, float } %[[DIV_A_B]], 1
-// LLVM: %[[RESULT_COERCED:.*]] = call <2 x float> @__divsc3(float %[[B_REAL_F32]], float %[[B_IMAG_F32]], float %[[DIV_AB_REAL]], float %[[DIV_AB_IMAG]])
+// LLVM: %[[RESULT_COERCED:.*]] = call <2 x float> @__divsc3(float %[[B_REAL_F32_EX]], float %[[B_IMAG_F32_EX]], float %[[DIV_AB_REAL]], float %[[DIV_AB_IMAG]])
 // LLVM: store <2 x float> %[[RESULT_COERCED]], ptr %[[SLOT_R:.*]], align 8
 // LLVM: %[[RESULT:.*]] = load { float, float }, ptr %[[SLOT_R]], align 4
 // LLVM: %[[RESULT_REAL_F32:.*]] = extractvalue { float, float } %[[RESULT]], 0
