@@ -2671,6 +2671,9 @@ cir::GlobalOp LoweringPreparePass::getOrCreateConstAggregateGlobal(
       gv, mlir::SymbolTable::Visibility::Private);
   gv.setInitialValueAttr(constant);
   gv.setAlignment(alignment);
+  // These mirror classic createUnnamedGlobalForMemcpyFrom, which marks them
+  // unnamed_addr.
+  gv.setUnnamedAddr(true);
 
   // Keep the cached symbol table in sync with the new global so subsequent
   // lookups for other base names find it.

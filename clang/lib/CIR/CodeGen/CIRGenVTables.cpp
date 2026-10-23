@@ -209,7 +209,7 @@ mlir::Attribute CIRGenVTables::getVTableComponent(
           cgm.getBuilder().getFuncType({}, cgm.getBuilder().getVoidTy());
       cir::FuncOp fnPtr = cgm.createRuntimeFunction(fnTy, name);
 
-      assert(!cir::MissingFeatures::opGlobalUnnamedAddr());
+      fnPtr.setUnnamedAddr(true);
 
       // The Microsoft ABI uses the same function name for pure and deleted
       // virtual functions.
@@ -342,8 +342,13 @@ cir::GlobalOp CIRGenVTables::generateConstructionVTable(
   cir::GlobalOp vtable = cgm.createOrReplaceCXXRuntimeVariable(
       loc, name, vtType, linkage, CharUnits::fromQuantity(align));
 
-  // V-tables are always unnamed_addr.
-  assert(!cir::MissingFeatures::opGlobalUnnamedAddr());
+  // dynamic_cast assumes the vtable address is unique; see
+  // https://github.com/llvm/llvm-project/pull/200108. The address is
+  // insignificant either when no RTTI is emitted or for a weak vtable on a
+  // target that may duplicate vtables. In those cases the vtable can be marked
+  // unnamed_addr.
+  if (!cgm.shouldEmitRTTI() || cgm.mayVTableBeDuplicated(linkage))
+    vtable.setUnnamedAddr(true);
 
   mlir::Attribute rtti = cgm.getAddrOfRTTIDescriptor(
       loc, cgm.getASTContext().getCanonicalTagType(base.getBase()));

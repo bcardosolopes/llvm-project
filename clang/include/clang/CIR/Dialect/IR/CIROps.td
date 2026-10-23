@@ -3523,6 +3523,7 @@ def CIR_GlobalOp : CIR_RegionBranchOpBase<"global", [
                        OptionalAttr<StrAttr>:$comdat,
                        UnitProp:$constant,
                        UnitProp:$dso_local,
+                       UnitProp:$unnamed_addr,
                        OptionalAttr<CIR_DynamicInitGuardAttr>:$dynamic_init_guard,
                        OptionalAttr<I64Attr>:$alignment,
                        OptionalAttr<ASTVarDeclInterface>:$ast,
@@ -3546,6 +3547,7 @@ def CIR_GlobalOp : CIR_RegionBranchOpBase<"global", [
     (`tls_model` `=` enum($tls_model)^)?
     (`tls_refs` `=` $tls_refs^)?
     (`dso_local` $dso_local^)?
+    (`unnamed_addr` $unnamed_addr^)?
     (`dynamic_init_guard` `` $dynamic_init_guard^)?
     (` ` custom<GlobalMemorySpace>($addr_space)^ )?
     $sym_name
@@ -4384,6 +4386,10 @@ def CIR_FuncOp : CIR_Op<"func", [
     This attribute includes an optional 'group' name, which if not provided,
     results in the function's symbol name being used.
 
+    The `unnamed_addr` attribute marks the function's address as insignificant,
+    matching LLVM's `unnamed_addr` (e.g. C++ constructors, destructors, and
+    virtual methods).
+
     Example:
 
     ```
@@ -4428,6 +4434,7 @@ def CIR_FuncOp : CIR_Op<"func", [
     UnitAttr:$no_proto,
     UnitAttr:$requires_call_conv_lowering,
     UnitAttr:$dso_local,
+    UnitAttr:$unnamed_addr,
     DefaultValuedAttr<
       CIR_GlobalLinkageKindAttr,
       "cir::GlobalLinkageKind::ExternalLinkage"

@@ -505,6 +505,14 @@ static void setOriginalSymType(mlir::LLVM::GlobalOp global, mlir::Type ty) {
   global->setAttr(kOrigSymTypeAttrName, mlir::TypeAttr::get(ty));
 }
 
+// Propagate CIR's unnamed_addr to the lowered LLVM global. Takes the
+// pre-captured flag: callers must read it before replaceOpWithNewOp erases
+// the source op (no value mapping to read back through under one-shot).
+static void setUnnamedAddrFromCIR(bool unnamedAddr, mlir::LLVM::GlobalOp dst) {
+  if (unnamedAddr)
+    dst.setUnnamedAddr(mlir::LLVM::UnnamedAddr::Global);
+}
+
 class CIRAttrToValue {
 public:
   CIRAttrToValue(mlir::Location parentLoc, mlir::ModuleOp parentModule,
@@ -3182,6 +3190,8 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewriteAlias(
     return mlir::failure();
 
   mlir::Location loc = op.getLoc();
+  // Capture source-op state before replaceOp erases it.
+  const bool unnamedAddr = op.getUnnamedAddr();
   // Create the alias before replacing: without pattern rollback the
   // replace erases the root op immediately. The driver does not
   // invalidate the cached symbol table either, so build it before the
@@ -3211,6 +3221,8 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewriteAlias(
   symbolTables.getSymbolTable(modOp).remove(op);
   rewriter.replaceOp(op, aliasOp);
   symbolTables.getSymbolTable(modOp).insert(aliasOp);
+  if (unnamedAddr)
+    aliasOp.setUnnamedAddr(mlir::LLVM::UnnamedAddr::Global);
 
   return mlir::success();
 }
@@ -3277,6 +3289,9 @@ mlir::LogicalResult CIRToLLVMFuncOpLowering::matchAndRewrite(
   mlir::LLVM::LLVMFuncOp fn = mlir::LLVM::LLVMFuncOp::create(
       rewriter, loc, op.getName(), llvmFnTy, linkage, isDsoLocal, cconv,
       comdatAttr, attributes);
+
+  if (op.getUnnamedAddr())
+    fn.setUnnamedAddr(mlir::LLVM::UnnamedAddr::Global);
 
   assert(!cir::MissingFeatures::opFuncMultipleReturnVals());
 
@@ -3462,7 +3477,7 @@ CIRToLLVMGlobalOpLowering::setupRegionInitializedLLVMGlobalOp(
   SmallVector<mlir::NamedAttribute> attributes =
       lowerGlobalAttributes(op, rewriter);
 
-// Create beside the old op: the caller keeps it alive (and in the
+  // Create beside the old op: the caller keeps it alive (and in the
   // table) during the initializer visit, then swaps the table and erases
   // it on success. Comdat stays empty here; the caller attaches it only
   // after the visit succeeds.
@@ -3665,13 +3680,17 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
           // The cached symbol table must be maintained explicitly: without
           // pattern rollback the old op is erased immediately, so drop its
           // entry before replacement and register the new op after.
+          // Capture source-op state before replaceOpWithNewOp erases it.
+          mlir::Type origSymType = op.getSymType();
+          const bool unnamedAddr = op.getUnnamedAddr();
           symbolTables.getSymbolTable(modOp).remove(op);
           auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
               op, llvmType, isConst, linkage, symbol, bulkInit.value(),
               alignment, addrSpace, isDsoLocal, threadLocalMode, comdatAttr,
               attributes);
           symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
-          setOriginalSymType(newGlobalOp, op.getSymType());
+          setOriginalSymType(newGlobalOp, origSymType);
+          setUnnamedAddrFromCIR(unnamedAddr, newGlobalOp);
           return mlir::success();
         }
       }
@@ -3691,12 +3710,16 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
         // The cached symbol table must be maintained explicitly: without
         // pattern rollback the old op is erased immediately, so drop its
         // entry before replacement and register the new op after.
+        // Capture source-op state before replaceOpWithNewOp erases it.
+        mlir::Type origSymType = op.getSymType();
+        const bool unnamedAddr = op.getUnnamedAddr();
         symbolTables.getSymbolTable(modOp).remove(op);
         auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
             op, llvmType, isConst, linkage, symbol, bulkInit.value(), alignment,
             addrSpace, isDsoLocal, threadLocalMode, comdatAttr, attributes);
         symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
-        setOriginalSymType(newGlobalOp, op.getSymType());
+        setOriginalSymType(newGlobalOp, origSymType);
+        setUnnamedAddrFromCIR(unnamedAddr, newGlobalOp);
         return mlir::success();
       }
       return matchAndRewriteRegionInitializedGlobal(op, init.value(), rewriter);
@@ -3723,13 +3746,17 @@ mlir::LogicalResult CIRToLLVMGlobalOpLowering::matchAndRewrite(
   // pattern rollback the old op is erased immediately, so drop its
   // entry before replacement and register the new op after.
   mlir::ModuleOp modOp = op->getParentOfType<mlir::ModuleOp>();
+  // Capture source-op state before replaceOpWithNewOp erases it.
+  mlir::Type origSymType = op.getSymType();
+  const bool unnamedAddr = op.getUnnamedAddr();
   symbolTables.getSymbolTable(modOp).remove(op);
   auto newGlobalOp = rewriter.replaceOpWithNewOp<mlir::LLVM::GlobalOp>(
       op, llvmType, isConst, linkage, symbol, init.value_or(mlir::Attribute()),
       alignment, addrSpace, isDsoLocal, threadLocalMode, comdatAttr,
       attributes);
   symbolTables.getSymbolTable(modOp).insert(newGlobalOp);
-  setOriginalSymType(newGlobalOp, op.getSymType());
+  setOriginalSymType(newGlobalOp, origSymType);
+  setUnnamedAddrFromCIR(unnamedAddr, newGlobalOp);
 
   return mlir::success();
 }

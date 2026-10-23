@@ -516,6 +516,12 @@ void CIRGenItaniumCXXABI::emitVTableDefinitions(CIRGenVTables &cgvt,
   // Set the correct linkage.
   vtable.setLinkage(linkage);
 
+  // On a target that may duplicate vtables, a weak vtable does not have a
+  // unique address, so its address is insignificant and it can be marked
+  // unnamed_addr.
+  if (cgm.mayVTableBeDuplicated(linkage))
+    vtable.setUnnamedAddr(true);
+
   if (cgm.supportsCOMDAT() && cir::isWeakForLinker(linkage))
     vtable.setSelfComdat();
 
@@ -1609,8 +1615,11 @@ cir::GlobalOp CIRGenItaniumCXXABI::getAddrOfVTable(const CXXRecordDecl *rd,
       cgm.getLoc(rd->getSourceRange()), name, vtableType,
       cir::GlobalLinkageKind::ExternalLinkage,
       cgm.getASTContext().toCharUnitsFromBits(ptrAlign));
-  // LLVM codegen handles unnamedAddr
-  assert(!cir::MissingFeatures::opGlobalUnnamedAddr());
+  // Without RTTI the vtable address is never significant (dynamic_cast is
+  // unavailable), so it can be marked unnamed_addr up front. With RTTI the
+  // definition may still qualify; see emitVTableDefinitions.
+  if (!cgm.shouldEmitRTTI())
+    vtable.setUnnamedAddr(true);
 
   // In MS C++ if you have a class with virtual functions in which you are using
   // selective member import/export, then all virtual functions must be exported

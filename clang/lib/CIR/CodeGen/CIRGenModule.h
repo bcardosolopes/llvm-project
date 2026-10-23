@@ -684,6 +684,15 @@ public:
              getTriple().isNVPTX());
   }
 
+  // Mirrors CodeGenModule::mayVTableBeDuplicated: on targets where only
+  // strong-linkage vtables are unique, a weak vtable may be duplicated and
+  // its address is insignificant.
+  bool mayVTableBeDuplicated(cir::GlobalLinkageKind linkage) const {
+    return getTarget().getVTableUniqueness() ==
+               VTableUniquenessKind::UniqueIfStrongLinkage &&
+           cir::isWeakForLinker(linkage);
+  }
+
   /// Emit type info if type of an expression is a variably modified
   /// type. Also emit proper debug info for cast types.
   void emitExplicitCastExprType(const ExplicitCastExpr *e,

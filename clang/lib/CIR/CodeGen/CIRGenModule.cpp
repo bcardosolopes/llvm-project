@@ -2407,7 +2407,8 @@ generateStringLiteral(mlir::Location loc, mlir::TypedAttr c,
   gv.setLinkageAttr(
       cir::GlobalLinkageKindAttr::get(cgm.getBuilder().getContext(), lt));
   assert(!cir::MissingFeatures::opGlobalThreadLocal());
-  assert(!cir::MissingFeatures::opGlobalUnnamedAddr());
+  // String literals are always unnamed_addr.
+  gv.setUnnamedAddr(true);
   CIRGenModule::setInitializer(gv, c);
   if (gv.isWeakForLinker()) {
     assert(cgm.supportsCOMDAT() && "Only COFF uses weak string literals");
@@ -3563,6 +3564,14 @@ void CIRGenModule::setFunctionAttributes(GlobalDecl globalDecl,
     func->setAttr(cir::CIRDialect::getNoBuiltinAttrName(),
                   mlir::UnitAttr::get(&getMLIRContext()));
   }
+
+  // Mirrors CodeGenModule::SetFunctionAttributes: the address of a
+  // constructor, destructor, or virtual method is never significant.
+  if (isa<CXXConstructorDecl>(funcDecl) || isa<CXXDestructorDecl>(funcDecl))
+    func.setUnnamedAddr(true);
+  else if (const auto *md = dyn_cast<CXXMethodDecl>(funcDecl))
+    if (md->isVirtual())
+      func.setUnnamedAddr(true);
 }
 
 void CIRGenModule::setCIRFunctionAttributesForDefinition(
@@ -4437,7 +4446,7 @@ void CIRGenModule::emitAliasForGlobal(StringRef mangledName,
       alias, mlir::SymbolTable::Visibility::Private);
 
   // Alias constructors and destructors are always unnamed_addr.
-  assert(!cir::MissingFeatures::opGlobalUnnamedAddr());
+  alias.setUnnamedAddr(true);
 
   if (op) {
     // Any existing users of the existing function declaration will be
@@ -4711,6 +4720,8 @@ cir::GlobalOp CIRGenModule::getAddrOfUnnamedGlobalConstantDecl(
   auto globalOp = createGlobalOp(builder.getUnknownLoc(), name,
                                  typedInit.getType(), /*is_constant=*/true);
   globalOp.setLinkage(cir::GlobalLinkageKind::PrivateLinkage);
+  // Classic createUnnamedGlobalFrom marks these unnamed_addr.
+  globalOp.setUnnamedAddr(true);
 
   CharUnits alignment = getASTContext().getTypeAlignInChars(gcd->getType());
   globalOp.setAlignment(alignment.getAsAlign().value());
