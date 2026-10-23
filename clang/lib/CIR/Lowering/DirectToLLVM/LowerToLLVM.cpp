@@ -4935,14 +4935,15 @@ void ConvertCIRToLLVMPass::collectGlobalAnnotations(mlir::ModuleOp module) {
         collectedAnnotations.emplace_back(symName, annot, loc);
   };
 
-  // Walk in IR order: GlobalOps first (they appear before functions in the
-  // module body), then FuncOps. This matches OGCG's emission order.
-  module.walk([&](cir::GlobalOp op) {
+  // Iterate the module body directly instead of walking: globals and
+  // functions are top-level symbols only, so a recursive walk would visit
+  // every op in every function body for no reason. GlobalOps first (they
+  // appear before functions in the module body), then FuncOps. This matches
+  // OGCG's emission order.
+  for (cir::GlobalOp op : module.getBody()->getOps<cir::GlobalOp>())
     handleArray(op.getSymNameAttr(), op.getAnnotationsAttr(), op.getLoc());
-  });
-  module.walk([&](cir::FuncOp op) {
+  for (cir::FuncOp op : module.getBody()->getOps<cir::FuncOp>())
     handleArray(op.getSymNameAttr(), op.getAnnotationsAttr(), op.getLoc());
-  });
 }
 
 void ConvertCIRToLLVMPass::buildGlobalAnnotationsVar(mlir::ModuleOp module) {
@@ -5169,10 +5170,11 @@ void ConvertCIRToLLVMPass::runOnOperation() {
 
   // Drop the transient original-type attributes (see kOrigSymTypeAttrName):
   // they served GlobalView lowering during conversion and must not reach
-  // translation.
-  module.walk([&](mlir::LLVM::GlobalOp global) {
+  // translation. Globals are top-level symbols: iterate the body directly
+  // instead of walking the whole module.
+  for (mlir::LLVM::GlobalOp global :
+       module.getBody()->getOps<mlir::LLVM::GlobalOp>())
     global->removeAttr(kOrigSymTypeAttrName);
-  });
 
   // Drop the cir.ptr-keyed data-layout entries: they drove pointer-width
   // queries up to this point, but the LLVM IR exporter rejects CIR types.
