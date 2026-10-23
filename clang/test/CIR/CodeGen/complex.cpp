@@ -1046,7 +1046,8 @@ void foo35() {
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
 // LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
 // LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
-// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[A_REAL_F32]] to half
+// LLVM: %[[A_REAL_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 0
+// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[A_REAL_F32_EX]] to half
 // LLVM: store half %[[A_REAL_F16]], ptr %[[REAL_ADDR]], align 2
 
 // OGCG: %[[A_ADDR:.*]] = alloca { half, half }, align 2
@@ -1083,7 +1084,8 @@ void foo36() {
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
 // LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
 // LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
-// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[A_IMAG_F32]] to half
+// LLVM: %[[A_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 1
+// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[A_IMAG_F32_EX]] to half
 // LLVM: store half %[[A_IMAG_F16]], ptr %[[IMAG_ADDR]], align 2
 
 // OGCG: %[[A_ADDR:.*]] = alloca { half, half }, align 2
@@ -1341,7 +1343,8 @@ void real_on_scalar_from_real_with_type_promotion() {
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
 // LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
 // LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
-// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[A_REAL_F32]] to half
+// LLVM: %[[A_REAL_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 0
+// LLVM: %[[A_REAL_F16:.*]] = fptrunc float %[[A_REAL_F32_EX]] to half
 // LLVM: store half %[[A_REAL_F16]], ptr %[[B_ADDR]], align 2
 
 // OGCG: %[[A_ADDR:.*]] = alloca { half, half }, align 2
@@ -1379,7 +1382,8 @@ void real_on_scalar_from_imag_with_type_promotion() {
 // LLVM: %[[A_IMAG_F32:.*]] = fpext half %[[A_IMAG]] to float
 // LLVM: %[[TMP_A_COMPLEX_F32:.*]] = insertvalue { float, float } {{.*}}, float %[[A_REAL_F32]], 0
 // LLVM: %[[A_COMPLEX_F32:.*]] = insertvalue { float, float } %[[TMP_A_COMPLEX_F32]], float %[[A_IMAG_F32]], 1
-// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[A_IMAG_F32]] to half
+// LLVM: %[[A_IMAG_F32_EX:.*]] = extractvalue { float, float } %[[A_COMPLEX_F32]], 1
+// LLVM: %[[A_IMAG_F16:.*]] = fptrunc float %[[A_IMAG_F32_EX]] to half
 // LLVM: store half %[[A_IMAG_F16]], ptr %[[B_ADDR]], align 2
 
 // OGCG: %[[A_ADDR:.*]] = alloca { half, half }, align 2

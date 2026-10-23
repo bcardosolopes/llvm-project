@@ -27,22 +27,49 @@ namespace direct {
 namespace {
 
 std::optional<int64_t> getConstantInt(mlir::Value value) {
-  auto constOp = value.getDefiningOp<cir::ConstantOp>();
-  auto intAttr =
-      constOp ? mlir::dyn_cast<cir::IntAttr>(constOp.getValue()) : nullptr;
-  if (!intAttr)
-    return std::nullopt;
-  const llvm::APInt &v = intAttr.getValue();
-  if (mlir::cast<cir::IntType>(intAttr.getType()).isSigned()
-          ? v.getSignificantBits() > 64
-          : v.getActiveBits() > 63)
-    return std::nullopt;
-  return v.getSExtValue();
+  // A peeled ZExt makes the resolved value unsigned; SExt and unrealized
+  // casts preserve signedness. Trunc is not peeled: the address moves by
+  // the narrowed value, which this cannot recover soundly.
+  bool isUnsigned = false;
+  while (mlir::Operation *def = value.getDefiningOp()) {
+    if (auto cast = mlir::dyn_cast<mlir::UnrealizedConversionCastOp>(def)) {
+      if (cast.getNumOperands() != 1)
+        return std::nullopt;
+      value = cast.getOperand(0);
+    } else if (mlir::isa<mlir::LLVM::SExtOp>(def)) {
+      value = def->getOperand(0);
+    } else if (mlir::isa<mlir::LLVM::ZExtOp>(def)) {
+      value = def->getOperand(0);
+      isUnsigned = true;
+    } else {
+      break;
+    }
+  }
+  if (auto constOp = value.getDefiningOp<cir::ConstantOp>()) {
+    auto intAttr = mlir::dyn_cast<cir::IntAttr>(constOp.getValue());
+    if (!intAttr)
+      return std::nullopt;
+    const llvm::APInt &v = intAttr.getValue();
+    bool uns =
+        isUnsigned || !mlir::cast<cir::IntType>(intAttr.getType()).isSigned();
+    if (uns ? v.getActiveBits() > 64 : v.getSignificantBits() > 64)
+      return std::nullopt;
+    return uns ? v.getZExtValue() : v.getSExtValue();
+  }
+  if (auto constOp = value.getDefiningOp<mlir::LLVM::ConstantOp>()) {
+    auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue());
+    if (!intAttr || intAttr.getValue().getBitWidth() > 64)
+      return std::nullopt;
+    llvm::APInt v = intAttr.getValue();
+    return isUnsigned ? v.getZExtValue() : v.getSExtValue();
+  }
+  return std::nullopt;
 }
 
 bool isByteType(mlir::Type ty) {
-  auto intTy = mlir::dyn_cast<cir::IntType>(ty);
-  return intTy && intTy.getWidth() == 8;
+  if (auto intTy = mlir::dyn_cast<cir::IntType>(ty))
+    return intTy.getWidth() == 8;
+  return ty.isInteger(8);
 }
 
 bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
@@ -50,7 +77,13 @@ bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
                            std::string &str) {
   int64_t offset = 0;
   while (mlir::Operation *def = ptr.getDefiningOp()) {
-    if (auto cast = mlir::dyn_cast<cir::CastOp>(def)) {
+    if (auto cast = mlir::dyn_cast<mlir::UnrealizedConversionCastOp>(def)) {
+      // Without pattern rollback the producers are already converted and
+      // the operand arrives wrapped in a cast back to the CIR type.
+      if (cast.getNumOperands() != 1)
+        break;
+      ptr = cast.getOperand(0);
+    } else if (auto cast = mlir::dyn_cast<cir::CastOp>(def)) {
       if (cast.getKind() != cir::CastKind::array_to_ptrdecay &&
           cast.getKind() != cir::CastKind::bitcast &&
           cast.getKind() != cir::CastKind::address_space)
@@ -68,19 +101,83 @@ bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
           llvm::AddOverflow(offset, *index, offset))
         return false;
       ptr = stride.getBase();
+    } else if (mlir::isa<mlir::LLVM::AddrSpaceCastOp, mlir::LLVM::BitcastOp>(
+                   def)) {
+      // Converted address_space / bitcast / decay pieces add no offset.
+      ptr = def->getOperand(0);
+    } else if (auto gep = mlir::dyn_cast<mlir::LLVM::GEPOp>(def)) {
+      // Converted array_to_ptrdecay ({0}), GetElement ({0, k}) or PtrStride
+      // ({k}). Dynamic indices resolve like the CIR index operands they
+      // converted from. Only accept steps whose byte offset is exact: the
+      // pointer-level index must be zero unless the element is i8, array
+      // levels must be zero, and the final index must land in i8.
+      auto raw = gep.getRawConstantIndices();
+      if (raw.empty())
+        return false;
+      auto dynamicIt = gep.getDynamicIndices().begin();
+      auto getIndex = [&](size_t i, int64_t &idx) {
+        if (raw[i] == mlir::LLVM::GEPOp::kDynamicIndex) {
+          std::optional<int64_t> c = getConstantInt(*dynamicIt++);
+          if (!c)
+            return false;
+          idx = *c;
+        } else {
+          idx = raw[i];
+        }
+        return true;
+      };
+      mlir::Type elemTy = gep.getElemType();
+      if (raw.size() == 1) {
+        int64_t idx;
+        if (!getIndex(0, idx))
+          return false;
+        if (elemTy.isInteger(8)) {
+          if (llvm::AddOverflow(offset, idx, offset))
+            return false;
+        } else if (idx != 0) {
+          return false;
+        }
+      } else {
+        int64_t first;
+        if (!getIndex(0, first) || first != 0)
+          return false;
+        mlir::Type ty = elemTy;
+        for (size_t i = 1; i < raw.size(); ++i) {
+          auto arrTy = mlir::dyn_cast<mlir::LLVM::LLVMArrayType>(ty);
+          if (!arrTy)
+            return false;
+          int64_t idx;
+          if (!getIndex(i, idx))
+            return false;
+          if (i + 1 == raw.size()) {
+            if (!arrTy.getElementType().isInteger(8))
+              return false;
+            if (llvm::AddOverflow(offset, idx, offset))
+              return false;
+          } else if (idx != 0) {
+            return false;
+          }
+          ty = arrTy.getElementType();
+        }
+      }
+      ptr = gep.getBase();
     } else {
       break;
     }
   }
 
-  auto getGlobal = ptr.getDefiningOp<cir::GetGlobalOp>();
-  if (!getGlobal)
+  mlir::FlatSymbolRefAttr symName;
+  if (auto getGlobal = ptr.getDefiningOp<cir::GetGlobalOp>())
+    symName = getGlobal.getNameAttr();
+  else if (auto addrOf = ptr.getDefiningOp<mlir::LLVM::AddressOfOp>())
+    symName =
+        mlir::FlatSymbolRefAttr::get(mod.getContext(), addrOf.getGlobalName());
+  else
     return false;
+  mlir::Operation *symbol = symbolTables.lookupSymbolIn(mod, symName);
 
   // The global may or may not have been converted already.
   std::string data;
-  mlir::Operation *symbol =
-      symbolTables.lookupSymbolIn(mod, getGlobal.getNameAttr());
   if (auto global = mlir::dyn_cast_if_present<cir::GlobalOp>(symbol)) {
     std::optional<mlir::Attribute> init = global.getInitialValue();
     auto arrayTy = mlir::dyn_cast<cir::ArrayType>(global.getSymType());
