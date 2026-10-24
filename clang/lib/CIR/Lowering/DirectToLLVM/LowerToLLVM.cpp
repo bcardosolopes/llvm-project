@@ -5275,8 +5275,15 @@ mlir::LogicalResult CIRToLLVMExtractMemberOpLowering::matchAndRewrite(
   auto structTy = mlir::cast<cir::StructType>(op.getRecord().getType());
   std::int64_t indices[1] = {
       static_cast<std::int64_t>(structTy.getLLVMFieldIndex(op.getIndex()))};
-  rewriter.replaceOpWithNewOp<mlir::LLVM::ExtractValueOp>(
-      op, adaptor.getRecord(), indices);
+  auto extract = mlir::LLVM::ExtractValueOp::create(
+      rewriter, op.getLoc(), adaptor.getRecord(), indices);
+  // A bool field extracts in its in-memory width (i8); convert to the i1
+  // value representation explicitly like LoadOp lowering does, instead of
+  // leaving an unrealized conversion cast the reconciler cannot fold.
+  mlir::Value result = extract;
+  if (mlir::isa<cir::BoolType>(op.getType()))
+    result = createIntCast(rewriter, result, rewriter.getI1Type());
+  rewriter.replaceOp(op, result);
   return mlir::success();
 }
 
@@ -5291,8 +5298,14 @@ mlir::LogicalResult CIRToLLVMInsertMemberOpLowering::matchAndRewrite(
   auto structTy = mlir::cast<cir::StructType>(op.getRecord().getType());
   std::int64_t indices[1] = {
       static_cast<std::int64_t>(structTy.getLLVMFieldIndex(op.getIndex()))};
+  // A bool value is i1 but the field stores the in-memory width (i8);
+  // extend explicitly like StoreOp lowering does (InsertValueOp rejects
+  // the width mismatch).
+  mlir::Value value = adaptor.getValue();
+  if (mlir::isa<cir::BoolType>(op.getValue().getType()))
+    value = emitToMemory(rewriter, dataLayout, op.getValue().getType(), value);
   rewriter.replaceOpWithNewOp<mlir::LLVM::InsertValueOp>(
-      op, adaptor.getRecord(), adaptor.getValue(), indices);
+      op, adaptor.getRecord(), value, indices);
   return mlir::success();
 }
 
