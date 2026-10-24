@@ -4,6 +4,7 @@
 !s32i = !cir.int<s, 32>
 !u8i = !cir.int<u, 8>
 !ty_S = !cir.struct<"S" {data !u8i, data !s32i}>
+!ty_B = !cir.struct<"B" {data !cir.bool, data !s32i}>
 
 module {
   // CHECK-LABEL: @test_value
@@ -19,5 +20,19 @@ module {
     %2 = cir.extract_member %0[1] : !ty_S -> !s32i
     // CHECK-NEXT: %{{.+}} = llvm.extractvalue %[[#v4]][1] : !llvm.struct<"struct.S", (i8, i32)>
     cir.return
+  }
+
+  // A bool field extracts in its in-memory width (i8) and converts to the
+  // i1 value representation explicitly (no unrealized cast left behind);
+  // inserting extends i1 back to i8 for the field.
+  // CHECK-LABEL: @test_bool_member
+  cir.func @test_bool_member(%v: !ty_B, %b: !cir.bool) -> !cir.bool {
+    // CHECK: %[[E:.+]] = llvm.extractvalue %{{.+}}[0] : !llvm.struct<"struct.B", (i8, i32)>
+    // CHECK-NEXT: %[[T:.+]] = llvm.trunc %[[E]] : i8 to i1
+    %e = cir.extract_member %v[0] : !ty_B -> !cir.bool
+    // CHECK: %[[Z:.+]] = llvm.zext %{{.+}} : i1 to i8
+    // CHECK-NEXT: llvm.insertvalue %[[Z]], %{{.+}}[0] : !llvm.struct<"struct.B", (i8, i32)>
+    %r = cir.insert_member %v[0], %b : !ty_B, !cir.bool
+    cir.return %e : !cir.bool
   }
 }
