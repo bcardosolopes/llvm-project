@@ -1,0 +1,164 @@
+// RUN: cir-opt %s -cir-simplify | FileCheck %s
+
+!s64i = !cir.int<s, 64>
+!s8i = !cir.int<s, 8>
+!rec_S = !cir.struct<"S" {data !s64i, data !s8i}>
+!rec_anon = !cir.struct<"anon" {data !s64i, data !s8i}>
+!rec_Small = !cir.struct<"Small" {data !s64i}>
+
+// CHECK-LABEL: cir.func @fold_store_copy
+// CHECK-NEXT: %[[V:.+]] = cir.load %arg0 : !cir.ptr<!rec_S>, !rec_S
+// CHECK-NEXT: cir.store %[[V]], %arg1 : !rec_S, !cir.ptr<!rec_S>
+// CHECK-NEXT: cir.return
+cir.func @fold_store_copy(%src: !cir.ptr<!rec_S>, %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// Coerce-temporary shape: the copy reads the slot through a bitcast with a
+// layout-compatible (same size) but nominally different record type. The
+// bitcast moves to the destination side.
+// CHECK-LABEL: cir.func @fold_store_copy_coerce
+// CHECK-NEXT: %[[V:.+]] = cir.load %arg0 : !cir.ptr<!rec_anon>, !rec_anon
+// CHECK-NEXT: %[[DST:.+]] = cir.cast bitcast %arg1 : !cir.ptr<!rec_S> -> !cir.ptr<!rec_anon>
+// CHECK-NEXT: cir.store %[[V]], %[[DST]] : !rec_anon, !cir.ptr<!rec_anon>
+// CHECK-NEXT: cir.return
+cir.func @fold_store_copy_coerce(%src: !cir.ptr<!rec_anon>, %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_anon>, !rec_anon
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_anon>
+  cir.store %v, %slot : !rec_anon, !cir.ptr<!rec_anon>
+  %bc = cir.cast bitcast %slot : !cir.ptr<!rec_anon> -> !cir.ptr<!rec_S>
+  cir.copy %bc to %dst : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// Lifetime markers on the dead slot go away with it.
+// CHECK-LABEL: cir.func @fold_store_copy_lifetime
+// CHECK-NEXT: %[[V:.+]] = cir.load %arg0 : !cir.ptr<!rec_S>, !rec_S
+// CHECK-NEXT: cir.store %[[V]], %arg1 : !rec_S, !cir.ptr<!rec_S>
+// CHECK-NEXT: cir.return
+// CHECK-NOT: cir.lifetime
+cir.func @fold_store_copy_lifetime(%src: !cir.ptr<!rec_S>, %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.lifetime.start %slot : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst : !cir.ptr<!rec_S>
+  cir.lifetime.end %slot : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// CHECK-LABEL: cir.func @no_fold_volatile_copy
+// CHECK: cir.copy {{.*}} volatile
+cir.func @no_fold_volatile_copy(%src: !cir.ptr<!rec_S>, %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst volatile : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// Narrowing: the copy moves fewer bytes (9 data bytes, skipping tail padding)
+// than the store wrote (16). Scalar field stores covering exactly the
+// copied prefix are emitted directly into the destination. The stored
+// value must be a call result (only its padding is known-undef).
+// CHECK-LABEL: cir.func @fold_skip_tail_padding_narrow
+// CHECK-NEXT: %[[V:.+]] = cir.call @make_s() : () -> !rec_S
+// CHECK-NEXT: %[[F0:.+]] = cir.extract_member %[[V]][0] : !rec_S -> !s64i
+// CHECK-NEXT: %[[P0:.+]] = cir.get_member %arg0[0] {name = ""} : !cir.ptr<!rec_S> -> !cir.ptr<!s64i>
+// CHECK-NEXT: cir.store %[[F0]], %[[P0]] : !s64i, !cir.ptr<!s64i>
+// CHECK-NEXT: %[[F1:.+]] = cir.extract_member %[[V]][1] : !rec_S -> !s8i
+// CHECK-NEXT: %[[P1:.+]] = cir.get_member %arg0[1] {name = ""} : !cir.ptr<!rec_S> -> !cir.ptr<!s8i>
+// CHECK-NEXT: cir.store %[[F1]], %[[P1]] : !s8i, !cir.ptr<!s8i>
+// CHECK-NEXT: cir.return
+cir.func @fold_skip_tail_padding_narrow(%dst: !cir.ptr<!rec_S>) {
+  %v = cir.call @make_s() : () -> !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst skip_tail_padding : !cir.ptr<!rec_S>
+  cir.return
+}
+cir.func private @make_s() -> !rec_S
+
+// Narrowing requires a call result: a loaded value's padding is defined,
+// so skipping it is not a sound refinement.
+// CHECK-LABEL: cir.func @no_fold_narrow_non_call
+// CHECK: cir.copy
+cir.func @no_fold_narrow_non_call(%src: !cir.ptr<!rec_S>,
+                                  %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst skip_tail_padding : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// Extra load use of the slot blocks the fold (the slot must stay).
+// CHECK-LABEL: cir.func @no_fold_extra_load
+// CHECK: cir.copy
+cir.func @no_fold_extra_load(%src: !cir.ptr<!rec_S>, %dst: !cir.ptr<!rec_S>) -> !rec_S {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst : !cir.ptr<!rec_S>
+  %r = cir.load %slot : !cir.ptr<!rec_S>, !rec_S
+  cir.return %r : !rec_S
+}
+
+// The store must dominate the copy.
+// CHECK-LABEL: cir.func @no_fold_no_dominance
+// CHECK: cir.copy
+cir.func @no_fold_no_dominance(%cond: !cir.bool, %src: !cir.ptr<!rec_S>,
+                               %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.if %cond {
+    cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  }
+  cir.copy %slot to %dst : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// An over-aligned store folds with the weaker destination alignment.
+// CHECK-LABEL: cir.func @fold_alignment_weakened
+// CHECK-NEXT: %[[V:.+]] = cir.load %arg0 : !cir.ptr<!rec_S>, !rec_S
+// CHECK-NEXT: cir.store align(1) %[[V]], %arg1 : !rec_S, !cir.ptr<!rec_S>
+// CHECK-NEXT: cir.return
+cir.func @fold_alignment_weakened(%src: !cir.ptr<!rec_S>, %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_S>, !rec_S
+  %slot = cir.alloca "tmp" align(16) : !cir.ptr<!rec_S>
+  cir.store align(16) %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  cir.copy %slot to %dst align(1) : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// The store must cover every byte the copy moves: a copy wider than the
+// stored value cannot fold.
+// CHECK-LABEL: cir.func @no_fold_copy_bigger_than_store
+// CHECK: cir.copy
+cir.func @no_fold_copy_bigger_than_store(%src: !cir.ptr<!rec_Small>,
+                                          %dst: !cir.ptr<!rec_S>) {
+  %v = cir.load %src : !cir.ptr<!rec_Small>, !rec_Small
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_Small>
+  cir.store %v, %slot : !rec_Small, !cir.ptr<!rec_Small>
+  %bc = cir.cast bitcast %slot : !cir.ptr<!rec_Small> -> !cir.ptr<!rec_S>
+  cir.copy %bc to %dst : !cir.ptr<!rec_S>
+  cir.return
+}
+
+// Parameter spills are never forwarded, even when the shapes line up:
+// CallConvLowering reads non-byval parameters back out of plain matching
+// allocas only, so a bitcast destination (or a shared slot) is NYI there.
+// CHECK-LABEL: cir.func @no_fold_param_spill
+// CHECK: cir.store %arg0, %{{.+}} : !rec_S, !cir.ptr<!rec_S>
+// CHECK: cir.copy
+cir.func @no_fold_param_spill(%v: !rec_S, %dst: !cir.ptr<!rec_anon>) {
+  %slot = cir.alloca "tmp" align(8) : !cir.ptr<!rec_S>
+  cir.store %v, %slot : !rec_S, !cir.ptr<!rec_S>
+  %bc = cir.cast bitcast %slot : !cir.ptr<!rec_S> -> !cir.ptr<!rec_anon>
+  cir.copy %bc to %dst : !cir.ptr<!rec_anon>
+  cir.return
+}
