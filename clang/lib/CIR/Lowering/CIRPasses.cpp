@@ -98,8 +98,11 @@ mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
   mlir::PassManager pm(&mlirContext);
   pm.addPass(mlir::createCIRCanonicalizePass());
 
+  // Depth 1 here: the ABI passes below cannot classify extracts past
+  // the first member level (record-typed extracts of parameters and call
+  // results). The post-CallConv run below uses the default (unlimited).
   if (enableCIRSimplify)
-    pm.addPass(mlir::createCIRSimplifyPass());
+    pm.addPass(mlir::createCIRSimplifyPass(/*scalarizeMaxDepth=*/1));
 
   if (enableIdiomRecognizer)
     pm.addPass(mlir::createIdiomRecognizerPass());
@@ -149,6 +152,13 @@ mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
           getX86ABICompatInfo(triple, compat)));
     }
   }
+
+  // CallConvLowering introduces ABI temporaries (coerce slots fed by a single
+  // store and drained by a single copy) that are trivially foldable. Run
+  // CIRSimplify again so those shapes do not survive into lowering, where
+  // they become whole-aggregate stores that burden LLVM's SROA.
+  if (enableCIRSimplify)
+    pm.addPass(mlir::createCIRSimplifyPass());
 
   // Disable inter-pass verification. The CIR module is verified once before
   // this pipeline runs (in HandleTranslationUnit), and the resulting LLVM

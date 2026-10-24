@@ -46,6 +46,14 @@ def CIRSimplify : Pass<"cir-simplify"> {
   }];
   let constructor = "mlir::createCIRSimplifyPass()";
   let dependentDialects = ["cir::CIRDialect"];
+  let options = [
+    Option<"scalarizeMaxDepth", "scalarize-max-depth", "unsigned",
+           /*default=*/"0",
+           "Maximum member-nesting depth narrowed by store+copy folding "
+           "(0 = no limit). The pre-ABI run uses 1: deeper extracts of "
+           "parameters and call results cannot be classified by the ABI "
+           "passes">,
+  ];
 }
 
 def HoistAllocas : Pass<"cir-hoist-allocas"> {
