@@ -765,7 +765,7 @@ struct CheckFallThroughDiagnostics {
   bool checkDiagnostics(DiagnosticsEngine &D, bool ReturnsVoid,
                         bool HasNoReturn) const {
     if (FunKind == diag::FalloffFunctionKind::Function) {
-      return (ReturnsVoid ||
+      return (ReturnsVoid || !diag_FallThrough_ReturnsNonVoid ||
               D.isIgnored(diag::warn_falloff_nonvoid, FuncLoc)) &&
              (!HasNoReturn ||
               D.isIgnored(diag::warn_noreturn_has_return_expr, FuncLoc)) &&
@@ -773,16 +773,26 @@ struct CheckFallThroughDiagnostics {
               D.isIgnored(diag::warn_suggest_noreturn_block, FuncLoc));
     }
     if (FunKind == diag::FalloffFunctionKind::Coroutine) {
-      return (ReturnsVoid ||
+      return (ReturnsVoid || !diag_FallThrough_ReturnsNonVoid ||
               D.isIgnored(diag::warn_falloff_nonvoid, FuncLoc)) &&
              (!HasNoReturn);
     }
     // For blocks / lambdas.
-    return ReturnsVoid && !HasNoReturn;
+    return (ReturnsVoid || !diag_FallThrough_ReturnsNonVoid) && !HasNoReturn;
   }
 };
 
 } // anonymous namespace
+
+/// Whether ClangIR issues -Wreturn-type for \p D instead of the CFG: functions,
+/// lambdas and coroutines.
+static bool isReturnTypeIssuedByClangIR(const sema::AnalysisBasedWarnings &AW,
+                                        const Decl *D) {
+  // TODO: Blocks and ObjC methods are not implemented in ClangIR yet, so the
+  // CFG still checks them.
+  return AW.isIssuedByClangIR(ClangIRAnalysisWarning::ReturnType) &&
+         isa<FunctionDecl>(D);
+}
 
 /// CheckFallThroughForBody - Check that we don't fall off the end of a
 /// function that should return a value.  Check that we don't fall off the end
@@ -3237,7 +3247,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
 
   // Warning: check missing 'return'
   if (P.enableCheckFallThrough) {
-    const CheckFallThroughDiagnostics &CD =
+    CheckFallThroughDiagnostics CD =
         (isa<BlockDecl>(D) ? CheckFallThroughDiagnostics::MakeForBlock()
          : (isa<CXXMethodDecl>(D) &&
             cast<CXXMethodDecl>(D)->getOverloadedOperator() == OO_Call &&
@@ -3246,6 +3256,8 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
              : (fscope->isCoroutine()
                     ? CheckFallThroughDiagnostics::MakeForCoroutine(D)
                     : CheckFallThroughDiagnostics::MakeForFunction(S, D)));
+    if (isReturnTypeIssuedByClangIR(*this, D))
+      CD.diag_FallThrough_ReturnsNonVoid = 0;
     CheckFallThroughForBody(S, D, Body, BlockType, CD, AC);
   }
 

@@ -3562,6 +3562,12 @@ def clangir_lib_opt : Flag<["-"], "clangir-lib-opt">,
   Alias<clangir_lib_opt_EQ>, AliasArgs<["all"]>,
   HelpText<"Enable C/C++ library based optimizations">;
 
+def fclangir_analysis_warnings_EQ : CommaJoined<["-"], "fclangir-analysis-warnings=">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>, Values<"return-type">,
+  HelpText<"With -fclangir, issue the listed analysis-based warnings from "
+           "ClangIR instead of from Clang's CFG">,
+  MarshallingInfoStringVector<FrontendOpts<"ClangIRAnalysisWarnings">>;
+
 defm clangir : BoolFOption<"clangir",
   FrontendOpts<"UseClangIRPipeline">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option], "Use the ClangIR pipeline to compile">,

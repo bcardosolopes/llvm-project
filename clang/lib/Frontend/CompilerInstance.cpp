@@ -772,6 +772,11 @@ void CompilerInstance::createSema(TranslationUnitKind TUKind,
                                   CodeCompleteConsumer *CompletionConsumer) {
   TheSema.reset(new Sema(getPreprocessor(), getASTContext(), getASTConsumer(),
                          TUKind, CompletionConsumer));
+#define CLANGIR_ANALYSIS_WARNING(Name, Spelling)                               \
+  if (getFrontendOpts().issuesClangIRAnalysisWarning(                          \
+          ClangIRAnalysisWarning::Name))                                       \
+    TheSema->AnalysisWarnings.setIssuedByClangIR(ClangIRAnalysisWarning::Name);
+#include "clang/Basic/ClangIRAnalysisWarnings.def"
 
   // Set up API notes.
   TheSema->APINotes.setSwiftVersion(getAPINotesOpts().SwiftVersion);

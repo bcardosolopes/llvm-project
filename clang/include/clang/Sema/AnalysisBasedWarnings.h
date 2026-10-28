@@ -15,6 +15,7 @@
 
 #include "clang/AST/Decl.h"
 #include "clang/Analysis/Analyses/LifetimeSafety/LifetimeStats.h"
+#include "clang/Basic/ClangIRAnalysisWarnings.h"
 #include "clang/Sema/ScopeInfo.h"
 #include <memory>
 
@@ -64,6 +65,7 @@ private:
       VarDeclPossiblyUnreachableDiags;
 
   Policy PolicyOverrides;
+  ClangIRAnalysisWarningSet IssuedByClangIR;
   void clearOverrides();
 
   /// Caches results for getPolicyInEffectAt().
@@ -141,6 +143,15 @@ public:
 
   /// Drop cached getPolicyInEffectAt() results (diagnostic state changed).
   void clearPolicyCache();
+
+  /// Leave \p W to ClangIR, which issues it instead of the CFG
+  /// (-fclangir-analysis-warnings=).
+  void setIssuedByClangIR(ClangIRAnalysisWarning W) {
+    IssuedByClangIR.insert(W);
+  }
+  bool isIssuedByClangIR(ClangIRAnalysisWarning W) const {
+    return IssuedByClangIR.contains(W);
+  }
 
   void PrintStats() const;
 };

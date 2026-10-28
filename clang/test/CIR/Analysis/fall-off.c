@@ -4,8 +4,10 @@
 // RUN: cir-opt %t.cir -cir-fall-off-analysis -o /dev/null 2>&1 | FileCheck %s --check-prefix=ALIAS
 
 // The warning annotations are what Sema's CFG-based check reports for the
-// same code, so both classifications are pinned to each other.
+// same code, and what -fclangir-analysis-warnings=return-type reports from
+// this analysis instead, so both engines are pinned to each other.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fsyntax-only -Wreturn-type -verify %s
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir -fclangir-analysis-warnings=return-type -Wreturn-type -verify %s -o /dev/null
 
 _Noreturn void stop(void);
 

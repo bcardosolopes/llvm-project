@@ -8,6 +8,7 @@
 
 #include "clang/Frontend/FrontendOptions.h"
 #include "clang/Basic/LangStandard.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 
 using namespace clang;
@@ -37,4 +38,24 @@ InputKind FrontendOptions::getInputKindForExtension(StringRef Extension) {
       .Case("hlsl", Language::HLSL)
       .Cases({"cir", "cirbc"}, Language::CIR)
       .Default(Language::Unknown);
+}
+
+bool FrontendOptions::issuesClangIRAnalysisWarning(
+    ClangIRAnalysisWarning W) const {
+  if (!UseClangIRPipeline ||
+      llvm::none_of(ClangIRAnalysisWarnings, [&](StringRef Spelling) {
+        return parseClangIRAnalysisWarning(Spelling) == W;
+      }))
+    return false;
+  switch (ProgramAction) {
+  case frontend::EmitAssembly:
+  case frontend::EmitBC:
+  case frontend::EmitCIR:
+  case frontend::EmitCIRBC:
+  case frontend::EmitLLVM:
+  case frontend::EmitObj:
+    return true;
+  default:
+    return false;
+  }
 }

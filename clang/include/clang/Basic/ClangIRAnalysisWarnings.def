@@ -1,0 +1,21 @@
+//===-- ClangIRAnalysisWarnings.def - ClangIR analysis warnings -*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// The analysis-based warnings ClangIR can issue instead of Clang's CFG, as
+// CLANGIR_ANALYSIS_WARNING(Name, Spelling), where Spelling is the value of
+// -fclangir-analysis-warnings=.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef CLANGIR_ANALYSIS_WARNING
+#error "Define CLANGIR_ANALYSIS_WARNING before including this file"
+#endif
+
+CLANGIR_ANALYSIS_WARNING(ReturnType, "return-type")
+
+#undef CLANGIR_ANALYSIS_WARNING

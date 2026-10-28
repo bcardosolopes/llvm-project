@@ -14,10 +14,15 @@
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/Parser/Parser.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ASTLambda.h"
+#include "clang/AST/ExprCXX.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/Basic/DiagnosticCodeGen.h"
 #include "clang/Basic/DiagnosticFrontend.h"
+#include "clang/Basic/DiagnosticSema.h"
 #include "clang/CIR/CIRGenerator.h"
 #include "clang/CIR/CIRToCIRPasses.h"
+#include "clang/CIR/Dialect/Analysis/CIRFallOffAnalysis.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/InitAllDialects.h"
 #include "clang/CIR/LowerToLLVM.h"
@@ -37,6 +42,7 @@
 #include "llvm/Support/LibraryOptionsContext.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace cir;
@@ -229,6 +235,109 @@ static void emitCIRModuleOutput(
   }
 }
 
+static bool isLambda(const FunctionDecl *fd) {
+  const auto *md = dyn_cast<CXXMethodDecl>(fd);
+  return md && isLambdaCallOperator(md);
+}
+
+/// Whether -Wreturn-type can apply to `fd` at all.
+static bool mayWarnFallOff(DiagnosticsEngine &diags,
+                           const LangOptions &langOpts,
+                           const FunctionDecl *fd) {
+  const Stmt *body = fd->getBody();
+  if (!body || fd->isNoReturn() || fd->hasAttr<InferredNoReturnAttr>() ||
+      fd->isCPUDispatchMultiVersion())
+    return false;
+  // When the promise has return_void(), flowing off a coroutine is a
+  // co_return, whatever the function's return type ([stmt.return.coroutine]).
+  if (const auto *coroBody = dyn_cast<CoroutineBodyStmt>(body)) {
+    if (coroBody->getFallthroughHandler())
+      return false;
+  } else if (fd->getReturnType()->isVoidType()) {
+    return false;
+  }
+  if (!isLambda(fd) &&
+      diags.isIgnored(diag::warn_falloff_nonvoid, fd->getLocation()))
+    return false;
+  // Functions that implicitly return zero (like 'main') and naked functions
+  // are exempt, as in Sema::ActOnFinishFunctionBody.
+  return !(fd->hasImplicitReturnZero() &&
+           (langOpts.CPlusPlus || langOpts.C99 || !fd->isMain())) &&
+         !fd->hasAttr<NakedAttr>();
+}
+
+/// Whether the body of `fd` ends in a throw or in a call to a function that
+/// always throws, which Sema does not report as falling off.
+static bool endsInThrow(const FunctionDecl *fd) {
+  const Stmt *body = fd->getBody();
+  if (const auto *coroBody = dyn_cast<CoroutineBodyStmt>(body))
+    body = coroBody->getBody();
+  const auto *cs = dyn_cast<CompoundStmt>(body);
+  if (!cs || cs->body_empty())
+    return false;
+  const Stmt *last = cs->body_back();
+  if (const auto *ewc = dyn_cast<ExprWithCleanups>(last))
+    last = ewc->getSubExpr();
+  if (const auto *ce = dyn_cast<CallExpr>(last))
+    if (const FunctionDecl *callee = ce->getDirectCallee();
+        callee && callee->hasAttr<InferredNoReturnAttr>())
+      return true;
+  return isa<CXXThrowExpr>(last);
+}
+
+/// Issue -Wreturn-type from ClangIR's fall-off analysis, in source order,
+/// mirroring the reporting of Sema's CheckFallThroughForBody.
+static void issueReturnTypeWarnings(CompilerInstance &ci, CIRGenerator &gen) {
+  llvm::TimeTraceScope scope("ClangIR return-type warnings");
+  DiagnosticsEngine &diags = ci.getDiagnostics();
+  const LangOptions &langOpts = ci.getLangOpts();
+  // Like Sema's short circuit, skip void functions (not coroutines), and those
+  // whose end is unreachable by construction.
+  auto mayWarn = [](cir::FuncOp func) {
+    return (!func.getFunctionType().hasVoidReturn() ||
+            func.getCoroutineKind().has_value()) &&
+           mayFallOff(func);
+  };
+  llvm::SmallVector<std::pair<const FunctionDecl *, bool>> fallOffs;
+  llvm::SmallPtrSet<const FunctionDecl *, 8> seen;
+  for (FallOffResult result : analyzeFallOff(gen.getModule(), mayWarn)) {
+    if (result.kind != FallOffKind::Maybe && result.kind != FallOffKind::Always)
+      continue;
+    const auto *fd = dyn_cast_or_null<FunctionDecl>(
+        gen.getDeclForMangledName(result.func.getSymName()));
+    if (fd && seen.insert(fd).second && mayWarnFallOff(diags, langOpts, fd) &&
+        !endsInThrow(fd))
+      fallOffs.push_back({fd, result.kind == FallOffKind::Maybe});
+  }
+
+  SourceManager &sm = ci.getSourceManager();
+  llvm::stable_sort(fallOffs, [&](const auto &a, const auto &b) {
+    return sm.isBeforeInTranslationUnit(a.first->getLocation(),
+                                        b.first->getLocation());
+  });
+  for (auto [fd, notInAllControlPaths] : fallOffs) {
+    bool lambda = isLambda(fd);
+    unsigned diagID = diag::warn_falloff_nonvoid;
+    if (!lambda && !langOpts.CPlusPlus && !langOpts.C99 && fd->isMain())
+      diagID = diag::ext_main_no_return;
+    diags.Report(fd->getBody()->getEndLoc(), diagID)
+        << (lambda ? diag::FalloffFunctionKind::Lambda
+            : isa<CoroutineBodyStmt>(fd->getBody())
+                ? diag::FalloffFunctionKind::Coroutine
+                : diag::FalloffFunctionKind::Function)
+        << notInAllControlPaths;
+
+    // The CFG check runs while the function is instantiated, so its
+    // diagnostic carries this note.
+    if (fd->isTemplateInstantiation())
+      diags.Report(fd->getPointOfInstantiation(),
+                   fd->getPrimaryTemplate()
+                       ? diag::note_function_template_spec_here
+                       : diag::note_template_member_function_here)
+          << fd;
+  }
+}
+
 class CIRGenConsumer : public clang::ASTConsumer {
 
   virtual void anchor();
@@ -312,6 +421,16 @@ public:
             "CIR codegen: module verification error before running CIR passes");
         return;
       }
+    }
+
+    // The analysis needs CIRGen output, before passes rewrite it. Like a Sema
+    // error, a warning promoted to an error stops compilation here.
+    if (CI.getFrontendOpts().issuesClangIRAnalysisWarning(
+            ClangIRAnalysisWarning::ReturnType) &&
+        !CI.getDiagnostics().hasErrorOccurred()) {
+      issueReturnTypeWarnings(CI, *Gen);
+      if (CI.getDiagnostics().hasErrorOccurred())
+        return;
     }
 
     mlir::ModuleOp MlirModule = Gen->getModule();

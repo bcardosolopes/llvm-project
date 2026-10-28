@@ -6,8 +6,10 @@
 // RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fcxx-exceptions -fexceptions -fclangir -emit-cir -clangir-disable-passes -Wno-return-type %s -o %t-eh.cir
 // RUN: cir-opt %t-eh.cir -cir-fall-off-analysis -o /dev/null 2>&1 | FileCheck %s --check-prefixes=CHECK,EH
 
-// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fsyntax-only -Wreturn-type -verify %s
-// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fcxx-exceptions -fexceptions -fsyntax-only -Wreturn-type -verify %s
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fsyntax-only -Wreturn-type -verify=expected,cfg %s
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fcxx-exceptions -fexceptions -fsyntax-only -Wreturn-type -verify=expected,cfg %s
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fclangir -emit-cir -fclangir-analysis-warnings=return-type -Wreturn-type -verify=expected,cir %s -o /dev/null
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -I %S/../../SemaCXX -fcxx-exceptions -fexceptions -fclangir -emit-cir -fclangir-analysis-warnings=return-type -Wreturn-type -verify=expected,cir %s -o /dev/null
 
 #include "Inputs/std-coroutine.h"
 
@@ -179,4 +181,14 @@ int ends_in_throw() {
   co_await a;
   throw 1;
 }
+
+// Sema exempts a function whose last statement calls an always-throwing one,
+// but misses coroutines; ClangIR applies it to the code in the body.
+void thrower() { throw 1; }
+// EH-DAG: fall-off-coroutine.cpp:[[@LINE+1]]:1: remark: fall-off: maybe
+int ends_in_throwing_call(bool b) {
+  if (b)
+    co_return 1;
+  thrower();
+} // cfg-warning {{non-void coroutine does not return a value in all control paths}}
 #endif

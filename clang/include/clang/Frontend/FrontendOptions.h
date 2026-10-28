@@ -10,6 +10,7 @@
 #define LLVM_CLANG_FRONTEND_FRONTENDOPTIONS_H
 
 #include "clang/AST/ASTDumperUtils.h"
+#include "clang/Basic/ClangIRAnalysisWarnings.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Frontend/CommandLineSourceLoc.h"
 #include "clang/Sema/CodeCompleteOptions.h"
@@ -439,6 +440,13 @@ public:
 
   /// Options to control ClangIR library optimization
   std::string ClangIRLibOptOptions;
+
+  /// Analysis-based warnings that ClangIR issues instead of Clang's CFG.
+  std::vector<std::string> ClangIRAnalysisWarnings;
+
+  /// Whether ClangIR issues \p W instead of Clang's CFG: it is listed and the
+  /// ClangIR pipeline generates code for the input.
+  bool issuesClangIRAnalysisWarning(ClangIRAnalysisWarning W) const;
 
   CodeCompleteOptions CodeCompleteOpts;
 

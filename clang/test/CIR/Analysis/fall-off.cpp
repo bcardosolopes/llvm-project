@@ -5,9 +5,12 @@
 // RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fcxx-exceptions -fexceptions -O1 -fclangir -emit-cir -clangir-disable-passes -Wno-return-type %s -o %t-O1.cir
 // RUN: cir-opt %t-O1.cir -cir-fall-off-analysis -o /dev/null 2>&1 | FileCheck %s
 
-// The warning annotations are what Sema's CFG-based check reports
-// for the same code, so both classifications are pinned to each other.
+// The warning annotations are what Sema's CFG-based check reports for the
+// same code, and what -fclangir-analysis-warnings=return-type reports from
+// this analysis instead, so both engines are pinned to each other.
 // RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fcxx-exceptions -fexceptions -fsyntax-only -Wreturn-type -verify %s
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fcxx-exceptions -fexceptions -fclangir -emit-cir -fclangir-analysis-warnings=return-type -Wreturn-type -verify %s -o /dev/null
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fcxx-exceptions -fexceptions -O1 -fclangir -emit-cir -fclangir-analysis-warnings=return-type -Wreturn-type -verify %s -o /dev/null
 
 [[noreturn]] void die();
 int g();

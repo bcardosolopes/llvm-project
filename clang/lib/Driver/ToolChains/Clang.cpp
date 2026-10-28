@@ -19,6 +19,7 @@
 #include "PS4CPU.h"
 #include "ToolChains/Cuda.h"
 #include "clang/Basic/CLWarnings.h"
+#include "clang/Basic/ClangIRAnalysisWarnings.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/HeaderInclude.h"
 #include "clang/Basic/LangOptions.h"
@@ -5455,6 +5456,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (Args.hasFlag(options::OPT_fclangir, options::OPT_fno_clangir, false))
     CmdArgs.push_back("-fclangir");
+
+  for (const Arg *A :
+       Args.filtered(options::OPT_fclangir_analysis_warnings_EQ)) {
+    A->claim();
+    for (StringRef Value : A->getValues())
+      if (!parseClangIRAnalysisWarning(Value))
+        D.Diag(diag::err_drv_unsupported_option_argument)
+            << A->getSpelling() << Value;
+    A->render(Args, CmdArgs);
+  }
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
