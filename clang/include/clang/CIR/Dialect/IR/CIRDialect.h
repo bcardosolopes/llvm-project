@@ -99,6 +99,13 @@ RecordLayoutAttr getRecordLayout(mlir::ModuleOp mod, mlir::StringAttr name);
 /// Same lookup as getRecordLayout, but returns a null attribute instead of
 /// asserting when the record has no layout entry.
 RecordLayoutAttr tryGetRecordLayout(mlir::ModuleOp mod, mlir::StringAttr name);
+
+/// Registers external memory-slot interface models for CIR ops (currently
+/// the `get_member` alias model, which lets Mem2Reg promote struct slots
+/// accessed through member pointers). Must be added to the registry used
+/// to load the CIR dialect; see `cir::registerAllDialects`.
+void registerMemorySlotInterfacesExternalModels(
+    mlir::DialectRegistry &registry);
 } // namespace cir
 
 // TableGen'erated files for MLIR dialects require that a macro be defined when

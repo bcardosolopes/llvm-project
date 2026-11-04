@@ -317,3 +317,90 @@ DeletionKind cir::LifetimeEndOp::removeBlockingUses(
     const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
   return DeletionKind::Delete;
 }
+
+//===----------------------------------------------------------------------===//
+// Interfaces for GetMemberOp
+//===----------------------------------------------------------------------===//
+
+bool cir::GetMemberOp::canUsesBeRemoved(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses,
+    SmallVectorImpl<OpOperand *> &newBlockingUses,
+    const DataLayout &dataLayout) {
+  return forwardToUsers(*this, newBlockingUses);
+}
+
+DeletionKind cir::GetMemberOp::removeBlockingUses(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
+  return DeletionKind::Delete;
+}
+
+//===----------------------------------------------------------------------===//
+// PromotableAliaserInterface model for GetMemberOp
+//===----------------------------------------------------------------------===//
+
+/// Exposes a struct member access as an alias of the enclosing record slot.
+/// `projectSlotValueToAliasValue` extracts the member for loads, and
+/// `projectAliasValueToSlotValue` inserts a stored member back into the
+/// reaching definition, preserving the other members (and padding).
+/// Unions and bit-fields expose no alias: extract/insert member do not work
+/// on them.
+struct GetMemberOpAliasModel
+    : public PromotableAliaserInterface::ExternalModel<GetMemberOpAliasModel,
+                                                       cir::GetMemberOp> {
+  void
+  getPromotableSlotAliases(Operation *op, OpOperand &aliasedSlotPointerOperand,
+                           const MemorySlot &parentSlot,
+                           SmallVectorImpl<MemorySlot> &newMemorySlots) const {
+    auto getMember = cast<cir::GetMemberOp>(op);
+    if (aliasedSlotPointerOperand.get() != getMember.getAddr())
+      return;
+    auto recordTy = dyn_cast<cir::StructType>(parentSlot.valueType);
+    if (!recordTy)
+      return;
+    auto addrPtrTy = dyn_cast<cir::PointerType>(getMember.getAddr().getType());
+    if (!addrPtrTy || addrPtrTy.getPointee() != parentSlot.valueType)
+      return;
+    uint64_t index = static_cast<uint64_t>(getMember.getIndex());
+    if (index >= recordTy.getMembers().size())
+      return;
+    mlir::Type memberTy = recordTy.getElementType(index);
+    if (isa<cir::BitFieldType>(memberTy))
+      return;
+    auto resultPtrTy =
+        dyn_cast<cir::PointerType>(getMember.getResult().getType());
+    if (!resultPtrTy || resultPtrTy.getPointee() != memberTy)
+      return;
+    newMemorySlots.push_back(MemorySlot{getMember.getResult(), memberTy});
+  }
+
+  Value projectSlotValueToAliasValue(Operation *op,
+                                     OpOperand &aliasedSlotPointerOperand,
+                                     const MemorySlot &parentSlot,
+                                     const MemorySlot &aliasSlot,
+                                     Value slotValue,
+                                     OpBuilder &builder) const {
+    auto getMember = cast<cir::GetMemberOp>(op);
+    return cir::ExtractMemberOp::create(
+        builder, getMember.getLoc(), aliasSlot.valueType, slotValue,
+        static_cast<uint64_t>(getMember.getIndex()));
+  }
+
+  Value projectAliasValueToSlotValue(Operation *op,
+                                     OpOperand &aliasedSlotPointerOperand,
+                                     const MemorySlot &parentSlot,
+                                     const MemorySlot &aliasSlot,
+                                     Value aliasValue, Value reachingDef,
+                                     OpBuilder &builder) const {
+    auto getMember = cast<cir::GetMemberOp>(op);
+    return cir::InsertMemberOp::create(
+        builder, getMember.getLoc(), reachingDef,
+        static_cast<uint64_t>(getMember.getIndex()), aliasValue);
+  }
+};
+
+void cir::registerMemorySlotInterfacesExternalModels(
+    mlir::DialectRegistry &registry) {
+  registry.addExtension(+[](mlir::MLIRContext *ctx, cir::CIRDialect *dialect) {
+    cir::GetMemberOp::attachInterface<GetMemberOpAliasModel>(*ctx);
+  });
+}
