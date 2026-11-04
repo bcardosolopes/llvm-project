@@ -99,6 +99,13 @@ RecordLayoutAttr tryGetRecordLayout(mlir::ModuleOp mod, mlir::StringAttr name);
 
 /// Attempts to construct an llvm::Triple from a module's cir.triple attribute.
 std::optional<llvm::Triple> getTripleFromModule(mlir::ModuleOp mod);
+
+/// Registers external memory-slot interface models for CIR ops (currently
+/// the `get_member` alias model, which lets Mem2Reg promote struct slots
+/// accessed through member pointers). Must be added to the registry used
+/// to load the CIR dialect; see `cir::registerAllDialects`.
+void registerMemorySlotInterfacesExternalModels(
+    mlir::DialectRegistry &registry);
 } // namespace cir
 
 // TableGen'erated files for MLIR dialects require that a macro be defined when

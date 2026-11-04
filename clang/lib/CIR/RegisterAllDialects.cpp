@@ -32,6 +32,8 @@ void registerAllDialects(mlir::DialectRegistry &registry) {
   // Register extensions to integrate CIR types with OpenACC and OpenMP.
   cir::omp::registerOpenMPExtensions(registry);
   cir::acc::registerOpenACCExtensions(registry);
+  // External memory-slot models for CIR ops (get_member aliasing for Mem2Reg).
+  cir::registerMemorySlotInterfacesExternalModels(registry);
 }
 
 void registerAllDialects(mlir::MLIRContext &context) {

@@ -4239,7 +4239,8 @@ def CIR_GetBitfieldOp : CIR_Op<"get_bitfield", [
 // GetMemberOp
 //===----------------------------------------------------------------------===//
 
-def CIR_GetMemberOp : CIR_Op<"get_member", [Pure]> {
+def CIR_GetMemberOp : CIR_Op<"get_member", [Pure,
+    DeclareOpInterfaceMethods<PromotableOpInterface>]> {
   let summary = "Get the address of a member of a record";
   let description = [{
     The `cir.get_member` operation gets the address of a particular named
