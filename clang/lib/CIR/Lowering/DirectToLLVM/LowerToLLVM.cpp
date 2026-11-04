@@ -5163,10 +5163,19 @@ void ConvertCIRToLLVMPass::runOnOperation() {
   // explicitly at every module-symbol replacement.
   mlir::ConversionConfig config;
   config.allowPatternRollback = false;
-  if (failed(applyPartialConversion(ops, target, std::move(patterns), config))) {
+
+  mlir::LogicalResult driverResult = mlir::success();
+  {
+    llvm::TimeTraceScope driverScope("Convert driver");
+    driverResult =
+        applyPartialConversion(ops, target, std::move(patterns), config);
+  }
+  if (failed(driverResult)) {
     signalPassFailure();
     return;
   }
+
+  llvm::TimeTraceScope cleanupScope("Convert cleanup");
 
   // Drop the transient original-type attributes (see kOrigSymTypeAttrName):
   // they served GlobalView lowering during conversion and must not reach

@@ -22,6 +22,9 @@
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/MissingFeatures.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 
 using namespace mlir;
 using namespace cir;
@@ -53,6 +56,7 @@ struct CIRCanonicalizePass
 };
 
 void CIRCanonicalizePass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR Canonicalize");
   RewritePatternSet patterns(&getContext());
 
   // Collect canonicalization patterns from CIR ops.

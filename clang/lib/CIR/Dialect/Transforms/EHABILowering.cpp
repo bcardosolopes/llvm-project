@@ -42,8 +42,11 @@
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
 #include "clang/CIR/MissingFeatures.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/TargetParser/Triple.h"
 
 using namespace mlir;
@@ -1151,6 +1154,7 @@ static void eraseCatchCopyThunks(mlir::ModuleOp mod) {
 }
 
 void CIREHABILoweringPass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR EHABI Lowering");
   auto mod = mlir::cast<mlir::ModuleOp>(getOperation());
 
   // The target triple is attached to the module as the "cir.triple"

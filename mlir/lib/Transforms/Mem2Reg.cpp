@@ -22,6 +22,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/DebugLog.h"
 #include "llvm/Support/GenericIteratedDominanceFrontier.h"
+#include "llvm/Support/TimeProfiler.h"
 
 namespace mlir {
 #define GEN_PASS_DEF_MEM2REG
@@ -1144,6 +1145,7 @@ LogicalResult mlir::tryToPromoteMemorySlots(
   SmallVector<PromotableAllocationOpInterface> newWorkList;
   newWorkList.reserve(workList.size());
   while (true) {
+    llvm::TimeTraceScope roundScope("Mem2Reg round");
     bool changesInThisRound = false;
     for (PromotableAllocationOpInterface allocator : workList) {
       bool changedAllocator = false;
@@ -1151,14 +1153,22 @@ LogicalResult mlir::tryToPromoteMemorySlots(
         if (slot.ptr.use_empty())
           continue;
 
-        MemorySlotPromotionAnalyzer analyzer(slot, dominance, dataLayout);
-        std::optional<MemorySlotPromotionInfo> info = analyzer.computeInfo();
+        std::optional<MemorySlotPromotionInfo> info;
+        {
+          llvm::TimeTraceScope analyzeScope("Mem2Reg analyze");
+          MemorySlotPromotionAnalyzer analyzer(slot, dominance, dataLayout);
+          info = analyzer.computeInfo();
+        }
         if (info) {
-          std::optional<PromotableAllocationOpInterface> newAllocator =
-              MemorySlotPromoter(slot, allocator, builder, dominance,
-                                 dataLayout, std::move(*info), statistics,
-                                 blockIndexCache, interfaceCache)
-                  .promoteSlot();
+          std::optional<PromotableAllocationOpInterface> newAllocator;
+          {
+            llvm::TimeTraceScope rewriteScope("Mem2Reg rewrite");
+            newAllocator =
+                MemorySlotPromoter(slot, allocator, builder, dominance,
+                                   dataLayout, std::move(*info), statistics,
+                                   blockIndexCache, interfaceCache)
+                    .promoteSlot();
+          }
           changedAllocator = true;
           // Add newly created allocators to the worklist for further
           // processing.

@@ -23,6 +23,9 @@
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 
 using namespace mlir;
 using namespace cir;
@@ -299,6 +302,7 @@ populateTargetLoweringConversionTarget(mlir::ConversionTarget &target,
 }
 
 void TargetLoweringPass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR Target Lowering");
   auto mod = mlir::cast<mlir::ModuleOp>(getOperation());
   std::unique_ptr<cir::LowerModule> lowerModule = cir::createLowerModule(mod);
   // If lower module is not available, skip the target lowering pass.

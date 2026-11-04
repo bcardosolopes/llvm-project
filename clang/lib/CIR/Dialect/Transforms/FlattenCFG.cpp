@@ -25,8 +25,11 @@
 #include "clang/CIR/Dialect/Passes.h"
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
 #include "clang/CIR/MissingFeatures.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 
 using namespace mlir;
 using namespace cir;
@@ -2735,6 +2738,7 @@ public:
 } // namespace
 
 void CIRFlattenCFGPass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR Flatten CFG");
   RewritePatternSet patternList(&getContext());
   populateFlattenCFGPatterns(patternList);
   FrozenRewritePatternSet patterns(std::move(patternList));

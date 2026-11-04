@@ -54,6 +54,9 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Verifier.h"
 
+#include "llvm/ADT/STLFunctionalExtras.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 #include <algorithm>
 
 using namespace clang;
@@ -487,6 +490,7 @@ void CIRGenModule::emitGlobalDecl(const clang::GlobalDecl &d) {
 }
 
 void CIRGenModule::emitDeferred() {
+  llvm::TimeTraceScope scope("CIRGen emitDeferred");
   // Emit code for any potentially referenced deferred decls. Since a previously
   // unused static decl may become used during the generation of code for a
   // static function, iterate until no changes are made.
@@ -1587,6 +1591,7 @@ static void emitUsed(CIRGenModule &cgm, StringRef name,
 }
 
 void CIRGenModule::emitLLVMUsed() {
+  llvm::TimeTraceScope scope("CIRGen emitLLVMUsed");
   emitUsed(*this, "llvm.used", llvmUsed);
   emitUsed(*this, "llvm.compiler.used", llvmCompilerUsed);
 }
@@ -2093,6 +2098,7 @@ static bool verifyPointerTypeArgs(cir::FuncOp oldF, cir::FuncOp newF,
 #endif // NDEBUG
 
 void CIRGenModule::applyReplacements() {
+  llvm::TimeTraceScope scope("CIRGen applyReplacements");
   if (replacements.empty())
     return;
 
@@ -4238,6 +4244,7 @@ std::string CIRGenModule::getModuleInitializerName(clang::Module *mod) {
 }
 
 void CIRGenModule::release() {
+  llvm::TimeTraceScope scope("CIRGen release");
   emitDeferred();
   emitVTablesOpportunistically();
   applyReplacements();
@@ -4833,6 +4840,7 @@ void CIRGenModule::addGlobalAnnotations(const ValueDecl *d,
 }
 
 void CIRGenModule::emitGlobalAnnotations() {
+  llvm::TimeTraceScope scope("CIRGen emitGlobalAnnotations");
   for (const auto &[mangledName, vd] : deferredAnnotations) {
     mlir::Operation *gv = getGlobalValue(mangledName);
     if (gv)

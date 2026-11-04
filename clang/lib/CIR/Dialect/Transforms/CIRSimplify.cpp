@@ -19,7 +19,10 @@
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 #include <map>
 
 using namespace mlir;
@@ -825,6 +828,7 @@ void populateMergeCleanupPatterns(RewritePatternSet &patterns,
 }
 
 void CIRSimplifyPass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR Simplify");
   // Collect rewrite patterns. SimplifyConstantLoad queries dominance, so the
   // dominance info doubles as the driver's listener to stay coherent.
   RewriteDominanceInfo domInfo;

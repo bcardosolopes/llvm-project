@@ -17,7 +17,10 @@
 #include "mlir/IR/Types.h"
 #include "clang/AST/VTTBuilder.h"
 #include "clang/AST/VTableBuilder.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 
 using namespace llvm;
 using namespace clang;
@@ -1094,6 +1097,7 @@ void CIRGenModule::emitDeferredVTables() {
 }
 
 void CIRGenModule::emitVTablesOpportunistically() {
+  llvm::TimeTraceScope scope("CIRGen emitVTables");
   // Try to emit external vtables as available_externally if they have emitted
   // all inlined virtual functions.  It runs after EmitDeferred() and therefore
   // is not allowed to create new references to things that need to be emitted

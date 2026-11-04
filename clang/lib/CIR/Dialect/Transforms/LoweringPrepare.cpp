@@ -35,6 +35,9 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VersionTuple.h"
 
+#include "llvm/ADT/STLFunctionalExtras.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 #include <map>
 #include <memory>
 #include <optional>
@@ -3483,6 +3486,7 @@ void LoweringPreparePass::buildCUDARegisterVars(cir::CIRBaseBuilderTy &builder,
 }
 
 void LoweringPreparePass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR Lowering Prepare");
   mlirModule = getOperation();
 
   lowerModule = cir::createLowerModule(mlirModule);

@@ -46,6 +46,8 @@
 #include "llvm/ABI/TargetInfo.h"
 #include "llvm/ADT/ScopeExit.h"
 
+#include "llvm/Support/TimeProfiler.h"
+
 #include <algorithm>
 
 using namespace mlir;
@@ -175,6 +177,7 @@ cir::FuncOp lookupCallee(Operation *callOp, SymbolTable &symbolTable) {
 }
 
 void CallConvLoweringPass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR Call Conv Lowering");
   ModuleOp moduleOp = getOperation();
   MLIRContext *ctx = &getContext();
 
