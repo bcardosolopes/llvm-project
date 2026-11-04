@@ -21,6 +21,7 @@
 #include "llvm/ABI/Types.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/TimeProfiler.h"
 
 using namespace mlir;
 using namespace mlir::abi;
@@ -725,6 +726,7 @@ CIRABIClassifierCommon::classifySignature(
     mlir::Type retCIR, mlir::TypeRange inputs, llvm::abi::RequiredArgs required,
     const llvm::abi::TargetInfo &targetInfo, llvm::CallingConv::ID callConv,
     llvm::function_ref<mlir::InFlightDiagnostic()> emitError) {
+  llvm::TimeTraceScope scope("CallConv classify");
   assert(retCIR && "signature return type must be non-null");
   assert((!required.allowsOptionalArgs() ||
           required.getNumRequiredArgs() <= inputs.size()) &&

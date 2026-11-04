@@ -5271,11 +5271,19 @@ void ConvertCIRToLLVMPass::runOnOperation() {
   // explicitly at every module-symbol replacement.
   mlir::ConversionConfig config;
   config.allowPatternRollback = false;
-  if (failed(
-          applyPartialConversion(ops, target, std::move(patterns), config))) {
+
+  mlir::LogicalResult driverResult = mlir::success();
+  {
+    llvm::TimeTraceScope driverScope("Convert driver");
+    driverResult =
+        applyPartialConversion(ops, target, std::move(patterns), config);
+  }
+  if (failed(driverResult)) {
     signalPassFailure();
     return;
   }
+
+  llvm::TimeTraceScope cleanupScope("Convert cleanup");
 
   // Drop CIR-native data-layout entries. They drove pointer-width and
   // _BitInt alignment queries up to this point, but the LLVM IR exporter

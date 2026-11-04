@@ -25,7 +25,10 @@
 #include "clang/CIR/Dialect/Transforms/CIRTransformUtils.h"
 #include "clang/CIR/MissingFeatures.h"
 
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TimeProfiler.h"
 
 using namespace mlir;
 using namespace cir;
@@ -943,6 +946,7 @@ populateCXXABIConversionTarget(mlir::ConversionTarget &target,
 //===----------------------------------------------------------------------===//
 
 void CXXABILoweringPass::runOnOperation() {
+  llvm::TimeTraceScope scope("CIR CXXABI Lowering");
   auto mod = mlir::cast<mlir::ModuleOp>(getOperation());
   mlir::MLIRContext *ctx = mod.getContext();
 
