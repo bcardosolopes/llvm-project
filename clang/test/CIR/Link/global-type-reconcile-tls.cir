@@ -1,0 +1,32 @@
+// RUN: cir-link %s %S/Inputs/global-type-reconcile-tls-b.cir \
+// RUN:   --warn-odr-divergence -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Retyping a reference rebuilds the cir.get_global, and rebuilding an op means
+// every flag on it has to be carried over. `thread_local` is the one that
+// matters here, and losing it is silent in both directions:
+//
+//   - the verifier's only tls rule is that a *thread_local* get_global must
+//     target a tls global, so dropping the flag makes the check pass rather
+//     than fail;
+//   - the resulting access reads the process-wide storage instead of the
+//     thread's, which is a wrong answer, not a crash.
+//
+// A module that still verifies and still links is exactly the failure mode
+// this whole test directory exists for, so it is asserted rather than assumed.
+
+!s32i = !cir.int<s, 32>
+!rec_anon_struct = !cir.record<struct  {!s32i}>
+
+module {
+  cir.global external tls_dyn @tg = #cir.zero : !rec_anon_struct
+}
+
+// STATS: 1 references retyped
+
+// CHECK: cir.global{{ +}}external tls_dyn{{ +}}@tg = #cir.zero : !rec_anon_struct
+
+// The retyped reference is still thread_local.
+// CHECK: cir.func @reader() -> !cir.ptr<!rec_D>
+// CHECK:   %[[G:.*]] = cir.get_global thread_local @tg : !cir.ptr<!rec_anon_struct>
+// CHECK:   %[[C:.*]] = cir.cast bitcast %[[G]] : !cir.ptr<!rec_anon_struct> -> !cir.ptr<!rec_D>

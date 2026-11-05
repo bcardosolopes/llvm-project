@@ -19,6 +19,7 @@
 #include "EHScopeStack.h"
 #include "mlir/IR/Value.h"
 #include "clang/AST/StmtCXX.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 namespace clang::CIRGen {
 
@@ -85,7 +86,7 @@ public:
   enum Kind { Cleanup, Catch, Terminate, Filter };
 
   EHScope(Kind kind, EHScopeStack::stable_iterator enclosingEHScope)
-      : enclosingEHScope(enclosingEHScope) {
+      : enclosingEHScope(enclosingEHScope), scopeMayThrow(false) {
     commonBits.kind = kind;
   }
 
@@ -195,10 +196,82 @@ class alignas(EHScopeStack::ScopeStackAlignment) EHCleanupScope
   /// created if needed before the cleanup is popped.
   mlir::Block *normalBlock = nullptr;
 
+  /// Extra information required for cleanups that have resolved
+  /// branches through them.  This has to be allocated on the side
+  /// because everything on the cleanup stack has be trivially
+  /// movable.
+  struct ExtInfo {
+    /// The destinations of normal branch-afters and branch-throughs.
+    llvm::SmallPtrSet<mlir::Block *, 4> branches;
+
+    /// Normal branch-afters.
+    llvm::SmallVector<std::pair<mlir::Block *, mlir::Value>, 4> branchAfters;
+  };
+  mutable struct ExtInfo *extInfo = nullptr;
+
+  /// An address of an i1 (bool) alloca that tracks whether this cleanup
+  /// should actually run. Used for conditional cleanups in ternary
+  /// expressions where a temporary may or may not have been constructed.
+  Address activeFlag = Address::invalid();
+
   /// The number of fixups required by enclosing scopes (not including
   /// this one).  If this is the top cleanup scope, all the fixups
   /// from this index onwards belong to this scope.
   unsigned fixupDepth = 0;
+
+  /// Where the cleanup's guarded range begins, when pushCleanup decided this
+  /// cleanup should get a shared-landing-pad cir.cleanup.scope. The range runs
+  /// from just after `rangeStartAfter` (or the start of `rangeStartBlock` when
+  /// null) to the insertion point at pop time; popCleanupBlock moves it into a
+  /// cir.cleanup.scope body, so FlattenCFG can give every throwing call in it
+  /// ONE landing pad -- OGCG's one-pad-per-cleanup-depth shape -- instead of
+  /// one synthetic cir.try, and so one pad, per call.
+  ///
+  /// The scope is formed at pop time rather than opened at push time so that
+  /// the insertion point is never parked inside a region while the body is
+  /// emitted; that keeps the surrounding ordering (notably where cir.return
+  /// lands) identical to the per-call path.
+  mlir::Block *rangeStartBlock = nullptr;
+  mlir::Operation *rangeStartAfter = nullptr;
+  bool wantsCleanupScope = false;
+
+  /// Function-unique id, so a synthetic cir.try can name this cleanup even
+  /// after the scope has been popped and its storage reused. 0 when unset.
+  unsigned cleanupId = 0;
+
+  /// Value of CIRGenFunction::cleanupScopeSeqCounter when this cleanup was
+  /// pushed. cir.cleanup.scopes formed after that point (higher sequence
+  /// number) overlap this cleanup's guarded range and need its destructor on
+  /// their shared unwind edge; earlier ones sit entirely before it.
+  unsigned scopeSeqAtPush = 0;
+
+  /// Which chunk of a chunked initializer_list array emission this cleanup
+  /// was pushed during, or 0 when pushed outside one. A long single-object
+  /// array is emitted as nested cir.cleanup.scopes, one per chunk, so no one
+  /// pad guards more than a chunk's worth of conditional cleanups; each
+  /// nested dispatch emits only its own chunk (see
+  /// emitSharedCleanupScopeDispatch). Earlier chunks' cleanups reach their pad
+  /// through FlattenCFG's outward pad chaining, never through a later pad.
+  unsigned sharedScopeChunkId = 0;
+
+  /// Set when the cleanup is deactivated exactly at the end of the range it
+  /// guards (a throw expression retires its FreeException cleanup right where
+  /// it pops it). It is inactive from here on, so the normal path must skip it,
+  /// but a cir.cleanup.scope formed from that range still has to run it: every
+  /// throwing call the scope covers happened while it was live.
+  bool activeOverCleanupScopeRange = false;
+
+  struct ExtInfo &getExtInfo() {
+    if (!extInfo)
+      extInfo = new struct ExtInfo();
+    return *extInfo;
+  }
+
+  const struct ExtInfo &getExtInfo() const {
+    if (!extInfo)
+      extInfo = new struct ExtInfo();
+    return *extInfo;
+  }
 
 public:
   /// Gets the size required for a lazy cleanup scope with the given
@@ -211,15 +284,14 @@ public:
     return sizeof(EHCleanupScope) + cleanupBits.cleanupSize;
   }
 
-  EHCleanupScope(unsigned cleanupSize, unsigned fixupDepth,
+  EHCleanupScope(bool isNormal, bool isEH, unsigned cleanupSize,
+                 unsigned fixupDepth,
                  EHScopeStack::stable_iterator enclosingNormal,
                  EHScopeStack::stable_iterator enclosingEH)
       : EHScope(EHScope::Cleanup, enclosingEH),
         enclosingNormal(enclosingNormal), fixupDepth(fixupDepth) {
-    // TODO(cir): When exception handling is upstreamed, isNormalCleanup and
-    // isEHCleanup will be arguments to the constructor.
-    cleanupBits.isNormalCleanup = true;
-    cleanupBits.isEHCleanup = false;
+    cleanupBits.isNormalCleanup = isNormal;
+    cleanupBits.isEHCleanup = isEH;
     cleanupBits.isActive = true;
     cleanupBits.isLifetimeMarker = false;
     cleanupBits.testFlagInNormalCleanup = false;
@@ -229,7 +301,7 @@ public:
     assert(cleanupBits.cleanupSize == cleanupSize && "cleanup size overflow");
   }
 
-  void destroy() {}
+  void destroy() { delete extInfo; }
   // Objects of EHCleanupScope are not destructed. Use destroy().
   ~EHCleanupScope() = delete;
 
@@ -243,6 +315,91 @@ public:
   void setActive(bool isActive) { cleanupBits.isActive = isActive; }
 
   bool isLifetimeMarker() const { return cleanupBits.isLifetimeMarker; }
+  void setLifetimeMarker() { cleanupBits.isLifetimeMarker = true; }
+
+  unsigned getCleanupId() const { return cleanupId; }
+  void setCleanupId(unsigned id) { cleanupId = id; }
+
+  unsigned getScopeSeqAtPush() const { return scopeSeqAtPush; }
+  void setScopeSeqAtPush(unsigned seq) { scopeSeqAtPush = seq; }
+
+  unsigned getSharedScopeChunkId() const { return sharedScopeChunkId; }
+  void setSharedScopeChunkId(unsigned id) { sharedScopeChunkId = id; }
+
+  bool isActiveOverCleanupScopeRange() const {
+    return activeOverCleanupScopeRange;
+  }
+  void setActiveOverCleanupScopeRange() { activeOverCleanupScopeRange = true; }
+
+  bool wantsCleanupScopeOp() const { return wantsCleanupScope; }
+  mlir::Block *getRangeStartBlock() const { return rangeStartBlock; }
+  mlir::Operation *getRangeStartAfter() const { return rangeStartAfter; }
+  void setCleanupScopeRange(mlir::Block *block, mlir::Operation *after) {
+    wantsCleanupScope = true;
+    rangeStartBlock = block;
+    rangeStartAfter = after;
+  }
+
+  bool hasActiveFlag() const { return activeFlag.isValid(); }
+  Address getActiveFlag() const { return activeFlag; }
+  void setActiveFlag(Address var) { activeFlag = var; }
+
+  void setTestFlagInNormalCleanup() {
+    cleanupBits.testFlagInNormalCleanup = true;
+  }
+  bool shouldTestFlagInNormalCleanup() const {
+    return cleanupBits.testFlagInNormalCleanup;
+  }
+  void setTestFlagInEHCleanup() { cleanupBits.testFlagInEHCleanup = true; }
+  bool shouldTestFlagInEHCleanup() const {
+    return cleanupBits.testFlagInEHCleanup;
+  }
+
+  /// True if this cleanup scope has any branch-afters or branch-throughs.
+  bool hasBranches() const { return extInfo && !extInfo->branches.empty(); }
+
+  /// Add a branch-after to this cleanup scope.  A branch-after is a
+  /// branch from a point protected by this (normal) cleanup to a
+  /// point in the normal cleanup scope immediately containing it.
+  void addBranchAfter(mlir::Value index, mlir::Block *block) {
+    struct ExtInfo &info = getExtInfo();
+    if (info.branches.insert(block).second)
+      info.branchAfters.push_back(std::make_pair(block, index));
+  }
+
+  /// Return the number of unique branch-afters on this scope.
+  unsigned getNumBranchAfters() const {
+    return extInfo ? extInfo->branchAfters.size() : 0;
+  }
+
+  /// Return the destination block of the i'th branch-after.
+  mlir::Block *getBranchAfterBlock(unsigned i) const {
+    assert(i < getNumBranchAfters());
+    return extInfo->branchAfters[i].first;
+  }
+
+  /// Return the destination index of the i'th branch-after.
+  mlir::Value getBranchAfterIndex(unsigned i) const {
+    assert(i < getNumBranchAfters());
+    return extInfo->branchAfters[i].second;
+  }
+
+  /// Add a branch-through to this cleanup scope.  A branch-through is
+  /// a branch from a scope protected by this (normal) cleanup to an
+  /// enclosing scope other than the immediately-enclosing normal
+  /// cleanup scope.
+  ///
+  /// \return true if the branch-through was new to this scope
+  bool addBranchThrough(mlir::Block *block) {
+    return getExtInfo().branches.insert(block).second;
+  }
+
+  /// Determines if this cleanup scope has any branch throughs.
+  bool hasBranchThroughs() const {
+    if (!extInfo)
+      return false;
+    return (extInfo->branchAfters.size() != extInfo->branches.size());
+  }
 
   unsigned getFixupDepth() const { return fixupDepth; }
   EHScopeStack::stable_iterator getEnclosingNormalCleanup() const {
@@ -261,6 +418,60 @@ public:
   }
 
   void markEmitted() {}
+};
+
+/// An exceptions scope which calls std::terminate if any exception
+/// reaches it.
+class EHTerminateScope : public EHScope {
+public:
+  EHTerminateScope(EHScopeStack::stable_iterator enclosingEHScope)
+      : EHScope(Terminate, enclosingEHScope) {}
+  static size_t getSize() { return sizeof(EHTerminateScope); }
+
+  static bool classof(const EHScope *scope) {
+    return scope->getKind() == Terminate;
+  }
+};
+
+/// An exceptions scope for dynamic exception specifications (throw(T...)).
+/// Catches exceptions whose types are NOT in the filter list and calls
+/// __cxa_call_unexpected. Used for C++03/C++11/C++14 throw(Type) specs.
+/// Essentially ends in a flexible array member:
+///   mlir::Attribute FilterTypes[0];
+class EHFilterScope : public EHScope {
+  unsigned numFilters;
+
+  mlir::Attribute *getFilters() {
+    return reinterpret_cast<mlir::Attribute *>(this + 1);
+  }
+  const mlir::Attribute *getFilters() const {
+    return reinterpret_cast<const mlir::Attribute *>(this + 1);
+  }
+
+public:
+  EHFilterScope(unsigned numFilters,
+                EHScopeStack::stable_iterator enclosingEHScope)
+      : EHScope(Filter, enclosingEHScope), numFilters(numFilters) {}
+
+  static size_t getSizeForNumFilters(unsigned n) {
+    return sizeof(EHFilterScope) + n * sizeof(mlir::Attribute);
+  }
+
+  unsigned getNumFilters() const { return numFilters; }
+
+  void setFilter(unsigned i, mlir::Attribute typeInfo) {
+    assert(i < numFilters);
+    getFilters()[i] = typeInfo;
+  }
+
+  mlir::Attribute getFilter(unsigned i) const {
+    assert(i < numFilters);
+    return getFilters()[i];
+  }
+
+  static bool classof(const EHScope *scope) {
+    return scope->getKind() == Filter;
+  }
 };
 
 /// A non-stable pointer into the scope stack.
@@ -287,15 +498,16 @@ public:
       break;
 
     case EHScope::Filter:
-      llvm_unreachable("EHScopeStack::iterator Filter");
+      size = EHFilterScope::getSizeForNumFilters(
+          static_cast<const EHFilterScope *>(get())->getNumFilters());
       break;
 
     case EHScope::Cleanup:
-      llvm_unreachable("EHScopeStack::iterator Cleanup");
+      size = static_cast<const EHCleanupScope *>(get())->getAllocatedSize();
       break;
 
     case EHScope::Terminate:
-      llvm_unreachable("EHScopeStack::iterator Terminate");
+      size = EHTerminateScope::getSize();
       break;
     }
     ptr += llvm::alignTo(size, ScopeStackAlignment);
@@ -328,6 +540,35 @@ inline void EHScopeStack::popCatch() {
   EHCatchScope &scope = llvm::cast<EHCatchScope>(*begin());
   innermostEHScope = scope.getEnclosingEHScope();
   deallocate(EHCatchScope::getSizeForNumHandlers(scope.getNumHandlers()));
+}
+
+inline void EHScopeStack::pushTerminate() {
+  char *buffer = allocate(EHTerminateScope::getSize());
+  new (buffer) EHTerminateScope(innermostEHScope);
+  innermostEHScope = stable_begin();
+}
+
+inline void EHScopeStack::popTerminate() {
+  assert(!empty() && "popping exception stack when not empty");
+
+  EHTerminateScope &scope = llvm::cast<EHTerminateScope>(*begin());
+  innermostEHScope = scope.getEnclosingEHScope();
+  deallocate(EHTerminateScope::getSize());
+}
+
+inline EHFilterScope *EHScopeStack::pushFilter(unsigned numFilters) {
+  char *buffer = allocate(EHFilterScope::getSizeForNumFilters(numFilters));
+  auto *filter = new (buffer) EHFilterScope(numFilters, innermostEHScope);
+  innermostEHScope = stable_begin();
+  return filter;
+}
+
+inline void EHScopeStack::popFilter() {
+  assert(!empty() && "popping exception stack when not empty");
+
+  EHFilterScope &scope = llvm::cast<EHFilterScope>(*begin());
+  innermostEHScope = scope.getEnclosingEHScope();
+  deallocate(EHFilterScope::getSizeForNumFilters(scope.getNumFilters()));
 }
 
 /// The exceptions personality for a function.

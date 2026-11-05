@@ -2065,3 +2065,9 @@ llvm.func @invalid_sincos_gt_2_element_struct_return_type(%f: f32) -> () {
   // expected-error@+1 {{op expected result type to be an homogeneous struct with two elements matching the operand type}}
   llvm.intr.sincos(%f) : (f32) -> !llvm.struct<(f32, f32, f32)>
 }
+
+// -----
+
+// `!func_sanitize` is exactly two words, and the export path indexes both.
+// expected-error@+1 {{'llvm.func' op attribute 'func_sanitize' failed to satisfy constraint: i32 dense array attribute with exactly 2 elements}}
+llvm.func @func_sanitize_one_word() attributes {func_sanitize = array<i32: 5>}

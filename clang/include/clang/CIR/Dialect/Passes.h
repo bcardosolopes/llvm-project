@@ -28,8 +28,27 @@ std::unique_ptr<Pass> createHoistAllocasPass();
 std::unique_ptr<Pass> createLoweringPreparePass();
 std::unique_ptr<Pass> createLoweringPreparePass(clang::ASTContext *astCtx);
 std::unique_ptr<Pass> createGotoSolverPass();
+std::unique_ptr<Pass> createCIRTailMergePass();
+std::unique_ptr<Pass> createCIRInlinerPass();
+std::unique_ptr<Pass> createCIRInlinerPass(std::optional<unsigned> threshold);
+std::unique_ptr<Pass> createABILoweringPass();
+std::unique_ptr<Pass> createCallConvLoweringPass();
+std::unique_ptr<Pass> createSCFPreparePass();
+std::unique_ptr<Pass> createLifetimeCheckPass();
+std::unique_ptr<Pass> createLifetimeCheckPass(clang::ASTContext *astCtx);
+std::unique_ptr<Pass> createLifetimeCheckPass(llvm::ArrayRef<StringRef> remark,
+                                              llvm::ArrayRef<StringRef> hist,
+                                              unsigned hist_limit,
+                                              clang::ASTContext *astCtx);
 
-void populateCIRPreLoweringPasses(mlir::OpPassManager &pm);
+std::unique_ptr<Pass> createIdiomRecognizerPass();
+std::unique_ptr<Pass> createIdiomRecognizerPass(clang::ASTContext *astCtx);
+std::unique_ptr<Pass> createPointsToDiagnosticPass();
+std::unique_ptr<Pass> createLiveObjectDiagnosticPass();
+std::unique_ptr<Pass> createLibOptPass();
+std::unique_ptr<Pass> createLibOptPass(clang::ASTContext *astCtx);
+std::unique_ptr<Pass> createMoveOptPass();
+std::unique_ptr<Pass> createMoveOptPass(clang::ASTContext *astCtx);
 
 //===----------------------------------------------------------------------===//
 // Registration

@@ -1,0 +1,41 @@
+// RUN: cir-opt %s -split-input-file -verify-diagnostics
+
+// The flag list is parsed in a loop, so it is the loop -- not the assembly
+// format -- that has to reject what the format used to reject structurally.
+// Each of these was accepted by no version of this op and must stay rejected;
+// without a test, a later edit to the loop can start silently accepting them
+// and nothing would say so.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @dup_init() {
+    // expected-error @+1 {{'init' specified more than once}}
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init, init] {alignment = 4 : i64}
+    cir.return
+  }
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @dup_const() {
+    // expected-error @+1 {{'const' specified more than once}}
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", const, const] {alignment = 4 : i64}
+    cir.return
+  }
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @unknown_flag() {
+    // expected-error @+1 {{expected 'init' or 'const'}}
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", bogus] {alignment = 4 : i64}
+    cir.return
+  }
+}

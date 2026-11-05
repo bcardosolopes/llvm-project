@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -no-enable-noundef-analysis -triple x86_64-unknown-unknown -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -no-enable-noundef-analysis -triple x86_64-unknown-unknown -fclangir -O1 -disable-llvm-passes -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR %}
 
 // Basic base class test.
 struct f0_s0 { unsigned a; };
@@ -26,6 +27,11 @@ void f3(struct s3_1 x) {}
 
 // CHECK-LABEL: define{{.*}} i64 @_Z4f4_0M2s4i(i64 %a)
 // CHECK: define {{.*}} @_Z4f4_1M2s4FivE(i64 %a.coerce0, i64 %a.coerce1)
+// CIR-LABEL: define{{.*}} i64 @_Z4f4_0M2s4i(i64
+// CIR-NEXT: ret i64 %{{.*}}
+// CIR-LABEL: define{{.*}} @_Z4f4_1M2s4FivE(i64 %{{.*}}, i64 %{{.*}})
+// CIR: %[[MFP_LOAD:.*]] = load { i64, i64 }, ptr %{{.*}}, align 8, !tbaa
+// CIR-NEXT: ret { i64, i64 } %[[MFP_LOAD]]
 struct s4 {};
 typedef int s4::* s4_mdp;
 typedef int (s4::*s4_mfp)();
@@ -137,6 +143,9 @@ namespace test7 {
   // Check that the StringRef is passed byval instead of expanded
   // (which would split it between registers and memory).
   // CHECK: define{{.*}} void @_ZN5test71xENS_1AES0_llNS_9StringRefE({{.*}} byval({{.*}}) align 8 {{%.*}})
+  // CIR-LABEL: define{{.*}} void @_ZN5test71xENS_1AES0_llNS_9StringRefE(
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
 
   // And a couple extra related tests:
   A y(A, long double, long, long, StringRef) { return A(); }
@@ -146,6 +155,17 @@ namespace test7 {
   A zz(A, A, A, A, StringDouble) { return A(); }
   // CHECK: define{{.*}} void @_ZN5test71zENS_1AES0_S0_S0_S0_NS_12StringDoubleE({{.*}} byval({{.*}}) align 8 {{%.*}})
   // CHECK: define{{.*}} void @_ZN5test72zzENS_1AES0_S0_S0_NS_12StringDoubleE({{.*}} ptr
+  // CIR-LABEL: define{{.*}} void @_ZN5test71zENS_1AES0_S0_S0_S0_NS_12StringDoubleE(
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR-LABEL: define{{.*}} void @_ZN5test72zzENS_1AES0_S0_S0_NS_12StringDoubleE(
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
+  // CIR: store ptr %{{.*}}, ptr %{{.*}}, align 8, !tbaa
 }
 
 namespace test8 {

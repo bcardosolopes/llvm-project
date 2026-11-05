@@ -1,0 +1,44 @@
+// RUN: cir-opt %s -cir-to-llvm -o %t.cir
+// RUN: FileCheck %s --input-file=%t.cir
+//
+// Regression test: same-width integer and
+// floating-point casts should be identity (no-op), not bitcast/fpext.
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+
+module {
+  // Same-width integer cast: s32i -> u32i should be identity (no cast op)
+  cir.func @same_width_int_cast(%arg0: !s32i) -> !u32i {
+    %0 = cir.cast integral %arg0 : !s32i -> !u32i
+    // CHECK-LABEL: llvm.func @same_width_int_cast
+    // CHECK-SAME: (%arg0: i32) -> i32
+    // CHECK-NEXT: llvm.return %arg0 : i32
+    cir.return %0 : !u32i
+  }
+
+  // Same-width float cast: float -> float should be identity (no fpext)
+  cir.func @same_width_float_cast(%arg0: !cir.float) -> !cir.float {
+    %0 = cir.cast floating %arg0 : !cir.float -> !cir.float
+    // CHECK-LABEL: llvm.func @same_width_float_cast
+    // CHECK-SAME: (%arg0: f32) -> f32
+    // CHECK-NEXT: llvm.return %arg0 : f32
+    cir.return %0 : !cir.float
+  }
+
+  // Widening float cast: float -> double should use fpext
+  cir.func @widening_float_cast(%arg0: !cir.float) -> !cir.double {
+    %0 = cir.cast floating %arg0 : !cir.float -> !cir.double
+    // CHECK-LABEL: llvm.func @widening_float_cast
+    // CHECK: llvm.fpext %arg0 : f32 to f64
+    cir.return %0 : !cir.double
+  }
+
+  // Narrowing float cast: double -> float should use fptrunc
+  cir.func @narrowing_float_cast(%arg0: !cir.double) -> !cir.float {
+    %0 = cir.cast floating %arg0 : !cir.double -> !cir.float
+    // CHECK-LABEL: llvm.func @narrowing_float_cast
+    // CHECK: llvm.fptrunc %arg0 : f64 to f32
+    cir.return %0 : !cir.float
+  }
+}

@@ -6,6 +6,7 @@
 
 // CHECK: @._OBJC_PROTOCOL_Y = global 
 // CHECK-SAME: section "__objc_protocols", comdat, align 8
+// CHECK-DAG: @llvm.used = appending global {{.*}}ptr @.objc_category_Xy{{.*}}
 
 
 @interface X
@@ -21,5 +22,3 @@ id isa;
 @interface X (y) <Y>
 @end
 @implementation X (y) @end
-
-

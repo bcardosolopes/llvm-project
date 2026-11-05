@@ -15,31 +15,119 @@
 #define CLANG_LIB_CODEGEN_CIRGENCALL_H
 
 #include "CIRGenValue.h"
+#include "EHScopeStack.h"
 #include "mlir/IR/Operation.h"
 #include "clang/AST/GlobalDecl.h"
 #include "llvm/ADT/SmallVector.h"
+
+#include <cstdint>
+#include <optional>
 
 namespace clang::CIRGen {
 
 class CIRGenFunction;
 
+struct CIRGenPointerAuthInfo {
+  bool enabled = false;
+  unsigned key = 0;
+  uint64_t discriminator = 0;
+  PointerAuthenticationMode authenticationMode =
+      PointerAuthenticationMode::None;
+  bool isIsaPointer = false;
+  bool authenticatesNullValues = false;
+
+  explicit operator bool() const { return enabled; }
+};
+
+struct CIRGenRuntimePointerAuthInfo {
+  PointerAuthenticationMode authenticationMode =
+      PointerAuthenticationMode::None;
+  bool isIsaPointer = false;
+  bool authenticatesNullValues = false;
+  unsigned key = 0;
+  mlir::Value discriminator;
+
+  explicit operator bool() const {
+    return authenticationMode != PointerAuthenticationMode::None;
+  }
+
+  bool shouldStrip() const {
+    return authenticationMode == PointerAuthenticationMode::Strip ||
+           authenticationMode == PointerAuthenticationMode::SignAndStrip;
+  }
+
+  bool shouldSign() const {
+    return authenticationMode == PointerAuthenticationMode::SignAndStrip ||
+           authenticationMode == PointerAuthenticationMode::SignAndAuth;
+  }
+
+  bool shouldAuth() const {
+    return authenticationMode == PointerAuthenticationMode::SignAndAuth;
+  }
+};
+
 /// Abstract information about a function or function prototype.
 class CIRGenCalleeInfo {
   const clang::FunctionProtoType *calleeProtoTy;
   clang::GlobalDecl calleeDecl;
+  std::optional<CIRGenPointerAuthInfo> pointerAuthInfo;
+  mlir::Value runtimePtrauthDiscriminator;
+  bool blendVTableSlot;
 
 public:
-  explicit CIRGenCalleeInfo() : calleeProtoTy(nullptr), calleeDecl() {}
+  explicit CIRGenCalleeInfo()
+      : calleeProtoTy(nullptr), calleeDecl(), pointerAuthInfo(std::nullopt),
+        runtimePtrauthDiscriminator(), blendVTableSlot(false) {}
   CIRGenCalleeInfo(const clang::FunctionProtoType *calleeProtoTy,
-                   clang::GlobalDecl calleeDecl)
-      : calleeProtoTy(calleeProtoTy), calleeDecl(calleeDecl) {}
+                   clang::GlobalDecl calleeDecl,
+                   std::optional<CIRGenPointerAuthInfo> pointerAuthInfo =
+                       std::nullopt,
+                   mlir::Value runtimePtrauthDiscriminator = {},
+                   bool blendVTableSlot = false)
+      : calleeProtoTy(calleeProtoTy), calleeDecl(calleeDecl),
+        pointerAuthInfo(pointerAuthInfo),
+        runtimePtrauthDiscriminator(runtimePtrauthDiscriminator),
+        blendVTableSlot(blendVTableSlot) {}
+  CIRGenCalleeInfo(const clang::FunctionProtoType *calleeProtoTy,
+                   std::optional<CIRGenPointerAuthInfo> pointerAuthInfo,
+                   mlir::Value runtimePtrauthDiscriminator = {},
+                   bool blendVTableSlot = false)
+      : calleeProtoTy(calleeProtoTy), pointerAuthInfo(pointerAuthInfo),
+        runtimePtrauthDiscriminator(runtimePtrauthDiscriminator),
+        blendVTableSlot(blendVTableSlot) {}
+  CIRGenCalleeInfo(const clang::FunctionProtoType *calleeProtoTy,
+                   clang::GlobalDecl calleeDecl,
+                   std::optional<CIRGenPointerAuthInfo> pointerAuthInfo,
+                   bool blendVTableSlot)
+      : CIRGenCalleeInfo(calleeProtoTy, calleeDecl, pointerAuthInfo,
+                         /*runtimePtrauthDiscriminator=*/{},
+                         blendVTableSlot) {}
+  CIRGenCalleeInfo(const clang::FunctionProtoType *calleeProtoTy,
+                   std::optional<CIRGenPointerAuthInfo> pointerAuthInfo,
+                   bool blendVTableSlot)
+      : CIRGenCalleeInfo(calleeProtoTy, pointerAuthInfo,
+                         /*runtimePtrauthDiscriminator=*/{},
+                         blendVTableSlot) {}
+  CIRGenCalleeInfo(const clang::FunctionProtoType *calleeProtoTy)
+      : calleeProtoTy(calleeProtoTy), pointerAuthInfo(std::nullopt),
+        runtimePtrauthDiscriminator(),
+        blendVTableSlot(false) {}
   CIRGenCalleeInfo(clang::GlobalDecl calleeDecl)
-      : calleeProtoTy(nullptr), calleeDecl(calleeDecl) {}
+      : calleeProtoTy(nullptr), calleeDecl(calleeDecl),
+        pointerAuthInfo(std::nullopt), runtimePtrauthDiscriminator(),
+        blendVTableSlot(false) {}
 
   const clang::FunctionProtoType *getCalleeFunctionProtoType() const {
     return calleeProtoTy;
   }
   clang::GlobalDecl getCalleeDecl() const { return calleeDecl; }
+  std::optional<CIRGenPointerAuthInfo> getPointerAuthInfo() const {
+    return pointerAuthInfo;
+  }
+  mlir::Value getRuntimePtrauthDiscriminator() const {
+    return runtimePtrauthDiscriminator;
+  }
+  bool shouldBlendVTableSlot() const { return blendVTableSlot; }
 };
 
 class CIRGenCallee {
@@ -230,35 +318,75 @@ public:
 
 class CallArgList : public llvm::SmallVector<CallArg, 8> {
 public:
+  struct Writeback {
+    LValue source;
+    Address temporary;
+    mlir::Value toUse;
+    const Expr *writebackExpr;
+  };
+
+  /// Tracks a cleanup that should be deactivated immediately before the call.
+  /// This is used for callee-destructed arguments (e.g., MSVC ABI) where
+  /// the caller pushes a cleanup during argument evaluation that must be
+  /// deactivated once the callee takes ownership.
+  struct CallArgCleanup {
+    EHScopeStack::stable_iterator cleanup;
+    mlir::Operation *isActiveIP;
+  };
+
   void add(RValue rvalue, clang::QualType type) { emplace_back(rvalue, type); }
 
   void addUncopiedAggregate(LValue lvalue, clang::QualType type) {
     emplace_back(lvalue, type);
   }
 
+  void addWriteback(LValue srcLV, Address temporary, mlir::Value toUse,
+                    const Expr *writebackExpr = nullptr) {
+    writebacks.push_back({srcLV, temporary, toUse, writebackExpr});
+  }
+
+  bool hasWritebacks() const { return !writebacks.empty(); }
+
+  llvm::ArrayRef<Writeback> getWritebacks() const { return writebacks; }
+
   /// Add all the arguments from another CallArgList to this one. After doing
   /// this, the old CallArgList retains its list of arguments, but must not
   /// be used to emit a call.
   void addFrom(const CallArgList &other) {
     insert(end(), other.begin(), other.end());
-    // Classic codegen has handling for these here. We may not need it here for
-    // CIR, but if not we should implement equivalent handling in lowering.
-    assert(!cir::MissingFeatures::writebacks());
-    assert(!cir::MissingFeatures::cleanupsToDeactivate());
-    assert(!cir::MissingFeatures::stackBase());
+    llvm::append_range(writebacks, other.writebacks);
+    llvm::append_range(cleanupsToDeactivate, other.cleanupsToDeactivate);
+    // OGCG also merges writebacks (ObjC/HLSL-only) and stackBase
+    // (MSVC inalloca) here. Neither is applicable to CIR's targets.
   }
+
+  void addArgCleanupDeactivation(EHScopeStack::stable_iterator cleanup,
+                                 mlir::Operation *isActiveIP) {
+    cleanupsToDeactivate.push_back({cleanup, isActiveIP});
+  }
+
+  llvm::ArrayRef<CallArgCleanup> getCleanupsToDeactivate() const {
+    return cleanupsToDeactivate;
+  }
+
+private:
+  llvm::SmallVector<Writeback, 1> writebacks;
+  llvm::SmallVector<CallArgCleanup, 1> cleanupsToDeactivate;
 };
 
 /// Contains the address where the return value of a function can be stored, and
 /// whether the address is volatile or not.
 class ReturnValueSlot {
   Address addr = Address::invalid();
+  bool isVolatileFlag = false;
 
 public:
   ReturnValueSlot() = default;
-  ReturnValueSlot(Address addr) : addr(addr) {}
+  ReturnValueSlot(Address addr, bool isVolatile = false)
+      : addr(addr), isVolatileFlag(isVolatile) {}
 
   bool isNull() const { return !addr.isValid(); }
+  bool isVolatile() const { return isVolatileFlag; }
   Address getValue() const { return addr; }
 };
 

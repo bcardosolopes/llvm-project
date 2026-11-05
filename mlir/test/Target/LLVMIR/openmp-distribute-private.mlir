@@ -90,5 +90,3 @@ llvm.func @_QQmain() {
 // CHECK:       omp.region.cont:
 // CHECK-NEXT:   call void @foo_free(ptr %[[PRIV_VAR_ALLOC]])
 // CHECK:       }
-
-

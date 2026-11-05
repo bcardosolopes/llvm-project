@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 %s -emit-llvm -triple i686-windows-gnu -o - | FileCheck %s
 // RUN: %clang_cc1 %s -emit-llvm -triple i686-windows-itanium -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -emit-llvm -triple i686-windows-gnu -fclangir -o - | FileCheck %s --check-prefix=CIR-GNU %}
+// RUN: %if cir-support %{ %clang_cc1 %s -emit-llvm -triple i686-windows-itanium -fclangir -o - | FileCheck %s --check-prefix=CIR-ITANIUM %}
 
 // GCC 5.1 began mangling these Windows calling conventions into function
 // types, since they can be used for overloading. They've always been mangled
@@ -45,11 +47,19 @@ struct Foo { void bar(int, int); };
 // convention, but GCC doesn't mangle it, so we don't either.
 // CHECK: define dso_local void @_Z15memptr_thiscallP3FooMS_FvvE(ptr {{.*}})
 void memptr_thiscall(Foo *o, void (Foo::*mp)()) { (o->*mp)(); }
+// CIR-GNU-LABEL: define dso_local void @_Z15memptr_thiscallP3FooMS_FvvE(
+// CIR-GNU: call x86_thiscallcc void %{{.*}}(ptr nonnull align 1 dereferenceable(1) %{{.*}})
+// CIR-ITANIUM-LABEL: define dso_local void @_Z15memptr_thiscallP3FooMS_FvvE(
+// CIR-ITANIUM: call void %{{.*}}(ptr nonnull align 1 dereferenceable(1) %{{.*}})
 
 // CHECK: define dso_local void @_Z12memptrCCTypeR3FooMS_U8fastcallFviiE(ptr {{.*}}, ptr noundef byval{{.*}})
 void memptrCCType(Foo &o, void (__attribute__((fastcall)) Foo::*mp)(int, int)) {
   (o.*mp)(1, 2);
 }
+// CIR-GNU-LABEL: define dso_local void @_Z12memptrCCTypeR3FooMS_U8fastcallFviiE(
+// CIR-GNU: call x86_fastcallcc void %{{.*}}(ptr nonnull align 1 dereferenceable(1) %{{.*}}, i32 1, i32 2)
+// CIR-ITANIUM-LABEL: define dso_local void @_Z12memptrCCTypeR3FooMS_U8fastcallFviiE(
+// CIR-ITANIUM: call x86_fastcallcc void %{{.*}}(ptr nonnull align 1 dereferenceable(1) %{{.*}}, i32 1, i32 2)
 
 // CHECK: define dso_local noundef i32 @_Z17useTemplateFnTypev()
 // CHECK:   call noundef i32 @_ZL14templateFnTypeIU8fastcallFviiEElPT_(ptr noundef @"\01@_Z10f_fastcallii@8")

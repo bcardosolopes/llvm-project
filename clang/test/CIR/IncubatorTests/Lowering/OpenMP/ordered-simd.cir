@@ -1,0 +1,24 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @f() {
+    omp.ordered.region par_level_simd {
+      cir.call @work() : () -> ()
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @work() loc(#loc1)
+}
+
+#loc1 = loc("ordered-simd.cir":1:1)
+
+// CHECK-LABEL: define void @f()
+// CHECK: br label %omp.ordered.region
+// CHECK: omp.ordered.region:
+// CHECK: call void @work()
+// CHECK: br label %omp.region.cont
+// CHECK: omp_region.finalize:
+// CHECK-NOT: @__kmpc_ordered
+// CHECK-NOT: @__kmpc_end_ordered

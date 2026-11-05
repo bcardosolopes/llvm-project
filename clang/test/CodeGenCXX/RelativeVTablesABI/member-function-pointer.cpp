@@ -1,6 +1,7 @@
 // Member pointer to virtual function.
 
 // RUN: %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O3 -o - -emit-llvm | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O3 -fclangir -o - -emit-llvm | FileCheck %s --check-prefix=CIR %}
 
 // CHECK:      define{{.*}} void @_Z4funcP1AMS_FvvE(ptr noundef %a, [2 x i64] %fn.coerce) local_unnamed_addr
 // CHECK-NEXT: entry:
@@ -25,6 +26,26 @@
 // CHECK-NEXT:   tail call void [[method3]](ptr {{[^,]*}} [[this_adj]])
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
+
+// CIR-LABEL: define{{.*}} void @_Z4funcP1AMS_FvvE(
+// CIR:         [[FN_PTR:%.*]] = extractvalue [2 x i64] %{{.*}}, 0
+// CIR-NEXT:    [[ADJ:%.*]] = extractvalue [2 x i64] %{{.*}}, 1
+// CIR-NEXT:    [[THIS_ARG:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 [[ADJ]]
+// CIR-NEXT:    [[VIRTBIT:%.*]] = and i64 [[FN_PTR]], 1
+// CIR-NEXT:    [[ISVIRT:%.*]] = icmp eq i64 [[VIRTBIT]], 0
+// CIR-NEXT:    br i1 [[ISVIRT]], label %[[NONVIRT:.*]], label %[[VIRT:.*]]
+// CIR:       [[VIRT]]:
+// CIR-NEXT:    [[VTABLE:%.*]] = load ptr, ptr [[THIS_ARG]], align 8, !tbaa ![[VTBAA:[0-9]+]]
+// CIR-NEXT:    [[OFFSET:%.*]] = add nsw i64 [[FN_PTR]], -1
+// CIR-NEXT:    [[PTR:%.*]] = tail call ptr @llvm.load.relative.i64(ptr [[VTABLE]], i64 [[OFFSET]]), !nosanitize ![[NOSAN:[0-9]+]]
+// CIR-NEXT:    br label %[[MEMPTR_END:.*]]
+// CIR:       [[NONVIRT]]:
+// CIR-NEXT:    [[METHOD2:%.*]] = inttoptr i64 [[FN_PTR]] to ptr
+// CIR-NEXT:    br label %[[MEMPTR_END]]
+// CIR:       [[MEMPTR_END]]:
+// CIR-NEXT:    [[METHOD3:%.*]] = phi ptr [ [[METHOD2]], %[[NONVIRT]] ], [ [[PTR]], %[[VIRT]] ]
+// CIR-NEXT:    tail call void [[METHOD3]](ptr {{[^,]*}} [[THIS_ARG]])
+// CIR-NEXT:    ret void
 
 class A {
 public:

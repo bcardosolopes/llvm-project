@@ -25,6 +25,7 @@
 #include <optional>
 
 #define DEBUG_TYPE "mlir-bytecode-writer"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "] ")
 
 using namespace mlir;
 using namespace mlir::bytecode::detail;
@@ -861,6 +862,7 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
                            "attributes count");
   offsetEmitter.emitVarInt(llvm::size(numberingState.getTypes()),
                            "types count");
+  [[maybe_unused]] uint64_t numberOfEmitted = 0, numberOfCustomEmitted = 0;
 
   // A functor used to emit an attribute or type entry.
   uint64_t prevOffset = 0;
@@ -872,12 +874,24 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
       attrTypeEmitter.emitByte(0, "attr/type separator");
     };
     auto emitAttrOrTypeImpl = [&]() -> bool {
-      // TODO: We don't currently support custom encoded mutable types and
-      // attributes.
-      if (entryValue.template hasTrait<TypeTrait::IsMutable>() ||
-          entryValue.template hasTrait<AttributeTrait::IsMutable>()) {
-        emitAttrOrTypeRawImpl();
-        return false;
+      // Mutable *types* may now use a custom encoding: the numbering pass
+      // registers the type before descending into it, and on the read side
+      // DialectBytecodeReader::tryStartCyclicRead lets a dialect publish the
+      // incomplete type before reading its body, so a self-reference resolves
+      // rather than recursing.
+      //
+      // Mutable attributes still fall back -- there is no attribute-side
+      // analogue of tryStartCyclicRead yet.
+      //
+      // Note the kind test is load-bearing: hasTrait<AttributeTrait::IsMutable>
+      // also reports true for a mutable *type*, so testing it unguarded would
+      // send records back to the fallback.
+      if constexpr (std::is_same_v<std::decay_t<decltype(entryValue)>,
+                                   Attribute>) {
+        if (entryValue.template hasTrait<AttributeTrait::IsMutable>()) {
+          emitAttrOrTypeRawImpl();
+          return false;
+        }
       }
 
       DialectWriter dialectWriter(config.bytecodeVersion, attrTypeEmitter,
@@ -912,6 +926,12 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
     };
 
     bool hasCustomEncoding = emitAttrOrTypeImpl();
+    LLVM_DEBUG({
+      if (hasCustomEncoding) {
+        numberOfCustomEmitted++;
+      }
+      numberOfEmitted++;
+    });
 
     // Record the offset of this entry.
     uint64_t curOffset = attrTypeEmitter.size();
@@ -930,6 +950,15 @@ void BytecodeWriter::writeAttrTypeSection(EncodingEmitter &emitter) {
   emitter.emitSection(bytecode::Section::kAttrTypeOffset,
                       std::move(offsetEmitter));
   emitter.emitSection(bytecode::Section::kAttrType, std::move(attrTypeEmitter));
+
+  DEBUG_WITH_TYPE(DEBUG_TYPE, {
+    DBGS() << "type and attribute data, total entries emitted: "
+           << numberOfEmitted << "\n";
+  });
+  DEBUG_WITH_TYPE(DEBUG_TYPE, {
+    DBGS() << "type and attribute data, custom entries emitted: "
+           << numberOfCustomEmitted << "\n";
+  });
 }
 
 //===----------------------------------------------------------------------===//

@@ -127,3 +127,43 @@ define void @alias_scope(ptr %arg1) {
 !7 = !{!2, !3}
 !8 = !{!1, !3}
 !9 = !{!1, !2}
+
+; // -----
+
+; An invoke carries alias metadata exactly as a call does, and so do the
+; lifetime and invariant.start markers. Before these ops declared
+; AliasAnalysisOpInterface the importer had nowhere to put the metadata and
+; dropped it; on a merged Android library that was 710 attachments in one .so.
+
+declare void @callee(ptr)
+declare i32 @__gxx_personality_v0(...)
+
+; CHECK-DAG: #[[$SCOPE:.*]] = #llvm.alias_scope<{{.*}}>
+define void @invoke_and_markers(ptr %arg1) personality ptr @__gxx_personality_v0 {
+  %a = alloca i32
+  ; CHECK: llvm.intr.lifetime.start
+  ; CHECK-SAME: alias_scopes = [#[[$SCOPE]]]
+  call void @llvm.lifetime.start.p0(ptr %a), !alias.scope !2
+  ; CHECK: llvm.intr.invariant.start
+  ; CHECK-SAME: alias_scopes = [#[[$SCOPE]]]
+  %i = call ptr @llvm.invariant.start.p0(i64 4, ptr %a), !alias.scope !2
+  ; CHECK: llvm.invoke
+  ; CHECK-SAME: alias_scopes = [#[[$SCOPE]]]
+  invoke void @callee(ptr %arg1) to label %ok unwind label %lp, !alias.scope !2
+ok:
+  ; CHECK: llvm.intr.lifetime.end
+  ; CHECK-SAME: alias_scopes = [#[[$SCOPE]]]
+  call void @llvm.lifetime.end.p0(ptr %a), !alias.scope !2
+  ret void
+lp:
+  %e = landingpad { ptr, i32 } cleanup
+  resume { ptr, i32 } %e
+}
+
+declare void @llvm.lifetime.start.p0(ptr nocapture)
+declare void @llvm.lifetime.end.p0(ptr nocapture)
+declare ptr @llvm.invariant.start.p0(i64 immarg, ptr nocapture)
+
+!0 = !{!"domain"}
+!1 = !{!"scope", !0}
+!2 = !{!1}

@@ -1,0 +1,24 @@
+// Second input for ../local-linkage.cir. Not a test on its own.
+//
+// Defines its own @local_helper, unrelated to A's despite the shared name --
+// this is what `static int helper()` in two translation units looks like after
+// mangling. Also defines @shared, which A only declares.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func internal private @local_helper() -> !s32i {
+    %0 = cir.const #cir.int<222> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @from_b() -> !s32i {
+    %0 = cir.call @local_helper() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @shared() -> !s32i {
+    %0 = cir.const #cir.int<9> : !s32i
+    cir.return %0 : !s32i
+  }
+}

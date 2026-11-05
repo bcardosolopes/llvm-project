@@ -1,0 +1,27 @@
+// RUN: cir-opt %s -cir-to-llvm -o %t.mlir
+// RUN: FileCheck --input-file=%t.mlir %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // Duplicate case constants can arise in large flattened switch state
+  // machines. Lowering must not produce invalid llvm.switch with duplicate
+  // integer entries.
+  cir.func @switchFlatDuplicateCaseValue(%arg0: !s32i) {
+    cir.switch.flat %arg0 : !s32i, ^bb2 [
+      37: ^bb1,
+      37: ^bb3
+    ]
+  ^bb1:
+    cir.br ^bb2
+  ^bb2:
+    cir.return
+  ^bb3:
+    cir.br ^bb2
+  }
+}
+
+// CHECK: llvm.switch %arg0 : i32, ^bb{{[0-9]+}} [
+// CHECK-NEXT: 37: ^bb{{[0-9]+}}
+// CHECK-NEXT: ]
+

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fobjc-gc -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - %s
+// RUN: %if cir-support %{ %clang_cc1 -fobjc-gc -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -disable-llvm-passes -fclangir -o /dev/null %s %}
 
 struct A {
   int member;
@@ -21,4 +22,3 @@ void g(BInt *bint) {
   bint.value->member = 17;
   int x = bint.value.member;
 }
-

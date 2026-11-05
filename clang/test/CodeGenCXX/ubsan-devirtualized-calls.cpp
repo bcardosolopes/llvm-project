@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -std=c++11 -triple %itanium_abi_triple -emit-llvm -fsanitize=null,vptr %s -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -std=c++11 -triple %itanium_abi_triple -emit-llvm -fsanitize=null,vptr -fclangir %s -o - | FileCheck %s --check-prefix=CIR %}
 
 struct Base1 {
   virtual void f1() {}
@@ -86,3 +87,7 @@ void t5() {
   // CHECK: %[[BADP1:[0-9]+]] = ptrtoint ptr {{%[0-9]+}} to i{{[0-9]+}}, !nosanitize
   // CHECK-NEXT: call void @__ubsan_handle_dynamic_type_cache{{[_a-z]*}}({{.*}} [[UBSAN_TI_DERIVED4_2]], i{{[0-9]+}} %[[BADP1]]
 }
+
+// CIR: [[UBSAN_TI_DERIVED3:@[0-9]+]] = private unnamed_addr global {{.*}} ptr @_ZTI8Derived3
+// CIR: [[UBSAN_TI_DERIVED4_1:@[0-9]+]] = private unnamed_addr global {{.*}} ptr @_ZTI8Derived4
+// CIR: [[UBSAN_TI_DERIVED4_2:@[0-9]+]] = private unnamed_addr global {{.*}} ptr @_ZTI8Derived4

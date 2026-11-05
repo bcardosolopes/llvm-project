@@ -21,13 +21,29 @@ void CIRDataLayout::reset(mlir::DataLayoutSpecInterface spec) {
       if (auto str = llvm::dyn_cast<mlir::StringAttr>(entry.getValue()))
         bigEndian = str == mlir::DLTIDialect::kDataLayoutEndiannessBig;
   }
+
+  RecordAlignment =
+      llvm::DataLayout::PrimitiveSpec{0, llvm::Align(1), llvm::Align(8)};
 }
 
-llvm::Align CIRDataLayout::getAlignment(mlir::Type ty, bool useABIAlign) const {
+llvm::Align CIRDataLayout::getAlignment(mlir::Type ty,
+                                         bool useABIAlign) const {
+  if (auto stTy = llvm::dyn_cast<cir::RecordType>(ty)) {
+    // Packed record types always have an ABI alignment of one.
+    if (stTy.getPacked() && useABIAlign)
+      return llvm::Align(1);
+
+    // For record types, compute alignment from the members' alignments
+    // (via MLIR's data layout) and apply the aggregate alignment floor.
+    unsigned memberAlign = useABIAlign ? layout.getTypeABIAlignment(ty)
+                                       : layout.getTypePreferredAlignment(ty);
+    llvm::Align align =
+        useABIAlign ? RecordAlignment.ABIAlign : RecordAlignment.PrefAlign;
+    return std::max(align, llvm::Align(memberAlign));
+  }
+
   // FIXME(cir): This does not account for differnt address spaces, and relies
   // on CIR's data layout to give the proper alignment.
-  assert(!cir::MissingFeatures::addressSpace());
-
   // Fetch type alignment from MLIR's data layout.
   unsigned align = useABIAlign ? layout.getTypeABIAlignment(ty)
                                : layout.getTypePreferredAlignment(ty);
@@ -47,8 +63,6 @@ llvm::TypeSize CIRDataLayout::getTypeSizeInBits(mlir::Type ty) const {
 
   // FIXME(cir): This does not account for different address spaces, and relies
   // on CIR's data layout to give the proper ABI-specific type width.
-  assert(!cir::MissingFeatures::addressSpace());
-
   // This is calling mlir::DataLayout::getTypeSizeInBits().
   return llvm::TypeSize::getFixed(layout.getTypeSizeInBits(ty));
 }

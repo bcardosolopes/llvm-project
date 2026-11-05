@@ -1,0 +1,33 @@
+// A pass that completes a stage moves the module to it, and never back.
+//
+// RUN: split-file %s %t
+// RUN: cir-opt %t/abi.cir -cir-goto-solver | FileCheck %s --check-prefix=ADVANCE
+// ADVANCE: module attributes {cir.stage = "cir-flat"}
+// RUN: cir-opt %t/flat.cir -cir-goto-solver | FileCheck %s --check-prefix=KEEP
+// KEEP: module attributes {cir.stage = "cir-flat"}
+// RUN: cir-opt %t/flat.cir -cir-cxxabi-lowering | FileCheck %s --check-prefix=KEEP
+//
+// Only a known stage, and only on a module.
+// RUN: cir-opt %t/bad.cir -verify-diagnostics -split-input-file
+
+//--- abi.cir
+module attributes {cir.stage = "cir-abi"} {
+}
+
+//--- flat.cir
+module attributes {cir.stage = "cir-flat"} {
+}
+
+//--- bad.cir
+// expected-error@+1 {{'cir.stage' must be one of cirgen, cir-prepare, cir-abi, cir-flat}}
+module attributes {cir.stage = "cir-llvm"} {
+}
+
+// -----
+
+module {
+  // expected-error@+1 {{'cir.stage' belongs on a module}}
+  func.func @f() attributes {cir.stage = "cir-abi"} {
+    return
+  }
+}

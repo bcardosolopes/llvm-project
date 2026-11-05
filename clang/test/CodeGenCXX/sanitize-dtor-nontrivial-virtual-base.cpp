@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -fsanitize=memory -O0 -fsanitize-memory-use-after-dtor -std=c++11 -triple=x86_64-pc-linux -emit-llvm -debug-info-kind=line-tables-only -o - %s | FileCheck %s --implicit-check-not="call void @__sanitizer_"
 // RUN: %clang_cc1 -fsanitize=memory -O1 -disable-llvm-passes -fsanitize-memory-use-after-dtor -std=c++11 -triple=x86_64-pc-linux -emit-llvm -debug-info-kind=line-tables-only -o - %s | FileCheck %s --implicit-check-not="call void @__sanitizer_"
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=memory -O0 -fsanitize-memory-use-after-dtor -std=c++11 -triple=x86_64-pc-linux -fclangir -emit-llvm -debug-info-kind=line-tables-only -o - %s | FileCheck %s --check-prefix=CIR %}
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=memory -O1 -disable-llvm-passes -fsanitize-memory-use-after-dtor -std=c++11 -triple=x86_64-pc-linux -fclangir -emit-llvm -debug-info-kind=line-tables-only -o - %s | FileCheck %s --check-prefix=CIR %}
 
 template <class T>
 class Vector {
@@ -93,3 +95,33 @@ Derived d;
 // CHECK-DAG: ![[DI5]] = {{.*}}line: [[@LINE-57]]
 // CHECK-DAG: ![[DI6]] = {{.*}}line: [[@LINE-60]]
 // CHECK-DAG: ![[DI7]] = {{.*}}line: [[@LINE-88]]
+
+// CIR-LABEL: define {{.*}}ZN6VectorIiED2Ev
+// CIR: call void @__sanitizer_dtor_callback_fields({{.*}}, i64 4){{.*}}, !dbg ![[CIR_DI0:[0-9]+]]
+
+// CIR-LABEL: define {{.*}}ZN4BaseD2Ev
+// CIR: call void @__sanitizer_dtor_callback_fields({{.*}}, i64 16){{.*}}, !dbg ![[CIR_DI1:[0-9]+]]
+// CIR: call void @__sanitizer_dtor_callback_vptr({{.*}}){{.*}}, !dbg ![[CIR_DI2:[0-9]+]]
+
+// CIR-LABEL: define {{.*}}ZN7DerivedD2Ev
+// CIR: call void @__sanitizer_dtor_callback_fields({{.*}}, i64 4){{.*}}, !dbg ![[CIR_DI3:[0-9]+]]
+// CIR: call void {{.*}}ZN6VectorIiED1Ev
+// CIR: call void @__sanitizer_dtor_callback_fields({{.*}}, i64 4){{.*}}, !dbg ![[CIR_DI4:[0-9]+]]
+
+// CIR-LABEL: define {{.*}}ZN11VirtualBaseD2Ev
+// CIR: call void @__sanitizer_dtor_callback_fields({{.*}}, i64 8){{.*}}, !dbg ![[CIR_DI5:[0-9]+]]
+// CIR: call void @__sanitizer_dtor_callback_vptr({{.*}}){{.*}}, !dbg ![[CIR_DI6:[0-9]+]]
+
+// CIR-LABEL: define {{.*}}ZN7DerivedD1Ev
+// CIR: call void {{.*}}ZN11VirtualBaseD2Ev
+// CIR: call void @__sanitizer_dtor_callback_vptr({{.*}}){{.*}}, !dbg ![[CIR_DI7:[0-9]+]]
+
+// CIR-LABEL: !DIFile{{.*}}.cpp
+// CIR-DAG: ![[CIR_DI0]] = {{.*}}line: 9
+// CIR-DAG: ![[CIR_DI1]] = {{.*}}line: 16
+// CIR-DAG: ![[CIR_DI2]] = {{.*}}line: 22
+// CIR-DAG: ![[CIR_DI3]] = {{.*}}line: 38
+// CIR-DAG: ![[CIR_DI4]] = {{.*}}line: 36
+// CIR-DAG: ![[CIR_DI5]] = {{.*}}line: 26
+// CIR-DAG: ![[CIR_DI6]] = {{.*}}line: 32
+// CIR-DAG: ![[CIR_DI7]] = {{.*}}line: 42

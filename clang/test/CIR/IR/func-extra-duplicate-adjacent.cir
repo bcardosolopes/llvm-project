@@ -1,0 +1,17 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+
+// Back to back, with no annotations array between them. This takes the other
+// path through the two extra() attempts: the first consumes one, and the
+// second sees the keyword again rather than being skipped.
+
+!s32i = !cir.int<s, 32>
+
+#fn_attr = #cir<extra({minsize, nothrow = #cir.nothrow, optsize})>
+
+// CHECK-NOT: custom op 'extra' is unknown
+
+module {
+  // CHECK: extra already specified for this function
+  cir.func private @adjacent_extra(!s32i) -> !s32i
+      extra(#fn_attr) extra(#fn_attr)
+}

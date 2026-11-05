@@ -1,0 +1,56 @@
+// Second input for ../odr-events.cir. Not a test on its own.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!cir.float}>
+
+module {
+  cir.func linkonce_odr @same_inline() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // A different body from A's helper: only the reference to it is excused,
+  // and the helper itself is TU-local, so nothing resolves between the two.
+  cir.func internal private @helper() -> !s32i {
+    %0 = cir.const #cir.int<20> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @calls_helper() -> !s32i {
+    %0 = cir.call @helper() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func linkonce_odr @asm_inline() {
+    "cir.asm"() <{asm_flavor = 0 : i32, asm_string = "isb", constraints = "", operand_attrs = [], operands_segments = array<i32: 0, 0, 0>, side_effects}> {cir.asm_srcloc = [2]} : () -> ()
+    cir.return
+  }
+
+  cir.func linkonce_odr @diff_inline() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @weak_default() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @implicit_vs_explicit() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func linkonce_odr @strong_then_weak() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @conflict() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func linkonce_odr @uses_s(%arg0: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}

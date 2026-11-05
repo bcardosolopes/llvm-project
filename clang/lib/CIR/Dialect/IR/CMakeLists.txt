@@ -1,12 +1,14 @@
 add_clang_library(MLIRCIR
   CIRAttrs.cpp
   CIRDialect.cpp
+  CIRDialectBytecode.cpp
   CIRMemorySlot.cpp
   CIRTypes.cpp
   CIRDataLayout.cpp
 
   DEPENDS
   MLIRCIROpsIncGen
+  MLIRCIRDialectBytecodeIncGen
   MLIRCIRTypeConstraintsIncGen
   MLIRCIREnumsGen
   MLIRCIROpInterfacesIncGen
@@ -20,5 +22,6 @@ add_clang_library(MLIRCIR
   MLIRFuncDialect
   MLIRLoopLikeInterface
   MLIRCIRInterfaces
+  MLIRPtrDialect
   clangAST
   )

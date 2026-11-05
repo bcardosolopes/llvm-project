@@ -27,7 +27,7 @@ define void @composite_type() !dbg !3 {
 ; // -----
 
 ; CHECK: #{{.+}} = #llvm.di_composite_type<tag = DW_TAG_array_type, name = "vector",
-; CHECK-SAME: baseType = #{{.*}}, flags = Vector, elements = #llvm.di_subrange<count = 4 : i64>
+; CHECK-SAME: baseType = #{{.*}}, flags = Vector, elements = [#llvm.di_subrange<count = 4 : i64>]
 
 define void @composite_type() !dbg !3 {
   ret void

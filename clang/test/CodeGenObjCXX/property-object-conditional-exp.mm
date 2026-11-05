@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -disable-llvm-passes -fclangir -o - %s | FileCheck %s %}
 
 struct CGRect {
   char* origin;

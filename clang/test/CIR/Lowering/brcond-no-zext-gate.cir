@@ -1,0 +1,18 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @brcond_no_zext_gate(%arg0: !s32i) {
+    %zero = cir.const #cir.int<0> : !s32i
+    %cond = cir.cmp(ne, %arg0, %zero) : !s32i, !cir.bool
+    cir.brcond %cond ^bb1, ^bb2
+  ^bb1:
+    cir.return
+  ^bb2:
+    cir.return
+  }
+}
+
+// CHECK-LABEL: llvm.func @brcond_no_zext_gate
+// CHECK: llvm.cond_br %{{.*}}, ^bb1, ^bb2

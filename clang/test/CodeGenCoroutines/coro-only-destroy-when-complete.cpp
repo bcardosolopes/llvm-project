@@ -4,6 +4,9 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 \
 // RUN:     -O3 -emit-llvm %s -o - | FileCheck %s --check-prefix=CHECK-O
 
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 \
+// RUN:     -O3 -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=CHECK-CIR-O %}
+
 #include "Inputs/coroutine.h"
 
 using namespace std;
@@ -57,3 +60,8 @@ A foo() {
 // CHECK-O: {{^.*}}:
 // CHECK-O-NOT: br
 // CHECK-O: ret void
+
+// CHECK-CIR-O: define{{.*}}@_Z3foov.destroy
+// CHECK-CIR-O-NOT: @_ZN4dtorD1Ev
+// CHECK-CIR-O: @_ZdlPvm
+// CHECK-CIR-O: ret void

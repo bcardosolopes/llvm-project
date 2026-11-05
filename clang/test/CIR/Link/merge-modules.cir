@@ -1,0 +1,60 @@
+// RUN: cir-link %s %S/Inputs/merge-modules-b.cir --warn-odr-divergence -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s \
+// RUN:   --implicit-check-not="cir.int<222>" \
+// RUN:   --implicit-check-not="cir.func private @defined_in_b"
+
+// The CIR module linker. Holding CIR to link time only means something if
+// something merges the translation units, and this is that step.
+//
+// Three resolutions have to come out right, and each is a different bug if it
+// does not:
+//
+//   @defined_in_a   defined here, declared in B  -> one definition, no dangling decl
+//   @defined_in_b   declared here, defined in B  -> the definition must replace the
+//                                                   declaration, or the symbol is
+//                                                   undefined at link time
+//   @duplicated     defined in BOTH              -> permissive: first wins, and the
+//                                                   divergence is reported rather
+//                                                   than silently dropped
+//
+// The record type is the fourth thing under test. Both inputs declare
+// `struct "Shared"`, and both are parsed into one MLIRContext, so CIR's
+// name-based uniquing of identified records collapses them to a single type
+// with no work in the linker. A second !cir.record<struct "Shared"> in the
+// output would mean that unification broke.
+
+!s32i = !cir.int<s, 32>
+!rec_Shared = !cir.record<struct "Shared" {!s32i, !s32i}>
+
+module {
+  cir.func @defined_in_a(%arg0: !s32i) -> !s32i {
+    cir.return %arg0 : !s32i
+  }
+
+  cir.func private @defined_in_b(!rec_Shared) -> !s32i
+
+  cir.func @duplicated() -> !s32i {
+    %0 = cir.const #cir.int<111> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.global external @only_in_a = #cir.int<7> : !s32i
+}
+
+// STATS: warning: 'duplicated' defined in more than one input
+// STATS: 1 ODR divergences
+
+// Exactly one definition of each. The implicit-check-nots on the RUN line are
+// the load-bearing part: they assert that B's losing definition (222) never
+// appears, and that no declaration of @defined_in_b survives alongside the
+// definition. Ordinary CHECK lines cannot express "nowhere in the file".
+// CHECK-DAG: cir.func @defined_in_a
+// CHECK-DAG: cir.func @defined_in_b
+// CHECK-DAG: cir.func @duplicated
+// CHECK-DAG: cir.const #cir.int<111>
+// CHECK-DAG: cir.global external @only_in_a
+// CHECK-DAG: cir.global external @only_in_b
+
+// One record type, not two: both inputs declared `struct "Shared"` and CIR's
+// name-based uniquing collapsed them.
+// CHECK-DAG: !rec_Shared = !cir.record<struct "Shared" {!s32i, !s32i}>

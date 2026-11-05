@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -disable-llvm-passes -fclangir -o - %s | FileCheck %s --check-prefix=CIR %}
 
 static int gint;
 struct SetSection { 
@@ -25,3 +26,7 @@ static SetSection gSetSection;
 // CHECK: [[T1:%.*]] = load {{.*}}, ptr @OBJC_SELECTOR_REFERENCES_
 // CHECK: [[C:%.*]] = call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @objc_msgSend
 // CHECK: call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @_ZN10SetSection2atEi(ptr {{[^,]*}} [[C]]
+// CIR-LABEL: define internal noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @"\01-[SetShow sections]"(
+// CIR: load ptr, ptr @OBJC_SELECTOR_REFERENCES_
+// CIR: call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @objc_msgSend
+// CIR: call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @_ZN10SetSection2atEi(ptr {{[^,]*}} %{{.*}}, i32 noundef 100)

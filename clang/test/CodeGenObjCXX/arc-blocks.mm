@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -std=gnu++98 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -fexceptions -fobjc-arc-exceptions -o - %s | FileCheck -check-prefix CHECK %s
+// RUN: %if cir-support %{ %clang_cc1 -std=gnu++98 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -fexceptions -fobjc-arc-exceptions -fclangir -o - %s | FileCheck -check-prefix CHECK-CIR-RVAL-REF %s %}
 // RUN: %clang_cc1 -std=gnu++98 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -fexceptions -fobjc-arc-exceptions -O1 -o - %s | FileCheck -check-prefix CHECK-O1 %s
 // RUN: %clang_cc1 -std=gnu++98 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -o - %s | FileCheck -check-prefix CHECK-NOEXCP %s
 // RUN: %clang_cc1 -std=gnu++98 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -fexceptions -fobjc-arc-exceptions -fobjc-avoid-heapify-local-blocks -o - %s | FileCheck -check-prefix CHECK-NOHEAP %s
@@ -311,6 +312,13 @@ namespace test_block_retain {
 // CHECK: invoke void @_ZN13test_rval_ref17callTemplateBlockEOU15__autoreleasingU13block_pointerFvvE(
 
 // CHECK: call void @llvm.objc.storeStrong(ptr %[[BLOCK_CAPTURED]], ptr null)
+// CHECK-CIR-RVAL-REF-LABEL: define void @_ZN13test_rval_ref4testEP11objc_object(
+// CHECK-CIR-RVAL-REF: %[[BLOCK:.*]] = alloca { ptr, i32, i32, ptr, ptr, ptr }, i64 1, align 8
+// CHECK-CIR-RVAL-REF: %[[BLOCK_CAPTURED:.*]] = getelementptr inbounds nuw { ptr, i32, i32, ptr, ptr, ptr }, ptr %[[BLOCK]], i32 0, i32 5
+// CHECK-CIR-RVAL-REF: %[[RETAINED:.*]] = call ptr @llvm.objc.retain(
+// CHECK-CIR-RVAL-REF: store ptr %[[RETAINED]], ptr %[[BLOCK_CAPTURED]], align 8
+// CHECK-CIR-RVAL-REF: invoke void @_ZN13test_rval_ref17callTemplateBlockEOU15__autoreleasingU13block_pointerFvvE(
+// CHECK-CIR-RVAL-REF: call void @llvm.objc.storeStrong(ptr %[[BLOCK_CAPTURED]], ptr null)
 
 namespace test_rval_ref {
   void callTemplateBlock(BlockTy &&func);

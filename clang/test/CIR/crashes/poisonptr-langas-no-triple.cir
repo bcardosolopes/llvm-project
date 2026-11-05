@@ -1,0 +1,27 @@
+// RUN: not cir-opt %s -cir-to-llvm -split-input-file -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: failed to lower poison constant type
+// CHECK-SAME: lang_address_space(offload_global)
+// CHECK: error: failed to lower undef constant type
+// CHECK-SAME: lang_address_space(offload_global)
+// CHECK-NOT: attempting to construct a TypeRange with null types
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func private @f() {
+    %0 = cir.const #cir.poison : !cir.ptr<!s32i, lang_address_space(offload_global)>
+    cir.return
+  }
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func private @f() {
+    %0 = cir.const #cir.undef : !cir.ptr<!s32i, lang_address_space(offload_global)>
+    cir.return
+  }
+}

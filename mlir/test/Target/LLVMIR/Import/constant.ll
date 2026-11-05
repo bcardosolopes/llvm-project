@@ -308,3 +308,21 @@ define [0 x ptr] @load_zero_array() {
 @global_array_with_elements = global [3 x i32] zeroinitializer
 
 ; CHECK: llvm.mlir.global external @global_array_with_elements({{.*}}) {addr_space = 0 : i32} : !llvm.array<3 x i32>
+
+; // -----
+
+; A scalable vector's zero has no fixed number of elements: it imports as a
+; zero op, also as an intrinsic call's operand.
+
+declare void @llvm.masked.store.nxv4i32.p0(<vscale x 4 x i32>, ptr, i32, <vscale x 4 x i1>)
+
+define <vscale x 4 x i32> @scalable_vector_zero(<vscale x 4 x i32> %a, ptr %p, <vscale x 4 x i1> %m) {
+  %1 = add <vscale x 4 x i32> %a, zeroinitializer
+  call void @llvm.masked.store.nxv4i32.p0(<vscale x 4 x i32> zeroinitializer, ptr %p, i32 4, <vscale x 4 x i1> %m)
+  ret <vscale x 4 x i32> %1
+}
+
+; CHECK-LABEL: @scalable_vector_zero
+; CHECK:  %[[ZERO:.+]] = llvm.mlir.zero : vector<[4]xi32>
+; CHECK:  llvm.add %{{.+}}, %[[ZERO]] : vector<[4]xi32>
+; CHECK:  llvm.intr.masked.store %[[ZERO]], %{{.+}}, %{{.+}} {alignment = 4 : i32, llvm.call_arg_attrs = [{}, {llvm.align = 4 : i64}, {}]} : vector<[4]xi32>, vector<[4]xi1> into !llvm.ptr

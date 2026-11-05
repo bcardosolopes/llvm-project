@@ -1,0 +1,24 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @omp_cancellation_point_parallel() {
+    omp.parallel {
+      omp.cancellation_point cancellation_construct_type(parallel)
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func @omp_cancel_parallel() {
+    omp.parallel {
+      omp.cancel cancellation_construct_type(parallel)
+      omp.terminator
+    }
+    cir.return
+  }
+}
+
+// CHECK-LABEL: define internal void @omp_cancellation_point_parallel..omp_par(
+// CHECK: call i32 @__kmpc_cancellationpoint(ptr {{.*}}, i32 {{.*}}, i32 1)
+// CHECK-LABEL: define internal void @omp_cancel_parallel..omp_par(
+// CHECK: call i32 @__kmpc_cancel(ptr {{.*}}, i32 {{.*}}, i32 1)

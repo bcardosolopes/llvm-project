@@ -27,6 +27,7 @@ public:
   enum class OutputType {
     EmitAssembly,
     EmitCIR,
+    EmitMLIR,
     EmitLLVM,
     EmitBC,
     EmitObj,
@@ -35,8 +36,15 @@ public:
 private:
   friend class CIRGenConsumer;
 
+  /// Set only when no context was supplied to the constructor, in which case
+  /// this action allocates one and owns it. Declared before MLIRMod so that
+  /// the module, whose operations are uniqued in the context, is destroyed
+  /// first.
+  std::unique_ptr<mlir::MLIRContext> OwnedMLIRCtx;
+
   mlir::OwningOpRef<mlir::ModuleOp> MLIRMod;
 
+  /// The context in use: either the caller's or OwnedMLIRCtx.
   mlir::MLIRContext *MLIRCtx;
 
 protected:
@@ -45,6 +53,10 @@ protected:
   std::unique_ptr<clang::ASTConsumer>
   CreateASTConsumer(clang::CompilerInstance &CI,
                     llvm::StringRef InFile) override;
+
+  void ExecuteAction() override;
+
+  bool hasIRSupport() const override { return true; }
 
 public:
   ~CIRGenAction() override;
@@ -57,6 +69,13 @@ class EmitCIRAction : public CIRGenAction {
 
 public:
   EmitCIRAction(mlir::MLIRContext *MLIRCtx = nullptr);
+};
+
+class EmitMLIRAction : public CIRGenAction {
+  virtual void anchor();
+
+public:
+  EmitMLIRAction(mlir::MLIRContext *MLIRCtx = nullptr);
 };
 
 class EmitLLVMAction : public CIRGenAction {

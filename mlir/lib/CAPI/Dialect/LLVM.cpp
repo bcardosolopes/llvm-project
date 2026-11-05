@@ -242,6 +242,7 @@ MlirAttribute mlirLLVMDICompositeTypeAttrGet(
       cast<DIExpressionAttr>(unwrap(rank)),
       cast<DIExpressionAttr>(unwrap(allocated)),
       cast<DIExpressionAttr>(unwrap(associated)),
+      /*annotations=*/{},
       llvm::map_to_vector(unwrapList(nElements, elements, elementsStorage),
                           llvm::CastTo<DINodeAttr>)));
 }
@@ -421,14 +422,15 @@ MlirAttribute mlirLLVMDISubprogramAttrGet(
       cast<DICompileUnitAttr>(unwrap(compileUnit)),
       cast<DIScopeAttr>(unwrap(scope)), cast<StringAttr>(unwrap(name)),
       cast<StringAttr>(unwrap(linkageName)), cast<DIFileAttr>(unwrap(file)),
-      line, scopeLine, DISubprogramFlags(subprogramFlags),
+      line, scopeLine, DIFlags::Zero, DISubprogramFlags(subprogramFlags),
       cast<DISubroutineTypeAttr>(unwrap(type)),
       llvm::map_to_vector(
           unwrapList(nRetainedNodes, retainedNodes, nodesStorage),
           llvm::CastTo<DINodeAttr>),
       llvm::map_to_vector(
           unwrapList(nAnnotations, annotations, annotationsStorage),
-          llvm::CastTo<DINodeAttr>)));
+          llvm::CastTo<DINodeAttr>),
+      /*keyInstructions=*/false));
 }
 
 MlirStringRef mlirLLVMDISubprogramAttrGetName(void) {
@@ -503,7 +505,7 @@ MlirStringRef mlirLLVMDIImportedEntityAttrGetName(void) {
 MlirAttribute mlirLLVMDIAnnotationAttrGet(MlirContext ctx, MlirAttribute name,
                                           MlirAttribute value) {
   return wrap(DIAnnotationAttr::get(unwrap(ctx), cast<StringAttr>(unwrap(name)),
-                                    cast<StringAttr>(unwrap(value))));
+                                    unwrap(value)));
 }
 
 MlirStringRef mlirLLVMDIAnnotationAttrGetName(void) {

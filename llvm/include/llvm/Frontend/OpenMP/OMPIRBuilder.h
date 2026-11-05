@@ -9,6 +9,16 @@
 // This file defines the OpenMPIRBuilder class and helpers used as a convenient
 // way to create LLVM instructions for OpenMP directives.
 //
+// ClangIR's OpenMP frontend adds the following public API:
+//   - `setOpenMPVersion(unsigned)` setter on `OpenMPIRBuilder`.
+//   - `WorkshareAlignedVarsInfo` and `StaticWorkshareLoopInfo` structs.
+//   - `IVSigned` / `AlignedVars` parameters on the `applyWorkshareLoop`
+//     family, paired with the `omp.frontend.iv_signed` attribute.
+//   - `Severity` / `Message` parameters on `createParallel`, for the
+//     OpenMP 6.0 `severity` / `message` clauses.
+//   - `DepVal` / `DepSize` fields on `DepInfo`, paired with the
+//     `depend_sizes` operand on the OpenMP dialect ops.
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_FRONTEND_OPENMP_OMPIRBUILDER_H
@@ -142,6 +152,11 @@ public:
 
   CallingConv::ID RuntimeCC = llvm::CallingConv::C;
 
+  /// The OpenMP spec version (e.g., 50 for 5.0, 51 for 5.1). Used by the
+  /// builder to apply version-dependent behavior such as flush suppression
+  /// for atomic capture in OpenMP 5.1+.
+  std::optional<unsigned> OpenMPVersion;
+
   LLVM_ABI OpenMPIRBuilderConfig();
   LLVM_ABI OpenMPIRBuilderConfig(bool IsTargetDevice, bool IsGPU,
                                  bool OpenMPOffloadMandatory,
@@ -215,6 +230,8 @@ public:
   void setGridValue(omp::GV G) { GridValue = G; }
   void setDefaultTargetAS(unsigned AS) { DefaultTargetAS = AS; }
   void setRuntimeCC(CallingConv::ID CC) { RuntimeCC = CC; }
+  void setOpenMPVersion(unsigned Version) { OpenMPVersion = Version; }
+  std::optional<unsigned> getOpenMPVersion() const { return OpenMPVersion; }
 
   LLVM_ABI void setHasRequiresReverseOffload(bool Value);
   LLVM_ABI void setHasRequiresUnifiedAddress(bool Value);
@@ -557,6 +574,19 @@ public:
   /// Type used to represent an insertion point or an error value.
   using InsertPointOrErrorTy = Expected<InsertPointTy>;
 
+  /// Stable aligned-clause values captured from a nested composite SIMD region.
+  ///
+  /// When the original aligned pointer is a transient load that does not
+  /// survive wsloop reshaping or outlining, Vars stores the stable pointer
+  /// operand and DereferenceVars marks entries that must be reloaded at the
+  /// final emission site before creating the alignment assumption.
+  struct WorkshareAlignedVarsInfo {
+    MapVector<Value *, Value *> Vars;
+    SetVector<Value *> DereferenceVars;
+
+    bool empty() const { return Vars.empty(); }
+  };
+
   /// Get the create a name using the platform specific separators.
   /// \param Parts parts of the final name that needs separation
   /// The created name has a first separator between the first and second part
@@ -754,7 +784,8 @@ public:
   LLVM_ABI InsertPointOrErrorTy createBarrier(const LocationDescription &Loc,
                                               omp::Directive Kind,
                                               bool ForceSimpleCall = false,
-                                              bool CheckCancelFlag = true);
+                                              bool CheckCancelFlag = true,
+                                              Value *ThreadID = nullptr);
 
   /// Generator for '#omp cancel'
   ///
@@ -779,6 +810,10 @@ public:
   /// Creates a ScanInfo object, allocates and returns the pointer.
   LLVM_ABI Expected<ScanInfo *> scanInfoInitialize();
 
+  /// Address of element \p Index of a by-reference scan buffer whose elements
+  /// are \p ElemSize bytes.
+  Value *getScanBufferSlot(Value *Buff, Value *Index, Value *ElemSize);
+
   /// Generator for '#omp parallel'
   ///
   /// \param Loc The insert and source location description.
@@ -788,6 +823,10 @@ public:
   /// \param FiniCB Callback to finalize variable copies.
   /// \param IfCondition The evaluated 'if' clause expression, if any.
   /// \param NumThreads The evaluated 'num_threads' clause expression, if any.
+  /// \param NumThreadsModifier The evaluated 'num_threads' clause modifier, if
+  ///                           any.
+  /// \param Severity The evaluated strict num_threads severity payload, if any.
+  /// \param Message The evaluated strict num_threads message payload, if any.
   /// \param ProcBind The value of the 'proc_bind' clause (see ProcBindKind).
   /// \param IsCancellable Flag to indicate a cancellable parallel region.
   ///
@@ -796,7 +835,10 @@ public:
       const LocationDescription &Loc, InsertPointTy AllocaIP,
       BodyGenCallbackTy BodyGenCB, PrivatizeCallbackTy PrivCB,
       FinalizeCallbackTy FiniCB, Value *IfCondition, Value *NumThreads,
-      omp::ProcBindKind ProcBind, bool IsCancellable);
+      omp::ProcBindKind ProcBind = omp::OMP_PROC_BIND_default,
+      bool IsCancellable = false,
+      omp::NumThreadsType NumThreadsModifier = omp::OMP_NUMTHREADS_Unknown,
+      Value *Severity = nullptr, Value *Message = nullptr);
 
   /// Generator for the control flow structure of an OpenMP canonical loop.
   ///
@@ -1146,10 +1188,11 @@ private:
   /// \param NoLoop   If true, no-loop code is generated.
   ///
   /// \returns Point where to insert code after the workshare construct.
-  InsertPointTy applyWorkshareLoopTarget(DebugLoc DL, CanonicalLoopInfo *CLI,
-                                         InsertPointTy AllocaIP,
-                                         omp::WorksharingLoopType LoopType,
-                                         bool NoLoop);
+  InsertPointTy
+  applyWorkshareLoopTarget(DebugLoc DL, CanonicalLoopInfo *CLI,
+                           InsertPointTy AllocaIP,
+                           omp::WorksharingLoopType LoopType, bool NoLoop,
+                           WorkshareAlignedVarsInfo AlignedVars = {});
 
   /// Modifies the canonical loop to be a statically-scheduled workshare loop.
   ///
@@ -1172,14 +1215,36 @@ private:
   /// dist_schedule as this is handled slightly differently
   /// \param DistScheduleSchedType Defines the Schedule Type for the Distribute
   /// loop. Defaults to None if no Distribute loop is present.
-  ///
+  /// \param IVSigned Indicates whether the loop IV uses signed runtime helpers.
   /// \returns Point where to insert code after the workshare construct.
   InsertPointOrErrorTy applyStaticWorkshareLoop(
       DebugLoc DL, CanonicalLoopInfo *CLI, InsertPointTy AllocaIP,
       omp::WorksharingLoopType LoopType, bool NeedsBarrier,
       bool HasDistSchedule = false,
-      omp::OMPScheduleType DistScheduleSchedType = omp::OMPScheduleType::None);
+      omp::OMPScheduleType DistScheduleSchedType = omp::OMPScheduleType::None,
+      bool IVSigned = false, WorkshareAlignedVarsInfo AlignedVars = {});
 
+public:
+  /// Data returned after preparing a static workshare loop before finalization.
+  struct StaticWorkshareLoopInfo {
+    InsertPointTy AfterIP;
+    Value *SrcLoc;
+    Value *ThreadNum;
+  };
+
+  /// Modifies the canonical loop to use static workshare bounds, but leaves
+  /// finalization and the optional barrier to the caller.
+  ///
+  /// This is intended for cases that need to share one common finalization
+  /// sequence across multiple statically-versioned loop bodies.
+  LLVM_ABI StaticWorkshareLoopInfo prepareStaticWorkshareLoop(
+      DebugLoc DL, CanonicalLoopInfo *CLI, InsertPointTy AllocaIP,
+      omp::WorksharingLoopType LoopType, Value *SrcLoc = nullptr,
+      Value *ThreadNum = nullptr, bool HasDistSchedule = false,
+      omp::OMPScheduleType DistScheduleSchedType = omp::OMPScheduleType::None,
+      bool IVSigned = false, WorkshareAlignedVarsInfo AlignedVars = {});
+
+private:
   /// Modifies the canonical loop a statically-scheduled workshare loop with a
   /// user-specified chunk size.
   ///
@@ -1198,7 +1263,7 @@ private:
   ///                 scheduling. If \p nullptr, defaults to 1.
   /// \param DistScheduleSchedType Defines the Schedule Type for the Distribute
   /// loop. Defaults to None if no Distribute loop is present.
-  ///
+  /// \param IVSigned Indicates whether the loop IV uses signed runtime helpers.
   /// \returns Point where to insert code after the workshare construct.
   InsertPointOrErrorTy applyStaticChunkedWorkshareLoop(
       DebugLoc DL, CanonicalLoopInfo *CLI, InsertPointTy AllocaIP,
@@ -1206,7 +1271,8 @@ private:
       omp::OMPScheduleType SchedType =
           omp::OMPScheduleType::UnorderedStaticChunked,
       Value *DistScheduleChunkSize = nullptr,
-      omp::OMPScheduleType DistScheduleSchedType = omp::OMPScheduleType::None);
+      omp::OMPScheduleType DistScheduleSchedType = omp::OMPScheduleType::None,
+      bool IVSigned = false, WorkshareAlignedVarsInfo AlignedVars = {});
 
   /// Modifies the canonical loop to be a dynamically-scheduled workshare loop.
   ///
@@ -1226,14 +1292,12 @@ private:
   ///                     the loop.
   /// \param Chunk    The size of loop chunk considered as a unit when
   ///                 scheduling. If \p nullptr, defaults to 1.
-  ///
+  /// \param IVSigned Indicates whether the loop IV uses signed runtime helpers.
   /// \returns Point where to insert code after the workshare construct.
-  InsertPointOrErrorTy applyDynamicWorkshareLoop(DebugLoc DL,
-                                                 CanonicalLoopInfo *CLI,
-                                                 InsertPointTy AllocaIP,
-                                                 omp::OMPScheduleType SchedType,
-                                                 bool NeedsBarrier,
-                                                 Value *Chunk = nullptr);
+  InsertPointOrErrorTy applyDynamicWorkshareLoop(
+      DebugLoc DL, CanonicalLoopInfo *CLI, InsertPointTy AllocaIP,
+      omp::OMPScheduleType SchedType, bool NeedsBarrier, Value *Chunk = nullptr,
+      bool IVSigned = false, WorkshareAlignedVarsInfo AlignedVars = {});
 
   /// Create alternative version of the loop to support if clause
   ///
@@ -1309,7 +1373,9 @@ public:
   /// dist_schedule as this is handled slightly differently
   ///
   /// \param DistScheduleChunkSize The chunk size for dist_schedule loop
-  ///
+  /// \param IVSigned Indicates whether the loop IV uses signed runtime helpers.
+  /// \param Order The order clause kind. order(concurrent) attaches loop
+  /// parallel-access metadata without changing runtime scheduling semantics.
   /// \returns Point where to insert code after the workshare construct.
   LLVM_ABI InsertPointOrErrorTy applyWorkshareLoop(
       DebugLoc DL, CanonicalLoopInfo *CLI, InsertPointTy AllocaIP,
@@ -1321,7 +1387,9 @@ public:
       omp::WorksharingLoopType LoopType =
           omp::WorksharingLoopType::ForStaticLoop,
       bool NoLoop = false, bool HasDistSchedule = false,
-      Value *DistScheduleChunkSize = nullptr);
+      Value *DistScheduleChunkSize = nullptr, bool IVSigned = false,
+      WorkshareAlignedVarsInfo AlignedVars = {},
+      omp::OrderKind Order = omp::OrderKind::OMP_ORDER_unknown);
 
   /// Tile a loop nest.
   ///
@@ -1431,6 +1499,12 @@ public:
                           Value *IfCond, omp::OrderKind Order,
                           ConstantInt *Simdlen, ConstantInt *Safelen);
 
+  /// Mark a loop as the scalar fallback of an OpenMP SIMD region.
+  ///
+  /// This strips SIMD-only memory metadata such as nontemporal/access-group
+  /// and attaches `llvm.loop.vectorize.enable = false`.
+  LLVM_ABI void scalarizeSimd(CanonicalLoopInfo *Loop);
+
   /// Generator for '#omp flush'
   ///
   /// \param Loc The location where the flush directive was encountered
@@ -1449,13 +1523,28 @@ public:
   /// A struct to pack the relevant information for an OpenMP depend clause.
   struct DependData {
     omp::RTLDependenceKindTy DepKind = omp::RTLDependenceKindTy::DepUnknown;
-    Type *DepValueType;
-    Value *DepVal;
+    Type *DepValueType = nullptr;
+    Value *DepVal = nullptr;
+    Value *DepSize = nullptr;
     explicit DependData() = default;
     DependData(omp::RTLDependenceKindTy DepKind, Type *DepValueType,
-               Value *DepVal)
-        : DepKind(DepKind), DepValueType(DepValueType), DepVal(DepVal) {}
+               Value *DepVal, Value *DepSize = nullptr)
+        : DepKind(DepKind), DepValueType(DepValueType), DepVal(DepVal),
+          DepSize(DepSize) {}
   };
+
+  /// Generator for '#omp taskwait' with optional dependences and nowait.
+  ///
+  /// \param Loc The location where the taskwait directive was encountered.
+  /// \param Dependencies The list of dependence records to materialize.
+  /// \param HasNoWait Whether the taskwait carries the nowait clause.
+  /// \param NumDependencies Optional runtime dependence count when the
+  ///        dependence array is already materialized by the caller.
+  /// \param DepArray Optional prebuilt runtime dependence array.
+  LLVM_ABI void createTaskwait(const LocationDescription &Loc,
+                               ArrayRef<DependData> Dependencies,
+                               bool HasNoWait, Value *NumDependencies = nullptr,
+                               Value *DepArray = nullptr);
 
   /// Generator for `#omp taskloop`
   ///
@@ -1477,6 +1566,9 @@ public:
   /// \param NoGroup False if NoGroup is defined, true if not
   /// \param Sched If Grainsize is defined, Sched is 1. Num Tasks, Shed is 2.
   /// Otherwise Sched is 0
+  /// \param HasModifier True if the taskloop uses the strict
+  /// grainsize/num_tasks
+  ///                    runtime ABI variant.
   /// \param Final i1 value which is `true` if the task is final, `false` if the
   ///              task is not final.
   /// \param Mergeable If the given task is `mergeable`
@@ -1493,8 +1585,9 @@ public:
       llvm::function_ref<llvm::Expected<llvm::CanonicalLoopInfo *>()> LoopInfo,
       Value *LBVal, Value *UBVal, Value *StepVal, bool Untied = false,
       Value *IfCond = nullptr, Value *GrainSize = nullptr, bool NoGroup = false,
-      int Sched = 0, Value *Final = nullptr, bool Mergeable = false,
-      Value *Priority = nullptr, TaskDupCallbackTy DupCB = nullptr,
+      int Sched = 0, bool HasModifier = false, Value *Final = nullptr,
+      bool Mergeable = false, Value *Priority = nullptr,
+      TaskDupCallbackTy DupCB = nullptr,
       Value *TaskContextStructPtrVal = nullptr);
 
   /// Generator for `#omp task`
@@ -1521,7 +1614,8 @@ public:
              BodyGenCallbackTy BodyGenCB, bool Tied = true,
              Value *Final = nullptr, Value *IfCondition = nullptr,
              SmallVector<DependData> Dependencies = {}, bool Mergeable = false,
-             Value *EventHandle = nullptr, Value *Priority = nullptr);
+             Value *EventHandle = nullptr, Value *Priority = nullptr,
+             Value *NumDependencies = nullptr, Value *DepArray = nullptr);
 
   /// Generator for the taskgroup construct
   ///
@@ -2439,11 +2533,14 @@ public:
   /// Helper that contains information about regions we need to outline
   /// during finalization.
   struct OutlineInfo {
+    using RemapInputValueCBTy = std::function<void(Value *, Value *)>;
     using PostOutlineCBTy = std::function<void(Function &)>;
+    RemapInputValueCBTy RemapInputValueCB;
     PostOutlineCBTy PostOutlineCB;
     BasicBlock *EntryBB, *ExitBB, *OuterAllocaBB;
     SmallVector<Value *, 2> ExcludeArgsFromAggregate;
     SetVector<Value *> Inputs, Outputs;
+    bool AggregateArgs = true;
     // TODO: this should be safe to enable by default
     bool FixUpNonEntryAllocas = false;
 
@@ -2606,8 +2703,10 @@ public:
     SmallVector<Value *, 3> TargetThreadLimit = {nullptr};
     SmallVector<Value *, 3> TeamsThreadLimit = {nullptr};
 
-    /// 'parallel' construct 'num_threads' clause value, if present and it is an
-    /// SPMD kernel.
+    /// 'parallel' construct 'if' clause value, if present.
+    Value *ParallelIfCond = nullptr;
+
+    /// 'parallel' construct 'num_threads' clause value, if present.
     Value *MaxThreads = nullptr;
 
     /// Total number of iterations of the SPMD or Generic-SPMD kernel or null if
@@ -2803,13 +2902,17 @@ public:
   /// \param AllocaIP The insertion point to be used for alloca instructions.
   /// \param Dependencies Vector of DependData objects holding information of
   ///        dependencies as specified by the 'depend' clause.
+  /// \param NumDependencies Optional runtime dependence count when the
+  ///        dependence array is already materialized by the caller.
+  /// \param DepArray Optional prebuilt runtime dependence array.
   /// \param HasNoWait True if the target construct had 'nowait' on it, false
   ///        otherwise
-  LLVM_ABI InsertPointOrErrorTy emitTargetTask(
-      TargetTaskBodyCallbackTy TaskBodyCB, Value *DeviceID, Value *RTLoc,
-      OpenMPIRBuilder::InsertPointTy AllocaIP,
-      const SmallVector<llvm::OpenMPIRBuilder::DependData> &Dependencies,
-      const TargetDataRTArgs &RTArgs, bool HasNoWait);
+  LLVM_ABI InsertPointOrErrorTy
+  emitTargetTask(TargetTaskBodyCallbackTy TaskBodyCB, Value *DeviceID,
+                 Value *RTLoc, OpenMPIRBuilder::InsertPointTy AllocaIP,
+                 ArrayRef<llvm::OpenMPIRBuilder::DependData> Dependencies,
+                 const TargetDataRTArgs &RTArgs, bool HasNoWait,
+                 Value *NumDependencies = nullptr, Value *DepArray = nullptr);
 
   /// Emit the arguments to be passed to the runtime library based on the
   /// arrays of base pointers, pointers, sizes, map types, and mappers.  If
@@ -3389,6 +3492,8 @@ public:
   /// \param GenMapInfoCB Callback that populates the MapInfos and returns.
   /// \param CustomMapperCB Callback to generate code related to
   /// custom mappers.
+  /// \param Dependencies Optional dependency information for standalone target
+  ///        enter/exit/update directives.
   /// \param BodyGenCB Optional Callback to generate the region code.
   /// \param DeviceAddrCB Optional callback to generate code related to
   /// use_device_ptr and use_device_addr.
@@ -3397,6 +3502,7 @@ public:
       InsertPointTy CodeGenIP, Value *DeviceID, Value *IfCond,
       TargetDataInfo &Info, GenMapInfoCallbackTy GenMapInfoCB,
       CustomMapperCallbackTy CustomMapperCB,
+      ArrayRef<DependData> Dependencies = {},
       omp::RuntimeFunction *MapperFunc = nullptr,
       function_ref<InsertPointOrErrorTy(InsertPointTy CodeGenIP,
                                         BodyGenTy BodyGenType)>
@@ -3435,6 +3541,9 @@ public:
   ///        dependency information as passed in the depend clause
   /// \param HasNowait Whether the target construct has a `nowait` clause or
   ///        not.
+  /// \param NumDependencies Optional runtime dependence count when the
+  ///        dependence array is already materialized by the caller.
+  /// \param DepArray Optional prebuilt runtime dependence array.
   /// \param DynCGroupMem The size of the dynamic groupprivate memory for each
   /// cgroup.
   /// \param DynCGroupMem The fallback mechanism to execute if the requested
@@ -3451,6 +3560,31 @@ public:
       TargetGenArgAccessorsCallbackTy ArgAccessorFuncCB,
       CustomMapperCallbackTy CustomMapperCB,
       const SmallVector<DependData> &Dependencies, bool HasNowait = false,
+      Value *NumDependencies = nullptr, Value *DepArray = nullptr,
+      Value *DynCGroupMem = nullptr,
+      omp::OMPDynGroupprivateFallbackType DynCGroupMemFallback =
+          omp::OMPDynGroupprivateFallbackType::Abort);
+
+  /// Generator for '#omp target' with explicit host fallback inputs.
+  ///
+  /// \param Inputs The values to remap inside the outlined function body.
+  /// \param HostFallbackInputs The host fallback ABI/call inputs. These must
+  ///        correspond 1:1 with \p Inputs. On the host, the outlined function
+  ///        parameter types and fallback call arguments are derived from this
+  ///        list, while the outlined body still rewrites uses of \p Inputs.
+  LLVM_ABI InsertPointOrErrorTy createTarget(
+      const LocationDescription &Loc, bool IsOffloadEntry,
+      OpenMPIRBuilder::InsertPointTy AllocaIP,
+      OpenMPIRBuilder::InsertPointTy CodeGenIP, TargetDataInfo &Info,
+      TargetRegionEntryInfo &EntryInfo,
+      const TargetKernelDefaultAttrs &DefaultAttrs,
+      const TargetKernelRuntimeAttrs &RuntimeAttrs, Value *IfCond,
+      SmallVectorImpl<Value *> &Inputs, ArrayRef<Value *> HostFallbackInputs,
+      GenMapInfoCallbackTy GenMapInfoCB, TargetBodyGenCallbackTy BodyGenCB,
+      TargetGenArgAccessorsCallbackTy ArgAccessorFuncCB,
+      CustomMapperCallbackTy CustomMapperCB,
+      const SmallVector<DependData> &Dependencies, bool HasNowait = false,
+      Value *NumDependencies = nullptr, Value *DepArray = nullptr,
       Value *DynCGroupMem = nullptr,
       omp::OMPDynGroupprivateFallbackType DynCGroupMemFallback =
           omp::OMPDynGroupprivateFallbackType::Abort);
@@ -4197,6 +4331,12 @@ public:
   /// Maps the private reduction variable to the pointer of the temporary
   /// buffer
   llvm::SmallDenseMap<llvm::Value *, llvm::Value *> *ScanBuffPtrs;
+
+  /// Byte size (i64) of one buffer element for scan variables reduced by
+  /// reference, such as array sections. Such a variable is a pointer to its
+  /// storage; its buffer elements are copied with memcpy and combined in place.
+  /// Variables without an entry are held by value.
+  llvm::SmallDenseMap<llvm::Value *, llvm::Value *> ScanBuffElemSizes;
 
   /// Keeps track of value of iteration variable for input/scan loop to be
   /// used for Scan directive lowering

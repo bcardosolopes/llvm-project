@@ -1,0 +1,54 @@
+// RUN: cir-link %s %S/Inputs/local-linkage-b.cir --warn-odr-divergence -o %t.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// A local symbol that collides is a *different function*, not an ODR duplicate.
+//
+// Two translation units may each contain `static int helper()`. Both mangle to
+// the same name, and resolving them the way two definitions of an extern
+// function are resolved silently deletes one of them and rewires its callers
+// to the other. That is a miscompile, and it is not hypothetical -- it is what
+// cir-link did before local linkage was taken into account:
+//
+//   from_a=100 from_b=100        (wrong: B's helper was dropped)
+//   from_a=100 from_b=200        (correct, and what a normal build produces)
+//
+// So a colliding local is renamed and its references rewritten, while the
+// externally visible @shared below still resolves by the ordinary rules. The
+// two behaviours have to coexist, which is why both appear in one test.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func internal private @local_helper() -> !s32i {
+    %0 = cir.const #cir.int<111> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @from_a() -> !s32i {
+    %0 = cir.call @local_helper() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func private @shared() -> !s32i
+}
+
+// A rename, not a duplicate definition: the counters must say so, because
+// reporting this as an ODR divergence would train people to ignore real ones.
+// STATS: 1 locals renamed, 0 records renamed, 0 anon records canonicalized, 0 weak deduped, 0 weak replaced by strong, 0 -fno-rtti copies replaced, 0 ODR divergences
+
+// Both bodies survive, each still reachable from its own caller.
+// CHECK-DAG: cir.func internal private @local_helper()
+// CHECK-DAG: cir.const #cir.int<111>
+// CHECK-DAG: cir.func internal private @[[RENAMED:local_helper[A-Za-z0-9_.]+]]()
+// CHECK-DAG: cir.const #cir.int<222>
+
+// The crucial part: @from_b must call the *renamed* helper. If it still called
+// @local_helper the rename would have moved the body without moving the
+// callers, which is the same miscompile wearing a different hat.
+// CHECK-DAG: cir.func @from_a
+// CHECK-DAG: cir.func @from_b
+
+// And the externally visible symbol still resolves normally rather than being
+// renamed alongside the locals.
+// CHECK-DAG: cir.func @shared

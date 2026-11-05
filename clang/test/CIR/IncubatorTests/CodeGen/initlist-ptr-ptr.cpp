@@ -1,0 +1,82 @@
+// RUN: %clang_cc1 -triple aarch64-none-linux-android21 -fclangir -emit-mlir=cir-abi %s -o %t.cir
+// RUN: FileCheck --check-prefix=CIR --input-file=%t.cir %s
+// RUN: %clang_cc1 -triple aarch64-none-linux-android21 -fclangir -emit-llvm %s -o %t.ll
+// RUN: FileCheck --input-file=%t.ll %s -check-prefix=LLVM
+
+namespace std {
+template <class b> class initializer_list {
+  const b *array_start;
+  const b *array_end;
+};
+template <class b>
+void f(initializer_list<b>) {;}
+void test() {
+  f({"xy","uv"});
+}
+} // namespace std
+
+// CIR: [[INITLIST_TYPE:!.*]] = !cir.record<class "std::initializer_list<const char *>" {!cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!cir.ptr<!s8i>>}>
+
+// CIR: cir.global "private" constant cir_private dso_local [[STR_XY:@.*]] = #cir.const_array<"xy\00" : !cir.array<!s8i x 3>> : !cir.array<!s8i x 3>
+// CIR: cir.global "private" constant cir_private dso_local [[STR_UV:@.*]] = #cir.const_array<"uv\00" : !cir.array<!s8i x 3>> : !cir.array<!s8i x 3>
+
+// CIR: cir.func {{.*}} @_ZSt4testv()
+// CIR: cir.scope {
+// CIR: [[INITLIST_LOCAL:%.*]] = cir.alloca [[INITLIST_TYPE]], !cir.ptr<[[INITLIST_TYPE]]>,
+// CIR: [[LOCAL_ELEM_ARRAY:%.*]] = cir.alloca !cir.array<!cir.ptr<!s8i> x 2>, !cir.ptr<!cir.array<!cir.ptr<!s8i> x 2>>,
+// CIR: [[FIRST_ELEM_PTR:%.*]] = cir.cast array_to_ptrdecay [[LOCAL_ELEM_ARRAY]] : !cir.ptr<!cir.array<!cir.ptr<!s8i> x 2>> -> !cir.ptr<!cir.ptr<!s8i>>
+// CIR: [[XY_CHAR_ARRAY:%.*]] = cir.get_global [[STR_XY]]  : !cir.ptr<!cir.array<!s8i x 3>>
+// CIR: [[STR_XY_PTR:%.*]] = cir.cast array_to_ptrdecay [[XY_CHAR_ARRAY]] : !cir.ptr<!cir.array<!s8i x 3>> -> !cir.ptr<!s8i>
+// CIR:  cir.store{{.*}} [[STR_XY_PTR]], [[FIRST_ELEM_PTR]] : !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>
+// CIR: [[ONE:%.*]] = cir.const #cir.int<1>
+// CIR: [[NEXT_ELEM_PTR:%.*]] = cir.ptr_stride inbounds [[FIRST_ELEM_PTR]], [[ONE]] : (!cir.ptr<!cir.ptr<!s8i>>, !s64i) -> !cir.ptr<!cir.ptr<!s8i>>
+// CIR: [[UV_CHAR_ARRAY:%.*]] = cir.get_global [[STR_UV]]  : !cir.ptr<!cir.array<!s8i x 3>>
+// CIR: [[STR_UV_PTR:%.*]] = cir.cast array_to_ptrdecay [[UV_CHAR_ARRAY]] : !cir.ptr<!cir.array<!s8i x 3>> -> !cir.ptr<!s8i>
+// CIR:  cir.store{{.*}} [[STR_UV_PTR]], [[NEXT_ELEM_PTR]] : !cir.ptr<!s8i>, !cir.ptr<!cir.ptr<!s8i>>
+// CIR: [[START_FLD_PTR:%.*]] = cir.get_member [[INITLIST_LOCAL]][0] {name = "array_start"} : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.ptr<!cir.ptr<!s8i>>>
+// CIR: [[START_FLD_PTR_AS_PTR_2_CHAR_ARRAY:%.*]] = cir.cast bitcast [[START_FLD_PTR]] : !cir.ptr<!cir.ptr<!cir.ptr<!s8i>>> -> !cir.ptr<!cir.ptr<!cir.array<!cir.ptr<!s8i> x 2>>>
+// CIR: cir.store{{.*}} [[LOCAL_ELEM_ARRAY]], [[START_FLD_PTR_AS_PTR_2_CHAR_ARRAY]] : !cir.ptr<!cir.array<!cir.ptr<!s8i> x 2>>, !cir.ptr<!cir.ptr<!cir.array<!cir.ptr<!s8i> x 2>>>
+// CIR: [[ELEM_ARRAY_LEN:%.*]] = cir.const #cir.int<2>
+// CIR: [[END_FLD_PTR:%.*]] = cir.get_member [[INITLIST_LOCAL]][1] {name = "array_end"} : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.ptr<!cir.ptr<!s8i>>>
+// CIR: [[LOCAL_ELEM_DECAYED:%.*]] = cir.cast array_to_ptrdecay [[LOCAL_ELEM_ARRAY]] : !cir.ptr<!cir.array<!cir.ptr<!s8i> x 2>> -> !cir.ptr<!cir.ptr<!s8i>>
+// CIR: [[LOCAL_ELEM_ARRAY_END:%.*]] = cir.ptr_stride inbounds [[LOCAL_ELEM_DECAYED]], [[ELEM_ARRAY_LEN]] : (!cir.ptr<!cir.ptr<!s8i>>, !u64i) -> !cir.ptr<!cir.ptr<!s8i>>
+// CIR: cir.store{{.*}} [[LOCAL_ELEM_ARRAY_END]], [[END_FLD_PTR]] : !cir.ptr<!cir.ptr<!s8i>>, !cir.ptr<!cir.ptr<!cir.ptr<!s8i>>>
+// CIR: [[BITCAST:%.*]] = cir.cast bitcast [[INITLIST_LOCAL]] : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.array<!cir.ptr<!void> x 2>>
+// CIR: [[FLAT_ARG:%.*]] = cir.load align(8) [[BITCAST]] : !cir.ptr<!cir.array<!cir.ptr<!void> x 2>>, !cir.array<!cir.ptr<!void> x 2>
+// CIR: cir.call @_ZSt1fIPKcEvSt16initializer_listIT_E([[FLAT_ARG]]) : (!cir.array<!cir.ptr<!void> x 2>) -> ()
+// CIR: }
+// CIR: cir.return
+// CIR: }
+// CIR: cir.func {{.*}} @_ZSt1fIPKcEvSt16initializer_listIT_E(%arg0: !cir.array<!cir.ptr<!void> x 2>
+// CIR: [[REG0:%.*]] = cir.alloca [[INITLIST_TYPE]], !cir.ptr<[[INITLIST_TYPE]]>,
+// CIR: [[REG1:%.*]] = cir.cast bitcast [[REG0]] : !cir.ptr<[[INITLIST_TYPE]]> -> !cir.ptr<!cir.array<!cir.ptr<!void> x 2>>
+// CIR: cir.store{{.*}} %arg0, [[REG1]] : !cir.array<!cir.ptr<!void> x 2>, !cir.ptr<!cir.array<!cir.ptr<!void> x 2>>
+// CIR: cir.return
+
+// LLVM: %"class.std::initializer_list<const char *>" = type { ptr, ptr }
+
+// LLVM: @.str = private unnamed_addr constant [3 x i8] c"xy\00"
+// LLVM: @.str.1 = private unnamed_addr constant [3 x i8] c"uv\00"
+
+// LLVM: define dso_local void @_ZSt4testv()
+// LLVM:  [[INIT_STRUCT:%.*]] = alloca %"class.std::initializer_list<const char *>", i64 1, align 8
+// LLVM:  [[ELEM_ARRAY_PTR:%.*]] = alloca [2 x ptr], i64 1, align 8
+// LLVM:  [[PTR_FIRST_ELEM:%.*]] = getelementptr inbounds nuw ptr, ptr [[ELEM_ARRAY_PTR]], i32 0
+// LLVM:  store ptr @.str, ptr [[PTR_FIRST_ELEM]], align 8
+// LLVM:  [[PTR_SECOND_ELEM:%.*]] = getelementptr inbounds ptr, ptr [[PTR_FIRST_ELEM]], i64 1
+// LLVM:  store ptr @.str.1, ptr [[PTR_SECOND_ELEM]], align 8
+// LLVM:  [[INIT_START_FLD_PTR:%.*]] = getelementptr inbounds nuw %"class.std::initializer_list<const char *>", ptr [[INIT_STRUCT]], i32 0, i32 0
+// LLVM:  store ptr [[ELEM_ARRAY_PTR]], ptr [[INIT_START_FLD_PTR]], align 8
+// LLVM:  [[INIT_END_FLD_PTR:%.*]] = getelementptr inbounds nuw %"class.std::initializer_list<const char *>", ptr [[INIT_STRUCT]], i32 0, i32 1
+// LLVM:  [[ELEM_DECAY:%.*]] = getelementptr inbounds nuw ptr, ptr [[ELEM_ARRAY_PTR]], i32 0
+// LLVM:  [[ELEM_ARRAY_END:%.*]] = getelementptr inbounds ptr, ptr [[ELEM_DECAY]], i64 2
+// LLVM:  store ptr [[ELEM_ARRAY_END]], ptr [[INIT_END_FLD_PTR]], align 8
+// LLVM:  [[ARG2PASS:%.*]] = load [2 x ptr], ptr [[INIT_STRUCT]], align 8
+// LLVM:  call void @_ZSt1fIPKcEvSt16initializer_listIT_E([2 x ptr] [[ARG2PASS]])
+// LLVM:  ret void
+
+// LLVM: define linkonce_odr void @_ZSt1fIPKcEvSt16initializer_listIT_E([2 x ptr] [[ARG0:%.*]])
+// LLVM: [[LOCAL_PTR:%.*]] = alloca %"class.std::initializer_list<const char *>", i64 1, align 8
+// LLVM: store [2 x ptr] [[ARG0]], ptr [[LOCAL_PTR]], align 8
+// LLVM: ret void
+// LLVM: }

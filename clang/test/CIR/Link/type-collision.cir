@@ -1,0 +1,43 @@
+// RUN: cir-link %s %S/Inputs/type-collision-b.cir --warn-odr-divergence -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Two inputs, one record name, two different bodies. They must come out as
+// two types.
+//
+// This is reachable from *legal* C++, which is what makes it a correctness
+// requirement rather than an ODR question: anonymous-namespace types are
+// TU-local, so two TUs may each define a different `struct S` and both are
+// named `(anonymous namespace)::S`. Measured on 132 real CIR CodeGen tests,
+// 13 of 105 named record types already have more than one distinct body.
+//
+// Before per-input contexts this test asserted the opposite, because there
+// was no opposite available: all inputs shared one MLIRContext, identified
+// records were uniqued by name at parse time, and the second body was either
+// silently discarded (hand-written CIR, as here) or killed the parse outright
+// with "member type mismatch" (real CIRGen output). Both wrong; the silent
+// one worse, because @from_b kept compiling against a record it was never
+// written for.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "(anonymous namespace)::S" {!s32i}>
+
+module {
+  cir.func @from_a(%arg0: !cir.ptr<!rec_S>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// The first input keeps the name; the later one is suffixed. Which is which
+// has to be stable, or the output is not reproducible.
+// STATS: type-collision-b.cir:0:0: warning: record '(anonymous namespace)::S' has a different body than in an earlier input; renamed to '(anonymous namespace)::S.m1'
+// STATS: 1 records renamed
+
+// Both bodies survive, distinct...
+// CHECK-DAG: !rec_[[S:[A-Za-z0-9_]+]] = !cir.record<struct "(anonymous namespace)::S" {!s32i}>
+// CHECK-DAG: !rec_[[S1:[A-Za-z0-9_]+]] = !cir.record<struct "(anonymous namespace)::S.m1" {!cir.float}>
+
+// ...and each function still points at the one it was compiled against. This
+// is the part that was silently wrong before.
+// CHECK: cir.func @from_a(%{{.*}}: !cir.ptr<!rec_[[S]]>)
+// CHECK: cir.func @from_b(%{{.*}}: !cir.ptr<!rec_[[S1]]>)

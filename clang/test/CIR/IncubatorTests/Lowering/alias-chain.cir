@@ -1,0 +1,13 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+module {
+  cir.alias weak @alias3 = @alias2 : !cir.func<()>
+  cir.alias weak @alias4 = @alias2 : !cir.func<()>
+  cir.alias weak @alias2 = @func : !cir.func<()>
+  cir.func private @func()
+}
+
+// CHECK-DAG: llvm.mlir.alias weak @alias2 : !llvm.func<void ()>
+// CHECK-DAG: llvm.mlir.alias weak @alias3 : !llvm.func<void ()>
+// CHECK-DAG: llvm.mlir.alias weak @alias4 : !llvm.func<void ()>
+// CHECK: %0 = llvm.mlir.addressof @func : !llvm.ptr

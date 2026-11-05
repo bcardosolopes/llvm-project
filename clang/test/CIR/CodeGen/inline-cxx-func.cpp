@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --check-prefix=CIR --input-file=%t.cir %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --check-prefix=LLVM --input-file=%t-cir.ll %s
@@ -17,27 +17,21 @@ struct S {
 // LLVM: %struct.S = type { i32 }
 // OGCG: %struct.S = type { i32 }
 
-// CIR: cir.func{{.*}} @_ZN1S10InlineFuncEv(%arg0: !cir.ptr<!rec_S> {{.*}}) -> !s32i
+// CIR: cir.func{{.*}} @_ZN1S10InlineFuncEv(%arg0: !cir.ptr<!rec_S> {{.*}}) -> {{.*}}!s32i
 // CIR:   %[[THIS_ADDR:.*]] = cir.alloca !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>, ["this", init]
-// CIR:   %[[RET_ADDR:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"]
 // CIR:   cir.store %arg0, %[[THIS_ADDR]] : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
 // CIR:   %[[THIS:.*]] = cir.load %[[THIS_ADDR]] : !cir.ptr<!cir.ptr<!rec_S>>, !cir.ptr<!rec_S>
 // CIR:   %[[MEMBER_ADDR:.*]] = cir.get_member %[[THIS]][0] {name = "Member"} : !cir.ptr<!rec_S> -> !cir.ptr<!s32i>
 // CIR:   %[[MEMBER:.*]] = cir.load{{.*}} %[[MEMBER_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.store %[[MEMBER]], %[[RET_ADDR]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[RET_VAL:.*]] = cir.load %[[RET_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.return %[[RET_VAL]] : !s32i
+// CIR:   cir.return %[[MEMBER]] : !s32i
 
-// LLVM: define{{.*}} i32 @_ZN1S10InlineFuncEv(ptr %[[ARG0:.*]])
+// LLVM: define{{.*}} noundef i32 @_ZN1S10InlineFuncEv(ptr noundef nonnull align 4 dereferenceable(4) %[[ARG0:.*]])
 // LLVM:   %[[THIS_ADDR:.*]] = alloca ptr, i64 1, align 8
-// LLVM:   %[[RET_ADDR:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store ptr %[[ARG0]], ptr %[[THIS_ADDR]], align 8
 // LLVM:   %[[THIS:.*]] = load ptr, ptr %[[THIS_ADDR]], align 8
-// LLVM:   %[[MEMBER_ADDR:.*]] = getelementptr %struct.S, ptr %[[THIS]], i32 0, i32 0
+// LLVM:   %[[MEMBER_ADDR:.*]] = getelementptr inbounds nuw %struct.S, ptr %[[THIS]], i32 0, i32 0
 // LLVM:   %[[MEMBER:.*]] = load i32, ptr %[[MEMBER_ADDR]], align 4
-// LLVM:   store i32 %[[MEMBER]], ptr %[[RET_ADDR]], align 4
-// LLVM:   %[[RET_VAL:.*]] = load i32, ptr %[[RET_ADDR]], align 4
-// LLVM:   ret i32 %[[RET_VAL]]
+// LLVM:   ret i32 %[[MEMBER]]
 
 // The inlined function is defined after use() in OGCG
 
@@ -53,7 +47,7 @@ void use() {
 
 // LLVM: define{{.*}} void @_Z3usev()
 // LLVM:   %[[S_ADDR:.*]] = alloca %struct.S
-// LLVM:   %[[RET_VAL:.*]] = call i32 @_ZN1S10InlineFuncEv(ptr %[[S_ADDR]])
+// LLVM:   %[[RET_VAL:.*]] = call noundef i32 @_ZN1S10InlineFuncEv(ptr noundef nonnull align 4 dereferenceable(4) %[[S_ADDR]])
 // LLVM:   ret void
 
 // OGCG: define{{.*}} void @_Z3usev()

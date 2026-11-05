@@ -193,4 +193,54 @@ module {
   //CHECK:     }
   //CHECK:     cir.yield
   //CHECK:   }
+
+  // Test that yield-only cases are NOT merged when there are operations
+  // between them and the next case in the switch body. This pattern arises
+  // from C switch cases with goto labels where fallthrough code is placed
+  // outside the case region (e.g., case EXACTF in Perl's regexec.c).
+  cir.func @noFoldCascadeWithInterveningCode(%arg0: !s32i, %arg1: !s32i) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init] {alignment = 4 : i64}
+    %1 = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", init] {alignment = 4 : i64}
+    cir.store %arg0, %0 : !s32i, !cir.ptr<!s32i>
+    cir.store %arg1, %1 : !s32i, !cir.ptr<!s32i>
+    cir.scope {
+      %2 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+      cir.switch (%2 : !s32i) {
+        cir.case(equal, [#cir.int<1> : !s32i]) {
+          cir.yield
+        }
+        cir.case(equal, [#cir.int<2> : !s32i]) {
+          cir.yield
+        }
+        // Case 3 has only a yield, but there is code between it and case 4.
+        // This must NOT be merged with case 4.
+        cir.case(equal, [#cir.int<3> : !s32i]) {
+          cir.yield
+        }
+        // Intervening code: this store happens on fallthrough from case 3.
+        %3 = cir.const #cir.int<42> : !s32i
+        cir.store %3, %1 : !s32i, !cir.ptr<!s32i>
+        cir.case(equal, [#cir.int<4> : !s32i]) {
+          cir.break
+        }
+        cir.yield
+      }
+    }
+    cir.return
+  }
+  // Cases 1 and 2 are adjacent yield-only cases followed by case 3 which is
+  // also yield-only but NOT adjacent to case 4. Cases 1+2 should be merged
+  // together, but case 3 must remain separate because of the intervening store.
+  //CHECK: cir.func @noFoldCascadeWithInterveningCode
+  //CHECK:   cir.switch(%[[COND:.*]] : !s32i) {
+  //CHECK:     cir.case(anyof, [#cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i]) {
+  //CHECK:       cir.yield
+  //CHECK:     }
+  //CHECK:     %[[C42:.*]] = cir.const #cir.int<42> : !s32i
+  //CHECK:     cir.store %[[C42]]
+  //CHECK:     cir.case(equal, [#cir.int<4> : !s32i]) {
+  //CHECK:       cir.break
+  //CHECK:     }
+  //CHECK:     cir.yield
+  //CHECK:   }
 }

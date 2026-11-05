@@ -2,6 +2,7 @@
 // This should cover virtual inheritance, construction vtables, and VTTs.
 
 // RUN: %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O1 -o - -emit-llvm -fhalf-no-semantic-interposition | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O1 -fhalf-no-semantic-interposition -fclangir -emit-llvm -o - | FileCheck %s --check-prefix=CIR %}
 
 // Class A contains a vtable ptr, then int, then padding
 
@@ -52,6 +53,23 @@
 // CHECK-NEXT:   call void [[ptr]](ptr {{[^,]*}} [[add_ptr]])
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
+
+// CIR-DAG: @_ZTV1B.local = internal unnamed_addr constant { [4 x i32], [4 x i32] }
+// CIR-DAG: @_ZTV1B ={{.*}} unnamed_addr alias { [4 x i32], [4 x i32] }, ptr @_ZTV1B.local
+// CIR-DAG: @_ZTV1C.local = internal unnamed_addr constant { [4 x i32], [4 x i32] }
+// CIR-DAG: @_ZTV1C ={{.*}} unnamed_addr alias { [4 x i32], [4 x i32] }, ptr @_ZTV1C.local
+// CIR-DAG: @_ZTV1D.local = internal unnamed_addr constant { [5 x i32], [4 x i32], [4 x i32] }
+// CIR-DAG: @_ZTV1D ={{.*}} unnamed_addr alias { [5 x i32], [4 x i32], [4 x i32] }, ptr @_ZTV1D.local
+// CIR-DAG: @_ZTC1D0_1B.local = internal unnamed_addr constant { [4 x i32], [4 x i32] }
+// CIR-DAG: @_ZTC1D0_1B ={{.*}} unnamed_addr alias { [4 x i32], [4 x i32] }, ptr @_ZTC1D0_1B.local
+// CIR-DAG: @_ZTC1D8_1C.local = internal unnamed_addr constant { [4 x i32], [4 x i32] }
+// CIR-DAG: @_ZTC1D8_1C ={{.*}} unnamed_addr alias { [4 x i32], [4 x i32] }, ptr @_ZTC1D8_1C.local
+// CIR-DAG: @_ZTT1D = unnamed_addr constant [7 x ptr]
+// CIR-LABEL: define void @_Z5D_fooP1D(
+// CIR: [[VTABLE:%[0-9]+]] = load ptr, ptr %{{[0-9]+}}, align 8
+// CIR: [[VBASE_OFFSET_PTR:%[0-9]+]] = getelementptr i8, ptr [[VTABLE]], i64 -12
+// CIR: [[VBASE_OFFSET:%[0-9]+]] = load i32, ptr [[VBASE_OFFSET_PTR]], align 4
+// CIR: [[VFNPTR:%[0-9]+]] = tail call ptr @llvm.load.relative.i32(ptr %{{[0-9]+}}, i32 0)
 
 class A {
 public:

@@ -12,25 +12,50 @@ struct S {
   static inline HasDtor hd;
 };
 
-// CIR: cir.global linkonce_odr comdat @_ZN1S2hdE = #cir.zero : !rec_HasDtor
+// CIR: cir.global linkonce_odr comdat @_ZN1S2hdE = #cir.zero : !rec_HasDtor {alignment = 1 : i64, {{.*}}comdat_name = "_ZN1S2hdE"}
 
-// CIR: cir.func internal private @__cxx_global_var_init() {
-// CIR:   %[[HD:.*]] = cir.get_global @_ZN1S2hdE : !cir.ptr<!rec_HasDtor>
-// CIR:   %[[DTOR:.*]] = cir.get_global @_ZN7HasDtorD1Ev : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>>
-// CIR:   %[[DTOR_CAST:.*]] = cir.cast bitcast %[[DTOR]] : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>> -> !cir.ptr<!cir.func<(!cir.ptr<!void>)>>
-// CIR:   %[[HD_CAST:.*]] = cir.cast bitcast %[[HD]] : !cir.ptr<!rec_HasDtor> -> !cir.ptr<!void>
-// CIR:   %[[HANDLE:.*]] = cir.get_global @__dso_handle : !cir.ptr<i8>
-// CIR:   cir.call @__cxa_atexit(%[[DTOR_CAST]], %[[HD_CAST]], %[[HANDLE]])
+// CIR: cir.func no_inline comdat internal private @__cxx_global_var_init() section(".text.startup"){{.*}}comdat_name = "_ZN1S2hdE"{{.*}}{
+// CIR:   %[[GUARD_ADDR:.*]] = cir.get_global @_ZGVN1S2hdE : !cir.ptr<!u64i>
+// CIR:   %[[GUARD_PTR:.*]] = cir.cast bitcast %[[GUARD_ADDR]] : !cir.ptr<!u64i> -> !cir.ptr<!u8i>
+// CIR:   %[[GUARD_VAL:.*]] = cir.load align(8) atomic(acquire) %[[GUARD_PTR]] : !cir.ptr<!u8i>, !u8i
+// CIR:   %[[ZERO_U8:.*]] = cir.const #cir.int<0> : !u8i
+// CIR:   %[[NEEDS_INIT:.*]] = cir.cmp(eq, %[[GUARD_VAL]], %[[ZERO_U8]]) : !u8i, !cir.bool
+// CIR:   cir.if %[[NEEDS_INIT]] {
+// CIR:     %[[ACQ:.*]] = cir.call @__cxa_guard_acquire(%[[GUARD_ADDR]]) nothrow
+// CIR:     %[[ZERO_S32:.*]] = cir.const #cir.int<0> : !s32i
+// CIR:     %[[ACQUIRED:.*]] = cir.cmp(ne, %[[ACQ]], %[[ZERO_S32]]) : !s32i, !cir.bool
+// CIR:     cir.if %[[ACQUIRED]] {
+// CIR:       %[[HD:.*]] = cir.get_global @_ZN1S2hdE : !cir.ptr<!rec_HasDtor>
+// CIR:       %[[DTOR:.*]] = cir.get_global @_ZN7HasDtorD1Ev : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>>
+// CIR:       %[[DTOR_CAST:.*]] = cir.cast bitcast %[[DTOR]] : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>> -> !cir.ptr<!cir.func<(!cir.ptr<!void>)>>
+// CIR:       %[[HD_CAST:.*]] = cir.cast bitcast %{{.*}} : !cir.ptr<!rec_HasDtor> -> !cir.ptr<!void>
+// CIR:       cir.call @__cxa_atexit(%[[DTOR_CAST]], %[[HD_CAST]], %{{.*}})
+// CIR:       cir.call @__cxa_guard_release(%[[GUARD_ADDR]]) nothrow
+
+// CIR: cir.global linkonce_odr comdat @_ZGVN1S2hdE = #cir.int<0> : !u64i {alignment = 8 : i64, comdat_name = "_ZN1S2hdE"}
 
 // LLVM: @_ZN1S2hdE = linkonce_odr global %struct.HasDtor zeroinitializer, comdat
+// LLVM: @_ZGVN1S2hdE = linkonce_odr global i64 0, comdat($_ZN1S2hdE)
 // LLVM: @_ZN5Outer5Inner2hdE = linkonce_odr global %struct.HasDtor zeroinitializer, comdat
+// LLVM: @_ZGVN5Outer5Inner2hdE = linkonce_odr global i64 0, comdat($_ZN5Outer5Inner2hdE)
 
-// LLVM: @llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 65535, ptr @_GLOBAL__sub_I_static_members.cpp, ptr null }]
-// LLVM: define internal void @__cxx_global_var_init()
-// LLVM:   call void @__cxa_atexit(ptr @_ZN7HasDtorD1Ev, ptr @_ZN1S2hdE, ptr @__dso_handle)
+// LLVM: @llvm.global_ctors = appending global [2 x { i32, ptr, ptr }] [
+// LLVM-SAME:      { i32, ptr, ptr } { i32 65535, ptr @__cxx_global_var_init, ptr @_ZN1S2hdE },
+// LLVM-SAME:      { i32, ptr, ptr } { i32 65535, ptr @__cxx_global_var_init.1, ptr @_ZN5Outer5Inner2hdE }]
 
-// FIXME(cir): OGCG has a guard variable for this case that we don't generate in CIR.
-//             This is needed because the variable linkonce_odr linkage.
+// LLVM: @llvm.used = appending global [2 x ptr] [ptr @_ZN1S2hdE, ptr @_ZN5Outer5Inner2hdE]
+
+// LLVM: define internal void @__cxx_global_var_init() {{.*}}comdat($_ZN1S2hdE)
+// LLVM:   %[[GUARD_VAL:.*]] = load atomic i8, ptr @_ZGVN1S2hdE acquire, align 8
+// LLVM:   %[[NEEDS_INIT:.*]] = icmp eq i8 %[[GUARD_VAL]], 0
+// LLVM:   br i1 %[[NEEDS_INIT]], label %[[ACQUIRE_BB:.*]], label %[[END_BB:.*]]
+// LLVM: [[ACQUIRE_BB]]:
+// LLVM:   %[[ACQ:.*]] = call i32 @__cxa_guard_acquire(ptr @_ZGVN1S2hdE)
+// LLVM:   %[[ACQUIRED:.*]] = icmp ne i32 %[[ACQ]], 0
+// LLVM:   br i1 %[[ACQUIRED]], label %[[INIT_BB:.*]], label %[[MERGE_BB:.*]]
+// LLVM: [[INIT_BB]]:
+// LLVM:   %{{.*}} = call i32 @__cxa_atexit(ptr @_ZN7HasDtorD1Ev, ptr @_ZN1S2hdE, ptr @__dso_handle)
+// LLVM:   call void @__cxa_guard_release(ptr @_ZGVN1S2hdE)
 
 // OGCG: @_ZN1S2hdE = linkonce_odr global %struct.HasDtor zeroinitializer, comdat
 // OGCG: @_ZGVN1S2hdE = linkonce_odr global i64 0, comdat($_ZN1S2hdE)
@@ -60,17 +85,39 @@ struct Outer {
   };
 };
 
-// CIR: cir.global linkonce_odr comdat @_ZN5Outer5Inner2hdE = #cir.zero : !rec_HasDtor
-// CIR: cir.func internal private @__cxx_global_var_init.1()
-// CIR:   %[[HD:.*]] = cir.get_global @_ZN5Outer5Inner2hdE : !cir.ptr<!rec_HasDtor>
-// CIR:   %[[DTOR:.*]] = cir.get_global @_ZN7HasDtorD1Ev : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>>
-// CIR:   %[[DTOR_CAST:.*]] = cir.cast bitcast %[[DTOR]] : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>> -> !cir.ptr<!cir.func<(!cir.ptr<!void>)>>
-// CIR:   %[[HD_CAST:.*]] = cir.cast bitcast %[[HD]] : !cir.ptr<!rec_HasDtor> -> !cir.ptr<!void>
-// CIR:   %[[HANDLE:.*]] = cir.get_global @__dso_handle : !cir.ptr<i8>
-// CIR:   cir.call @__cxa_atexit(%[[DTOR_CAST]], %[[HD_CAST]], %[[HANDLE]]) : (!cir.ptr<!cir.func<(!cir.ptr<!void>)>>, !cir.ptr<!void>, !cir.ptr<i8>) -> ()
+// CIR: cir.global linkonce_odr comdat @_ZN5Outer5Inner2hdE = #cir.zero : !rec_HasDtor {alignment = 1 : i64, {{.*}}comdat_name = "_ZN5Outer5Inner2hdE"}
 
-// LLVM: define internal void @__cxx_global_var_init.1()
-// LLVM:   call void @__cxa_atexit(ptr @_ZN7HasDtorD1Ev, ptr @_ZN5Outer5Inner2hdE, ptr @__dso_handle)
+// CIR: cir.func no_inline comdat internal private @__cxx_global_var_init.1() section(".text.startup"){{.*}}comdat_name = "_ZN5Outer5Inner2hdE"
+// CIR:   %[[GUARD_ADDR:.*]] = cir.get_global @_ZGVN5Outer5Inner2hdE : !cir.ptr<!u64i>
+// CIR:   %[[GUARD_PTR:.*]] = cir.cast bitcast %[[GUARD_ADDR]] : !cir.ptr<!u64i> -> !cir.ptr<!u8i>
+// CIR:   %[[GUARD_VAL:.*]] = cir.load align(8) atomic(acquire) %[[GUARD_PTR]] : !cir.ptr<!u8i>, !u8i
+// CIR:   %[[ZERO_U8:.*]] = cir.const #cir.int<0> : !u8i
+// CIR:   %[[NEEDS_INIT:.*]] = cir.cmp(eq, %[[GUARD_VAL]], %[[ZERO_U8]]) : !u8i, !cir.bool
+// CIR:   cir.if %[[NEEDS_INIT]] {
+// CIR:     %[[ACQ:.*]] = cir.call @__cxa_guard_acquire(%[[GUARD_ADDR]]) nothrow
+// CIR:     %[[ZERO_S32:.*]] = cir.const #cir.int<0> : !s32i
+// CIR:     %[[ACQUIRED:.*]] = cir.cmp(ne, %[[ACQ]], %[[ZERO_S32]]) : !s32i, !cir.bool
+// CIR:     cir.if %[[ACQUIRED]] {
+// CIR:       %[[HD:.*]] = cir.get_global @_ZN5Outer5Inner2hdE : !cir.ptr<!rec_HasDtor>
+// CIR:       %[[DTOR:.*]] = cir.get_global @_ZN7HasDtorD1Ev : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>>
+// CIR:       %[[DTOR_CAST:.*]] = cir.cast bitcast %[[DTOR]] : !cir.ptr<!cir.func<(!cir.ptr<!rec_HasDtor>)>> -> !cir.ptr<!cir.func<(!cir.ptr<!void>)>>
+// CIR:       %[[HD_CAST:.*]] = cir.cast bitcast %{{.*}} : !cir.ptr<!rec_HasDtor> -> !cir.ptr<!void>
+// CIR:       cir.call @__cxa_atexit(%[[DTOR_CAST]], %[[HD_CAST]], %{{.*}}) nothrow
+// CIR:       cir.call @__cxa_guard_release(%[[GUARD_ADDR]]) nothrow
+
+// CIR: cir.global linkonce_odr comdat @_ZGVN5Outer5Inner2hdE = #cir.int<0> : !u64i {alignment = 8 : i64, comdat_name = "_ZN5Outer5Inner2hdE"}
+
+// LLVM: define internal void @__cxx_global_var_init.1() {{.*}}comdat($_ZN5Outer5Inner2hdE)
+// LLVM:   %[[GUARD_VAL:.*]] = load atomic i8, ptr @_ZGVN5Outer5Inner2hdE acquire, align 8
+// LLVM:   %[[NEEDS_INIT:.*]] = icmp eq i8 %[[GUARD_VAL]], 0
+// LLVM:   br i1 %[[NEEDS_INIT]], label %[[ACQUIRE_BB:.*]], label %[[END_BB:.*]]
+// LLVM: [[ACQUIRE_BB]]:
+// LLVM:   %[[ACQ:.*]] = call i32 @__cxa_guard_acquire(ptr @_ZGVN5Outer5Inner2hdE)
+// LLVM:   %[[ACQUIRED:.*]] = icmp ne i32 %[[ACQ]], 0
+// LLVM:   br i1 %[[ACQUIRED]], label %[[INIT_BB:.*]], label %[[MERGE_BB:.*]]
+// LLVM: [[INIT_BB]]:
+// LLVM:   %{{.*}} = call i32 @__cxa_atexit(ptr @_ZN7HasDtorD1Ev, ptr @_ZN5Outer5Inner2hdE, ptr @__dso_handle)
+// LLVM:   call void @__cxa_guard_release(ptr @_ZGVN5Outer5Inner2hdE)
 
 // OGCG: define internal void @__cxx_global_var_init.1() {{.*}} section ".text.startup" comdat($_ZN5Outer5Inner2hdE) {
 // OGCG:   %[[GUARD:.*]] = load atomic i8, ptr @_ZGVN5Outer5Inner2hdE acquire
@@ -87,8 +134,4 @@ struct Outer {
 // OGCG: [[INIT_END]]:
 
 
-// CIR: cir.func private @_GLOBAL__sub_I_static_members.cpp()
-// CIR:   cir.call @__cxx_global_var_init()
-
-// LLVM: define void @_GLOBAL__sub_I_static_members.cpp()
-// LLVM:   call void @__cxx_global_var_init()
+// No _GLOBAL__sub_I_ is generated because all inits are comdat-keyed.

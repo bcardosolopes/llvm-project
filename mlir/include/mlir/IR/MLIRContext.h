@@ -152,6 +152,11 @@ public:
   /// The command line debugging flag `--mlir-disable-threading` is overriding
   /// this call and making it a no-op!
   void disableMultithreading(bool disable = true);
+
+  /// Free the caches each thread keeps of the attributes, types and affine
+  /// objects it has looked up, which otherwise live as long as the thread.
+  /// No other thread may use the context meanwhile.
+  void clearThreadLocalCaches();
   void enableMultithreading(bool enable = true) {
     disableMultithreading(!enable);
   }

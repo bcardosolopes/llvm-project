@@ -27,6 +27,7 @@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Error.h"
 
 #include "LLVMDialectBytecode.h"
@@ -491,7 +492,8 @@ void CondBrOp::build(OpBuilder &builder, OperationState &result,
                                       static_cast<int32_t>(weights->second)});
 
   build(builder, result, condition, trueOperands, falseOperands, weightsAttr,
-        /*loop_annotation=*/{}, trueDest, falseDest);
+        /*loop_annotation=*/{}, /*unpredictable=*/{},
+        /*irr_loop_header_weight=*/{}, trueDest, falseDest);
 }
 
 //===----------------------------------------------------------------------===//
@@ -509,7 +511,8 @@ void SwitchOp::build(OpBuilder &builder, OperationState &result, Value value,
     weightsAttr = builder.getDenseI32ArrayAttr(branchWeights);
 
   build(builder, result, value, defaultOperands, caseOperands, caseValues,
-        weightsAttr, defaultDestination, caseDestinations);
+        weightsAttr, /*loop_annotation=*/{}, /*unpredictable=*/{},
+        /*irr_loop_header_weight=*/{}, defaultDestination, caseDestinations);
 }
 
 void SwitchOp::build(OpBuilder &builder, OperationState &result, Value value,
@@ -700,6 +703,30 @@ static void destructureIndices(Type currType, ArrayRef<GEPArg> indices,
   }
 }
 
+/// Parse the optional `inrange(start, end)` attribute for GEPOp.
+static ParseResult parseGEPInRange(OpAsmParser &parser,
+                                   DenseI32ArrayAttr &inRange) {
+  if (failed(parser.parseOptionalKeyword("inrange"))) {
+    inRange = nullptr;
+    return success();
+  }
+  int32_t start, end;
+  if (parser.parseLParen() || parser.parseInteger(start) ||
+      parser.parseComma() || parser.parseInteger(end) ||
+      parser.parseRParen())
+    return failure();
+  inRange = DenseI32ArrayAttr::get(parser.getContext(), {start, end});
+  return success();
+}
+
+/// Print the optional `inrange(start, end)` attribute for GEPOp.
+static void printGEPInRange(OpAsmPrinter &printer, LLVM::GEPOp gepOp,
+                            DenseI32ArrayAttr inRange) {
+  if (!inRange || inRange.empty())
+    return;
+  printer << "inrange(" << inRange[0] << ", " << inRange[1] << ") ";
+}
+
 void GEPOp::build(OpBuilder &builder, OperationState &result, Type resultType,
                   Type elementType, Value basePtr, ArrayRef<GEPArg> indices,
                   GEPNoWrapFlags noWrapFlags,
@@ -826,6 +853,13 @@ LogicalResult LLVM::GEPOp::verify() {
   if (getNoWrapFlags() == GEPNoWrapFlags::inboundsFlag)
     return emitOpError("'inbounds_flag' cannot be used directly.");
 
+  if (auto inRange = getInRange()) {
+    if (inRange->size() != 2)
+      return emitOpError("expected inrange to have exactly 2 elements "
+                         "[start, end), got ")
+             << inRange->size();
+  }
+
   return verifyStructIndices(getElemType(), getIndices(),
                              [&] { return emitOpError(); });
 }
@@ -904,9 +938,10 @@ void LoadOp::build(OpBuilder &builder, OperationState &state, Type type,
         isNonTemporal, isInvariant, isInvariantGroup, ordering,
         syncscope.empty() ? nullptr : builder.getStringAttr(syncscope),
         /*dereferenceable=*/nullptr,
-        /*access_groups=*/nullptr,
+        /*nonnull=*/false, /*access_groups=*/nullptr,
         /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr,
-        /*tbaa=*/nullptr);
+        /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -944,7 +979,8 @@ void StoreOp::build(OpBuilder &builder, OperationState &state, Value value,
         isNonTemporal, isInvariantGroup, ordering,
         syncscope.empty() ? nullptr : builder.getStringAttr(syncscope),
         /*access_groups=*/nullptr,
-        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr);
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -995,12 +1031,31 @@ void CallOp::build(OpBuilder &builder, OperationState &state, TypeRange results,
         /*CConv=*/nullptr, /*TailCallKind=*/nullptr,
         /*memory_effects=*/nullptr,
         /*convergent=*/nullptr, /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_return=*/nullptr,
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{},
         /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr,
         /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
-        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr, /*annotations=*/nullptr,
         /*no_inline=*/nullptr, /*always_inline=*/nullptr,
-        /*inline_hint=*/nullptr);
+        /*inline_hint=*/nullptr, /*heapallocsite=*/nullptr,
+        /*callees=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*passthrough=*/nullptr,
+        /*no_objc_arc_exceptions=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr);
 }
 
 void CallOp::build(OpBuilder &builder, OperationState &state,
@@ -1025,12 +1080,32 @@ void CallOp::build(OpBuilder &builder, OperationState &state,
         /*TailCallKind=*/nullptr, /*memory_effects=*/nullptr,
         /*convergent=*/nullptr,
         /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_return=*/nullptr,
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{},
         /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr,
         /*access_groups=*/nullptr,
         /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr,
         /*no_inline=*/nullptr, /*always_inline=*/nullptr,
-        /*inline_hint=*/nullptr);
+        /*inline_hint=*/nullptr, /*heapallocsite=*/nullptr,
+        /*callees=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*passthrough=*/nullptr,
+        /*no_objc_arc_exceptions=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr);
 }
 
 void CallOp::build(OpBuilder &builder, OperationState &state,
@@ -1041,12 +1116,31 @@ void CallOp::build(OpBuilder &builder, OperationState &state,
         /*fastmathFlags=*/nullptr,
         /*CConv=*/nullptr, /*TailCallKind=*/nullptr, /*memory_effects=*/nullptr,
         /*convergent=*/nullptr, /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_return=*/nullptr,
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{},
         /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr,
         /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
-        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr, /*annotations=*/nullptr,
         /*no_inline=*/nullptr, /*always_inline=*/nullptr,
-        /*inline_hint=*/nullptr);
+        /*inline_hint=*/nullptr, /*heapallocsite=*/nullptr,
+        /*callees=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*passthrough=*/nullptr,
+        /*no_objc_arc_exceptions=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr);
 }
 
 void CallOp::build(OpBuilder &builder, OperationState &state, LLVMFuncOp func,
@@ -1057,12 +1151,31 @@ void CallOp::build(OpBuilder &builder, OperationState &state, LLVMFuncOp func,
         /*fastmathFlags=*/nullptr,
         /*CConv=*/nullptr, /*TailCallKind=*/nullptr, /*memory_effects=*/nullptr,
         /*convergent=*/nullptr, /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_return=*/nullptr,
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{},
         /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
         /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr,
-        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr, /*annotations=*/nullptr,
         /*no_inline=*/nullptr, /*always_inline=*/nullptr,
-        /*inline_hint=*/nullptr);
+        /*inline_hint=*/nullptr, /*heapallocsite=*/nullptr,
+        /*callees=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*passthrough=*/nullptr,
+        /*no_objc_arc_exceptions=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr);
 }
 
 CallInterfaceCallable CallOp::getCallableForCallee() {
@@ -1095,10 +1208,11 @@ MutableOperandRange CallOp::getArgOperandsMutable() {
 /// Verify that an inlinable callsite of a debug-info-bearing function in a
 /// debug-info-bearing function has a debug location attached to it. This
 /// mirrors an LLVM IR verifier.
-static LogicalResult verifyCallOpDebugInfo(CallOp callOp, LLVMFuncOp callee) {
+template <typename OpTy>
+static LogicalResult verifyCallOpDebugInfo(OpTy callOp, LLVMFuncOp callee) {
   if (callee.isExternal())
     return success();
-  auto parentFunc = callOp->getParentOfType<FunctionOpInterface>();
+  auto parentFunc = callOp->template getParentOfType<FunctionOpInterface>();
   if (!parentFunc)
     return success();
 
@@ -1180,8 +1294,10 @@ static LogicalResult verifyOperandBundles(OpType &op) {
 
 LogicalResult CallOp::verify() { return verifyOperandBundles(*this); }
 
-LogicalResult CallOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
-  if (failed(verifyCallOpVarCalleeType(*this)))
+template <typename OpTy>
+static LogicalResult
+verifyCallOpSymbolUses(OpTy callOp, SymbolTableCollection &symbolTable) {
+  if (failed(verifyCallOpVarCalleeType(callOp)))
     return failure();
 
   // Type for the callee, we'll get it differently depending if it is a direct
@@ -1191,84 +1307,104 @@ LogicalResult CallOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   bool isIndirect = false;
 
   // If this is an indirect call, the callee attribute is missing.
-  FlatSymbolRefAttr calleeName = getCalleeAttr();
+  FlatSymbolRefAttr calleeName = callOp.getCalleeAttr();
   if (!calleeName) {
     isIndirect = true;
-    if (!getNumOperands())
-      return emitOpError(
+    if (!callOp.getNumOperands())
+      return callOp.emitOpError(
           "must have either a `callee` attribute or at least an operand");
-    auto ptrType = llvm::dyn_cast<LLVMPointerType>(getOperand(0).getType());
+    auto ptrType =
+        llvm::dyn_cast<LLVMPointerType>(callOp.getOperand(0).getType());
     if (!ptrType)
-      return emitOpError("indirect call expects a pointer as callee: ")
-             << getOperand(0).getType();
+      return callOp.emitOpError("indirect call expects a pointer as callee: ")
+             << callOp.getOperand(0).getType();
 
     return success();
   } else {
     Operation *callee =
-        symbolTable.lookupNearestSymbolFrom(*this, calleeName.getAttr());
+        symbolTable.lookupNearestSymbolFrom(callOp, calleeName.getAttr());
     if (!callee)
-      return emitOpError()
+      return callOp.emitOpError()
              << "'" << calleeName.getValue()
              << "' does not reference a symbol in the current scope";
     if (auto fn = dyn_cast<LLVMFuncOp>(callee)) {
-      if (failed(verifyCallOpDebugInfo(*this, fn)))
+      if (failed(verifyCallOpDebugInfo(callOp, fn)))
         return failure();
       fnType = fn.getFunctionType();
     } else if (auto ifunc = dyn_cast<IFuncOp>(callee)) {
       fnType = ifunc.getIFuncType();
+    } else if (isa<AliasOp>(callee)) {
+      // Aliases can alias functions, so calling through an alias is valid.
+      // The function type is determined by the call's operands and result
+      // types.
+      fnType = callOp.getCalleeFunctionType();
     } else {
-      return emitOpError()
+      return callOp.emitOpError()
              << "'" << calleeName.getValue()
-             << "' does not reference a valid LLVM function or IFunc";
+             << "' does not reference a valid LLVM function, IFunc, or alias";
     }
   }
 
   LLVMFunctionType funcType = llvm::dyn_cast<LLVMFunctionType>(fnType);
   if (!funcType)
-    return emitOpError("callee does not have a functional type: ") << fnType;
+    return callOp.emitOpError("callee does not have a functional type: ")
+           << fnType;
 
-  if (funcType.isVarArg() && !getVarCalleeType())
-    return emitOpError() << "missing var_callee_type attribute for vararg call";
+  if (funcType.isVarArg() && !callOp.getVarCalleeType())
+    return callOp.emitOpError()
+           << "missing var_callee_type attribute for vararg call";
 
   // Verify that the operand and result types match the callee.
 
   if (!funcType.isVarArg() &&
-      funcType.getNumParams() != (getCalleeOperands().size() - isIndirect))
-    return emitOpError() << "incorrect number of operands ("
-                         << (getCalleeOperands().size() - isIndirect)
-                         << ") for callee (expecting: "
-                         << funcType.getNumParams() << ")";
+      funcType.getNumParams() !=
+          (callOp.getCalleeOperands().size() - isIndirect))
+    return callOp.emitOpError()
+           << "incorrect number of operands ("
+           << (callOp.getCalleeOperands().size() - isIndirect)
+           << ") for callee (expecting: " << funcType.getNumParams() << ")";
 
-  if (funcType.getNumParams() > (getCalleeOperands().size() - isIndirect))
-    return emitOpError() << "incorrect number of operands ("
-                         << (getCalleeOperands().size() - isIndirect)
-                         << ") for varargs callee (expecting at least: "
-                         << funcType.getNumParams() << ")";
+  if (funcType.getNumParams() >
+      (callOp.getCalleeOperands().size() - isIndirect))
+    return callOp.emitOpError()
+           << "incorrect number of operands ("
+           << (callOp.getCalleeOperands().size() - isIndirect)
+           << ") for varargs callee (expecting at least: "
+           << funcType.getNumParams() << ")";
 
   for (unsigned i = 0, e = funcType.getNumParams(); i != e; ++i)
-    if (getOperand(i + isIndirect).getType() != funcType.getParamType(i))
-      return emitOpError() << "operand type mismatch for operand " << i << ": "
-                           << getOperand(i + isIndirect).getType()
-                           << " != " << funcType.getParamType(i);
+    if (callOp.getOperand(i + isIndirect).getType() !=
+        funcType.getParamType(i))
+      return callOp.emitOpError()
+             << "operand type mismatch for operand " << i << ": "
+             << callOp.getOperand(i + isIndirect).getType()
+             << " != " << funcType.getParamType(i);
 
-  if (getNumResults() == 0 &&
+  if (callOp.getNumResults() == 0 &&
       !llvm::isa<LLVM::LLVMVoidType>(funcType.getReturnType()))
-    return emitOpError() << "expected function call to produce a value";
+    return callOp.emitOpError()
+           << "expected function call to produce a value";
 
-  if (getNumResults() != 0 &&
+  if (callOp.getNumResults() != 0 &&
       llvm::isa<LLVM::LLVMVoidType>(funcType.getReturnType()))
-    return emitOpError()
+    return callOp.emitOpError()
            << "calling function with void result must not produce values";
 
-  if (getNumResults() > 1)
-    return emitOpError()
+  if (callOp.getNumResults() > 1)
+    return callOp.emitOpError()
            << "expected LLVM function call to produce 0 or 1 result";
 
-  if (getNumResults() && getResult().getType() != funcType.getReturnType())
-    return emitOpError() << "result type mismatch: " << getResult().getType()
-                         << " != " << funcType.getReturnType();
+  if (callOp.getNumResults() &&
+      callOp.getResult().getType() != funcType.getReturnType())
+    return callOp.emitOpError()
+           << "result type mismatch: " << callOp.getResult().getType()
+           << " != " << funcType.getReturnType();
 
   return success();
+}
+
+LogicalResult CallOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
+  return verifyCallOpSymbolUses(*this, symbolTable);
 }
 
 void CallOp::print(OpAsmPrinter &p) {
@@ -1523,7 +1659,33 @@ void InvokeOp::build(OpBuilder &builder, OperationState &state, LLVMFuncOp func,
   build(builder, state, getCallOpResultTypes(calleeType),
         getCallOpVarCalleeType(calleeType), SymbolRefAttr::get(func), ops,
         /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr, normalOps, unwindOps,
-        nullptr, nullptr, {}, {}, normal, unwind);
+        nullptr, nullptr, {}, {}, /*heapallocsite=*/nullptr,
+        /*callees=*/nullptr, /*loop_annotation=*/nullptr,
+        /*no_objc_arc_exceptions=*/nullptr, /*irr_loop_header_weight=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr,
+        /*no_return=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*convergent=*/nullptr,
+        /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_inline=*/nullptr, /*always_inline=*/nullptr,
+        /*inline_hint=*/nullptr, /*memory_effects=*/nullptr,
+        /*passthrough=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr,
+        /*access_groups=*/nullptr,
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr, normal, unwind);
 }
 
 void InvokeOp::build(OpBuilder &builder, OperationState &state, TypeRange tys,
@@ -1533,6 +1695,32 @@ void InvokeOp::build(OpBuilder &builder, OperationState &state, TypeRange tys,
   build(builder, state, tys,
         /*var_callee_type=*/nullptr, callee, ops, /*arg_attrs=*/nullptr,
         /*res_attrs=*/nullptr, normalOps, unwindOps, nullptr, nullptr, {}, {},
+        /*heapallocsite=*/nullptr, /*callees=*/nullptr,
+        /*loop_annotation=*/nullptr, /*no_objc_arc_exceptions=*/nullptr,
+        /*irr_loop_header_weight=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr,
+        /*no_return=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*convergent=*/nullptr,
+        /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_inline=*/nullptr, /*always_inline=*/nullptr,
+        /*inline_hint=*/nullptr, /*memory_effects=*/nullptr,
+        /*passthrough=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr,
+        /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr, /*annotations=*/nullptr,
         normal, unwind);
 }
 
@@ -1543,7 +1731,33 @@ void InvokeOp::build(OpBuilder &builder, OperationState &state,
   build(builder, state, getCallOpResultTypes(calleeType),
         getCallOpVarCalleeType(calleeType), callee, ops,
         /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr, normalOps, unwindOps,
-        nullptr, nullptr, {}, {}, normal, unwind);
+        nullptr, nullptr, {}, {}, /*heapallocsite=*/nullptr,
+        /*callees=*/nullptr, /*loop_annotation=*/nullptr,
+        /*no_objc_arc_exceptions=*/nullptr, /*irr_loop_header_weight=*/nullptr,
+        /*opt_size=*/nullptr, /*min_size=*/nullptr,
+        /*no_return=*/nullptr, /*cold=*/nullptr,
+        /*no_merge=*/nullptr, /*builtin=*/nullptr,
+        /*alloc_size=*/nullptr, /*convergent=*/nullptr,
+        /*no_unwind=*/nullptr, /*will_return=*/nullptr,
+        /*no_inline=*/nullptr, /*always_inline=*/nullptr,
+        /*inline_hint=*/nullptr, /*memory_effects=*/nullptr,
+        /*passthrough=*/nullptr,
+        /*optimize_none=*/nullptr, /*uwtable_kind=*/nullptr,
+        /*vscale_range=*/nullptr, /*frame_pointer=*/nullptr,
+        /*target_features=*/nullptr, /*target_cpu=*/nullptr,
+        /*tune_cpu=*/nullptr, /*unsafe_fp_math=*/nullptr,
+        /*no_infs_fp_math=*/nullptr, /*no_nans_fp_math=*/nullptr,
+        /*approx_func_fp_math=*/nullptr, /*no_signed_zeros_fp_math=*/nullptr,
+        /*denormal_fp_math=*/nullptr, /*denormal_fp_math_f32=*/nullptr,
+        /*fp_contract=*/nullptr, /*instrument_function_entry=*/nullptr,
+        /*instrument_function_exit=*/nullptr, /*arm_streaming=*/nullptr,
+        /*arm_locally_streaming=*/nullptr,
+        /*arm_streaming_compatible=*/nullptr, /*arm_new_za=*/nullptr,
+        /*arm_in_za=*/nullptr, /*arm_out_za=*/nullptr,
+        /*arm_inout_za=*/nullptr, /*arm_preserves_za=*/nullptr,
+        /*access_groups=*/nullptr,
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr, normal, unwind);
 }
 
 SuccessorOperands InvokeOp::getSuccessorOperands(unsigned index) {
@@ -1596,6 +1810,10 @@ LogicalResult InvokeOp::verify() {
     return failure();
 
   return success();
+}
+
+LogicalResult InvokeOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
+  return verifyCallOpSymbolUses(*this, symbolTable);
 }
 
 void InvokeOp::print(OpAsmPrinter &p) {
@@ -3506,7 +3724,8 @@ void AtomicRMWOp::build(OpBuilder &builder, OperationState &state,
         !syncscope.empty() ? builder.getStringAttr(syncscope) : nullptr,
         alignment ? builder.getI64IntegerAttr(alignment) : nullptr, isVolatile,
         /*access_groups=*/nullptr,
-        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr);
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
 }
 
 LogicalResult AtomicRMWOp::verify() {
@@ -3566,7 +3785,8 @@ void AtomicCmpXchgOp::build(OpBuilder &builder, OperationState &state,
         !syncscope.empty() ? builder.getStringAttr(syncscope) : nullptr,
         alignment ? builder.getI64IntegerAttr(alignment) : nullptr, isWeak,
         isVolatile, /*access_groups=*/nullptr,
-        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr);
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
 }
 
 LogicalResult AtomicCmpXchgOp::verify() {
@@ -3593,7 +3813,9 @@ LogicalResult AtomicCmpXchgOp::verify() {
 void FenceOp::build(OpBuilder &builder, OperationState &state,
                     AtomicOrdering ordering, StringRef syncscope) {
   build(builder, state, ordering,
-        syncscope.empty() ? nullptr : builder.getStringAttr(syncscope));
+        syncscope.empty() ? nullptr : builder.getStringAttr(syncscope),
+        /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr, /*annotations=*/nullptr);
 }
 
 LogicalResult FenceOp::verify() {
@@ -3742,7 +3964,8 @@ OpFoldResult LLVM::GEPOp::fold(FoldAdaptor adaptor) {
                                                  adaptor.getDynamicIndices());
 
   // gep %x:T, 0 -> %x
-  if (getBase().getType() == getType() && indices.size() == 1)
+  if (getBase().getType() == getType() && indices.size() == 1 &&
+      !getInRange())
     if (auto integer = llvm::dyn_cast_or_null<IntegerAttr>(indices[0]))
       if (integer.getValue().isZero())
         return getBase();
@@ -3830,6 +4053,13 @@ LogicalResult CallIntrinsicOp::verify() {
     return emitOpError() << "intrinsic name must start with 'llvm.'";
   if (failed(verifyOperandBundles(*this)))
     return failure();
+  // A void return is modeled as zero results (mirroring LLVM::CallOp); a
+  // `!llvm.void` result cannot round-trip -- the parser rejects `-> !llvm.void`.
+  // Enforce the invariant in the verifier so it holds for EVERY construction
+  // path, not just the void-folding builder below.
+  if (getNumResults() != 0 && isa<LLVM::LLVMVoidType>(getResultTypes()[0]))
+    return emitOpError() << "result type cannot be '!llvm.void'; a void "
+                            "intrinsic must have zero results";
   return success();
 }
 
@@ -3838,7 +4068,8 @@ void CallIntrinsicOp::build(OpBuilder &builder, OperationState &state,
   build(builder, state, /*resultTypes=*/TypeRange{}, intrin, args,
         FastmathFlagsAttr{},
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{}, /*arg_attrs=*/{},
-        /*res_attrs=*/{});
+        /*res_attrs=*/{}, /*access_groups=*/{}, /*alias_scopes=*/{},
+        /*noalias_scopes=*/{}, /*tbaa=*/{}, /*annotations=*/{});
 }
 
 void CallIntrinsicOp::build(OpBuilder &builder, OperationState &state,
@@ -3847,15 +4078,26 @@ void CallIntrinsicOp::build(OpBuilder &builder, OperationState &state,
   build(builder, state, /*resultTypes=*/TypeRange{}, intrin, args,
         fastMathFlags,
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{}, /*arg_attrs=*/{},
-        /*res_attrs=*/{});
+        /*res_attrs=*/{}, /*access_groups=*/{}, /*alias_scopes=*/{},
+        /*noalias_scopes=*/{}, /*tbaa=*/{}, /*annotations=*/{});
 }
 
 void CallIntrinsicOp::build(OpBuilder &builder, OperationState &state,
                             mlir::Type resultType, mlir::StringAttr intrin,
                             mlir::ValueRange args) {
+  // A void return must be represented as zero results, not a single
+  // `!llvm.void` result: the asm printer/parser round-trips void only as an
+  // empty result list -- a `!llvm.void` result prints as `-> !llvm.void`, which
+  // the parser rejects with "expected a non-void result type". Delegate to the
+  // no-result builder in that case.
+  if (!resultType || llvm::isa<LLVM::LLVMVoidType>(resultType)) {
+    build(builder, state, intrin, args);
+    return;
+  }
   build(builder, state, {resultType}, intrin, args, FastmathFlagsAttr{},
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{}, /*arg_attrs=*/{},
-        /*res_attrs=*/{});
+        /*res_attrs=*/{}, /*access_groups=*/{}, /*alias_scopes=*/{},
+        /*noalias_scopes=*/{}, /*tbaa=*/{}, /*annotations=*/{});
 }
 
 void CallIntrinsicOp::build(OpBuilder &builder, OperationState &state,
@@ -3864,7 +4106,8 @@ void CallIntrinsicOp::build(OpBuilder &builder, OperationState &state,
                             mlir::LLVM::FastmathFlagsAttr fastMathFlags) {
   build(builder, state, resultTypes, intrin, args, fastMathFlags,
         /*op_bundle_operands=*/{}, /*op_bundle_tags=*/{}, /*arg_attrs=*/{},
-        /*res_attrs=*/{});
+        /*res_attrs=*/{}, /*access_groups=*/{}, /*alias_scopes=*/{},
+        /*noalias_scopes=*/{}, /*tbaa=*/{}, /*annotations=*/{});
 }
 
 ParseResult CallIntrinsicOp::parse(OpAsmParser &parser,
@@ -4145,13 +4388,17 @@ LogicalResult LLVM::SincosOp::verify() {
 
 void LLVM::AssumeOp::build(OpBuilder &builder, OperationState &state,
                            mlir::Value cond) {
-  return build(builder, state, cond, /*op_bundle_operands=*/{},
+  return build(builder, state, cond, /*alias_scopes=*/nullptr,
+               /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+               /*annotations=*/nullptr, /*op_bundle_operands=*/{},
                /*op_bundle_tags=*/ArrayAttr{});
 }
 
 void LLVM::AssumeOp::build(OpBuilder &builder, OperationState &state,
                            Value cond, llvm::StringRef tag, ValueRange args) {
-  return build(builder, state, cond, ArrayRef<ValueRange>(args),
+  return build(builder, state, cond, /*alias_scopes=*/nullptr,
+               /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+               /*annotations=*/nullptr, ArrayRef<ValueRange>(args),
                builder.getStrArrayAttr(tag));
 }
 
@@ -4233,6 +4480,34 @@ void LLVM::masked_compressstore::build(OpBuilder &builder,
 // InlineAsmOp
 //===----------------------------------------------------------------------===//
 
+void InlineAsmOp::build(OpBuilder &builder, OperationState &state,
+                        TypeRange resultTypes, ValueRange operands,
+                        StringRef asmString, StringRef constraints,
+                        bool hasSideEffects, bool isAlignStack,
+                        TailCallKind tailCallKind, AsmDialectAttr asmDialect,
+                        ArrayAttr operandAttrs) {
+  state.addTypes(resultTypes);
+  state.addOperands(operands);
+  Properties &props = state.getOrAddProperties<Properties>();
+  props.asm_string = builder.getStringAttr(asmString);
+  props.constraints = builder.getStringAttr(constraints);
+  if (hasSideEffects)
+    props.has_side_effects = builder.getUnitAttr();
+  if (isAlignStack)
+    props.is_align_stack = builder.getUnitAttr();
+  props.tail_call_kind =
+      TailCallKindAttr::get(builder.getContext(), tailCallKind);
+  props.asm_dialect = asmDialect;
+  props.operand_attrs = operandAttrs;
+}
+
+LLVMFunctionType InlineAsmOp::getCalleeFunctionType() {
+  Type resultType =
+      getNumResults() ? getRes().getType() : LLVMVoidType::get(getContext());
+  return LLVMFunctionType::get(resultType,
+                               llvm::to_vector(getOperands().getTypes()));
+}
+
 LogicalResult InlineAsmOp::verify() {
   if (!getTailCallKindAttr())
     return success();
@@ -4270,6 +4545,118 @@ Speculation::Speculatability SDivOp::getSpeculatability() {
     return Speculation::Speculatable;
 
   return Speculation::NotSpeculatable;
+}
+
+//===----------------------------------------------------------------------===//
+// CallBrOp
+//===----------------------------------------------------------------------===//
+
+void CallBrOp::build(OpBuilder &builder, OperationState &state,
+                     TypeRange resultTypes, ValueRange asmOperands,
+                     StringRef asmString, StringRef constraints,
+                     bool hasSideEffects, bool isAlignStack,
+                     AsmDialectAttr asmDialect, ArrayAttr operandAttrs,
+                     Block *defaultDest, ValueRange defaultDestOperands,
+                     BlockRange indirectDests,
+                     ArrayRef<ValueRange> indirectDestOperands) {
+  state.addTypes(resultTypes);
+  state.addOperands(asmOperands);
+  state.addOperands(defaultDestOperands);
+  SmallVector<int32_t> segments;
+  int32_t numIndirectOperands = 0;
+  for (ValueRange range : indirectDestOperands) {
+    state.addOperands(range);
+    segments.push_back(range.size());
+    numIndirectOperands += range.size();
+  }
+  Properties &props = state.getOrAddProperties<Properties>();
+  props.asm_string = builder.getStringAttr(asmString);
+  props.constraints = builder.getStringAttr(constraints);
+  if (hasSideEffects)
+    props.has_side_effects = builder.getUnitAttr();
+  if (isAlignStack)
+    props.is_align_stack = builder.getUnitAttr();
+  props.asm_dialect = asmDialect;
+  props.operand_attrs = operandAttrs;
+  props.indirect_dest_operand_segments =
+      builder.getDenseI32ArrayAttr(segments);
+  props.operandSegmentSizes = {static_cast<int32_t>(asmOperands.size()),
+                               static_cast<int32_t>(defaultDestOperands.size()),
+                               numIndirectOperands};
+  state.addSuccessors(defaultDest);
+  state.addSuccessors(indirectDests);
+}
+
+SuccessorOperands CallBrOp::getSuccessorOperands(unsigned index) {
+  assert(index < getNumSuccessors() && "invalid successor index");
+  if (index == 0)
+    return SuccessorOperands(getDefaultDestOperandsMutable());
+  return SuccessorOperands(getIndirectDestOperandsMutable()[index - 1]);
+}
+
+void CallBrOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  if (getHasSideEffects()) {
+    effects.emplace_back(MemoryEffects::Write::get());
+    effects.emplace_back(MemoryEffects::Read::get());
+  }
+}
+
+LLVMFunctionType CallBrOp::getCalleeFunctionType() {
+  Type resultType = getNumResults()
+                        ? getRes().getType()
+                        : LLVMVoidType::get(getContext());
+  return LLVMFunctionType::get(
+      resultType, llvm::to_vector(getAsmOperands().getTypes()));
+}
+
+LogicalResult CallBrOp::verify() {
+  size_t numLabels = llvm::count_if(
+      llvm::InlineAsm::ParseConstraints(getConstraints()),
+      [](const llvm::InlineAsm::ConstraintInfo &info) {
+        return info.Type == llvm::InlineAsm::isLabel;
+      });
+  if (numLabels != getIndirectDests().size())
+    return emitOpError("expects one indirect destination per label "
+                       "constraint, got ")
+           << getIndirectDests().size() << " for " << numLabels;
+  return success();
+}
+
+static ParseResult parseCallBrIndirectDests(
+    OpAsmParser &parser, SmallVectorImpl<Block *> &dests,
+    SmallVectorImpl<SmallVector<OpAsmParser::UnresolvedOperand>> &operands,
+    SmallVectorImpl<SmallVector<Type>> &types) {
+  return parser.parseCommaSeparatedList(
+      OpAsmParser::Delimiter::Square,
+      [&]() -> ParseResult {
+        Block *dest = nullptr;
+        SmallVector<OpAsmParser::UnresolvedOperand> destOperands;
+        SmallVector<Type> destTypes;
+        if (parser.parseSuccessor(dest))
+          return failure();
+        if (succeeded(parser.parseOptionalLParen()) &&
+            (parser.parseOperandList(destOperands) ||
+             parser.parseColonTypeList(destTypes) || parser.parseRParen()))
+          return failure();
+        dests.push_back(dest);
+        operands.push_back(std::move(destOperands));
+        types.push_back(std::move(destTypes));
+        return success();
+      },
+      "indirect destinations");
+}
+
+static void printCallBrIndirectDests(OpAsmPrinter &p, Operation *,
+                                     SuccessorRange dests,
+                                     OperandRangeRange operands,
+                                     const TypeRangeRange &) {
+  p << "[";
+  llvm::interleaveComma(llvm::zip(dests, operands), p, [&](auto dest) {
+    p.printSuccessorAndUseList(std::get<0>(dest), std::get<1>(dest));
+  });
+  p << "]";
 }
 
 //===----------------------------------------------------------------------===//
@@ -4449,6 +4836,10 @@ LogicalResult LLVMDialect::verifyParameterAttribute(Operation *op,
       name == LLVMDialect::getInRegAttrName() ||
       name == LLVMDialect::getReturnedAttrName())
     return checkUnitAttrType();
+
+  // Check an integer attribute that can be attached to arbitrary types.
+  if (name == LLVMDialect::getNoFPClassAttrName())
+    return checkIntegerAttrType();
 
   return success();
 }

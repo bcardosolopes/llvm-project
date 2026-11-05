@@ -1,0 +1,39 @@
+// RUN: cir-link %s %S/Inputs/void-func-type-rename-b.cir --warn-odr-divergence \
+// RUN:   -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Renaming a colliding record rewrites every type that mentions it, and CIR
+// spells a void return as a *null* return type. Reading the MLIRContext off
+// that null crashed the rename walk, so cir-link SEGVd on any void function
+// reachable from a renamed record.
+//
+// @a_takes is the control: same void signature, but on the record that keeps
+// its name, so nothing about it is rebuilt. Only the renamed side is special.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "(anonymous namespace)::S" {!s32i}>
+
+module {
+  cir.func @from_a(%arg0: !cir.ptr<!rec_S>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @a_takes(%arg0: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}
+
+// STATS: 1 records renamed
+
+// CHECK-DAG: !rec_[[S:[A-Za-z0-9_]+]] = !cir.record<struct "(anonymous namespace)::S" {!s32i}>
+// CHECK-DAG: !rec_[[S1:[A-Za-z0-9_]+]] = !cir.record<struct "(anonymous namespace)::S.m1" {!cir.float}>
+
+// CHECK: cir.func @from_a(%{{.*}}: !cir.ptr<!rec_[[S]]>)
+
+// The control keeps the original record and stays void.
+// CHECK: cir.func @a_takes(%{{.*}}: !cir.ptr<!rec_[[S]]>) {
+
+// The renamed side is the one that crashed. The trailing `) {` is the voidness
+// pin: a rebuild that attached a return type would print `) -> ... {` here.
+// CHECK: cir.func @take_s(%{{.*}}: !cir.ptr<!rec_[[S1]]>) {

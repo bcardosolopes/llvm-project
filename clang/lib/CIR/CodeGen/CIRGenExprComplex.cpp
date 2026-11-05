@@ -48,6 +48,21 @@ public:
   mlir::Value emitComplexToComplexCast(mlir::Value value, QualType srcType,
                                        QualType destType, SourceLocation loc);
 
+  /// Attach FP constraint attributes to a CastOp if we're in a constrained
+  /// FP context. Used to propagate strictfp metadata through complex casts
+  /// that get decomposed in LoweringPrepare.
+  void attachFPConstraints(mlir::Value val, clang::FPOptions fpFeatures) {
+    if (!(fpFeatures.isFPConstrained() || cgf.IsFPConstrained))
+      return;
+    if (auto castOp = val.getDefiningOp<cir::CastOp>()) {
+      auto *ctx = &cgf.getMLIRContext();
+      if (auto fpExcept = cgf.getFPExceptionBehavior(ctx, fpFeatures))
+        castOp->setAttr("cir.fp_exception", fpExcept);
+      if (auto roundMode = CIRGenFunction::getRoundingMode(ctx, fpFeatures))
+        castOp->setAttr("cir.rounding_mode", roundMode);
+    }
+  }
+
   /// Emit a cast from scalar value Val to DestType.
   mlir::Value emitScalarToComplexCast(mlir::Value value, QualType srcType,
                                       QualType destType, SourceLocation loc);
@@ -57,11 +72,15 @@ public:
   //===--------------------------------------------------------------------===//
 
   mlir::Value Visit(Expr *e) {
+    // OGCG applies debug location for each visited expression via
+    // ApplyDebugLocation DL(CGF, E) (CGExprComplex.cpp:100).
+    // CIR ops carry their own mlir::Location, so this is handled inherently.
     return StmtVisitor<ComplexExprEmitter, mlir::Value>::Visit(e);
   }
 
   mlir::Value VisitStmt(Stmt *s) {
-    cgf.cgm.errorNYI(s->getBeginLoc(), "ComplexExprEmitter VisitStmt");
+    cgf.cgm.errorNYI(s->getSourceRange(),
+                     "ComplexExprEmitter::VisitStmt");
     return {};
   }
 
@@ -71,9 +90,7 @@ public:
       return builder.getConstant(cgf.getLoc(e->getSourceRange()),
                                  mlir::cast<mlir::TypedAttr>(result));
 
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitConstantExpr non constantexpr");
-    return {};
+    return Visit(e->getSubExpr());
   }
 
   mlir::Value VisitParenExpr(ParenExpr *pe) { return Visit(pe->getSubExpr()); }
@@ -86,16 +103,13 @@ public:
     return Visit(pe->getReplacement());
   }
   mlir::Value VisitCoawaitExpr(CoawaitExpr *s) {
-    cgf.cgm.errorNYI(s->getExprLoc(), "ComplexExprEmitter VisitCoawaitExpr");
-    return {};
+    return cgf.emitCoawaitExpr(*s).getComplexValue();
   }
   mlir::Value VisitCoyieldExpr(CoyieldExpr *s) {
-    cgf.cgm.errorNYI(s->getExprLoc(), "ComplexExprEmitter VisitCoyieldExpr");
-    return {};
+    return cgf.emitCoyieldExpr(*s).getComplexValue();
   }
   mlir::Value VisitUnaryCoawait(const UnaryOperator *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(), "ComplexExprEmitter VisitUnaryCoawait");
-    return {};
+    return Visit(e->getSubExpr());
   }
 
   mlir::Value emitConstant(const CIRGenFunction::ConstantEmission &constant,
@@ -116,14 +130,12 @@ public:
     return emitLoadOfLValue(e);
   }
   mlir::Value VisitObjCIvarRefExpr(ObjCIvarRefExpr *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitObjCIvarRefExpr");
+    cgf.cgm.errorNYI(e->getSourceRange(),
+                     "ComplexExprEmitter::VisitObjCIvarRefExpr");
     return {};
   }
   mlir::Value VisitObjCMessageExpr(ObjCMessageExpr *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitObjCMessageExpr");
-    return {};
+    return cgf.emitObjCMessageExpr(e).getComplexValue();
   }
   mlir::Value VisitArraySubscriptExpr(Expr *e) { return emitLoadOfLValue(e); }
   mlir::Value VisitMemberExpr(MemberExpr *me) {
@@ -141,8 +153,8 @@ public:
   }
 
   mlir::Value VisitPseudoObjectExpr(PseudoObjectExpr *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitPseudoObjectExpr");
+    cgf.cgm.errorNYI(e->getSourceRange(),
+                     "ComplexExprEmitter::VisitPseudoObjectExpr");
     return {};
   }
 
@@ -152,22 +164,42 @@ public:
     // here.
     if (e->changesVolatileQualification())
       return emitLoadOfLValue(e);
-    return emitCast(e->getCastKind(), e->getSubExpr(), e->getType());
+    mlir::Value result =
+        emitCast(e->getCastKind(), e->getSubExpr(), e->getType());
+    attachFPConstraints(result, e->getFPFeaturesInEffect(cgf.getLangOpts()));
+    return result;
   }
   mlir::Value VisitCastExpr(CastExpr *e) {
     if (const auto *ece = dyn_cast<ExplicitCastExpr>(e)) {
       // Bind VLAs in the cast type.
       if (ece->getType()->isVariablyModifiedType()) {
-        cgf.cgm.errorNYI(e->getExprLoc(),
-                         "VisitCastExpr Bind VLAs in the cast type");
+        cgf.cgm.errorNYI(ece->getSourceRange(),
+                         "VisitCastExpr VLA type binding for complex");
         return {};
       }
+      // Keep explicit-cast type side effects in sync with scalar code paths
+      // (VLA binding + any other type-dependent bookkeeping).
+      cgf.cgm.emitExplicitCastExprType(ece, &cgf);
     }
 
     if (e->changesVolatileQualification())
       return emitLoadOfLValue(e);
 
-    return emitCast(e->getCastKind(), e->getSubExpr(), e->getType());
+    // Set up strict FP context before emitting the cast, matching OGCG's
+    // CGFPOptionsRAII usage. This ensures inner scalar conversions (e.g.
+    // double→float in a FloatingRealToComplex) use constrained intrinsics.
+    FPOptions fpFeatures = e->getFPFeaturesInEffect(cgf.getLangOpts());
+    bool savedFPConstrained = cgf.IsFPConstrained;
+    if (fpFeatures.isFPConstrained())
+      cgf.IsFPConstrained = true;
+
+    mlir::Value result =
+        emitCast(e->getCastKind(), e->getSubExpr(), e->getType());
+
+    cgf.IsFPConstrained = savedFPConstrained;
+
+    attachFPConstraints(result, fpFeatures);
+    return result;
   }
   mlir::Value VisitCallExpr(const CallExpr *e);
   mlir::Value VisitStmtExpr(const StmtExpr *e);
@@ -210,9 +242,15 @@ public:
     return Visit(die->getExpr());
   }
   mlir::Value VisitExprWithCleanups(ExprWithCleanups *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitExprWithCleanups");
-    return {};
+    CIRGenFunction::SourceLocRAIIObject exprLoc{
+        cgf, cgf.getLoc(e->getSubExpr()->getExprLoc())};
+    CIRGenFunction::RunCleanupsScope scope(cgf);
+    mlir::Value result = Visit(e->getSubExpr());
+    // OGCG calls Scope.ForceCleanup({&Vals.first, &Vals.second}) to defend
+    // against SSA dominance problems in shared cleanup blocks. CIR's
+    // structured control flow (MLIR regions) inherently avoids this issue —
+    // values remain valid within their defining scope. Intentional divergence.
+    return result;
   }
   mlir::Value VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *e) {
     mlir::Location loc = cgf.getLoc(e->getExprLoc());
@@ -220,9 +258,10 @@ public:
     return builder.getNullValue(complexTy, loc);
   }
   mlir::Value VisitImplicitValueInitExpr(ImplicitValueInitExpr *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitImplicitValueInitExpr");
-    return {};
+    assert(e->getType()->isAnyComplexType() && "Expected complex type!");
+    mlir::Location loc = cgf.getLoc(e->getExprLoc());
+    mlir::Type complexTy = cgf.convertType(e->getType());
+    return builder.getNullValue(complexTy, loc);
   }
 
   struct BinOpInfo {
@@ -251,9 +290,43 @@ public:
   mlir::Value emitBinMul(const BinOpInfo &op);
   mlir::Value emitBinDiv(const BinOpInfo &op);
 
-  QualType getPromotionType(QualType ty, bool isDivOpCode = false) {
+  QualType higherPrecisionTypeForComplexArithmetic(QualType elementTy) {
+    ASTContext &ctx = cgf.getContext();
+    const QualType higherElementTy = ctx.GetHigherPrecisionFPType(elementTy);
+    const llvm::fltSemantics &elementTySemantics =
+        ctx.getFloatTypeSemantics(elementTy);
+    const llvm::fltSemantics &higherElementTySemantics =
+        ctx.getFloatTypeSemantics(higherElementTy);
+
+    if (llvm::APFloat::semanticsMaxExponent(elementTySemantics) * 2 + 1 <=
+        llvm::APFloat::semanticsMaxExponent(higherElementTySemantics)) {
+      if (!ctx.getTargetInfo().hasLongDoubleType() &&
+          higherElementTy.getCanonicalType().getUnqualifiedType() ==
+              ctx.LongDoubleTy)
+        return QualType();
+      return ctx.getComplexType(higherElementTy);
+    }
+
+    return QualType();
+  }
+
+  QualType getPromotionType(FPOptionsOverride features, QualType ty,
+                            bool isComplexDivisor) {
     if (auto *complexTy = ty->getAs<ComplexType>()) {
-      QualType elementTy = complexTy->getElementType();
+      QualType elementTy = complexTy->getElementType().getCanonicalType();
+      bool isFloatingType = elementTy->isFloatingType();
+      bool isComplexRangePromoted =
+          cgf.getLangOpts().getComplexRange() == LangOptions::CX_Promoted;
+      bool hasNoComplexRangeOverride = !features.hasComplexRangeOverride();
+      bool hasMatchingComplexRange =
+          features.hasComplexRangeOverride() &&
+          features.getComplexRangeOverride() ==
+              cgf.getLangOpts().getComplexRange();
+
+      if (isComplexDivisor && isFloatingType && isComplexRangePromoted &&
+          (hasNoComplexRangeOverride || hasMatchingComplexRange))
+        return higherPrecisionTypeForComplexArithmetic(elementTy);
+
       if (elementTy.UseExcessPrecision(cgf.getContext()))
         return cgf.getContext().getComplexType(cgf.getContext().FloatTy);
     }
@@ -265,8 +338,11 @@ public:
 
 #define HANDLEBINOP(OP)                                                        \
   mlir::Value VisitBin##OP(const BinaryOperator *e) {                          \
-    QualType promotionTy = getPromotionType(                                   \
-        e->getType(), e->getOpcode() == BinaryOperatorKind::BO_Div);           \
+    bool isComplexDivisor =                                                     \
+        e->getOpcode() == BinaryOperatorKind::BO_Div &&                         \
+        e->getRHS()->getType()->isAnyComplexType();                             \
+    QualType promotionTy = getPromotionType(                                    \
+        e->getStoredFPFeaturesOrDefault(), e->getType(), isComplexDivisor);    \
     mlir::Value result = emitBin##OP(emitBinOps(e, promotionTy));              \
     if (!promotionTy.isNull())                                                 \
       result = cgf.emitUnPromotedValue(result, e->getType());                  \
@@ -280,9 +356,7 @@ public:
 #undef HANDLEBINOP
 
   mlir::Value VisitCXXRewrittenBinaryOperator(CXXRewrittenBinaryOperator *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitCXXRewrittenBinaryOperator");
-    return {};
+    return Visit(e->getSemanticForm());
   }
 
   // Compound assignments.
@@ -325,9 +399,7 @@ public:
   }
 
   mlir::Value VisitPackIndexingExpr(PackIndexingExpr *e) {
-    cgf.cgm.errorNYI(e->getExprLoc(),
-                     "ComplexExprEmitter VisitPackIndexingExpr");
-    return {};
+    return Visit(e->getSelectedExpr());
   }
 };
 } // namespace
@@ -342,7 +414,7 @@ mlir::Value ComplexExprEmitter::emitLoadOfLValue(LValue lv,
                                                  SourceLocation loc) {
   assert(lv.isSimple() && "non-simple complex l-value?");
   if (lv.getType()->isAtomicType())
-    cgf.cgm.errorNYI(loc, "emitLoadOfLValue with Atomic LV");
+    return cgf.emitAtomicLoad(lv, loc).getComplexValue();
 
   const Address srcAddr = lv.getAddress();
   return builder.createLoad(cgf.getLoc(loc), srcAddr, lv.isVolatileQualified());
@@ -353,13 +425,13 @@ mlir::Value ComplexExprEmitter::emitLoadOfLValue(LValue lv,
 void ComplexExprEmitter::emitStoreOfComplex(mlir::Location loc, mlir::Value val,
                                             LValue lv, bool isInit) {
   if (lv.getType()->isAtomicType() ||
-      (!isInit && cgf.isLValueSuitableForInlineAtomic(lv))) {
-    cgf.cgm.errorNYI(loc, "StoreOfComplex with Atomic LV");
-    return;
-  }
+      (!isInit && cgf.isLValueSuitableForInlineAtomic(lv)))
+    return cgf.emitAtomicStore(RValue::getComplex(val), lv, isInit);
 
   const Address destAddr = lv.getAddress();
-  builder.createStore(loc, val, destAddr, lv.isVolatileQualified());
+  auto storeOp = builder.createStore(loc, val, destAddr,
+                                     lv.isVolatileQualified());
+  cgf.addOpToCurrentSourceAtom(storeOp, val);
 }
 
 //===----------------------------------------------------------------------===//
@@ -367,7 +439,8 @@ void ComplexExprEmitter::emitStoreOfComplex(mlir::Location loc, mlir::Value val,
 //===----------------------------------------------------------------------===//
 
 mlir::Value ComplexExprEmitter::VisitExpr(Expr *e) {
-  cgf.cgm.errorNYI(e->getExprLoc(), "ComplexExprEmitter VisitExpr");
+  cgf.cgm.errorNYI(e->getSourceRange(),
+                   "ComplexExprEmitter::VisitExpr catch-all");
   return {};
 }
 
@@ -446,6 +519,14 @@ mlir::Value ComplexExprEmitter::emitScalarToComplexCast(mlir::Value val,
                                                         QualType srcType,
                                                         QualType destType,
                                                         SourceLocation loc) {
+  // Convert the input element to the element type of the complex.
+  // This matches OGCG which calls EmitScalarConversion before pairing
+  // (realval, 0). For example, bool → complex float requires converting
+  // the bool to float first, then wrapping in complex.
+  QualType elementType = destType->castAs<ComplexType>()->getElementType();
+  val = cgf.emitScalarConversion(val, srcType, elementType, loc);
+  srcType = elementType;
+
   cir::CastKind castOpKind;
   if (srcType->isFloatingType())
     castOpKind = cir::CastKind::float_to_complex;
@@ -468,13 +549,14 @@ mlir::Value ComplexExprEmitter::emitCast(CastKind ck, Expr *op,
   case CK_LValueToRValue:
     return Visit(op);
 
+  case CK_UserDefinedConversion:
+    return Visit(op);
+
+  // Atomic to non-atomic casts may be more than a no-op for some platforms
+  // and for some types.
   case CK_AtomicToNonAtomic:
   case CK_NonAtomicToAtomic:
-  case CK_UserDefinedConversion: {
-    cgf.cgm.errorNYI(
-        "ComplexExprEmitter::emitCast Atmoic & UserDefinedConversion");
-    return {};
-  }
+    return Visit(op);
 
   case CK_LValueBitCast: {
     LValue origLV = cgf.emitLValue(op);
@@ -489,7 +571,7 @@ mlir::Value ComplexExprEmitter::emitCast(CastKind ck, Expr *op,
     Address addr = sourceLVal.getAddress().withElementType(
         builder, cgf.convertTypeForMem(destTy));
     LValue destLV = cgf.makeAddrLValue(addr, destTy);
-    assert(!cir::MissingFeatures::opTBAA());
+    destLV.setTBAAInfo(TBAAAccessInfo::getMayAliasInfo());
     return emitLoadOfLValue(destLV, op->getExprLoc());
   }
 
@@ -553,7 +635,6 @@ mlir::Value ComplexExprEmitter::emitCast(CastKind ck, Expr *op,
 
   case CK_FloatingRealToComplex:
   case CK_IntegralRealToComplex: {
-    assert(!cir::MissingFeatures::cgFPOptionsRAII());
     return emitScalarToComplexCast(cgf.emitScalarExpr(op), op->getType(),
                                    destTy, op->getExprLoc());
   }
@@ -562,7 +643,6 @@ mlir::Value ComplexExprEmitter::emitCast(CastKind ck, Expr *op,
   case CK_FloatingComplexToIntegralComplex:
   case CK_IntegralComplexCast:
   case CK_IntegralComplexToFloatingComplex: {
-    assert(!cir::MissingFeatures::cgFPOptionsRAII());
     return emitComplexToComplexCast(Visit(op), op->getType(), destTy,
                                     op->getExprLoc());
   }
@@ -572,7 +652,9 @@ mlir::Value ComplexExprEmitter::emitCast(CastKind ck, Expr *op,
 }
 
 mlir::Value ComplexExprEmitter::VisitUnaryPlus(const UnaryOperator *e) {
-  QualType promotionTy = getPromotionType(e->getSubExpr()->getType());
+  QualType promotionTy =
+      getPromotionType(FPOptionsOverride(), e->getSubExpr()->getType(),
+                       /*isComplexDivisor=*/false);
   mlir::Value result = VisitPlusMinus(e, cir::UnaryOpKind::Plus, promotionTy);
   if (!promotionTy.isNull())
     return cgf.emitUnPromotedValue(result, e->getSubExpr()->getType());
@@ -580,7 +662,9 @@ mlir::Value ComplexExprEmitter::VisitUnaryPlus(const UnaryOperator *e) {
 }
 
 mlir::Value ComplexExprEmitter::VisitUnaryMinus(const UnaryOperator *e) {
-  QualType promotionTy = getPromotionType(e->getSubExpr()->getType());
+  QualType promotionTy =
+      getPromotionType(FPOptionsOverride(), e->getSubExpr()->getType(),
+                       /*isComplexDivisor=*/false);
   mlir::Value result = VisitPlusMinus(e, cir::UnaryOpKind::Minus, promotionTy);
   if (!promotionTy.isNull())
     return cgf.emitUnPromotedValue(result, e->getSubExpr()->getType());
@@ -590,13 +674,15 @@ mlir::Value ComplexExprEmitter::VisitUnaryMinus(const UnaryOperator *e) {
 mlir::Value ComplexExprEmitter::VisitPlusMinus(const UnaryOperator *e,
                                                cir::UnaryOpKind kind,
                                                QualType promotionType) {
-  assert(kind == cir::UnaryOpKind::Plus ||
-         kind == cir::UnaryOpKind::Minus &&
-             "Invalid UnaryOp kind for ComplexType Plus or Minus");
+  assert((kind == cir::UnaryOpKind::Plus ||
+          kind == cir::UnaryOpKind::Minus) &&
+         "Invalid UnaryOp kind for ComplexType Plus or Minus");
 
   mlir::Value op;
   if (!promotionType.isNull())
-    op = cgf.emitPromotedComplexExpr(e->getSubExpr(), promotionType);
+    // Avoid creating a nested ComplexExprEmitter for promoted operands while
+    // already in a ComplexExprEmitter walk.
+    op = emitPromoted(e->getSubExpr(), promotionType);
   else
     op = Visit(e->getSubExpr());
   return builder.createUnaryOp(cgf.getLoc(e->getExprLoc()), kind, op);
@@ -608,47 +694,107 @@ mlir::Value ComplexExprEmitter::VisitUnaryNot(const UnaryOperator *e) {
 }
 
 mlir::Value ComplexExprEmitter::emitBinAdd(const BinOpInfo &op) {
-  assert(!cir::MissingFeatures::fastMathFlags());
-  assert(!cir::MissingFeatures::cgFPOptionsRAII());
+  cir::FastMathFlags fmf =
+      CIRGenFunction::getFastMathFlags(op.fpFeatures);
+  auto *ctx = &cgf.getMLIRContext();
+  auto fpExcept = cgf.getFPExceptionBehavior(ctx, op.fpFeatures);
+  auto roundMode = CIRGenFunction::getRoundingMode(ctx, op.fpFeatures);
 
   if (mlir::isa<cir::ComplexType>(op.lhs.getType()) &&
-      mlir::isa<cir::ComplexType>(op.rhs.getType()))
-    return cir::ComplexAddOp::create(builder, op.loc, op.lhs, op.rhs);
+      mlir::isa<cir::ComplexType>(op.rhs.getType())) {
+    // When strict FP is enabled, decompose into scalar operations so that
+    // constrained FP intrinsics are used. ComplexAddOp doesn't carry
+    // FP exception/rounding attributes.
+    if (fpExcept) {
+      mlir::Value lhsR = builder.createComplexReal(op.loc, op.lhs);
+      mlir::Value lhsI = builder.createComplexImag(op.loc, op.lhs);
+      mlir::Value rhsR = builder.createComplexReal(op.loc, op.rhs);
+      mlir::Value rhsI = builder.createComplexImag(op.loc, op.rhs);
+      mlir::Value addR =
+          builder.createFAdd(op.loc, lhsR, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value addI =
+          builder.createFAdd(op.loc, lhsI, rhsI, fmf, fpExcept, roundMode);
+      return builder.createComplexCreate(op.loc, addR, addI);
+    }
+    return cir::ComplexAddOp::create(builder, op.loc, op.lhs, op.rhs, fmf);
+  }
 
   if (mlir::isa<cir::ComplexType>(op.lhs.getType())) {
     mlir::Value real = builder.createComplexReal(op.loc, op.lhs);
     mlir::Value imag = builder.createComplexImag(op.loc, op.lhs);
-    mlir::Value newReal = builder.createAdd(op.loc, real, op.rhs);
+    mlir::Value newReal;
+    if (cir::isFPOrVectorOfFPType(real.getType())) {
+      newReal =
+          builder.createFAdd(op.loc, real, op.rhs, fmf, fpExcept, roundMode);
+    } else {
+      newReal = builder.createAdd(op.loc, real, op.rhs);
+    }
     return builder.createComplexCreate(op.loc, newReal, imag);
   }
 
   assert(mlir::isa<cir::ComplexType>(op.rhs.getType()));
   mlir::Value real = builder.createComplexReal(op.loc, op.rhs);
   mlir::Value imag = builder.createComplexImag(op.loc, op.rhs);
-  mlir::Value newReal = builder.createAdd(op.loc, op.lhs, real);
+  mlir::Value newReal;
+  if (cir::isFPOrVectorOfFPType(real.getType())) {
+    newReal =
+        builder.createFAdd(op.loc, op.lhs, real, fmf, fpExcept, roundMode);
+  } else {
+    newReal = builder.createAdd(op.loc, op.lhs, real);
+  }
   return builder.createComplexCreate(op.loc, newReal, imag);
 }
 
 mlir::Value ComplexExprEmitter::emitBinSub(const BinOpInfo &op) {
-  assert(!cir::MissingFeatures::fastMathFlags());
-  assert(!cir::MissingFeatures::cgFPOptionsRAII());
+  cir::FastMathFlags fmf =
+      CIRGenFunction::getFastMathFlags(op.fpFeatures);
+  auto *ctx = &cgf.getMLIRContext();
+  auto fpExcept = cgf.getFPExceptionBehavior(ctx, op.fpFeatures);
+  auto roundMode = CIRGenFunction::getRoundingMode(ctx, op.fpFeatures);
 
   if (mlir::isa<cir::ComplexType>(op.lhs.getType()) &&
-      mlir::isa<cir::ComplexType>(op.rhs.getType()))
-    return cir::ComplexSubOp::create(builder, op.loc, op.lhs, op.rhs);
+      mlir::isa<cir::ComplexType>(op.rhs.getType())) {
+    // When strict FP is enabled, decompose into scalar operations.
+    if (fpExcept) {
+      mlir::Value lhsR = builder.createComplexReal(op.loc, op.lhs);
+      mlir::Value lhsI = builder.createComplexImag(op.loc, op.lhs);
+      mlir::Value rhsR = builder.createComplexReal(op.loc, op.rhs);
+      mlir::Value rhsI = builder.createComplexImag(op.loc, op.rhs);
+      mlir::Value subR =
+          builder.createFSub(op.loc, lhsR, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value subI =
+          builder.createFSub(op.loc, lhsI, rhsI, fmf, fpExcept, roundMode);
+      return builder.createComplexCreate(op.loc, subR, subI);
+    }
+    return cir::ComplexSubOp::create(builder, op.loc, op.lhs, op.rhs, fmf);
+  }
 
   if (mlir::isa<cir::ComplexType>(op.lhs.getType())) {
     mlir::Value real = builder.createComplexReal(op.loc, op.lhs);
     mlir::Value imag = builder.createComplexImag(op.loc, op.lhs);
-    mlir::Value newReal = builder.createSub(op.loc, real, op.rhs);
+    mlir::Value newReal;
+    if (cir::isFPOrVectorOfFPType(real.getType())) {
+      newReal =
+          builder.createFSub(op.loc, real, op.rhs, fmf, fpExcept, roundMode);
+    } else {
+      newReal = builder.createSub(op.loc, real, op.rhs);
+    }
     return builder.createComplexCreate(op.loc, newReal, imag);
   }
 
   assert(mlir::isa<cir::ComplexType>(op.rhs.getType()));
   mlir::Value real = builder.createComplexReal(op.loc, op.rhs);
   mlir::Value imag = builder.createComplexImag(op.loc, op.rhs);
-  mlir::Value newReal = builder.createSub(op.loc, op.lhs, real);
-  return builder.createComplexCreate(op.loc, newReal, imag);
+  mlir::Value newReal;
+  if (cir::isFPOrVectorOfFPType(real.getType())) {
+    newReal =
+        builder.createFSub(op.loc, op.lhs, real, fmf, fpExcept, roundMode);
+  } else {
+    newReal = builder.createSub(op.loc, op.lhs, real);
+  }
+  mlir::Value negImag =
+      builder.createUnaryOp(op.loc, cir::UnaryOpKind::Minus, imag);
+  return builder.createComplexCreate(op.loc, newReal, negImag);
 }
 
 static cir::ComplexRangeKind
@@ -669,36 +815,83 @@ getComplexRangeAttr(LangOptions::ComplexRangeKind range) {
 }
 
 mlir::Value ComplexExprEmitter::emitBinMul(const BinOpInfo &op) {
-  assert(!cir::MissingFeatures::fastMathFlags());
-  assert(!cir::MissingFeatures::cgFPOptionsRAII());
+  cir::ComplexRangeKind rangeKind =
+      getComplexRangeAttr(op.fpFeatures.getComplexRange());
+  cir::FastMathFlags fmf =
+      CIRGenFunction::getFastMathFlags(op.fpFeatures);
+  auto *ctx = &cgf.getMLIRContext();
+  auto fpExcept = cgf.getFPExceptionBehavior(ctx, op.fpFeatures);
+  auto roundMode = CIRGenFunction::getRoundingMode(ctx, op.fpFeatures);
 
   if (mlir::isa<cir::ComplexType>(op.lhs.getType()) &&
       mlir::isa<cir::ComplexType>(op.rhs.getType())) {
-    cir::ComplexRangeKind rangeKind =
-        getComplexRangeAttr(op.fpFeatures.getComplexRange());
+    // When strict FP is enabled, decompose into scalar operations so that
+    // constrained FP intrinsics are used. ComplexMulOp doesn't carry
+    // FP exception/rounding attributes.
+    if (fpExcept) {
+      mlir::Value lhsR = builder.createComplexReal(op.loc, op.lhs);
+      mlir::Value lhsI = builder.createComplexImag(op.loc, op.lhs);
+      mlir::Value rhsR = builder.createComplexReal(op.loc, op.rhs);
+      mlir::Value rhsI = builder.createComplexImag(op.loc, op.rhs);
+      // (a+bi) * (c+di) = (ac-bd) + (ad+bc)i
+      mlir::Value ac =
+          builder.createFMul(op.loc, lhsR, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value bd =
+          builder.createFMul(op.loc, lhsI, rhsI, fmf, fpExcept, roundMode);
+      mlir::Value ad =
+          builder.createFMul(op.loc, lhsR, rhsI, fmf, fpExcept, roundMode);
+      mlir::Value bc =
+          builder.createFMul(op.loc, lhsI, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value resR =
+          builder.createFSub(op.loc, ac, bd, fmf, fpExcept, roundMode);
+      mlir::Value resI =
+          builder.createFAdd(op.loc, ad, bc, fmf, fpExcept, roundMode);
+      return builder.createComplexCreate(op.loc, resR, resI);
+    }
     return cir::ComplexMulOp::create(builder, op.loc, op.lhs, op.rhs,
-                                     rangeKind);
+                                     rangeKind, fmf);
   }
 
   if (mlir::isa<cir::ComplexType>(op.lhs.getType())) {
     mlir::Value real = builder.createComplexReal(op.loc, op.lhs);
     mlir::Value imag = builder.createComplexImag(op.loc, op.lhs);
-    mlir::Value newReal = builder.createMul(op.loc, real, op.rhs);
-    mlir::Value newImag = builder.createMul(op.loc, imag, op.rhs);
+    mlir::Value newReal, newImag;
+    if (cir::isFPOrVectorOfFPType(real.getType())) {
+      newReal =
+          builder.createFMul(op.loc, real, op.rhs, fmf, fpExcept, roundMode);
+      newImag =
+          builder.createFMul(op.loc, imag, op.rhs, fmf, fpExcept, roundMode);
+    } else {
+      newReal = builder.createMul(op.loc, real, op.rhs);
+      newImag = builder.createMul(op.loc, imag, op.rhs);
+    }
     return builder.createComplexCreate(op.loc, newReal, newImag);
   }
 
   assert(mlir::isa<cir::ComplexType>(op.rhs.getType()));
   mlir::Value real = builder.createComplexReal(op.loc, op.rhs);
   mlir::Value imag = builder.createComplexImag(op.loc, op.rhs);
-  mlir::Value newReal = builder.createMul(op.loc, op.lhs, real);
-  mlir::Value newImag = builder.createMul(op.loc, op.lhs, imag);
+  mlir::Value newReal, newImag;
+  if (cir::isFPOrVectorOfFPType(real.getType())) {
+    newReal =
+        builder.createFMul(op.loc, op.lhs, real, fmf, fpExcept, roundMode);
+    newImag =
+        builder.createFMul(op.loc, op.lhs, imag, fmf, fpExcept, roundMode);
+  } else {
+    newReal = builder.createMul(op.loc, op.lhs, real);
+    newImag = builder.createMul(op.loc, op.lhs, imag);
+  }
   return builder.createComplexCreate(op.loc, newReal, newImag);
 }
 
 mlir::Value ComplexExprEmitter::emitBinDiv(const BinOpInfo &op) {
-  assert(!cir::MissingFeatures::fastMathFlags());
-  assert(!cir::MissingFeatures::cgFPOptionsRAII());
+  cir::ComplexRangeKind rangeKind =
+      getComplexRangeAttr(op.fpFeatures.getComplexRange());
+  cir::FastMathFlags fmf =
+      CIRGenFunction::getFastMathFlags(op.fpFeatures);
+  auto *ctx = &cgf.getMLIRContext();
+  auto fpExcept = cgf.getFPExceptionBehavior(ctx, op.fpFeatures);
+  auto roundMode = CIRGenFunction::getRoundingMode(ctx, op.fpFeatures);
 
   // Handle division between two complex values. In the case of complex integer
   // types mixed with scalar integers, the scalar integer type will always be
@@ -706,10 +899,41 @@ mlir::Value ComplexExprEmitter::emitBinDiv(const BinOpInfo &op) {
   // the AST is formed.
   if (mlir::isa<cir::ComplexType>(op.lhs.getType()) &&
       mlir::isa<cir::ComplexType>(op.rhs.getType())) {
-    cir::ComplexRangeKind rangeKind =
-        getComplexRangeAttr(op.fpFeatures.getComplexRange());
+    // When strict FP is enabled, decompose into scalar operations so that
+    // constrained FP intrinsics are used. ComplexDivOp doesn't carry
+    // FP exception/rounding attributes. (follow-up)
+    if (fpExcept) {
+      mlir::Value lhsR = builder.createComplexReal(op.loc, op.lhs);
+      mlir::Value lhsI = builder.createComplexImag(op.loc, op.lhs);
+      mlir::Value rhsR = builder.createComplexReal(op.loc, op.rhs);
+      mlir::Value rhsI = builder.createComplexImag(op.loc, op.rhs);
+      // (a+bi) / (c+di) = ((ac+bd)/(cc+dd)) + i((bc-ad)/(cc+dd))
+      mlir::Value ac =
+          builder.createFMul(op.loc, lhsR, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value bd =
+          builder.createFMul(op.loc, lhsI, rhsI, fmf, fpExcept, roundMode);
+      mlir::Value acPbd =
+          builder.createFAdd(op.loc, ac, bd, fmf, fpExcept, roundMode);
+      mlir::Value cc =
+          builder.createFMul(op.loc, rhsR, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value dd =
+          builder.createFMul(op.loc, rhsI, rhsI, fmf, fpExcept, roundMode);
+      mlir::Value ccPdd =
+          builder.createFAdd(op.loc, cc, dd, fmf, fpExcept, roundMode);
+      mlir::Value bc =
+          builder.createFMul(op.loc, lhsI, rhsR, fmf, fpExcept, roundMode);
+      mlir::Value ad =
+          builder.createFMul(op.loc, lhsR, rhsI, fmf, fpExcept, roundMode);
+      mlir::Value bcMad =
+          builder.createFSub(op.loc, bc, ad, fmf, fpExcept, roundMode);
+      mlir::Value resR =
+          builder.createFDiv(op.loc, acPbd, ccPdd, fmf, fpExcept, roundMode);
+      mlir::Value resI =
+          builder.createFDiv(op.loc, bcMad, ccPdd, fmf, fpExcept, roundMode);
+      return builder.createComplexCreate(op.loc, resR, resI);
+    }
     return cir::ComplexDivOp::create(builder, op.loc, op.lhs, op.rhs,
-                                     rangeKind);
+                                     rangeKind, fmf);
   }
 
   // The C99 standard (G.5.1) defines division of a complex value by a real
@@ -719,17 +943,58 @@ mlir::Value ComplexExprEmitter::emitBinDiv(const BinOpInfo &op) {
            op.rhs.getType());
     mlir::Value real = builder.createComplexReal(op.loc, op.lhs);
     mlir::Value imag = builder.createComplexImag(op.loc, op.lhs);
-    mlir::Value newReal = builder.createFDiv(op.loc, real, op.rhs);
-    mlir::Value newImag = builder.createFDiv(op.loc, imag, op.rhs);
+    mlir::Value newReal =
+        builder.createFDiv(op.loc, real, op.rhs, fmf, fpExcept, roundMode);
+    mlir::Value newImag =
+        builder.createFDiv(op.loc, imag, op.rhs, fmf, fpExcept, roundMode);
     return builder.createComplexCreate(op.loc, newReal, newImag);
   }
 
   assert(mlir::isa<cir::ComplexType>(op.rhs.getType()));
+  if (fpExcept) {
+    // When strict FP is enabled, decompose scalar/complex division inline
+    // rather than going through ComplexDivOp.
+    cir::ConstantOp zero = builder.getNullValue(op.lhs.getType(), op.loc);
+    mlir::Value lhsR = op.lhs;
+    mlir::Value lhsI = zero;
+    mlir::Value rhsR = builder.createComplexReal(op.loc, op.rhs);
+    mlir::Value rhsI = builder.createComplexImag(op.loc, op.rhs);
+    // (a+0i) / (c+di) = ((ac)/(cc+dd)) + i((0c-ad)/(cc+dd))
+    //                  = (ac/(cc+dd)) + i(-ad/(cc+dd))
+    mlir::Value ac =
+        builder.createFMul(op.loc, lhsR, rhsR, fmf, fpExcept, roundMode);
+    mlir::Value cc =
+        builder.createFMul(op.loc, rhsR, rhsR, fmf, fpExcept, roundMode);
+    mlir::Value dd =
+        builder.createFMul(op.loc, rhsI, rhsI, fmf, fpExcept, roundMode);
+    mlir::Value ccPdd =
+        builder.createFAdd(op.loc, cc, dd, fmf, fpExcept, roundMode);
+    mlir::Value ad =
+        builder.createFMul(op.loc, lhsR, rhsI, fmf, fpExcept, roundMode);
+    mlir::Value negAd =
+        builder.createUnaryOp(op.loc, cir::UnaryOpKind::Minus, ad);
+    mlir::Value resR =
+        builder.createFDiv(op.loc, ac, ccPdd, fmf, fpExcept, roundMode);
+    mlir::Value resI =
+        builder.createFDiv(op.loc, negAd, ccPdd, fmf, fpExcept, roundMode);
+    return builder.createComplexCreate(op.loc, resR, resI);
+  }
   cir::ConstantOp nullValue = builder.getNullValue(op.lhs.getType(), op.loc);
   mlir::Value lhs = builder.createComplexCreate(op.loc, op.lhs, nullValue);
-  cir::ComplexRangeKind rangeKind =
-      getComplexRangeAttr(op.fpFeatures.getComplexRange());
-  return cir::ComplexDivOp::create(builder, op.loc, lhs, op.rhs, rangeKind);
+  return cir::ComplexDivOp::create(builder, op.loc, lhs, op.rhs, rangeKind,
+                                   fmf);
+}
+
+static void addScalarComplexResultSourceAtom(CIRGenFunction &cgf,
+                                             mlir::Value result) {
+  if (auto create = result.getDefiningOp<cir::ComplexCreateOp>()) {
+    if (mlir::Operation *realOp = create.getReal().getDefiningOp()) {
+      cgf.addOpToCurrentSourceAtomWithRank(realOp, 2);
+      return;
+    }
+  }
+  if (mlir::Operation *resultOp = result.getDefiningOp())
+    cgf.addOpToCurrentSourceAtomWithRank(resultOp, 2);
 }
 
 mlir::Value CIRGenFunction::emitUnPromotedValue(mlir::Value result,
@@ -794,7 +1059,9 @@ ComplexExprEmitter::emitPromotedComplexOperand(const Expr *e,
                                                QualType promotionTy) {
   if (e->getType()->isAnyComplexType()) {
     if (!promotionTy.isNull())
-      return cgf.emitPromotedComplexExpr(e, promotionTy);
+      // Keep promotion in the current emitter to avoid extra emitter
+      // construction in hot complex-expression paths.
+      return emitPromoted(e, promotionTy);
     return Visit(const_cast<Expr *>(e));
   }
 
@@ -824,26 +1091,29 @@ LValue ComplexExprEmitter::emitCompoundAssignLValue(
   SourceLocation exprLoc = e->getExprLoc();
   mlir::Location loc = cgf.getLoc(exprLoc);
 
-  if (lhsTy->getAs<AtomicType>()) {
-    cgf.cgm.errorNYI("emitCompoundAssignLValue AtmoicType");
-    return {};
-  }
+  if (const AtomicType *at = lhsTy->getAs<AtomicType>())
+    lhsTy = at->getValueType();
 
   BinOpInfo opInfo{loc};
   opInfo.fpFeatures = e->getFPFeaturesInEffect(cgf.getLangOpts());
 
-  assert(!cir::MissingFeatures::cgFPOptionsRAII());
 
   // Load the RHS and LHS operands.
   // __block variables need to have the rhs evaluated first, plus this should
   // improve codegen a little.
-  QualType promotionTypeCR = getPromotionType(e->getComputationResultType());
+  const bool isComplexDivisor = e->getOpcode() == BO_DivAssign &&
+                                e->getRHS()->getType()->isAnyComplexType();
+  QualType promotionTypeCR = getPromotionType(e->getStoredFPFeaturesOrDefault(),
+                                              e->getComputationResultType(),
+                                              isComplexDivisor);
   opInfo.ty = promotionTypeCR.isNull() ? e->getComputationResultType()
                                        : promotionTypeCR;
 
   QualType complexElementTy =
       opInfo.ty->castAs<ComplexType>()->getElementType();
-  QualType promotionTypeRHS = getPromotionType(rhsTy);
+  QualType promotionTypeRHS =
+      getPromotionType(e->getStoredFPFeaturesOrDefault(), rhsTy,
+                       isComplexDivisor);
 
   // The RHS should have been converted to the computation type.
   if (e->getRHS()->getType()->isRealFloatingType()) {
@@ -855,7 +1125,9 @@ LValue ComplexExprEmitter::emitCompoundAssignLValue(
     }
   } else {
     if (!promotionTypeRHS.isNull()) {
-      opInfo.rhs = cgf.emitPromotedComplexExpr(e->getRHS(), promotionTypeRHS);
+      // Reuse this emitter for promoted complex RHS to avoid nested emitter
+      // creation during compound assignment lowering.
+      opInfo.rhs = emitPromoted(e->getRHS(), promotionTypeRHS);
     } else {
       assert(cgf.getContext().hasSameUnqualifiedType(opInfo.ty, rhsTy));
       opInfo.rhs = Visit(e->getRHS());
@@ -865,13 +1137,16 @@ LValue ComplexExprEmitter::emitCompoundAssignLValue(
   LValue lhs = cgf.emitLValue(e->getLHS());
 
   // Load from the l-value and convert it.
-  QualType promotionTypeLHS = getPromotionType(e->getComputationLHSType());
+  QualType promotionTypeLHS = getPromotionType(
+      e->getStoredFPFeaturesOrDefault(), e->getComputationLHSType(),
+      isComplexDivisor);
   if (lhsTy->isAnyComplexType()) {
     mlir::Value lhsValue = emitLoadOfLValue(lhs, exprLoc);
     QualType destTy = promotionTypeLHS.isNull() ? opInfo.ty : promotionTypeLHS;
     opInfo.lhs = emitComplexToComplexCast(lhsValue, lhsTy, destTy, exprLoc);
+    attachFPConstraints(opInfo.lhs, opInfo.fpFeatures);
   } else {
-    mlir::Value lhsVal = cgf.emitLoadOfScalar(lhs, exprLoc);
+    mlir::Value lhsVal = cgf.emitLoadOfLValue(lhs, exprLoc).getValue();
     // For floating point real operands we can directly pass the scalar form
     // to the binary operator emission and potentially get more efficient code.
     if (lhsTy->isRealFloatingType()) {
@@ -898,15 +1173,19 @@ LValue ComplexExprEmitter::emitCompoundAssignLValue(
   mlir::Value result = (this->*func)(opInfo);
 
   // Truncate the result and store it into the LHS lvalue.
+  CIRGenFunction::SourceLocRAIIObject sourceLoc{
+      cgf, cgf.getLoc(e->getSourceRange())};
   if (lhsTy->isAnyComplexType()) {
     mlir::Value resultValue =
         emitComplexToComplexCast(result, opInfo.ty, lhsTy, exprLoc);
+    attachFPConstraints(resultValue, opInfo.fpFeatures);
     emitStoreOfComplex(loc, resultValue, lhs, /*isInit*/ false);
     value = RValue::getComplex(resultValue);
   } else {
+    addScalarComplexResultSourceAtom(cgf, result);
     mlir::Value resultValue =
         cgf.emitComplexToScalarConversion(result, opInfo.ty, lhsTy, exprLoc);
-    cgf.emitStoreOfScalar(resultValue, lhs, /*isInit*/ false);
+    cgf.emitStoreThroughLValue(RValue::get(resultValue), lhs, /*isInit*/ false);
     value = RValue::get(resultValue);
   }
 
@@ -916,6 +1195,7 @@ LValue ComplexExprEmitter::emitCompoundAssignLValue(
 mlir::Value ComplexExprEmitter::emitCompoundAssign(
     const CompoundAssignOperator *e,
     mlir::Value (ComplexExprEmitter::*func)(const BinOpInfo &)) {
+  CIRGenFunction::ApplySourceAtomGroup atomGroup(cgf);
   RValue val;
   LValue lv = emitCompoundAssignLValue(e, func, val);
 
@@ -949,6 +1229,7 @@ LValue ComplexExprEmitter::emitBinAssignLValue(const BinaryOperator *e,
 }
 
 mlir::Value ComplexExprEmitter::VisitBinAssign(const BinaryOperator *e) {
+  CIRGenFunction::ApplySourceAtomGroup atomGroup(cgf);
   mlir::Value value;
   LValue lv = emitBinAssignLValue(e, value);
 
@@ -977,6 +1258,9 @@ mlir::Value ComplexExprEmitter::VisitAbstractConditionalOperator(
   CIRGenFunction::OpaqueValueMapping binding(cgf, e);
 
   CIRGenFunction::ConditionalEvaluation eval(cgf);
+
+  // OGCG integrates with PGO profiling via EmitBranchOnBoolExpr and
+  // calls incrementProfileCounter for coverage.
 
   Expr *cond = e->getCond()->IgnoreParens();
   mlir::Value condValue = cgf.evaluateExprAsBool(cond);
@@ -1034,6 +1318,10 @@ mlir::Value CIRGenFunction::emitComplexExpr(const Expr *e) {
   assert(e && getComplexType(e->getType()) &&
          "Invalid complex expression to emit");
 
+  // OGCG accepts IgnoreReal/IgnoreImag parameters to skip computing the
+  // unused component (e.g., for __real__/__imag__ unary ops). CIR preserves
+  // the full complex expression and defers dead code elimination to MLIR/LLVM
+  // passes, which remove unused extractions. Intentional divergence.
   return ComplexExprEmitter(*this).Visit(const_cast<Expr *>(e));
 }
 
@@ -1059,10 +1347,11 @@ mlir::Value CIRGenFunction::emitLoadOfComplex(LValue src, SourceLocation loc) {
 LValue CIRGenFunction::emitComplexAssignmentLValue(const BinaryOperator *e) {
   assert(e->getOpcode() == BO_Assign && "Expected assign op");
 
+  ApplySourceAtomGroup atomGroup(*this);
   mlir::Value value; // ignored
   LValue lvalue = ComplexExprEmitter(*this).emitBinAssignLValue(e, value);
   if (getLangOpts().OpenMP)
-    cgm.errorNYI("emitComplexAssignmentLValue OpenMP");
+    checkAndEmitOpenMPLastprivateConditional(e->getLHS());
 
   return lvalue;
 }
@@ -1087,17 +1376,22 @@ static CompoundFunc getComplexOp(BinaryOperatorKind op) {
 
 LValue CIRGenFunction::emitComplexCompoundAssignmentLValue(
     const CompoundAssignOperator *e) {
+  ApplySourceAtomGroup atomGroup(*this);
   CompoundFunc op = getComplexOp(e->getOpcode());
   RValue val;
-  return ComplexExprEmitter(*this).emitCompoundAssignLValue(e, op, val);
+  LValue lvalue = ComplexExprEmitter(*this).emitCompoundAssignLValue(e, op, val);
+  if (getLangOpts().OpenMP)
+    checkAndEmitOpenMPLastprivateConditional(e->getLHS());
+  return lvalue;
 }
 
 mlir::Value CIRGenFunction::emitComplexPrePostIncDec(const UnaryOperator *e,
                                                      LValue lv,
                                                      cir::UnaryOpKind op,
                                                      bool isPre) {
-  assert(op == cir::UnaryOpKind::Inc ||
-         op == cir::UnaryOpKind::Dec && "Invalid UnaryOp kind for ComplexType");
+  assert((op == cir::UnaryOpKind::Inc ||
+          op == cir::UnaryOpKind::Dec) &&
+         "Invalid UnaryOp kind for ComplexType");
 
   mlir::Value inVal = emitLoadOfComplex(lv, e->getExprLoc());
   mlir::Location loc = getLoc(e->getExprLoc());
@@ -1107,7 +1401,7 @@ mlir::Value CIRGenFunction::emitComplexPrePostIncDec(const UnaryOperator *e,
   emitStoreOfComplex(loc, incVal, lv, /*isInit=*/false);
 
   if (getLangOpts().OpenMP)
-    cgm.errorNYI(loc, "emitComplexPrePostIncDec OpenMP");
+    checkAndEmitOpenMPLastprivateConditional(e->getSubExpr());
 
   // If this is a postinc, return the value read from memory, otherwise use the
   // updated value.
@@ -1122,5 +1416,7 @@ LValue CIRGenFunction::emitScalarCompoundAssignWithComplex(
   RValue value;
   LValue ret = ComplexExprEmitter(*this).emitCompoundAssignLValue(e, op, value);
   result = value.getValue();
+  if (getLangOpts().OpenMP)
+    checkAndEmitOpenMPLastprivateConditional(e->getLHS());
   return ret;
 }

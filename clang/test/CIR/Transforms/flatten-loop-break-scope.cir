@@ -1,0 +1,33 @@
+// UNSUPPORTED: system-darwin
+// RUN: cir-opt %s -cir-flatten-cfg -o %t.cir
+// RUN: FileCheck %s --input-file=%t.cir
+
+// Test that a break-scope as the sole body op (with trailing yield)
+// doesn't leave an empty block without a terminator after scope inlining.
+// The scope contains a break which is lowered to BrOp, then the scope is
+// inlined. After erasure, the afterScopeBlock (containing only the yield)
+// should remain valid.
+
+!s32i = !cir.int<s, 32>
+!booli = !cir.bool
+
+cir.func @loopBreakScopeOnly(%arg0 : !booli) {
+  cir.scope {
+    cir.while {
+      cir.condition(%arg0)
+    } do {
+      cir.scope {
+        cir.if %arg0 {
+          cir.break
+        }
+      }
+      cir.yield
+    }
+  }
+  cir.return
+}
+
+// CHECK: cir.func @loopBreakScopeOnly
+// CHECK: cir.br
+// CHECK: cir.return
+// CHECK-NOT: empty block

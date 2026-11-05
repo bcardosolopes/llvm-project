@@ -1,0 +1,58 @@
+// The CIR-to-LLVM pipeline schedules only what the input has not been through,
+// by the stage it is at.
+//
+// CIR written by hand records no stage and gets every step. Tail merging (and
+// mem2reg, when on) are nested on cir.func, to run on the functions in
+// parallel.
+// RUN: cir-opt %s --cir-to-llvm -dump-pass-pipeline -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=HAND
+// HAND: Pass Manager with 7 passes:
+// HAND-NEXT: builtin.module(
+// HAND-NEXT:   cir-cxxabi-lowering,
+// HAND-NEXT:   cir-hoist-allocas,
+// HAND-NEXT:   cir-flatten-cfg,
+// HAND-NEXT:   cir-goto-solver,
+// HAND-NEXT:   cir.func(
+// HAND-NEXT:     cir-tail-merge
+// HAND-NEXT:   ),
+// HAND-NEXT:   cir-lower-static-chain-calls,
+// HAND-NEXT:   cir-flat-to-llvm
+// HAND-NEXT: )
+//
+// Past the CIR-to-CIR pipeline, with call-conv lowering still to run.
+// RUN: cir-opt %s --cir-to-llvm='from-stage=cir-prepare call-conv-lowering=1' \
+// RUN:     -dump-pass-pipeline -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=PREPARE
+// PREPARE: Pass Manager with 7 passes:
+// PREPARE-NEXT: builtin.module(
+// PREPARE-NEXT:   cir-call-conv-lowering,
+// PREPARE-NEXT:   cir-hoist-allocas,
+// PREPARE-NEXT:   cir-flatten-cfg,
+// PREPARE-NEXT:   cir-goto-solver,
+// PREPARE-NEXT:   cir.func(
+// PREPARE-NEXT:     cir-tail-merge
+// PREPARE-NEXT:   ),
+// PREPARE-NEXT:   cir-lower-static-chain-calls,
+// PREPARE-NEXT:   cir-flat-to-llvm
+// PREPARE-NEXT: )
+//
+// Already flat: nothing before the conversion is scheduled again.
+// RUN: cir-opt %s --cir-to-llvm='from-stage=cir-flat call-conv-lowering=1' \
+// RUN:     -dump-pass-pipeline -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=FLAT
+// FLAT: Pass Manager with 3 passes:
+// FLAT-NEXT: builtin.module(
+// FLAT-NEXT:   cir.func(
+// FLAT-NEXT:     cir-tail-merge
+// FLAT-NEXT:   ),
+// FLAT-NEXT:   cir-lower-static-chain-calls,
+// FLAT-NEXT:   cir-flat-to-llvm
+// FLAT-NEXT: )
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @already_flat(%arg0: !s32i) -> !s32i {
+    cir.return %arg0 : !s32i
+  }
+}

@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s -check-prefix=CIR
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=LLVM
@@ -19,33 +19,37 @@ struct Bar varargs_aggregate(int count, ...) {
   return res;
 }
 
-// CIR-LABEL: cir.func {{.*}} @varargs_aggregate(
-// CIR:   %[[COUNT_ADDR:.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["count", init]
-// CIR:   %[[RET_ADDR:.+]] = cir.alloca !rec_Bar, !cir.ptr<!rec_Bar>, ["__retval", init]
-// CIR:   %[[VAAREA:.+]] = cir.alloca !cir.array<!rec___va_list_tag x 1>, !cir.ptr<!cir.array<!rec___va_list_tag x 1>>, ["args"]
-// CIR:   %[[TMP_ADDR:.+]] = cir.alloca !rec_Bar, !cir.ptr<!rec_Bar>, ["vaarg.tmp"]
-// CIR:   cir.store %arg0, %[[COUNT_ADDR]] : !s32i, !cir.ptr<!s32i>
-// CIR:   %[[VA_PTR0:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
-// CIR:   %[[COUNT_VAL:.+]] = cir.load{{.*}} %[[COUNT_ADDR]] : !cir.ptr<!s32i>, !s32i
-// CIR:   cir.va_start %[[VA_PTR0]] %[[COUNT_VAL]] : !cir.ptr<!rec___va_list_tag>, !s32i
-// CIR:   %[[VA_PTR1:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
-// CIR:   %[[VA_ARG:.+]] = cir.va_arg %[[VA_PTR1]] : (!cir.ptr<!rec___va_list_tag>) -> !rec_Bar
-// CIR:   cir.store{{.*}} %[[VA_ARG]], %[[TMP_ADDR]] : !rec_Bar, !cir.ptr<!rec_Bar>
-// CIR:   cir.copy %[[TMP_ADDR]] to %[[RET_ADDR]] : !cir.ptr<!rec_Bar>
-// CIR:   %[[VA_PTR2:.+]] = cir.cast array_to_ptrdecay %[[VAAREA]] : !cir.ptr<!cir.array<!rec___va_list_tag x 1>> -> !cir.ptr<!rec___va_list_tag>
-// CIR:   cir.va_end %[[VA_PTR2]] : !cir.ptr<!rec___va_list_tag>
-// CIR:   %[[RETVAL:.+]] = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!rec_Bar>, !rec_Bar
-// CIR:   cir.return %[[RETVAL]] : !rec_Bar
+// CIR-LABEL: "cir.func"() <{{.*}}sym_name = "varargs_aggregate"
+// CIR: "cir.va_start"
+// CIR: %{{.*}} = "cir.scope"()
+// CIR: %{{.*}} = "cir.get_member"({{.*}}) <{index_attr = 0 : index, name = "gp_offset"}>
+// CIR: %{{.*}} = "cir.cmp"({{.*}}) <{{.*}}kind = 1 : i32}>
+// CIR: %{{.*}} = "cir.get_member"({{.*}}) <{index_attr = 1 : index, name = "fp_offset"}>
+// CIR: %{{.*}} = "cir.cmp"({{.*}}) <{{.*}}kind = 1 : i32}>
+// CIR: %{{.*}} = "cir.binop"({{.*}}) <{{.*}}kind = 5 : i32}>
+// CIR: "cir.brcond"
+// CIR: ^bb1:
+// CIR: %{{.*}} = "cir.get_member"({{.*}}) <{index_attr = 3 : index, name = "reg_save_area"}>
+// CIR: "cir.br"({{.*}})[^bb3]
+// CIR: ^bb2:
+// CIR: %{{.*}} = "cir.get_member"({{.*}}) <{index_attr = 2 : index, name = "overflow_arg_area"}>
+// CIR: "cir.br"({{.*}})[^bb3]
+// CIR: ^bb3(%{{.*}}: !cir.ptr<!rec_Bar>
+// CIR: "cir.libc.memcpy"({{.*}}) {cir.dst_align = 4 : i64, cir.src_align = 4 : i64}
+// CIR: "cir.yield"({{.*}})
+// CIR: "cir.va_end"({{.*}})
+// CIR: "cir.libc.memcpy"({{.*}}) {cir.dst_align = 8 : i64, cir.src_align = 4 : i64}
 
-// LLVM-LABEL: define dso_local %struct.Bar @varargs_aggregate(
+// LLVM-LABEL: define dso_local { <2 x float>, i32 } @varargs_aggregate(
 // LLVM:   call void @llvm.va_start.p0(ptr %{{.*}})
-// LLVM:   %[[VA_PTR1:.+]] = getelementptr %struct.__va_list_tag, ptr %{{.*}}, i32 0
-// LLVM:   %[[VA_ARG:.+]] = va_arg ptr %[[VA_PTR1]], %struct.Bar
-// LLVM:   store %struct.Bar %[[VA_ARG]], ptr %{{.*}}
-// LLVM:   call void @llvm.memcpy.p0.p0.i32(ptr %{{.*}}, ptr %{{.*}}, i32 12, i1 false)
+// LLVM:   icmp ule i32 %{{.+}}, 40
+// LLVM:   icmp ule i32 %{{.+}}, 160
+// LLVM:   and i1
+// LLVM:   br i1
+// LLVM:   phi ptr
+// LLVM:   call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %{{.*}}, ptr{{.*}} %{{.*}}, i64 12, i1 false)
 
 // OGCG-LABEL: define dso_local { <2 x float>, i32 } @varargs_aggregate
 // OGCG:   call void @llvm.va_start.p0(ptr %{{.*}})
 // OGCG:   %[[VAARG_ADDR:.+]] = phi ptr [ %{{.*}}, %vaarg.in_reg ], [ %{{.*}}, %vaarg.in_mem ]
 // OGCG:   call void @llvm.memcpy.p0.p0.i64(ptr align 4 %{{.*}}, ptr align 4 %[[VAARG_ADDR]], i64 12, i1 false)
-

@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --check-prefix=CIR --input-file=%t.cir %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --check-prefix=LLVM --input-file=%t-cir.ll %s
@@ -10,9 +10,8 @@ int x(int y) {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z1xi(
-// CIR-SAME: %[[ARG0:.*]]: !s32i {{.*}}) -> !s32i{{.*}}{
+// CIR-SAME: %[[ARG0:.*]]: !s32i {{.*}}) -> {{.*}}!s32i{{.*}}{
 // CIR: [[Y:%.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["y", init]
-// CIR: [[RETVAL:%.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"]
 // CIR: cir.store %[[ARG0]], [[Y]] : !s32i, !cir.ptr<!s32i>
 // CIR: [[YVAL:%.+]] = cir.load{{.*}} [[Y]] : !cir.ptr<!s32i>, !s32i
 // CIR: [[ZERO:%.+]] = cir.const #cir.int<0> : !s32i
@@ -20,21 +19,16 @@ int x(int y) {
 // CIR: [[THREE:%.+]] = cir.const #cir.int<3> : !s32i
 // CIR: [[FIVE:%.+]] = cir.const #cir.int<5> : !s32i
 // CIR: [[SELECT_RES:%.+]] = cir.select if [[CMP]] then [[THREE]] else [[FIVE]] : (!cir.bool, !s32i, !s32i) -> !s32i
-// CIR: cir.store [[SELECT_RES]], [[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR: [[RETVAL_VAL:%.+]] = cir.load [[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR: cir.return [[RETVAL_VAL]] : !s32i
+// CIR: cir.return [[SELECT_RES]] : !s32i
 
-// LLVM-LABEL: define{{.*}} i32 @_Z1xi(
-// LLVM-SAME: i32 %[[ARG0:.+]])
+// LLVM-LABEL: define{{.*}} noundef i32 @_Z1xi(
+// LLVM-SAME: i32 noundef %[[ARG0:.+]])
 // LLVM: %[[Y:.*]] = alloca i32
-// LLVM: %[[RETVAL:.*]] = alloca i32
 // LLVM: store i32 %[[ARG0]], ptr %[[Y]]
 // LLVM: %[[YVAL:.*]] = load i32, ptr %[[Y]]
 // LLVM: %[[CMP:.*]] = icmp sgt i32 %[[YVAL]], 0
 // LLVM: %[[SELECT:.*]] = select i1 %[[CMP]], i32 3, i32 5
-// LLVM: store i32 %[[SELECT]], ptr %[[RETVAL]]
-// LLVM: %[[RESULT:.*]] = load i32, ptr %[[RETVAL]]
-// LLVM: ret i32 %[[RESULT]]
+// LLVM: ret i32 %[[SELECT]]
 
 // OGCG-LABEL: define{{.*}} i32 @_Z1xi(
 // OGCG-SAME: i32 {{.*}} %[[ARG0:.+]])
@@ -52,13 +46,12 @@ int foo(int a, int b) {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z3fooii(
-// CIR-SAME: %[[ARG0:.*]]: !s32i {{.*}}, %[[ARG1:.*]]: !s32i {{.*}}) -> !s32i{{.*}}{
+// CIR-SAME: %[[ARG0:.*]]: !s32i {{.*}}, %[[ARG1:.*]]: !s32i {{.*}}) -> {{.*}}!s32i{{.*}}{
 // CIR: [[A:%.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
 // CIR: [[B:%.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", init]
 // CIR: [[RETVAL:%.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"]
 // CIR: cir.store %[[ARG0]], [[A]] : !s32i, !cir.ptr<!s32i>
 // CIR: cir.store %[[ARG1]], [[B]] : !s32i, !cir.ptr<!s32i>
-// CIR: cir.scope {
 // CIR: [[ALOAD:%.+]] = cir.load{{.*}} [[A]] : !cir.ptr<!s32i>, !s32i
 // CIR: [[BLOAD:%.+]] = cir.load{{.*}} [[B]] : !cir.ptr<!s32i>, !s32i
 // CIR: [[CMP:%.+]] = cir.cmp(lt, [[ALOAD]], [[BLOAD]]) : !s32i, !cir.bool
@@ -76,21 +69,18 @@ int foo(int a, int b) {
 // CIR: [[RETVAL_VAL:%.+]] = cir.load [[RETVAL]] : !cir.ptr<!s32i>, !s32i
 // CIR: cir.return [[RETVAL_VAL]] : !s32i
 // CIR: }
-// CIR: }
 // CIR: [[ZERO2:%.+]] = cir.const #cir.int<0> : !s32i
 // CIR: cir.store [[ZERO2]], [[RETVAL]] : !s32i, !cir.ptr<!s32i>
 // CIR: [[RETVAL_VAL2:%.+]] = cir.load [[RETVAL]] : !cir.ptr<!s32i>, !s32i
 // CIR: cir.return [[RETVAL_VAL2]] : !s32i
 
-// LLVM-LABEL: define{{.*}} i32 @_Z3fooii(
-// LLVM-SAME: i32 %[[ARG0:.*]], i32 %[[ARG1:.*]])
+// LLVM-LABEL: define{{.*}} noundef i32 @_Z3fooii(
+// LLVM-SAME: i32 noundef %[[ARG0:.*]], i32 noundef %[[ARG1:.*]])
 // LLVM: %[[A:.*]] = alloca i32
 // LLVM: %[[B:.*]] = alloca i32
 // LLVM: %[[RETVAL:.*]] = alloca i32
 // LLVM: store i32 %[[ARG0]], ptr %[[A]]
 // LLVM: store i32 %[[ARG1]], ptr %[[B]]
-// LLVM: br label %[[ENTRY_BB:.*]]
-// LLVM: [[ENTRY_BB]]:
 // LLVM: %[[AVAL:.*]] = load i32, ptr %[[A]]
 // LLVM: %[[BVAL:.*]] = load i32, ptr %[[B]]
 // LLVM: %[[CMP:.*]] = icmp slt i32 %[[AVAL]], %[[BVAL]]
@@ -103,17 +93,16 @@ int foo(int a, int b) {
 // LLVM: [[MERGE_BB]]:
 // LLVM: %[[PHI:.*]] = phi i32 [ %[[AVAL2]], %[[FALSE_BB]] ], [ 0, %[[TRUE_BB]] ]
 // LLVM: %[[COND:.*]] = icmp ne i32 %[[PHI]], 0
-// LLVM: br i1 %[[COND]], label %[[RETURN_MINUS_ONE:.*]], label %[[CONT_BB:.*]]
+// LLVM: br i1 %[[COND]], label %[[RETURN_MINUS_ONE:.*]], label %[[RETURN_ZERO:.*]]
 // LLVM: [[RETURN_MINUS_ONE]]:
 // LLVM: store i32 -1, ptr %[[RETVAL]]
-// LLVM: %[[RET1:.*]] = load i32, ptr %[[RETVAL]]
-// LLVM: ret i32 %[[RET1]]
-// LLVM: [[CONT_BB]]:
-// LLVM: br label %[[RETURN_ZERO:.*]]
+// LLVM: br label %[[RETURN_BB:.*]]
 // LLVM: [[RETURN_ZERO]]:
 // LLVM: store i32 0, ptr %[[RETVAL]]
-// LLVM: %[[RET2:.*]] = load i32, ptr %[[RETVAL]]
-// LLVM: ret i32 %[[RET2]]
+// LLVM: br label %[[RETURN_BB]]
+// LLVM: [[RETURN_BB]]:
+// LLVM: %[[RET:.*]] = load i32, ptr %[[RETVAL]]
+// LLVM: ret i32 %[[RET]]
 
 // OGCG-LABEL: define{{.*}} i32 @_Z3fooii(
 // OGCG-SAME: i32 {{.*}} %[[ARG0:.*]], i32 {{.*}} %[[ARG1:.*]])
@@ -176,8 +165,6 @@ void test_cond_lvalue_assign(bool flag) {
 // LLVM:   br label %[[MERGE_BB]]
 // LLVM: [[MERGE_BB]]:
 // LLVM:   %[[PHI_PTR:.*]] = phi ptr [ %[[B]], %[[FALSE_BB]] ], [ %[[A]], %[[TRUE_BB]] ]
-// LLVM:   br label %[[CONT_BB:.*]]
-// LLVM: [[CONT_BB]]:
 // LLVM:   store i32 42, ptr %[[PHI_PTR]]
 
 // OGCG-LABEL: define{{.*}} void @_Z23test_cond_lvalue_assignb(
@@ -209,11 +196,9 @@ int& test_cond_lvalue_ref(bool cond, int x, int y) {
 // CIR: }, false {
 // CIR:   cir.yield %[[Y]] : !cir.ptr<!s32i>
 // CIR: }) : (!cir.bool) -> !cir.ptr<!s32i>
-// CIR: cir.store %[[REF_PTR]]
-// CIR: %[[RET_VAL:.*]] = cir.load
-// CIR: cir.return %[[RET_VAL]] : !cir.ptr<!s32i>
+// CIR: cir.return %[[REF_PTR]] : !cir.ptr<!s32i>
 
-// LLVM-LABEL: define{{.*}} ptr @_Z20test_cond_lvalue_refbii(
+// LLVM-LABEL: define{{.*}} noundef nonnull align 4 dereferenceable(4) ptr @_Z20test_cond_lvalue_refbii(
 // LLVM: %[[COND:.*]] = alloca i8
 // LLVM: %[[X:.*]] = alloca i32
 // LLVM: %[[Y:.*]] = alloca i32
@@ -226,11 +211,7 @@ int& test_cond_lvalue_ref(bool cond, int x, int y) {
 // LLVM:   br label %[[MERGE_BB]]
 // LLVM: [[MERGE_BB]]:
 // LLVM:   %[[PHI:.*]] = phi ptr [ %[[Y]], %[[FALSE_BB]] ], [ %[[X]], %[[TRUE_BB]] ]
-// LLVM:   br label %[[CONT:.*]]
-// LLVM: [[CONT]]:
-// LLVM:   store ptr %[[PHI]]
-// LLVM:   %[[RET:.*]] = load ptr
-// LLVM:   ret ptr %[[RET]]
+// LLVM:   ret ptr %[[PHI]]
 
 // OGCG-LABEL: define{{.*}} ptr @_Z20test_cond_lvalue_refbii(
 // OGCG: %[[COND:.*]] = alloca i8
@@ -281,8 +262,6 @@ void test_cond_lvalue_compound(bool flag) {
 // LLVM:   br label %[[MERGE_BB]]
 // LLVM: [[MERGE_BB]]:
 // LLVM:   %[[PTR:.*]] = phi ptr [ %[[B]], %[[FALSE_BB]] ], [ %[[A]], %[[TRUE_BB]] ]
-// LLVM:   br label %[[CONT:.*]]
-// LLVM: [[CONT]]:
 // LLVM:   %[[OLD:.*]] = load i32, ptr %[[PTR]]
 // LLVM:   %[[NEW:.*]] = add{{.*}} i32 %[[OLD]], 3
 // LLVM:   store i32 %[[NEW]], ptr %[[PTR]]

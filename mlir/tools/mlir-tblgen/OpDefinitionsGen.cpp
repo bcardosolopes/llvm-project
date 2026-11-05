@@ -2317,16 +2317,16 @@ generateNamedOperandGetters(const Operator &op, Class &opClass,
       continue;
     std::string name = op.getGetterName(operand.name);
     if (operand.isOptional()) {
-      m = opClass.addInlineMethod(isGenericAdaptorBase
-                                      ? rangeElementType
-                                      : generateTypeForGetter(operand),
-                                  name);
+      std::string getterType = isGenericAdaptorBase
+                                   ? rangeElementType.str()
+                                   : generateTypeForGetter(operand);
+      m = opClass.addInlineMethod(getterType, name);
       ERROR_IF_PRUNED(m, name, op);
       m->body().indent() << formatv("auto operands = getODSOperands({0});\n"
                                     "return operands.empty() ? {1}{{} : ",
-                                    i, m->getReturnType());
+                                    i, getterType);
       if (!isGenericAdaptorBase)
-        m->body() << llvm::formatv("::llvm::cast<{0}>", m->getReturnType());
+        m->body() << llvm::formatv("::llvm::cast<{0}>", getterType);
       m->body() << "(*operands.begin());";
     } else if (operand.isVariadicOfVariadic()) {
       std::string segmentAttr = op.getGetterName(
@@ -2348,14 +2348,14 @@ generateNamedOperandGetters(const Operator &op, Class &opClass,
       ERROR_IF_PRUNED(m, name, op);
       m->body() << "  return getODSOperands(" << i << ");";
     } else {
-      m = opClass.addInlineMethod(isGenericAdaptorBase
-                                      ? rangeElementType
-                                      : generateTypeForGetter(operand),
-                                  name);
+      std::string getterType = isGenericAdaptorBase
+                                   ? rangeElementType.str()
+                                   : generateTypeForGetter(operand);
+      m = opClass.addInlineMethod(getterType, name);
       ERROR_IF_PRUNED(m, name, op);
       m->body().indent() << "return ";
       if (!isGenericAdaptorBase)
-        m->body() << llvm::formatv("::llvm::cast<{0}>", m->getReturnType());
+        m->body() << llvm::formatv("::llvm::cast<{0}>", getterType);
       m->body() << llvm::formatv("(*getODSOperands({0}).begin());", i);
     }
   }
@@ -2512,23 +2512,25 @@ void OpEmitter::genNamedResultGetters() {
       continue;
     std::string name = op.getGetterName(result.name);
     if (result.isOptional()) {
-      m = opClass.addInlineMethod(generateTypeForGetter(result), name);
+      std::string getterType = generateTypeForGetter(result);
+      m = opClass.addInlineMethod(getterType, name);
       ERROR_IF_PRUNED(m, name, op);
       m->body() << "  auto results = getODSResults(" << i << ");\n"
                 << llvm::formatv("  return results.empty()"
                                  " ? {0}()"
                                  " : ::llvm::cast<{0}>(*results.begin());",
-                                 m->getReturnType());
+                                 getterType);
     } else if (result.isVariadic()) {
       m = opClass.addInlineMethod("::mlir::Operation::result_range", name);
       ERROR_IF_PRUNED(m, name, op);
       m->body() << "  return getODSResults(" << i << ");";
     } else {
-      m = opClass.addInlineMethod(generateTypeForGetter(result), name);
+      std::string getterType = generateTypeForGetter(result);
+      m = opClass.addInlineMethod(getterType, name);
       ERROR_IF_PRUNED(m, name, op);
       m->body() << llvm::formatv(
           "  return ::llvm::cast<{0}>(*getODSResults({1}).begin());",
-          m->getReturnType(), i);
+          getterType, i);
     }
   }
 }

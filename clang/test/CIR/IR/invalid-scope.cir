@@ -1,0 +1,10 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify ScopeOp: scope region must not be empty
+cir.func @scope_empty() {
+  // expected-error@+1 {{cir.scope must not be empty since it should include at least an implicit cir.yield}}
+  "cir.scope"() ({
+  }, {
+  }) : () -> ()
+  cir.return
+}

@@ -1,6 +1,10 @@
 // RUN: %clang_cc1 -I%S %s -triple amdgcn-amd-amdhsa -emit-llvm -o - | FileCheck %s -check-prefix=AS
 // RUN: %clang_cc1 -I%S %s -triple spirv64-amd-amdhsa -emit-llvm -o - | FileCheck %s -check-prefix=NONZERO-DEFAULT-AS
 // RUN: %clang_cc1 -I%S %s -triple x86_64-linux-gnu -emit-llvm -o - | FileCheck %s -check-prefix=NO-AS
+// RUN: %if cir-support %{ %clang_cc1 -I%S %s -triple amdgcn-amd-amdhsa -emit-cir -fclangir -o - | FileCheck %s -check-prefix=CIR-RTTI-AS %}
+// RUN: %if cir-support %{ %clang_cc1 -I%S %s -triple spirv64-amd-amdhsa -emit-cir -fclangir -o - | FileCheck %s -check-prefix=CIR-RTTI-AS %}
+// RUN: %if cir-support %{ %clang_cc1 -I%S %s -triple amdgcn-amd-amdhsa -emit-llvm -fclangir -o /dev/null %}
+// RUN: %if cir-support %{ %clang_cc1 -I%S %s -triple spirv64-amd-amdhsa -emit-llvm -fclangir -o /dev/null %}
 #include <typeinfo>
 
 class A {
@@ -25,6 +29,9 @@ class B : A {
 // NO-AS: @_ZTIf = external constant ptr
 
 unsigned long Fn(B& b) {
+// CIR-RTTI-AS: %[[TYPEINFO_RAW:.*]] = cir.const #cir.global_view<@_ZTISt9type_info> : !cir.ptr<!u8i, target_address_space(1)>
+// CIR-RTTI-AS: %[[TYPEINFO_TYPED:.*]] = cir.cast bitcast %[[TYPEINFO_RAW]] : !cir.ptr<!u8i, target_address_space(1)> -> !cir.ptr<!rec_std3A3Atype_info, target_address_space(1)>
+// CIR-RTTI-AS: %[[TYPEINFO_DEFAULT:.*]] = cir.cast address_space %[[TYPEINFO_TYPED]] : !cir.ptr<!rec_std3A3Atype_info, target_address_space(1)> -> !cir.ptr<!rec_std3A3Atype_info>
 // AS: %call = call noundef zeroext i1 @_ZNKSt9type_infoeqERKS_(ptr {{.*}} addrspacecast (ptr addrspace(1) @_ZTISt9type_info to ptr), ptr {{.*}} %2)
 // NONZERO-DEFAULT-AS: %call = call{{.*}} noundef zeroext{{.*}} i1 @_ZNKSt9type_infoeqERKS_(ptr addrspace(4) {{.*}} addrspacecast (ptr addrspace(1) @_ZTISt9type_info to ptr addrspace(4)), ptr addrspace(4) {{.*}} %2)
 // NO-AS: %call = call noundef zeroext i1 @_ZNKSt9type_infoeqERKS_(ptr {{.*}} @_ZTISt9type_info, ptr {{.*}} %2)

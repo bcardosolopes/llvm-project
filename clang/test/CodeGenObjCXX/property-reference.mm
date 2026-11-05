@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 %s -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -disable-llvm-passes -fclangir -o - | FileCheck %s --check-prefix=CIR %}
 
 struct MyStruct {
   int x;
@@ -27,6 +28,8 @@ void test0() {
 
 // CHECK: [[C:%.*]] = call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @objc_msgSend
 // CHECK:   store ptr [[C]], ptr [[D:%.*]]
+// CIR: call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @objc_msgSend
+// CIR: store ptr {{%.*}}, ptr {{%.*}}, align 8
 
 namespace test1 {
   struct A { A(); A(const A&); A&operator=(const A&); ~A(); };
@@ -44,10 +47,17 @@ namespace test1 {
 // CHECK:      [[T0:%.*]] = load ptr, ptr [[SELF]]
 // CHECK-NEXT: [[T2:%.*]] = getelementptr inbounds i8, ptr [[T0]], i64 0
 // CHECK-NEXT: ret ptr [[T2]]
+// CIR-LABEL: define internal noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @"\01-[Test1 prop1]"(
+// CIR: [[SELF:%.*]] = load ptr, ptr {{%.*}}, align 8
+// CIR-NEXT: [[T0:%.*]] = getelementptr inbounds i8, ptr [[SELF]], i64 0
+// CIR: ret ptr {{%.*}}
 
 // CHECK:    define internal void @"\01-[Test1 setProp1:]"(
 // CHECK:      call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @_ZN5test11AaSERKS0_(
 // CHECK-NEXT: ret void
+// CIR-LABEL: define internal void @"\01-[Test1 setProp1:]"(
+// CIR: call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @_ZN5test11AaSERKS0_(
+// CIR: ret void
 
 @interface Test2
 @property int prop;

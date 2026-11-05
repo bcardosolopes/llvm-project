@@ -1,0 +1,48 @@
+// RUN: cir-opt -emit-bytecode %s | cir-opt | FileCheck %s
+
+// Round-trip the CIR types that CIRDialectBytecode.td encodes natively.
+//
+// Scope note, because it is easy to read more into this than it says: these
+// are the *non-recursive* types. cir.record is absent, and not by choice --
+// MLIR refuses custom encodings for mutable types
+// (IRNumbering.cpp:499, "TODO: We don't allow custom encodings for mutable
+// types right now"), and cir.record is MutableType. writeType is never called
+// for it, so a table entry would be dead code.
+//
+// That is the expensive gap. Records are the only types that nest, and the
+// fallback writes a type's fully expanded printed form while the text printer
+// emits one alias per record -- so bytecode is O(width^depth) in nesting where
+// text is linear: 257x at depth 7, 1,859x at depth 9. Covering the types below
+// does not touch that; it is a constant-factor win only.
+
+!u8i = !cir.int<u, 8>
+!s32i = !cir.int<s, 32>
+!s64i = !cir.int<s, 64>
+
+module {
+  // Integers: width and signedness are independent parameters, so u8 / s32 /
+  // s64 would catch a transposed or dropped one.
+  cir.func private @ints(!u8i, !s32i, !s64i)
+
+  // Every float kind, including the two that are not IEEE-shaped.
+  cir.func private @floats(!cir.float, !cir.double, !cir.f16, !cir.bf16,
+                           !cir.f80, !cir.f128)
+
+  cir.func private @scalars(!cir.bool, !cir.vptr) -> !cir.void
+
+  // Nested aggregates, so a reader that lost an element type or an extent one
+  // level down would not round-trip.
+  cir.func private @ptrs(!cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!u8i>>)
+  cir.func private @arrays(!cir.array<!s32i x 4>,
+                           !cir.array<!cir.array<!u8i x 3> x 5>,
+                           !cir.array<!cir.ptr<!s32i> x 2>)
+
+  cir.func private @complexes(!cir.complex<!cir.double>, !cir.complex<!s32i>)
+}
+
+// CHECK-DAG: cir.func private @ints(!u8i, !s32i, !s64i)
+// CHECK-DAG: cir.func private @floats(!cir.float, !cir.double, !cir.f16, !cir.bf16, !cir.f80, !cir.f128)
+// CHECK-DAG: cir.func private @scalars(!cir.bool, !cir.vptr)
+// CHECK-DAG: cir.func private @ptrs(!cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!u8i>>)
+// CHECK-DAG: cir.func private @arrays(!cir.array<!s32i x 4>, !cir.array<!cir.array<!u8i x 3> x 5>, !cir.array<!cir.ptr<!s32i> x 2>)
+// CHECK-DAG: cir.func private @complexes(!cir.complex<!cir.double>, !cir.complex<!s32i>)

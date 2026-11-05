@@ -22,10 +22,23 @@ llvm.func @distribute_dist_schedule_chunk_size(%lb : i32, %ub : i32, %step : i32
 // -----
 
 llvm.func @distribute_dist_schedule(%lb : i32, %ub : i32, %step : i32, %x : i32) {
-  // CHECK: call void @[[RUNTIME_FUNC:__kmpc_for_static_init_4u]](ptr @1, i32 %omp_global_thread_num, i32 92, ptr %p.lastiter, ptr %p.lowerbound, ptr %p.upperbound, ptr %p.stride, i32 1, i32 0)
+  // CHECK: call void @[[RUNTIME_FUNC:__kmpc_for_static_init_4u]](ptr @1, i32 %omp_global_thread_num, i32 92, ptr %p.lastiter, ptr %p.lowerbound, ptr %p.upperbound, ptr %p.stride, i32 1, i32 1)
   // We want to make sure that the next call is not another init builder.
   // CHECK-NOT: call void @[[RUNTIME_FUNC]]
   omp.distribute dist_schedule_static {
+    omp.loop_nest (%iv) : i32 = (%lb) to (%ub) step (%step) {
+      omp.yield
+    }
+  }
+  llvm.return
+}
+
+// -----
+
+llvm.func @distribute_order_modifier(%lb : i32, %ub : i32, %step : i32) {
+  // CHECK-LABEL: define void @distribute_order_modifier(
+  // CHECK: call void @__kmpc_for_static_init_4u(ptr @1, i32 %omp_global_thread_num, i32 92, ptr %p.lastiter, ptr %p.lowerbound, ptr %p.upperbound, ptr %p.stride, i32 1, i32 1)
+  omp.distribute order(unconstrained:concurrent) {
     omp.loop_nest (%iv) : i32 = (%lb) to (%ub) step (%step) {
       omp.yield
     }

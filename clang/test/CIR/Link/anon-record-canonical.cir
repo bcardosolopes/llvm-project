@@ -1,0 +1,50 @@
+// RUN: cir-link %s %S/Inputs/anon-record-canonical-b.cir --warn-odr-divergence -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Two inputs, one anonymous union, two different numbers. One type.
+//
+// CIRGen names an anonymous record from a counter that restarts every
+// translation unit, so the same union is `anon.1` here and `anon.0` in the
+// other input. That number is not identity. Reading it as one made every
+// record containing an anonymous member look like an ODR divergence: `Holder`
+// was renamed to `Holder.1`, and a call between the two spellings then failed
+// to verify. Real C++ hits this through std::optional, whose storage is an
+// anonymous union.
+//
+// `Boxed` reaches the same union through an array rather than holding it
+// directly, and that is a second path to the same bug worth its own coverage:
+// a composite member is hashed on its own, and a digest is opaque to every
+// normalizer above it, so a number left inside one is a number nothing
+// downstream can take back out.
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!rec_anon = !cir.record<union "anon.1" {!u8i, !s32i}>
+!rec_Holder = !cir.record<struct "Holder" {!rec_anon}>
+!rec_Boxed = !cir.record<struct "Boxed" {!cir.array<!rec_anon x 2>}>
+
+module {
+  cir.func @from_a(%arg0: !cir.ptr<!rec_Holder>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @boxed_a(%arg0: !cir.ptr<!rec_Boxed>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Holder and Boxed are each one type, so nothing is renamed. Both anonymous
+// records are given the cross-input name instead -- including this input's, so
+// that the result does not depend on which input happened to be first.
+// STATS: 0 records renamed, 2 anon records canonicalized
+
+// CHECK: !rec_[[ANON:[A-Za-z0-9_]+]] = !cir.record<union "anon.m0" {!u8i, !s32i}>
+// CHECK: !rec_[[HOLDER:[A-Za-z0-9_]+]] = !cir.record<struct "Holder" {!rec_[[ANON]]}>
+// CHECK: !rec_[[BOXED:[A-Za-z0-9_]+]] = !cir.record<struct "Boxed" {!cir.array<!rec_[[ANON]] x 2>}>
+
+// Both inputs' functions still take the same Holder and the same Boxed.
+// CHECK: cir.func @from_a(%{{.*}}: !cir.ptr<!rec_[[HOLDER]]>)
+// CHECK: cir.func @boxed_a(%{{.*}}: !cir.ptr<!rec_[[BOXED]]>)
+// CHECK: cir.func @from_b(%{{.*}}: !cir.ptr<!rec_[[HOLDER]]>)
+// CHECK: cir.func @boxed_b(%{{.*}}: !cir.ptr<!rec_[[BOXED]]>)

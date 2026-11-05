@@ -1,0 +1,21 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify CmpOp: fone predicate requires floating point operands
+!s32i = !cir.int<s, 32>
+
+cir.func @cmp_fone_int(%arg0: !s32i, %arg1: !s32i) {
+  // expected-error@+1 {{floating point comparison predicate requires floating point operands}}
+  %0 = cir.cmp(fone, %arg0, %arg1) : !s32i, !cir.bool
+  cir.return
+}
+
+// -----
+
+// Verify CmpOp: funo predicate requires floating point operands
+!s32i = !cir.int<s, 32>
+
+cir.func @cmp_funo_int(%arg0: !s32i, %arg1: !s32i) {
+  // expected-error@+1 {{floating point comparison predicate requires floating point operands}}
+  %0 = cir.cmp(funo, %arg0, %arg1) : !s32i, !cir.bool
+  cir.return
+}

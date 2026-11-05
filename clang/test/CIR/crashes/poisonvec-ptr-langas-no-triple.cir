@@ -1,0 +1,16 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: failed to lower poison constant type
+// CHECK-SAME: !cir.vector<2 x !cir.ptr<!cir.int<s, 32>, lang_address_space(offload_global)>>
+// CHECK-NOT: Stack dump:
+// CHECK-NOT: Segmentation fault
+
+!s32i = !cir.int<s, 32>
+!p = !cir.ptr<!s32i, lang_address_space(offload_global)>
+!v2p = !cir.vector<2 x !p>
+
+module {
+  cir.func private @f() {
+    %0 = cir.const #cir.poison : !v2p
+    cir.return
+  }
+}

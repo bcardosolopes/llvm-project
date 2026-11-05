@@ -138,8 +138,10 @@ ModuleOp ModuleOp::create(Location loc, std::optional<StringRef> name) {
 DataLayoutSpecInterface ModuleOp::getDataLayoutSpec() {
   // Take the first and only (if present) attribute that implements the
   // interface. This needs a linear search, but is called only once per data
-  // layout object construction that is used for repeated queries.
-  for (NamedAttribute attr : getOperation()->getAttrs())
+  // layout object construction that is used for repeated queries. The spec is
+  // a discardable attribute: reading those alone does not build a dictionary
+  // of the module's attributes for every data layout constructed.
+  for (NamedAttribute attr : getOperation()->getDiscardableAttrs())
     if (auto spec = llvm::dyn_cast<DataLayoutSpecInterface>(attr.getValue()))
       return spec;
   return {};
@@ -149,7 +151,8 @@ TargetSystemSpecInterface ModuleOp::getTargetSystemSpec() {
   // Take the first and only (if present) attribute that implements the
   // interface. This needs a linear search, but is called only once per data
   // layout object construction that is used for repeated queries.
-  for (NamedAttribute attr : getOperation()->getAttrs())
+  // A discardable attribute too; see getDataLayoutSpec.
+  for (NamedAttribute attr : getOperation()->getDiscardableAttrs())
     if (auto spec = llvm::dyn_cast<TargetSystemSpecInterface>(attr.getValue()))
       return spec;
   return {};

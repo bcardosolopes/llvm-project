@@ -8,17 +8,15 @@
 
 void a() {}
 
-// CIR: cir.func no_inline dso_local @_Z1av()
+// CIR: cir.func no_inline optnone dso_local @_Z1av()
 // LLVM: define dso_local void @_Z1av()
 // OGCG: define dso_local void @_Z1av()
 
 extern void b();
-// CIR: cir.func private @_Z1bv()
-// LLVM: declare void @_Z1bv()
 // OGCG: declare void @_Z1bv()
 
 static void c() {}
-// CIR: cir.func no_inline internal private dso_local @_ZL1cv()
+// CIR: cir.func no_inline optnone internal private dso_local @_ZL1cv()
 // LLVM: define internal void @_ZL1cv()
 // OGCG: define internal void @_ZL1cv()
 
@@ -36,8 +34,11 @@ namespace {
 // OGCG: define internal void @_ZN12_GLOBAL__N_11eEv()
 
 void f();
-// CIR: cir.func private @_Z1fv()
-// LLVM: declare void @_Z1fv()
+
+// CIR-DAG: cir.func private @_Z1fv()
+// CIR-DAG: cir.func private @_Z1bv()
+// LLVM-DAG: declare void @_Z1bv()
+// LLVM-DAG: declare void @_Z1fv()
 // OGCG: declare void @_Z1fv()
 
 // Force the functions to be emitted

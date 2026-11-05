@@ -116,3 +116,111 @@ void test_builtin_elementwise_cos(float f, double d, vfloat4 vf4,
   // OGCG: {{%.*}} = call <4 x double> @llvm.cos.v4f64(<4 x double> {{%.*}})
   vd4 = __builtin_elementwise_cos(vd4);
 }
+
+void test_builtin_elementwise_cosh(float f, double d, vfloat4 vf4,
+                                   vdouble4  vd4) {
+  // CIR-LABEL: test_builtin_elementwise_cosh
+  // LLVM-LABEL: test_builtin_elementwise_cosh
+  // OGCG-LABEL: test_builtin_elementwise_cosh
+
+  // CIR: {{%.*}} = cir.cosh {{%.*}} : !cir.float
+  // LLVM: {{%.*}} = call float @llvm.cosh.f32(float {{%.*}})
+  // OGCG: {{%.*}} = call float @llvm.cosh.f32(float {{%.*}})
+  f = __builtin_elementwise_cosh(f);
+
+  // CIR: {{%.*}} = cir.cosh {{%.*}} : !cir.double
+  // LLVM: {{%.*}} = call double @llvm.cosh.f64(double {{%.*}})
+  // OGCG: {{%.*}} = call double @llvm.cosh.f64(double {{%.*}})
+  d = __builtin_elementwise_cosh(d);
+
+  // CIR: {{%.*}} = cir.cosh {{%.*}} : !cir.vector<4 x !cir.float>
+  // LLVM: {{%.*}} = call <4 x float> @llvm.cosh.v4f32(<4 x float> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x float> @llvm.cosh.v4f32(<4 x float> {{%.*}})
+  vf4 = __builtin_elementwise_cosh(vf4);
+
+  // CIR: {{%.*}} = cir.cosh {{%.*}} : !cir.vector<4 x !cir.double>
+  // LLVM: {{%.*}} = call <4 x double> @llvm.cosh.v4f64(<4 x double> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x double> @llvm.cosh.v4f64(<4 x double> {{%.*}})
+  vd4 = __builtin_elementwise_cosh(vd4);
+}
+
+void test_builtin_elementwise_exp10(float f, double d, vfloat4 vf4,
+                                    vdouble4  vd4) {
+  // CIR-LABEL: test_builtin_elementwise_exp10
+  // LLVM-LABEL: test_builtin_elementwise_exp10
+  // OGCG-LABEL: test_builtin_elementwise_exp10
+
+  // CIR: {{%.*}} = cir.exp10 {{%.*}} : !cir.float
+  // LLVM: {{%.*}} = call float @llvm.exp10.f32(float {{%.*}})
+  // OGCG: {{%.*}} = call float @llvm.exp10.f32(float {{%.*}})
+  f = __builtin_elementwise_exp10(f);
+
+  // CIR: {{%.*}} = cir.exp10 {{%.*}} : !cir.double
+  // LLVM: {{%.*}} = call double @llvm.exp10.f64(double {{%.*}})
+  // OGCG: {{%.*}} = call double @llvm.exp10.f64(double {{%.*}})
+  d = __builtin_elementwise_exp10(d);
+
+  // CIR: {{%.*}} = cir.exp10 {{%.*}} : !cir.vector<4 x !cir.float>
+  // LLVM: {{%.*}} = call <4 x float> @llvm.exp10.v4f32(<4 x float> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x float> @llvm.exp10.v4f32(<4 x float> {{%.*}})
+  vf4 = __builtin_elementwise_exp10(vf4);
+
+  // CIR: {{%.*}} = cir.exp10 {{%.*}} : !cir.vector<4 x !cir.double>
+  // LLVM: {{%.*}} = call <4 x double> @llvm.exp10.v4f64(<4 x double> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x double> @llvm.exp10.v4f64(<4 x double> {{%.*}})
+  vd4 = __builtin_elementwise_exp10(vd4);
+}
+
+void test_builtin_elementwise_sinh(float f, double d, vfloat4 vf4,
+                                   vdouble4  vd4) {
+  // CIR-LABEL: test_builtin_elementwise_sinh
+  // LLVM-LABEL: test_builtin_elementwise_sinh
+  // OGCG-LABEL: test_builtin_elementwise_sinh
+
+  // CIR: {{%.*}} = cir.sinh {{%.*}} : !cir.float
+  // LLVM: {{%.*}} = call float @llvm.sinh.f32(float {{%.*}})
+  // OGCG: {{%.*}} = call float @llvm.sinh.f32(float {{%.*}})
+  f = __builtin_elementwise_sinh(f);
+
+  // CIR: {{%.*}} = cir.sinh {{%.*}} : !cir.double
+  // LLVM: {{%.*}} = call double @llvm.sinh.f64(double {{%.*}})
+  // OGCG: {{%.*}} = call double @llvm.sinh.f64(double {{%.*}})
+  d = __builtin_elementwise_sinh(d);
+
+  // CIR: {{%.*}} = cir.sinh {{%.*}} : !cir.vector<4 x !cir.float>
+  // LLVM: {{%.*}} = call <4 x float> @llvm.sinh.v4f32(<4 x float> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x float> @llvm.sinh.v4f32(<4 x float> {{%.*}})
+  vf4 = __builtin_elementwise_sinh(vf4);
+
+  // CIR: {{%.*}} = cir.sinh {{%.*}} : !cir.vector<4 x !cir.double>
+  // LLVM: {{%.*}} = call <4 x double> @llvm.sinh.v4f64(<4 x double> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x double> @llvm.sinh.v4f64(<4 x double> {{%.*}})
+  vd4 = __builtin_elementwise_sinh(vd4);
+}
+
+void test_builtin_elementwise_tanh(float f, double d, vfloat4 vf4,
+                                   vdouble4  vd4) {
+  // CIR-LABEL: test_builtin_elementwise_tanh
+  // LLVM-LABEL: test_builtin_elementwise_tanh
+  // OGCG-LABEL: test_builtin_elementwise_tanh
+
+  // CIR: {{%.*}} = cir.tanh {{%.*}} : !cir.float
+  // LLVM: {{%.*}} = call float @llvm.tanh.f32(float {{%.*}})
+  // OGCG: {{%.*}} = call float @llvm.tanh.f32(float {{%.*}})
+  f = __builtin_elementwise_tanh(f);
+
+  // CIR: {{%.*}} = cir.tanh {{%.*}} : !cir.double
+  // LLVM: {{%.*}} = call double @llvm.tanh.f64(double {{%.*}})
+  // OGCG: {{%.*}} = call double @llvm.tanh.f64(double {{%.*}})
+  d = __builtin_elementwise_tanh(d);
+
+  // CIR: {{%.*}} = cir.tanh {{%.*}} : !cir.vector<4 x !cir.float>
+  // LLVM: {{%.*}} = call <4 x float> @llvm.tanh.v4f32(<4 x float> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x float> @llvm.tanh.v4f32(<4 x float> {{%.*}})
+  vf4 = __builtin_elementwise_tanh(vf4);
+
+  // CIR: {{%.*}} = cir.tanh {{%.*}} : !cir.vector<4 x !cir.double>
+  // LLVM: {{%.*}} = call <4 x double> @llvm.tanh.v4f64(<4 x double> {{%.*}})
+  // OGCG: {{%.*}} = call <4 x double> @llvm.tanh.v4f64(<4 x double> {{%.*}})
+  vd4 = __builtin_elementwise_tanh(vd4);
+}

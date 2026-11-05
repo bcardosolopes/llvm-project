@@ -36,6 +36,8 @@ let cppNamespace = "::cir" in {
           "unsigned", "getNumArgOperands", (ins)>,
       InterfaceMethod<"Return whether the callee is nothrow",
                       "bool", "getNothrow", (ins)>,
+      InterfaceMethod<"Return the calling convention of the call operation",
+                      "cir::CallingConv", "getCallingConv", (ins)>,
       InterfaceMethod<"Return the side effects of the call operation",
                       "cir::SideEffect", "getSideEffect", (ins)>,
     ];

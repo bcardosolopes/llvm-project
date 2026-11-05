@@ -7,6 +7,55 @@
 // RUN: %clang_cc1 -ffreestanding -triple x86_64-unknown-linux -fms-extensions -Wno-implicit-function-declaration -emit-llvm -o %t.ll -Wall -Werror %s
 // RUN: FileCheck --check-prefix=OGCG --input-file=%t.ll %s
 
+unsigned __int64 __shiftleft128(unsigned __int64 low, unsigned __int64 high,
+                                unsigned char shift);
+unsigned __int64 __shiftright128(unsigned __int64 low, unsigned __int64 high,
+                                 unsigned char shift);
+
+// CIR-LABEL: cir.func{{.*}}@test_shiftleft128
+// CIR: %[[D_LOAD:[^ ]+]] = cir.load {{.*}} : !cir.ptr<!u8i>, !u8i
+// CIR: %[[D_CAST:[^ ]+]] = cir.cast integral %[[D_LOAD]] : !u8i -> !u64i
+// CIR: %{{[^ ]+}} = cir.call_llvm_intrinsic "fshl" {{.*}} : (!u64i, !u64i, !u64i) -> !u64i
+// CIR: cir.return
+
+// LLVM-LABEL: define {{.*}} i64 @test_shiftleft128
+// LLVM-SAME: (i64 noundef %{{.*}}, i64 noundef %{{.*}}, i8 noundef zeroext %{{.*}})
+// LLVM: [[TMP1:%.*]] = zext i8 %{{.*}} to i64
+// LLVM-NEXT: {{.*}} = call i64 @llvm.fshl.i64(i64 %{{.*}}, i64 %{{.*}}, i64 [[TMP1]])
+
+// OGCG-LABEL: define {{.*}} i64 @test_shiftleft128
+// OGCG-SAME: (i64 {{.*}} %{{.*}}, i64 {{.*}} %{{.*}}, i8 {{.*}} %{{.*}})
+// OGCG-NEXT: entry:
+// OGCG: [[TMP:%.*]] = zext i8 {{.*}} to i64
+// OGCG-NEXT: {{.*}} = call i64 @llvm.fshl.i64(i64 {{.*}}, i64 {{.*}}, i64 [[TMP]])
+// OGCG-NEXT: ret i64
+unsigned __int64 test_shiftleft128(unsigned __int64 l, unsigned __int64 h,
+                                   unsigned char d) {
+  return __shiftleft128(l, h, d);
+}
+
+// CIR-LABEL: cir.func{{.*}}@test_shiftright128
+// CIR: %[[D_LOAD:[^ ]+]] = cir.load {{.*}} : !cir.ptr<!u8i>, !u8i
+// CIR: %[[D_CAST:[^ ]+]] = cir.cast integral %[[D_LOAD]] : !u8i -> !u64i
+// CIR: %{{[^ ]+}} = cir.call_llvm_intrinsic "fshr" {{.*}} : (!u64i, !u64i, !u64i) -> !u64i
+// CIR: cir.return
+
+// LLVM-LABEL: define {{.*}} i64 @test_shiftright128
+// LLVM-SAME: (i64 noundef %{{.*}}, i64 noundef %{{.*}}, i8 noundef zeroext %{{.*}})
+// LLVM: [[TMP1:%.*]] = zext i8 %{{.*}} to i64
+// LLVM-NEXT: {{.*}} = call i64 @llvm.fshr.i64(i64 %{{.*}}, i64 %{{.*}}, i64 [[TMP1]])
+
+// OGCG-LABEL: define {{.*}} i64 @test_shiftright128
+// OGCG-SAME: (i64 {{.*}} %{{.*}}, i64 {{.*}} %{{.*}}, i8 {{.*}} %{{.*}})
+// OGCG-NEXT: entry:
+// OGCG: [[TMP:%.*]] = zext i8 {{.*}} to i64
+// OGCG-NEXT: {{.*}} = call i64 @llvm.fshr.i64(i64 {{.*}}, i64 {{.*}}, i64 [[TMP]])
+// OGCG-NEXT: ret i64
+unsigned __int64 test_shiftright128(unsigned __int64 l, unsigned __int64 h,
+                                    unsigned char d) {
+  return __shiftright128(l, h, d);
+}
+
 #pragma intrinsic(__cpuid)
 #pragma intrinsic(__cpuidex)
 
@@ -66,7 +115,7 @@ void test__cpuid_with_cpu_info_as_array(int functionId) {
     // CIR: cir.cpuid [[CPU_INFO_PTR]], [[FUNCTION_ID]], [[SUB_FUNCTION_ID]] : !cir.ptr<!s32i>, !s32i, !s32i
 
     // LLVM-LABEL: _cpuid_with_cpu_info_as_array
-    // LLVM: [[CPU_INFO_PTR:%.*]] = getelementptr i32, ptr
+    // LLVM: [[CPU_INFO_PTR:%.*]] = getelementptr inbounds nuw i32, ptr
     // LLVM: [[FUNCTION_ID:%.*]] = load i32
     // LLVM: [[ASM_RESULTS:%.*]] = call { i32, i32, i32, i32 } asm "{{.*}}cpuid{{.*}}", "={ax},=r,={cx},={dx},0,2"(i32 [[FUNCTION_ID]], i32 0)
     // LLVM: [[RESULT_0:%.*]] = extractvalue { i32, i32, i32, i32 } [[ASM_RESULTS]], 0

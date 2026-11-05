@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: eh.inflight_exception must be lowered inside an LLVM function
+// CHECK-NOT: expected LLVM function parent
+// CHECK-NOT: Stack dump:
+
+!u32i = !cir.int<u, 32>
+
+module {
+  %exception_ptr, %type_id = cir.eh.inflight_exception
+}

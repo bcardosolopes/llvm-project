@@ -1,0 +1,16 @@
+// Second input for ../available-externally.cir. Not a test on its own.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // The real definition. It must displace A's available_externally body.
+  cir.func @inlinable() -> !s32i {
+    %0 = cir.const #cir.int<222> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func available_externally @only_ae() -> !s32i {
+    %0 = cir.const #cir.int<7> : !s32i
+    cir.return %0 : !s32i
+  }
+}

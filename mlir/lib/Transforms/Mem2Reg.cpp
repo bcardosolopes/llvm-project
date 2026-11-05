@@ -120,8 +120,10 @@ struct MemorySlotPromotionInfo {
 class MemorySlotPromotionAnalyzer {
 public:
   MemorySlotPromotionAnalyzer(MemorySlot slot, DominanceInfo &dominance,
-                              const DataLayout &dataLayout)
-      : slot(slot), dominance(dominance), dataLayout(dataLayout) {}
+                              const DataLayout &dataLayout,
+                              bool followPromotableChains = false)
+      : slot(slot), dominance(dominance), dataLayout(dataLayout),
+        followPromotableChains(followPromotableChains) {}
 
   /// Computes the information for slot promotion if promotion is possible,
   /// returns nothing otherwise.
@@ -157,6 +159,7 @@ private:
   MemorySlot slot;
   DominanceInfo &dominance;
   const DataLayout &dataLayout;
+  bool followPromotableChains = false;
 };
 
 using BlockIndexCache = DenseMap<Region *, DenseMap<Block *, size_t>>;
@@ -208,7 +211,6 @@ private:
   /// Contains the reaching definition at this operation. Reaching definitions
   /// are only computed for promotable memory operations with blocking uses.
   DenseMap<PromotableMemOpInterface, Value> reachingDefs;
-  DenseMap<PromotableMemOpInterface, Value> replacedValuesMap;
   DominanceInfo &dominance;
   const DataLayout &dataLayout;
   MemorySlotPromotionInfo info;
@@ -343,24 +345,47 @@ SmallPtrSet<Block *, 16> MemorySlotPromotionAnalyzer::computeSlotLiveIn(
   // Blocks with a load before any other store to the slot are the starting
   // points of the analysis. The slot value is definitely live-in in those
   // blocks.
+  //
+  // When `followPromotableChains` is enabled (CIR mode), collect all blocks
+  // that contain users of the slot, including indirect users reached via
+  // `PromotableOpInterface` chains (e.g. bitcasts). When disabled (upstream
+  // default), only direct users of `slot.ptr` are considered.
   SmallPtrSet<Block *, 16> visited;
-  for (Operation *user : slot.ptr.getUsers()) {
-    if (!visited.insert(user->getBlock()).second)
-      continue;
-
-    for (Operation &op : user->getBlock()->getOperations()) {
-      if (auto memOp = dyn_cast<PromotableMemOpInterface>(op)) {
-        // If this operation loads the slot, it is loading from it before
-        // ever writing to it, so the value is live-in in this block.
-        if (memOp.loadsFrom(slot)) {
-          liveInWorkList.push_back(user->getBlock());
-          break;
+  SmallVector<Value, 4> worklist;
+  worklist.push_back(slot.ptr);
+  SmallPtrSet<Value, 4> seen;
+  seen.insert(slot.ptr);
+  while (!worklist.empty()) {
+    Value current = worklist.pop_back_val();
+    for (Operation *user : current.getUsers()) {
+      if (followPromotableChains) {
+        if (auto promotable = dyn_cast<PromotableOpInterface>(user)) {
+          // Follow through promotable ops (e.g. bitcasts) to find indirect
+          // memory users.
+          if (!isa<PromotableMemOpInterface>(user))
+            for (Value result : user->getResults())
+              if (seen.insert(result).second)
+                worklist.push_back(result);
         }
+      }
 
-        // If we store to the slot, further loads will see that value.
-        // Because we did not meet any load before, the value is not live-in.
-        if (memOp.storesTo(slot))
-          break;
+      if (!visited.insert(user->getBlock()).second)
+        continue;
+
+      for (Operation &op : user->getBlock()->getOperations()) {
+        if (auto memOp = dyn_cast<PromotableMemOpInterface>(op)) {
+          // If this operation loads the slot, it is loading from it before
+          // ever writing to it, so the value is live-in in this block.
+          if (memOp.loadsFrom(slot)) {
+            liveInWorkList.push_back(user->getBlock());
+            break;
+          }
+
+          // If we store to the slot, further loads will see that value.
+          // Because we did not meet any load before, the value is not live-in.
+          if (memOp.storesTo(slot))
+            break;
+        }
       }
     }
   }
@@ -396,10 +421,33 @@ void MemorySlotPromotionAnalyzer::computeMergePoints(
   IDFCalculator idfCalculator(dominance.getDomTree(slot.ptr.getParentRegion()));
 
   SmallPtrSet<Block *, 16> definingBlocks;
-  for (Operation *user : slot.ptr.getUsers())
-    if (auto storeOp = dyn_cast<PromotableMemOpInterface>(user))
-      if (storeOp.storesTo(slot))
-        definingBlocks.insert(user->getBlock());
+
+  // Collect all PromotableMemOpInterface users that store to the slot. When
+  // `followPromotableChains` is enabled (CIR mode), this also walks through
+  // `PromotableOpInterface` chains (e.g. bitcasts) — required because, in
+  // CIR-lowered IR, a CopyOp may store through a bitcast of the alloca and
+  // is not a direct user of `slot.ptr`. When disabled (upstream default),
+  // only direct users are considered, matching the original Mem2Reg
+  // behaviour.
+  SmallVector<Value, 4> worklist;
+  worklist.push_back(slot.ptr);
+  SmallPtrSet<Value, 4> seen;
+  seen.insert(slot.ptr);
+  while (!worklist.empty()) {
+    Value current = worklist.pop_back_val();
+    for (Operation *user : current.getUsers()) {
+      if (auto storeOp = dyn_cast<PromotableMemOpInterface>(user)) {
+        if (storeOp.storesTo(slot))
+          definingBlocks.insert(user->getBlock());
+      } else if (followPromotableChains && isa<PromotableOpInterface>(user)) {
+        // Follow through promotable ops (e.g. bitcasts) to find indirect
+        // memory users.
+        for (Value result : user->getResults())
+          if (seen.insert(result).second)
+            worklist.push_back(result);
+      }
+    }
+  }
 
   idfCalculator.setDefiningBlocks(definingBlocks);
 
@@ -463,7 +511,6 @@ Value MemorySlotPromoter::computeReachingDefInBlock(Block *block,
         assert(stored && "a memory operation storing to a slot must provide a "
                          "new definition of the slot");
         reachingDef = stored;
-        replacedValuesMap[memOp] = stored;
       }
     }
   }
@@ -488,6 +535,36 @@ void MemorySlotPromoter::computeReachingDefInRegion(Region *region,
 
   auto &domTree = dominance.getDomTree(slot.ptr.getParentRegion());
 
+  // Only the memory operations that use the slot, directly or through the
+  // operations that forward it, can read or define it, so only their blocks
+  // need their operations visited; every other block passes the reaching
+  // definition through. Visiting every operation of the region for every slot
+  // made promotion quadratic in a function's size, which a function with tens
+  // of thousands of slots (one the inliner grew) does not survive.
+  SmallPtrSet<Block *, 16> blocksWithMemOps;
+  for (auto &[user, blockingUses] : info.userToBlockingUses)
+    if (isa<PromotableMemOpInterface>(user))
+      blocksWithMemOps.insert(user->getBlock());
+
+  // Nor does the walk have to enter a subtree of the dominator tree holding
+  // none of those blocks, no merge point and no predecessor of one: nothing
+  // there reads the reaching definition. So it only follows the paths from the
+  // entry to those blocks, and a slot costs its own blocks rather than the
+  // whole region.
+  SmallPtrSet<Block *, 16> onPath;
+  auto addPath = [&](Block *block) {
+    for (llvm::DomTreeNodeBase<Block> *node = domTree.getNode(block);
+         node && onPath.insert(node->getBlock()).second; node = node->getIDom())
+      ;
+  };
+  for (Block *block : blocksWithMemOps)
+    addPath(block);
+  for (Block *mergePoint : info.mergePoints) {
+    addPath(mergePoint);
+    for (Block *predecessor : mergePoint->getPredecessors())
+      addPath(predecessor);
+  }
+
   dfsStack.emplace_back<DfsJob>(
       {domTree.getNode(&region->front()), reachingDef});
 
@@ -506,7 +583,8 @@ void MemorySlotPromoter::computeReachingDefInRegion(Region *region,
         (*statistics.newBlockArgumentAmount)++;
     }
 
-    job.reachingDef = computeReachingDefInBlock(block, job.reachingDef);
+    if (blocksWithMemOps.contains(block))
+      job.reachingDef = computeReachingDefInBlock(block, job.reachingDef);
     assert(job.reachingDef);
 
     if (auto terminator = dyn_cast<BranchOpInterface>(block->getTerminator())) {
@@ -519,7 +597,8 @@ void MemorySlotPromoter::computeReachingDefInRegion(Region *region,
     }
 
     for (auto *child : job.block->children())
-      dfsStack.emplace_back<DfsJob>({child, job.reachingDef});
+      if (onPath.contains(child->getBlock()))
+        dfsStack.emplace_back<DfsJob>({child, job.reachingDef});
   }
 }
 
@@ -570,6 +649,8 @@ void MemorySlotPromoter::removeBlockingUses() {
   llvm::SmallVector<Operation *> toErase;
   // List of all replaced values in the slot.
   llvm::SmallVector<std::pair<Operation *, Value>> replacedValuesList;
+  // Stores whose `getStored` result must feed `visitReplacedValues`.
+  llvm::SmallVector<PromotableMemOpInterface> replacedValueStores;
   // Ops to visit with the `visitReplacedValues` method.
   llvm::SmallVector<PromotableOpInterface> toVisit;
   for (Operation *toPromote : llvm::reverse(usersToRemoveUses)) {
@@ -586,8 +667,7 @@ void MemorySlotPromoter::removeBlockingUses() {
               dataLayout) == DeletionKind::Delete)
         toErase.push_back(toPromote);
       if (toPromoteMemOp.storesTo(slot))
-        if (Value replacedValue = replacedValuesMap[toPromoteMemOp])
-          replacedValuesList.push_back({toPromoteMemOp, replacedValue});
+        replacedValueStores.push_back(toPromoteMemOp);
       continue;
     }
 
@@ -599,6 +679,35 @@ void MemorySlotPromoter::removeBlockingUses() {
     if (toPromoteBasic.requiresReplacedValues())
       toVisit.push_back(toPromoteBasic);
   }
+
+  // Recompute the stored value via a fresh `getStored` call only when at
+  // least one op in `toVisit` actually consumes `replacedValuesList`. The
+  // value used by load reaching-def replacements is the one created during
+  // `computeReachingDefInBlock` (and whose insertion location the upstream
+  // `mem2reg.mlir` / `mem2reg-intrinsics.mlir` `bitcast` checks observe);
+  // for the dbg visitor we materialise a fresh duplicate after the
+  // storeOp. The duplicate is dead in MLIR but is exactly what LLVM-IR's
+  // `salvageDebugInfo` needs in order to decompose a partial store into a
+  // `DIExpression(DW_OP_constu, N, DW_OP_or, DW_OP_stack_value)` —
+  // required by `debug-info-mem2reg-byte-store.c` and the analogous LLVM
+  // dialect tests in `mem2reg-dbginfo.mlir`. For self-assign
+  // load-store-back patterns (`@self_assign` /
+  // `debug-info-mem2reg-self-assign.c`) the recompute uses the
+  // post-promotion `reachingDef`, avoiding the dangling cloned use the
+  // value cached during reaching-def computation would otherwise produce
+  // after `toErase` runs.
+  if (!toVisit.empty()) {
+    for (PromotableMemOpInterface storeOp : replacedValueStores) {
+      Value reachingDef = reachingDefs.lookup(storeOp);
+      if (!reachingDef)
+        reachingDef = getOrCreateDefaultValue();
+      builder.setInsertionPointAfter(storeOp);
+      if (Value rebuilt =
+              storeOp.getStored(slot, builder, reachingDef, dataLayout))
+        replacedValuesList.push_back({storeOp, rebuilt});
+    }
+  }
+
   for (PromotableOpInterface op : toVisit) {
     builder.setInsertionPointAfter(op);
     op.visitReplacedValues(replacedValuesList, builder);
@@ -644,7 +753,7 @@ MemorySlotPromoter::promoteSlot() {
 LogicalResult mlir::tryToPromoteMemorySlots(
     ArrayRef<PromotableAllocationOpInterface> allocators, OpBuilder &builder,
     const DataLayout &dataLayout, DominanceInfo &dominance,
-    Mem2RegStatistics statistics) {
+    Mem2RegStatistics statistics, bool followPromotableChains) {
   bool promotedAny = false;
 
   // A cache that stores deterministic block indices which are used to determine
@@ -664,7 +773,8 @@ LogicalResult mlir::tryToPromoteMemorySlots(
         if (slot.ptr.use_empty())
           continue;
 
-        MemorySlotPromotionAnalyzer analyzer(slot, dominance, dataLayout);
+        MemorySlotPromotionAnalyzer analyzer(slot, dominance, dataLayout,
+                                             followPromotableChains);
         std::optional<MemorySlotPromotionInfo> info = analyzer.computeInfo();
         if (info) {
           std::optional<PromotableAllocationOpInterface> newAllocator =
@@ -730,7 +840,8 @@ struct Mem2Reg : impl::Mem2RegBase<Mem2Reg> {
 
       // Attempt promoting as many of the slots as possible.
       if (succeeded(tryToPromoteMemorySlots(allocators, builder, dataLayout,
-                                            dominance, statistics)))
+                                            dominance, statistics,
+                                            followPromotableChains)))
         changed = true;
     }
     if (!changed)

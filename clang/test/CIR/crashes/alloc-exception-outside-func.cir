@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: operation must be inside a function when creating declaration for '__cxa_allocate_exception'
+// CHECK-NOT: expected enclosing function op
+// CHECK-NOT: Stack dump:
+
+!void = !cir.void
+
+module {
+  %0 = cir.alloc.exception 8 -> !cir.ptr<!void>
+}

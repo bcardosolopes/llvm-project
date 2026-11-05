@@ -45,7 +45,7 @@
 
 // Check the module format for scanner modules:
 //
-// RUN: find %t/cache -name "*.pcm" -exec %clang_cc1 -module-file-info "{}" ";" | FileCheck %s -check-prefix=SCAN
+// RUN: find %t/cache -name "*.pcm" | xargs -I{} %clang_cc1 -module-file-info "{}" | FileCheck %s -check-prefix=SCAN
 // SCAN: Module format: raw
 // SCAN: Module format: raw
 // SCAN: Module format: raw
@@ -53,7 +53,7 @@
 
 // Check the module format for built modules:
 //
-// RUN: find %t/build -name "*.pcm" -exec %clang_cc1 -module-file-info "{}" ";" | FileCheck %s -check-prefix=BUILD
+// RUN: find %t/build -name "*.pcm" | xargs -I{} %clang_cc1 -module-file-info "{}" | FileCheck %s -check-prefix=BUILD
 // BUILD: Module format: obj
 // BUILD: Module format: obj
 // BUILD: Module format: obj

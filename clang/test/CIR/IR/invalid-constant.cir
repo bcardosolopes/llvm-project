@@ -1,0 +1,37 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify ConstantOp: zero with invalid type (non struct/array/vector/complex/opaque)
+!s32i = !cir.int<s, 32>
+
+cir.func @const_zero_int() {
+  // expected-error@+1 {{zero expects struct, array, vector, complex, or opaque type}}
+  %0 = cir.const #cir.zero : !s32i
+  cir.return
+}
+
+// -----
+
+// Verify ConstantOp: zero with float type
+cir.func @const_zero_float() {
+  // expected-error@+1 {{zero expects struct, array, vector, complex, or opaque type}}
+  %0 = cir.const #cir.zero : !cir.float
+  cir.return
+}
+
+// -----
+
+// Verify ConstantOp: zero with bool type
+cir.func @const_zero_bool() {
+  // expected-error@+1 {{zero expects struct, array, vector, complex, or opaque type}}
+  %0 = cir.const #cir.zero : !cir.bool
+  cir.return
+}
+
+// -----
+
+// Verify ConstantOp: zero with pointer type
+cir.func @const_zero_ptr() {
+  // expected-error@+1 {{zero expects struct, array, vector, complex, or opaque type}}
+  %0 = cir.const #cir.zero : !cir.ptr<!cir.void>
+  cir.return
+}

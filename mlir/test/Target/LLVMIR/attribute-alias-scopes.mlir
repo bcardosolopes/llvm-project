@@ -155,3 +155,38 @@ llvm.func @alias_scopes(%arg1 : !llvm.ptr) {
 // CHECK-DAG: ![[SCOPES12]] = !{![[SCOPE1]], ![[SCOPE2]]}
 // CHECK-DAG: ![[SCOPES13]] = !{![[SCOPE1]], ![[SCOPE3]]}
 // CHECK-DAG: ![[SCOPES23]] = !{![[SCOPE2]], ![[SCOPE3]]}
+
+// -----
+
+// An invoke and the memory markers must emit their alias metadata on the way
+// out, exactly as a call does. The invoke path in particular imported the
+// metadata onto the op and then dropped it during translation, because it never
+// called setAliasScopeMetadata.
+
+#alias_scope_domain = #llvm.alias_scope_domain<id = distinct[0]<>, description = "domain">
+#alias_scope = #llvm.alias_scope<id = distinct[1]<>, domain = #alias_scope_domain, description = "scope">
+
+llvm.func @callee(!llvm.ptr)
+llvm.func @__gxx_personality_v0(...) -> i32
+
+// CHECK-LABEL: define void @invoke_and_markers
+llvm.func @invoke_and_markers(%arg0: !llvm.ptr, %size: i64)
+    attributes {personality = @__gxx_personality_v0} {
+  // A lifetime marker only takes an alloca; LLVM's verifier rejects one on any
+  // other pointer.
+  %one = llvm.mlir.constant(1 : i32) : i32
+  %a = llvm.alloca %one x i32 : (i32) -> !llvm.ptr
+  // CHECK: call void @llvm.lifetime.start.p0({{.*}} !alias.scope ![[SCOPES:[0-9]+]]
+  llvm.intr.lifetime.start %a {alias_scopes = [#alias_scope]} : !llvm.ptr
+  // CHECK: invoke void @callee
+  // CHECK: !alias.scope ![[SCOPES]]
+  llvm.invoke @callee(%arg0) to ^bb1 unwind ^bb2
+      {alias_scopes = [#alias_scope]} : (!llvm.ptr) -> ()
+^bb1:
+  // CHECK: call void @llvm.lifetime.end.p0({{.*}} !alias.scope ![[SCOPES]]
+  llvm.intr.lifetime.end %a {alias_scopes = [#alias_scope]} : !llvm.ptr
+  llvm.return
+^bb2:
+  %e = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %e : !llvm.struct<(ptr, i32)>
+}

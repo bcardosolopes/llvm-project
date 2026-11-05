@@ -4,6 +4,7 @@ add_mlir_unittest(MLIRIRTests
   AffineMapTest.cpp
   AttributeTest.cpp
   AttrTypeReplacerTest.cpp
+  AttrTypeWalkerTest.cpp
   Diagnostic.cpp
   DialectTest.cpp
   DistinctAttributeAllocatorTest.cpp

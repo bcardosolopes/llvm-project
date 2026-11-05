@@ -68,3 +68,35 @@ func.func @symbol_bar() {
   "foo.possibly_unknown_symbol_table"() ({
   }) : () -> ()
 }
+
+// -----
+
+// A registered op that keeps its inherent attributes in properties, as the
+// test dialect's ops do: the symbol references there are uses, and so are the
+// ones in its discardable attributes. The walk skips the attributes it already
+// found to hold no reference -- the dictionary both ops carry -- and still
+// reports an attribute that holds one on every op that carries it.
+module {
+  // expected-remark@+1 {{symbol has 2 uses}}
+  func.func private @first_property()
+
+  // expected-remark@+1 {{symbol has 2 uses}}
+  func.func private @second_property()
+
+  // expected-remark@+1 {{symbol has 2 uses}}
+  func.func private @discardable()
+
+  // expected-remark@below {{symbol has no uses}}
+  // expected-remark@below {{symbol contains 6 nested references}}
+  func.func @user() {
+    // expected-remark@below {{found use of symbol : @first_property}}
+    // expected-remark@below {{found use of symbol : @second_property}}
+    // expected-remark@below {{found use of symbol : @discardable}}
+    %0 = "test.op_with_effects_a"() <{first = @first_property, second = @second_property}> {no_refs = {k = 1 : i32}, refs = [@discardable]} : () -> memref<i32>
+    // expected-remark@below {{found use of symbol : @first_property}}
+    // expected-remark@below {{found use of symbol : @second_property}}
+    // expected-remark@below {{found use of symbol : @discardable}}
+    %1 = "test.op_with_effects_a"() <{first = @first_property, second = @second_property}> {no_refs = {k = 1 : i32}, refs = [@discardable]} : () -> memref<i32>
+    return
+  }
+}

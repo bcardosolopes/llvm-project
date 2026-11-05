@@ -16,6 +16,12 @@
 // RUN:     -fsanitize-trap=cfi-icall,cfi-nvcall \
 // RUN:     -emit-llvm -o - %s | FileCheck %s --check-prefix=NO-MERGE
 
+// RUN: %if cir-support %{ %clang_cc1 -O3 -triple x86_64-unknown-linux -fsanitize-cfi-cross-dso \
+// RUN:     -fsanitize=cfi-icall,cfi-nvcall,cfi-vcall,cfi-unrelated-cast,cfi-derived-cast \
+// RUN:     -fsanitize-trap=cfi-icall,cfi-nvcall \
+// RUN:     -fsanitize-merge=cfi-icall,cfi-nvcall \
+// RUN:     -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR-MERGE %}
+
 // NOMERGE-LABEL: define dso_local void @caller(
 // NOMERGE-SAME: ptr noundef [[F:%.*]]) #[[ATTR0:[0-9]+]] !type [[META4:![0-9]+]] !type [[META5:![0-9]+]] !type [[META6:![0-9]+]] {
 // NOMERGE-NEXT:  [[ENTRY:.*:]]
@@ -230,3 +236,11 @@ void caller(void (*f)(void)) {
 
 // NO-MERGE: [[ATTR6]] = { noreturn nounwind }
 // NO-MERGE: [[ATTR7]] = { nomerge noreturn nounwind }
+
+// CIR-MERGE-LABEL: define weak_odr hidden void @__cfi_check_fail(
+// CIR-MERGE: ptrtoint ptr [[TMP1:%.*]] to i64, !nosanitize
+// CIR-MERGE: ptrtoint ptr [[TMP0:%.*]] to i64, !nosanitize
+// CIR-MERGE: tail call void @__ubsan_handle_cfi_check_fail_abort(i64 {{%.*}}, i64 {{%.*}}, i64 {{%.*}}) #[[ATTR6:[0-9]+]], !nosanitize
+// CIR-MERGE: ; Function Attrs: noreturn nounwind uwtable
+// CIR-MERGE-NEXT: declare void @__ubsan_handle_cfi_check_fail_abort(i64, i64, i64)
+// CIR-MERGE-NOT: declare void @__ubsan_handle_cfi_check_fail_abort(ptr, i64, i64)

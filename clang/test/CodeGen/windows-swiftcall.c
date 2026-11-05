@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-windows -emit-llvm -target-cpu core2 -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-windows -emit-llvm -target-cpu core2 -fclangir -o - %s | FileCheck %s --check-prefix=CIR %}
 
 #define SWIFTCALL __attribute__((swiftcall))
 #define OUT __attribute__((swift_indirect_result))
@@ -11,6 +12,7 @@
 
 SWIFTCALL void indirect_result_1(OUT int *arg0, OUT float *arg1) {}
 // CHECK-LABEL: define {{.*}} void @indirect_result_1(ptr noalias noundef sret(ptr) align 4 dereferenceable(4){{.*}}, ptr noalias noundef align 4 dereferenceable(4){{.*}})
+// CIR-LABEL: define {{.*}} void @indirect_result_1(ptr noalias noundef sret(ptr) align 4 dereferenceable(4) %{{.*}}, ptr noalias noundef align 4 dereferenceable(4) %{{.*}})
 
 // TODO: maybe this shouldn't suppress sret.
 SWIFTCALL int indirect_result_2(OUT int *arg0, OUT float *arg1) {  __builtin_unreachable(); }
@@ -19,6 +21,7 @@ SWIFTCALL int indirect_result_2(OUT int *arg0, OUT float *arg1) {  __builtin_unr
 typedef struct { char array[1024]; } struct_reallybig;
 SWIFTCALL struct_reallybig indirect_result_3(OUT int *arg0, OUT float *arg1) { __builtin_unreachable(); }
 // CHECK-LABEL: define {{.*}} void @indirect_result_3(ptr dead_on_unwind noalias writable sret({{.*}}) {{.*}}, ptr noalias noundef align 4 dereferenceable(4){{.*}}, ptr noalias noundef align 4 dereferenceable(4){{.*}})
+// CIR-LABEL: define {{.*}} void @indirect_result_3(ptr dead_on_unwind noalias writable sret({{.*}}) {{.*}}, ptr noalias noundef align 4 dereferenceable(4) %{{.*}}, ptr noalias noundef align 4 dereferenceable(4) %{{.*}})
 
 SWIFTCALL void context_1(CONTEXT void *self) {}
 // CHECK-LABEL: define {{.*}} void @context_1(ptr noundef swiftself
@@ -33,6 +36,12 @@ SWIFTCALL void context_error_1(CONTEXT int *self, ERROR float **error) {}
 // CHECK:       store ptr [[T0]], ptr [[TEMP]], align 8
 // CHECK:       [[T0:%.*]] = load ptr, ptr [[TEMP]], align 8
 // CHECK:       store ptr [[T0]], ptr [[ERRORARG]], align 8
+// CIR-LABEL: define {{.*}} void @context_error_1(ptr noundef swiftself %{{.*}}, ptr noundef swifterror %{{.*}}) #0 {
+// CIR:       [[TEMP:%.*]] = alloca ptr, i64 1, align 8
+// CIR:       [[T0:%.*]] = load ptr, ptr %{{.*}}, align 8
+// CIR:       store ptr [[T0]], ptr [[TEMP]], align 8
+// CIR:       [[T1:%.*]] = load ptr, ptr [[TEMP]], align 8
+// CIR:       store ptr [[T1]], ptr %{{.*}}, align 8
 void test_context_error_1(void) {
   int x;
   float *error;
@@ -47,6 +56,15 @@ void test_context_error_1(void) {
 // CHECK:       call [[SWIFTCC:swiftcc]] void @context_error_1(ptr noundef swiftself [[X]], ptr noundef swifterror [[TEMP]])
 // CHECK:       [[T0:%.*]] = load ptr, ptr [[TEMP]], align 8
 // CHECK:       store ptr [[T0]], ptr [[ERROR]], align 8
+// CIR-LABEL: define dso_local void @test_context_error_1() #0 {
+// CIR:       [[TEMP:%.*]] = alloca swifterror ptr, i64 1, align 8
+// CIR:       [[X:%.*]] = alloca i32, i64 1, align 4
+// CIR:       [[ERROR:%.*]] = alloca ptr, i64 1, align 8
+// CIR:       [[T0:%.*]] = load ptr, ptr [[ERROR]], align 8
+// CIR:       store ptr [[T0]], ptr [[TEMP]], align 8
+// CIR:       call swiftcc void @context_error_1(ptr noundef swiftself [[X]], ptr noundef swifterror [[TEMP]])
+// CIR:       [[T1:%.*]] = load ptr, ptr [[TEMP]], align 8
+// CIR:       store ptr [[T1]], ptr [[ERROR]], align 8
 
 SWIFTCALL void context_error_2(short s, CONTEXT int *self, ERROR float **error) {}
 // CHECK-LABEL: define {{.*}} void @context_error_2(i16{{.*}}, ptr noundef swiftself{{.*}}, ptr noundef swifterror %0)
@@ -86,6 +104,10 @@ TEST(struct_empty);
 // CHECK:   ret void
 // CHECK-LABEL: define {{.*}} @take_struct_empty()
 // CHECK:   ret void
+// CIR-LABEL: define {{.*}} @return_struct_empty()
+// CIR:   ret void
+// CIR-LABEL: define {{.*}} @take_struct_empty()
+// CIR:   ret void
 
 typedef struct {
   int x;
@@ -130,6 +152,12 @@ TEST(struct_1);
 // CHECK:   call swiftcc void @take_struct_1(i64 [[V0]], i64 [[V1]])
 // CHECK:   ret void
 // CHECK: }
+// CIR-LABEL: define dso_local swiftcc { i64, i64 } @return_struct_1() #0 {
+// CIR-LABEL: define dso_local swiftcc void @take_struct_1(i64 %{{.*}}, i64 %{{.*}}) #0 {
+// CIR-LABEL: define dso_local void @test_struct_1() #0 {
+// CIR: %[[AGG1:.+]] = alloca %struct.struct_1, i64 1, align 4
+// CIR: %[[CALL1:.+]] = call swiftcc { i64, i64 } @return_struct_1()
+// CIR: store { i64, i64 } {{.*}}, ptr %[[AGG1]], align 4
 
 typedef struct {
   int x;
@@ -174,6 +202,10 @@ TEST(struct_2);
 // CHECK:   call swiftcc void @take_struct_2(i64 [[R0]], i64 [[R1]])
 // CHECK:   ret void
 // CHECK: }
+// CIR-LABEL: define dso_local void @test_struct_2() #0 {
+// CIR: %[[AGG2:.+]] = alloca %struct.struct_2, i64 1, align 4
+// CIR: %[[CALL2:.+]] = call swiftcc { i64, i64 } @return_struct_2()
+// CIR: store { i64, i64 } {{.*}}, ptr %[[AGG2]], align 4
 
 // There's no way to put a field randomly in the middle of an otherwise
 // empty storage unit in C, so that case has to be tested in C++, which
@@ -209,6 +241,10 @@ TEST(struct_misaligned_1)
 // CHECK:   call swiftcc void @take_struct_misaligned_1(i64 [[P]])
 // CHECK:   ret void
 // CHECK: }
+// CIR-LABEL: define dso_local void @test_struct_misaligned_1() #0 {
+// CIR: %[[AGG3:.+]] = alloca %struct.struct_misaligned_1, i64 1, align 1
+// CIR: %[[CALL3:.+]] = call swiftcc i64 @return_struct_misaligned_1()
+// CIR: store { i64 } {{.*}}, ptr %[[AGG3]], align 1
 
 // Too many scalars.
 typedef struct {
@@ -335,6 +371,10 @@ TEST(union_het_fpv_partial)
 TEST(int4)
 // CHECK-LABEL: define {{.*}} <4 x i32> @return_int4()
 // CHECK-LABEL: define {{.*}} @take_int4(<4 x i32>
+// CIR-LABEL: define {{.*}} @take_int4(
+// CIR-SAME: <4 x i32> noundef %{{.*}})
+// CIR-LABEL: define dso_local void @test_int4()
+// CIR: call swiftcc void @take_int4(<4 x i32> noundef %{{.*}})
 
 TEST(int8)
 // CHECK-LABEL: define {{.*}} @return_int8()
@@ -375,6 +415,10 @@ TEST(int8)
 // CHECK:   [[SECOND:%.*]] = load <4 x i32>, ptr [[T0]], align
 // CHECK:   call [[SWIFTCC]] void @take_int8(<4 x i32> noundef [[FIRST]], <4 x i32> noundef [[SECOND]])
 // CHECK:   ret void
+// CIR-LABEL: define {{.*}} @take_int8(
+// CIR-SAME: <4 x i32> noundef %{{.*}}, <4 x i32> noundef %{{.*}})
+// CIR-LABEL: define dso_local void @test_int8()
+// CIR: call swiftcc void @take_int8(<4 x i32> noundef %{{.*}}, <4 x i32> noundef %{{.*}})
 
 TEST(int5)
 // CHECK-LABEL: define {{.*}} @return_int5()
@@ -415,6 +459,10 @@ TEST(int5)
 // CHECK:   [[SECOND:%.*]] = load i32, ptr [[T0]], align
 // CHECK:   call [[SWIFTCC]] void @take_int5(<4 x i32> [[FIRST]], i32 [[SECOND]])
 // CHECK:   ret void
+// CIR-LABEL: define {{.*}} @take_int5(
+// CIR-SAME: <4 x i32> %{{.*}}, i32 %{{.*}})
+// CIR-LABEL: define dso_local void @test_int5()
+// CIR: call swiftcc void @take_int5(<4 x i32> %{{.*}}, i32 %{{.*}})
 
 typedef struct {
   int x;
@@ -422,3 +470,7 @@ typedef struct {
 } misaligned_int3;
 TEST(misaligned_int3)
 // CHECK-LABEL: define dso_local swiftcc void @take_misaligned_int3(i64 %0, i64 %1)
+// CIR-LABEL: define dso_local void @test_misaligned_int3() #0 {
+// CIR: %[[AGG4:.+]] = alloca %struct.misaligned_int3, i64 1, align 4
+// CIR: %[[CALL4:.+]] = call swiftcc { i64, i64 } @return_misaligned_int3()
+// CIR: store { i64, i64 } {{.*}}, ptr %[[AGG4]], align 4

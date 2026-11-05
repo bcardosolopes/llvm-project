@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -disable-llvm-passes -fclangir -o - %s | FileCheck %s --check-prefix=CIR %}
 
 @interface SuperClass
 @end
@@ -49,3 +50,19 @@
 // CHECK-NEXT:  [[T3:%.*]] = getelementptr inbounds i8, ptr [[T0]], i64 [[T1]]
 // CHECK-NEXT:  call void @llvm.objc.destroyWeak(ptr [[T3]])
 // CHECK-NEXT:  ret void
+
+// CIR-LABEL: define internal ptr @"\01-[WeakPropertyTest PROP]"
+// CIR: load i64, ptr @"OBJC_IVAR_$_WeakPropertyTest.PROP"
+// CIR: call ptr @llvm.objc.loadWeakRetained(ptr
+// CIR-NOT: call void @llvm.objc.release(ptr
+// CIR: call ptr @llvm.objc.autoreleaseReturnValue(ptr
+
+// CIR-LABEL: define internal void @"\01-[WeakPropertyTest setPROP:]"
+// CIR: load i64, ptr @"OBJC_IVAR_$_WeakPropertyTest.PROP"
+// CIR: call ptr @llvm.objc.storeWeak(ptr
+// CIR: ret void
+
+// CIR-LABEL: define internal void @"\01-[WeakPropertyTest .cxx_destruct]"
+// CIR: load i64, ptr @"OBJC_IVAR_$_WeakPropertyTest.PROP"
+// CIR: call void @llvm.objc.destroyWeak(ptr
+// CIR: ret void

@@ -1,0 +1,139 @@
+// RUN: cir-opt %s -o %t.text
+// RUN: cir-opt %s --emit-bytecode -o %t.bc
+// RUN: cir-opt %t.bc -o %t.roundtrip
+// RUN: diff %t.text %t.roundtrip
+// RUN: FileCheck --input-file=%t.roundtrip %s
+// RUN: grep -ao Marker %t.bc | count 1
+
+// The type-carrying attributes must have a bytecode encoding, for the reason
+// spelled out in bytecode-special-member.cir: an attribute with no encoding is
+// serialized by printing it, and printing an attribute prints its type in full.
+//
+// GlobalViewDiffAttr was encoded before any of these were, which bought
+// nothing -- it wrote its two operands as nested attributes and each of those
+// dropped straight back to the fallback. That is why the diff appears here
+// too: the fix for the container is only worth anything once its contents are
+// covered.
+//
+// A relative-vtable build puts a global_view in every vtable slot with a
+// typeinfo beside it, so this is the shape that recurs at scale. In one generated
+// translation unit a single global_view printed to 9.89 MB -- its symbol is a
+// std::variant dispatcher, so both the mangled name and the pointee function
+// type are enormous -- and there were enough of them to take the .cir section
+// to 280 MB, which overflowed the bitcode writer's 4 GB buffer under
+// -ffat-lto-objects.
+//
+// As in the special-member test, the grep is the guard that matters: encoded,
+// the record is written once into the type table and referred to by index, so
+// its name appears once in the file. Printed, every attribute carries its own
+// expanded copy.
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!rec_Marker = !cir.record<struct "Marker" {!s32i}>
+!rec_TI = !cir.record<struct "TI" {!cir.ptr<!u8i>, !s32i}>
+!rec_Other = !cir.record<struct "Other" {!s32i}>
+!method_Other = !cir.method<!cir.func<(!s32i)> in !rec_Other>
+!s64i = !cir.int<s, 64>
+!rec_Base = !cir.record<struct "Base" {!cir.vptr}>
+!rec_Derived = !cir.record<struct "Derived" {!rec_Base}>
+
+#info = #cir.dyn_cast_info<src_rtti = #cir.global_view<@_ZTI4Base> : !cir.ptr<!u8i>, dest_rtti = #cir.global_view<@_ZTI7Derived> : !cir.ptr<!u8i>, runtime_func = @__dynamic_cast, bad_cast_func = @__cxa_bad_cast, offset_hint = #cir.int<0> : !s64i>
+
+module {
+  // global_view has eight parameters and the encoding writes all eight, so each
+  // optional one is set somewhere below and none is left at its default
+  // everywhere -- a dropped or mis-ordered field among them round-trips
+  // perfectly if every occurrence leaves it empty.
+  //
+  // They all keep the same !cir.ptr<!rec_Marker> self type on purpose: the
+  // grep above counts how many times the record is written, so the payloads
+  // have to differ while the type does not.
+  cir.global external @plain = #cir.global_view<@some_sym> : !cir.ptr<!rec_Marker>
+  cir.global external @indexed = #cir.global_view<@some_sym, [3 : i32, 0 : i32]> : !cir.ptr<!u8i>
+  cir.global external @g2 = #cir.global_view<@s2, byte_offset = 56 : i64> : !cir.ptr<!rec_Marker>
+  cir.global external @g3 = #cir.global_view<@s3, addr_adjustment = 7 : i64> : !cir.ptr<!rec_Marker>
+  cir.global external @g4 = #cir.global_view<@s4, inrange = array<i32: -24, 8>> : !cir.ptr<!rec_Marker>
+  cir.global external @g5 = #cir.global_view<@s5, inbounds = true> : !cir.ptr<!rec_Marker>
+  // All of them at once, which is what catches a pair swapped between two
+  // adjacent slots of the same C++ type -- rawByteOffset and addrAdjustment
+  // are both an optional IntegerAttr, so nothing but a differing value
+  // distinguishes them.
+  cir.global external @g6 = #cir.global_view<@s6, [1 : i32], byte_offset = 5 : i64, addr_adjustment = 9 : i64, inrange = array<i32: 2, 4>, no_cfi = true, inbounds = true> : !cir.ptr<!rec_Marker>
+  cir.global external @g7 = #cir.global_view<@s7> : !cir.ptr<!rec_Marker>
+
+  // typeinfo holds an array of global_views, and dyn_cast_info holds two of
+  // them plus an IntAttr: both are the nesting case.
+  cir.global external @info = #cir.typeinfo<{#cir.global_view<@_ZTS6Widget> : !cir.ptr<!u8i>, #cir.int<2> : !s32i}> : !rec_TI
+
+  cir.global external @vec = #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<2> : !s32i]> : !cir.vector<2 x !s32i>
+  cir.global external @cpx = #cir.const_complex<#cir.fp<1.000000e+00> : !cir.double, #cir.fp<2.000000e+00> : !cir.double> : !cir.complex<!cir.double>
+
+  // A data member and a method are both "something in a record", so each
+  // carries the record type; the optional-integer parameters are why
+  // CIRDialectBytecode.cpp needs readOptionalInt at all.
+  //
+  // data_member has two optional unsigned slots and they are the three states
+  // the presence flag has to keep apart: a member index, a byte offset, and
+  // neither, which is the null pointer-to-data-member. Getting the two slots
+  // confused is invisible unless both are exercised separately.
+  cir.global external @dm = #cir.data_member<0> : !cir.data_member<!s32i in !rec_Other>
+  cir.global external @dm_null = #cir.data_member<null> : !cir.data_member<!s32i in !rec_Other>
+  cir.global external @dm_off = #cir.data_member<offset_bytes = 12> : !cir.data_member<!s32i in !rec_Other>
+
+  cir.global external @m_sym = #cir.method<@f> : !method_Other
+  cir.global external @m_null = #cir.method<null> : !method_Other
+  cir.global external @m_virtual = #cir.method<vtable_offset = 8> : !method_Other
+  // this_adjustment is the signed one, and it is signed for a reason -- a
+  // pointer to a member of a virtual base adjusts downwards -- so a negative
+  // value has to survive. ptrauth_discriminator and noCFI sit on either side
+  // of it, which is what makes the order worth pinning down.
+  cir.global external @m_adj = #cir.method<@f, adj = -16> : !method_Other
+  cir.global external @m_ptrauth = #cir.method<@f, adj = 8, ptrauth_discriminator = 35591, no_cfi = true> : !method_Other
+  cir.global external @m_vt_adj = #cir.method<vtable_offset = 24, adj = -32> : !method_Other
+
+  cir.func private @__dynamic_cast(!cir.ptr<!u8i>, !cir.ptr<!u8i>, !cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
+  cir.func private @__cxa_bad_cast()
+
+  cir.func @cast(%arg0: !cir.ptr<!rec_Base>) -> !cir.ptr<!rec_Derived> {
+    %0 = cir.dyn_cast ptr %arg0 : !cir.ptr<!rec_Base> -> !cir.ptr<!rec_Derived> #info
+    cir.return %0 : !cir.ptr<!rec_Derived>
+  }
+}
+
+// CHECK: cir.global external @plain = #cir.global_view<@some_sym> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @indexed = #cir.global_view<@some_sym, [3 : i32, 0 : i32]> : !cir.ptr<!u8i>
+// CHECK: cir.global external @g2 = #cir.global_view<@s2, byte_offset = 56 : i64> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @g3 = #cir.global_view<@s3, addr_adjustment = 7 : i64> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @g4 = #cir.global_view<@s4, inrange = array<i32: -24, 8>> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @g5 = #cir.global_view<@s5, inbounds = true> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @g6 = #cir.global_view<@s6, [1 : i32], byte_offset = 5 : i64, addr_adjustment = 9 : i64, inrange = array<i32: 2, 4>, no_cfi = true, inbounds = true> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @g7 = #cir.global_view<@s7> : !cir.ptr<!rec_Marker>
+// CHECK: cir.global external @info = #cir.typeinfo<{#cir.global_view<@_ZTS6Widget> : !cir.ptr<!u8i>, #cir.int<2> : !s32i}> : !rec_TI
+// CHECK: cir.global external @vec = #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<2> : !s32i]> : !cir.vector<2 x !s32i>
+// CHECK: cir.global external @cpx = #cir.const_complex<#cir.fp<1.000000e+00> : !cir.double, #cir.fp<2.000000e+00> : !cir.double> : !cir.complex<!cir.double>
+
+// The three data_member states, which are what the two optional unsigned slots
+// and their presence flags have to keep apart. A mix-up between the slots, or
+// a mishandled absent flag, shows up here and nowhere else.
+// CHECK: cir.global external @dm = #cir.data_member<0> : !cir.data_member<!s32i in !rec_Other>
+// CHECK: cir.global external @dm_null = #cir.data_member<null> : !cir.data_member<!s32i in !rec_Other>
+// CHECK: cir.global external @dm_off = #cir.data_member<offset_bytes = 12> : !cir.data_member<!s32i in !rec_Other>
+
+// The method spellings are the states of its optional parameters, and they
+// must stay distinct: a symbol, no target at all, and a vtable slot.
+// Collapsing null into vtable_offset = 0 would turn a null pointer-to-member
+// into a call of the first virtual function. adj is the signed one and carries
+// a negative value here, with ptrauth_discriminator and no_cfi on either side
+// of it, so a swap among the three is caught.
+// CHECK: cir.global external @m_sym = #cir.method<@f> : !cir.method<!cir.func<(!s32i)> in !rec_Other>
+// CHECK: cir.global external @m_null = #cir.method<null> : !cir.method<!cir.func<(!s32i)> in !rec_Other>
+// CHECK: cir.global external @m_virtual = #cir.method<vtable_offset = 8> : !cir.method<!cir.func<(!s32i)> in !rec_Other>
+// CHECK: cir.global external @m_adj = #cir.method<@f, adj = -16> : !cir.method<!cir.func<(!s32i)> in !rec_Other>
+// CHECK: cir.global external @m_ptrauth = #cir.method<@f, adj = 8, ptrauth_discriminator = 35591, no_cfi = true> : !cir.method<!cir.func<(!s32i)> in !rec_Other>
+// CHECK: cir.global external @m_vt_adj = #cir.method<vtable_offset = 24, adj = -32> : !cir.method<!cir.func<(!s32i)> in !rec_Other>
+
+// dyn_cast_info is the nesting case: two global_views and an IntAttr inside
+// one attribute, which is what GlobalViewDiffAttr got wrong by being encoded
+// while its operands were not.
+// CHECK: %0 = cir.dyn_cast ptr %arg0 : !cir.ptr<!rec_Base> -> !cir.ptr<!rec_Derived> #dyn_cast_info__ZTI4Base__ZTI7Derived

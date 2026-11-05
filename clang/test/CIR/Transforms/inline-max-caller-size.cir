@@ -1,0 +1,65 @@
+// A caller takes no more inlined code once its weighted size reaches the CIR
+// inliner's max-caller-size, whatever the rule: its size is measured once and
+// grows by each callee inlined into it. @tiny weighs 2, a call 3.
+//
+// RUN: cir-opt %s --cir-inline="max-caller-size=11" | FileCheck %s --check-prefix=MAX11
+// RUN: cir-opt %s --cir-inline="max-caller-size=13" | FileCheck %s --check-prefix=MAX13
+// RUN: cir-opt %s --cir-inline | FileCheck %s --check-prefix=DEFAULT
+
+!s32i = !cir.int<s, 32>
+module {
+  cir.func @tiny(%arg0: !s32i) -> !s32i {
+    %0 = cir.binop(mul, %arg0, %arg0) : !s32i
+    %1 = cir.binop(add, %0, %arg0) : !s32i
+    cir.return %1 : !s32i
+  }
+
+  // Weighs 3: always under the bound.
+  // MAX11-LABEL: cir.func @small(
+  // MAX11-NOT:     cir.call
+  // MAX11:         cir.return
+  // MAX13-LABEL: cir.func @small(
+  // MAX13-NOT:     cir.call
+  // MAX13:         cir.return
+  cir.func @small(%arg0: !s32i) -> !s32i {
+    %0 = cir.call @tiny(%arg0) : (!s32i) -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Weighs 11: at a bound of 11 it takes nothing; under 13 it takes @tiny.
+  // MAX11-LABEL: cir.func @large(
+  // MAX11:         cir.call @tiny(
+  // MAX13-LABEL: cir.func @large(
+  // MAX13-NOT:     cir.call
+  // MAX13:         cir.return
+  cir.func @large(%arg0: !s32i) -> !s32i {
+    %0 = cir.binop(mul, %arg0, %arg0) : !s32i
+    %1 = cir.binop(add, %0, %arg0) : !s32i
+    %2 = cir.binop(sub, %1, %0) : !s32i
+    %3 = cir.binop(mul, %2, %1) : !s32i
+    %4 = cir.binop(add, %3, %2) : !s32i
+    %5 = cir.binop(xor, %4, %3) : !s32i
+    %6 = cir.binop(add, %5, %4) : !s32i
+    %7 = cir.binop(sub, %6, %5) : !s32i
+    %8 = cir.call @tiny(%7) : (!s32i) -> !s32i
+    cir.return %8 : !s32i
+  }
+
+  // Weighs 12: under 13 it takes the first @tiny, which brings it to 14, and
+  // then no more.
+  // MAX11-LABEL: cir.func @grows(
+  // MAX11-COUNT-4: cir.call @tiny(
+  // MAX13-LABEL: cir.func @grows(
+  // MAX13-COUNT-3: cir.call @tiny(
+  // MAX13-NOT:     cir.call
+  // DEFAULT-LABEL: cir.func @grows(
+  // DEFAULT-NOT:     cir.call
+  // DEFAULT:         cir.return
+  cir.func @grows(%arg0: !s32i) -> !s32i {
+    %0 = cir.call @tiny(%arg0) : (!s32i) -> !s32i
+    %1 = cir.call @tiny(%0) : (!s32i) -> !s32i
+    %2 = cir.call @tiny(%1) : (!s32i) -> !s32i
+    %3 = cir.call @tiny(%2) : (!s32i) -> !s32i
+    cir.return %3 : !s32i
+  }
+}

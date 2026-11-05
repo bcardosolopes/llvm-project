@@ -1,0 +1,19 @@
+// RUN: not cir-translate --cir-to-llvmir %s -o /dev/null 2>&1 | FileCheck %s
+//
+// Ensure malformed dtor regions report a proper diagnostic and fail cleanly,
+// instead of triggering an internal hard abort in LoweringPrepare.
+
+!u8i = !cir.int<u, 8>
+!rec_T = !cir.record<struct "T" {!u8i}>
+
+module attributes {cir.triple = "x86_64-unknown-linux-gnu"} {
+  cir.func private @dtor_fn(!cir.ptr<!rec_T>)
+  cir.global external @g = #cir.zero : !rec_T dtor {
+    %0 = cir.const #cir.ptr<null> : !cir.ptr<!rec_T>
+    cir.call @dtor_fn(%0) : (!cir.ptr<!rec_T>) -> ()
+  }
+}
+
+// CHECK: error: GlobalOp ctor and dtor regions should be removed in LoweringPrepare
+// CHECK-NOT: LLVM ERROR:
+// CHECK-NOT: Stack dump:

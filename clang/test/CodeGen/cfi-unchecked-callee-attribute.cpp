@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm -fsanitize=cfi-icall -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm -fsanitize=cfi-icall -fclangir -Wno-cfi-unchecked-callee -o - %s | FileCheck %s %}
 
 #define CFI_UNCHECKED_CALLEE __attribute__((cfi_unchecked_callee))
 
@@ -31,15 +32,15 @@ void func_accepting_checked(void (*p)(void)) {}
 
 // CHECK-LABEL: _Z9InvokeCFIv
 void InvokeCFI() {
-  // CHECK: %0 = load ptr, ptr @checked, align 8
-  // CHECK: %1 = call i1 @llvm.type.test(ptr %0, metadata !"_ZTSFvvE")
+  // CHECK: [[CHECKED:%.*]] = load ptr, ptr @checked, align 8
+  // CHECK: [[TEST:%.*]] = call i1 @llvm.type.test(ptr [[CHECKED]], metadata !"_ZTSFvvE")
   checked();
 }
 
 // CHECK-LABEL: _Z11InvokeNoCFIv
 void InvokeNoCFI() {
-  // CHECK:  %0 = load ptr, ptr @unchecked2, align 8
-  // CHECK:  call void %0()
+  // CHECK:  [[UNCHECKED:%.*]] = load ptr, ptr @unchecked2, align 8
+  // CHECK:  call void [[UNCHECKED]]()
   unchecked2();
 }
 
@@ -52,7 +53,7 @@ struct A {
 };
 
 void h(void) {
-  // CHECK: store ptr no_cfi @_Z9uncheckedv, ptr %unchecked_local
+  // CHECK: store ptr no_cfi @_Z9uncheckedv, ptr %{{.*}}
   void (*unchecked_local)(void) = unchecked;
 
   // CHECK: call void @_Z22func_accepting_checkedPFvvE(ptr noundef no_cfi @_Z9uncheckedv)
@@ -62,16 +63,16 @@ void h(void) {
   // CHECK-NEXT: call void @_Z22func_accepting_checkedPFvvE(ptr noundef [[B]]) 
   func_accepting_checked(checked);
 
-  // CHECK: store { i64, i64 } { i64 ptrtoint (ptr no_cfi @_ZN1A16unchecked_methodEv to i64), i64 0 }, ptr %A1
+  // CHECK: store { i64, i64 } { i64 ptrtoint (ptr no_cfi @_ZN1A16unchecked_methodEv to i64), i64 0 }, ptr %{{.*}}
   auto A1 = &A::unchecked_method;
   /// Storing unchecked virtual function pointer stores an offset instead. This is part of the
   /// normal Itanium C++ ABI, but let's make sure we don't change anything.
-  // CHECK: store { i64, i64 } { i64 1, i64 0 }, ptr %A2
+  // CHECK: store { i64, i64 } { i64 1, i64 0 }, ptr %{{.*}}
   auto A2 = &A::unchecked_virtual_method;
-  // CHECK: store ptr no_cfi @_ZN1A23unchecked_static_methodEv, ptr %A3
+  // CHECK: store ptr no_cfi @_ZN1A23unchecked_static_methodEv, ptr %{{.*}}
   auto A3 = &A::unchecked_static_method;
-  // CHECK: store { i64, i64 } { i64 ptrtoint (ptr no_cfi @_ZNK1A22unchecked_const_methodEv to i64), i64 0 }, ptr %A4
+  // CHECK: store { i64, i64 } { i64 ptrtoint (ptr no_cfi @_ZNK1A22unchecked_const_methodEv to i64), i64 0 }, ptr %{{.*}}
   auto A4 = (int(CFI_UNCHECKED_CALLEE A::*)() const)(&A::unchecked_const_method);
-  // CHECK: store { i64, i64 } { i64 ptrtoint (ptr no_cfi @_ZNK1A30unchecked_const_method_int_argEi to i64), i64 0 }, ptr %A5
+  // CHECK: store { i64, i64 } { i64 ptrtoint (ptr no_cfi @_ZNK1A30unchecked_const_method_int_argEi to i64), i64 0 }, ptr %{{.*}}
   auto A5 = (int(CFI_UNCHECKED_CALLEE A::*)(int) const)(&A::unchecked_const_method_int_arg);
 }

@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -mconstructor-aliases -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -mconstructor-aliases -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --check-prefix=CIR --input-file=%t.cir %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -mconstructor-aliases -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=LLVM
@@ -16,9 +16,9 @@ A::A() {}
 // CIR: !rec_A = !cir.record<struct "A" {!cir.vptr}>
 // CIR: !rec_anon_struct = !cir.record<struct  {!cir.array<!cir.ptr<!u8i> x 3>}>
 
-// CIR: cir.global "private" external @_ZTV1A : !rec_anon_struct
+// CIR: cir.global "private"  constant external  @_ZTV1A : !rec_anon_struct
 
-// LLVM: @_ZTV1A = external global { [3 x ptr] }
+// LLVM: @_ZTV1A = external unnamed_addr constant { [3 x ptr] }
 
 // OGCG: @_ZTV1A = external unnamed_addr constant { [3 x ptr] }
 
@@ -31,11 +31,11 @@ A::A() {}
 // CIR:    cir.store{{.*}} align(8) %[[VPTR]], %[[THIS_VPTR_PTR]] : !cir.vptr, !cir.ptr<!cir.vptr>
 // CIR:    cir.return
 
-// LLVM: define{{.*}} void @_ZN1AC2Ev(ptr %[[ARG0:.*]])
+// LLVM: define{{.*}} void @_ZN1AC2Ev(ptr noundef nonnull align 8 dereferenceable(8) %[[ARG0:.*]])
 // LLVM:   %[[THIS_ADDR:.*]] = alloca ptr
 // LLVM:   store ptr %[[ARG0]], ptr %[[THIS_ADDR]]
 // LLVM:   %[[THIS:.*]] = load ptr, ptr %[[THIS_ADDR]]
-// LLVM:   store ptr getelementptr inbounds nuw (i8, ptr @_ZTV1A, i64 16), ptr %[[THIS]]
+// LLVM:   store ptr getelementptr inbounds inrange({{.*}}) ({{.*}}, ptr @_ZTV1A, i32 0, i32 0, i32 {{.*}}), ptr %[[THIS]]
 
 // OGCG: define{{.*}} void @_ZN1AC2Ev(ptr {{.*}} %[[ARG0:.*]])
 // OGCG:   %[[THIS_ADDR:.*]] = alloca ptr
@@ -60,16 +60,16 @@ void f1(A *a) {
 // CIR:   %[[VPTR:.*]] = cir.load{{.*}} %[[VPTR_ADDR]] : !cir.ptr<!cir.vptr>, !cir.vptr
 // CIR:   %[[FN_PTR_PTR:.*]] = cir.vtable.get_virtual_fn_addr %[[VPTR]][0] : !cir.vptr -> !cir.ptr<!cir.ptr<!cir.func<(!cir.ptr<!rec_A>, !s8i)>>>
 // CIR:   %[[FN_PTR:.*]] = cir.load{{.*}} %[[FN_PTR_PTR:.*]] : !cir.ptr<!cir.ptr<!cir.func<(!cir.ptr<!rec_A>, !s8i)>>>, !cir.ptr<!cir.func<(!cir.ptr<!rec_A>, !s8i)>>
-// CIR:   cir.call %[[FN_PTR]](%[[A]], %[[C_LITERAL]]) : (!cir.ptr<!cir.func<(!cir.ptr<!rec_A>, !s8i)>>, !cir.ptr<!rec_A>, !s8i) -> ()
+// CIR:   cir.call %[[FN_PTR]](%[[A]], %[[C_LITERAL]]) {cir.call_arg_attrs = [{cir.align = 8 : i64, cir.dereferenceable = 8 : i64, cir.nonnull, cir.noundef}, {cir.noundef, cir.signext}]} : (!cir.ptr<!cir.func<(!cir.ptr<!rec_A>, !s8i)>>, !cir.ptr<!rec_A>, !s8i) -> ()
 
-// LLVM: define{{.*}} void @_Z2f1P1A(ptr %[[ARG0:.*]])
+// LLVM: define{{.*}} void @_Z2f1P1A(ptr noundef %[[ARG0:.*]])
 // LLVM:   %[[A_ADDR:.*]] = alloca ptr
 // LLVM:   store ptr %[[ARG0]], ptr %[[A_ADDR]]
 // LLVM:   %[[A:.*]] = load ptr, ptr %[[A_ADDR]]
 // LLVM:   %[[VPTR:.*]] = load ptr, ptr %[[A]]
-// LLVM:   %[[FN_PTR_PTR:.*]] = getelementptr inbounds ptr, ptr %[[VPTR]], i32 0
+// LLVM:   %[[FN_PTR_PTR:.*]] = getelementptr inbounds ptr, ptr %[[VPTR]], i64 0
 // LLVM:   %[[FN_PTR:.*]] = load ptr, ptr %[[FN_PTR_PTR]]
-// LLVM:   call void %[[FN_PTR]](ptr %[[A]], i8 99)
+// LLVM:   call void %[[FN_PTR]](ptr noundef nonnull align 8 dereferenceable(8) %[[A]], i8 noundef signext 99)
 
 // OGCG: define{{.*}} void @_Z2f1P1A(ptr {{.*}} %[[ARG0:.*]])
 // OGCG:   %[[A_ADDR:.*]] = alloca ptr

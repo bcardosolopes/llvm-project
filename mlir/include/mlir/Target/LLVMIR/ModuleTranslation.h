@@ -64,7 +64,7 @@ class ComdatSelectorOp;
 class ModuleTranslation {
   friend std::unique_ptr<llvm::Module>
   mlir::translateModuleToLLVMIR(Operation *, llvm::LLVMContext &, StringRef,
-                                bool);
+                                bool, bool);
 
 public:
   /// Stores the mapping between a function name and its LLVM IR representation.
@@ -91,6 +91,21 @@ public:
            "attempting to map a value that is already mapped");
     return llvm;
   }
+
+  /// Replaces the LLVM IR value corresponding to the given MLIR value.
+  /// Unlike mapValue, this allows updating an existing mapping (e.g., when
+  /// amendOperation replaces an instruction with a constrained intrinsic).
+  ///
+  /// All in-tree consumers live in
+  /// `clang/lib/CIR/Lowering/DirectToLLVM/LowerToLLVMIR.cpp` (10+ call
+  /// sites in CIR's `amendOperation` hook for cir.fp_exception /
+  /// cir.rounding_mode constrained-intrinsic replacement, cir.no_cfi /
+  /// cir.member_func_ptr_ptrauth constant rewriting, and CFI checked-call
+  /// substitution). Each pattern needs to swap the mapped LLVM value
+  /// after the original instruction is replaced; without this API the
+  /// later translation steps would dereference stale value mappings.
+  /// Other dialects can opt into the same value-rewrite pattern.
+  void remapValue(Value mlir, llvm::Value *llvm) { valueMapping[mlir] = llvm; }
 
   /// Finds an LLVM IR value corresponding to the given MLIR value.
   llvm::Value *lookupValue(Value value) const {
@@ -213,6 +228,17 @@ public:
   getOrCreateAliasScopes(ArrayRef<AliasScopeAttr> aliasScopeAttrs);
 
   // Sets LLVM metadata for memory operations that are in a parallel loop.
+  /// Sets `!annotation` on every instruction `op` produced. LLVM permits the
+  /// metadata on any instruction and an op can expand into several, so this
+  /// takes the instruction list rather than a single instruction.
+  /// Builds the `!annotation` node for the given array, or null if empty.
+  /// Shared by the instruction path and the function path, which must write to
+  /// the GlobalObject instead.
+  llvm::MDNode *getAnnotationNode(ArrayAttr annotations);
+
+  void setAnnotationMetadata(AnnotationOpInterface op,
+                             ArrayRef<llvm::Instruction *> instructions);
+
   void setAccessGroupsMetadata(AccessGroupOpInterface op,
                                llvm::Instruction *inst);
 
@@ -223,6 +249,14 @@ public:
   /// Sets LLVM TBAA metadata for memory operations that have TBAA attributes.
   void setTBAAMetadata(AliasAnalysisOpInterface op, llvm::Instruction *inst);
 
+  /// Sets LLVM tbaa.struct metadata on an aggregate copy, describing which
+  /// fields of the aggregate the copy touches.
+  void setTBAAStructMetadata(ArrayAttr fields, llvm::Instruction *inst);
+
+  /// Sets LLVM heapallocsite metadata on a call or invoke that names the type
+  /// of the object it allocates.
+  void setHeapAllocSiteMetadata(DITypeAttr attr, llvm::Instruction *inst);
+
   /// Sets LLVM dereferenceable metadata for operations that have
   /// dereferenceable attributes.
   void setDereferenceableMetadata(DereferenceableOpInterface op,
@@ -230,6 +264,11 @@ public:
 
   /// Sets LLVM profiling metadata for operations that have branch weights.
   void setBranchWeightsMetadata(WeightedBranchOpInterface op);
+
+  /// Builds the `!llvm.loop` node for the given annotation, or null. Exposed so
+  /// the discardable-attribute fallback can reuse it for carriers that have no
+  /// typed `loop_annotation` slot, and so both paths build the identical node.
+  llvm::MDNode *getLoopMetadataNode(LoopAnnotationAttr attr, Operation *op);
 
   /// Sets LLVM loop metadata for branch operations that have a loop annotation
   /// attribute.
@@ -288,6 +327,11 @@ public:
   /// Translates the given LLVM debug info metadata.
   llvm::Metadata *translateDebugInfo(LLVM::DINodeAttr attr);
 
+  /// Translates the given assignment-tracking identity, cached so that a store
+  /// and the `#dbg_assign` describing it name one node. Separate from
+  /// `translateDebugInfo`: `llvm::DIAssignID` is an `MDNode`, not a `DINode`.
+  llvm::MDNode *translateDIAssignID(LLVM::DIAssignIDAttr attr);
+
   /// Translates the given LLVM rounding mode metadata.
   llvm::RoundingMode translateRoundingMode(LLVM::RoundingMode rounding);
 
@@ -318,6 +362,22 @@ public:
   convertArgAndResultAttrs(ArgAndResultAttrsOpInterface attrsOp,
                            llvm::CallBase *call,
                            ArrayRef<unsigned> immArgPositions = {});
+
+  /// Translates parameter attributes of a call and adds them to the returned
+  /// AttrBuilder. Returns failure if any of the translations failed.
+  FailureOr<llvm::AttrBuilder> convertParameterAttrs(mlir::Location loc,
+                                                     DictionaryAttr paramAttrs);
+
+  /// Rebuilds the `!pcsections` node for a `llvm.pcsections` attribute. Shared
+  /// because the metadata is legal on a function as well as an instruction,
+  /// and those are separate export paths.
+  llvm::MDNode *getPCSectionsNode(ArrayAttr sections);
+
+  /// Rebuilds the `!callback` node for a `llvm.callback` attribute.
+  llvm::MDNode *getCallbackNode(ArrayAttr encodings);
+
+  /// Rebuilds the `!llvm.preserve.access.index` node, which is a `DIType`.
+  llvm::MDNode *getPreserveAccessIndexNode(DITypeAttr type);
 
   /// Gets the named metadata in the LLVM IR module being constructed, creating
   /// it if it does not exist.
@@ -389,6 +449,10 @@ private:
   /// Process the llvm.commandline LLVM Metadata, if it exists.
   LogicalResult createCommandlineMetadata();
 
+  /// Writes `!ro_after_init` back, the marker a read-only-after-init pass
+  /// uses to record that it has already run on this module.
+  LogicalResult createRoAfterInitMetadata();
+
   /// Process the llvm.dependent_libraries LLVM Metadata, if it exists.
   LogicalResult createDependentLibrariesMetadata();
 
@@ -396,11 +460,6 @@ private:
   LogicalResult
   convertDialectAttributes(Operation *op,
                            ArrayRef<llvm::Instruction *> instructions);
-
-  /// Translates parameter attributes of a call and adds them to the returned
-  /// AttrBuilder. Returns failure if any of the translations failed.
-  FailureOr<llvm::AttrBuilder> convertParameterAttrs(mlir::Location loc,
-                                                     DictionaryAttr paramAttrs);
 
   /// Translates parameter attributes of a function and adds them to the
   /// returned AttrBuilder. Returns failure if any of the translations failed.
@@ -489,6 +548,16 @@ private:
 
   /// A cache for the symbol tables constructed during symbols lookup.
   SymbolTableCollection symbolTableCollection;
+
+  /// When true, `convertGlobalsAndAliases` builds the global-initializer
+  /// IRBuilder with `StrictGEPTargetFolder` instead of upstream's
+  /// `llvm::TargetFolder`. This preserves the exact GEP no-wrap flags
+  /// that the source dialect emitted (matching Clang/CIR codegen
+  /// behaviour). Default `false` keeps upstream constant-folding for
+  /// Flang, Toy, mlir-runner, GPU `ModuleToObject`, and other in-tree
+  /// consumers. Set via the corresponding parameter on
+  /// `translateModuleToLLVMIR`.
+  bool useStrictGEPFolderForGlobals = false;
 };
 
 namespace detail {

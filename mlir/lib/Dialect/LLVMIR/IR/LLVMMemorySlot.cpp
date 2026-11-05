@@ -656,7 +656,16 @@ bool LLVM::DbgDeclareOp::requiresReplacedValues() { return true; }
 void LLVM::DbgDeclareOp::visitReplacedValues(
     ArrayRef<std::pair<Operation *, Value>> definitions, OpBuilder &builder) {
   for (auto [op, value] : definitions) {
-    builder.setInsertionPointAfter(op);
+    Operation *insertAfter = op;
+    if (Operation *defOp = value.getDefiningOp();
+        defOp && defOp->getBlock() == op->getBlock() &&
+        op->isBeforeInBlock(defOp))
+      insertAfter = defOp;
+
+    // Some promotion rewrites materialize a converted replacement value after
+    // the original store. Insert the dbg.value after that defining op so LLVM
+    // translation sees the operand mapping before it lowers the debug record.
+    builder.setInsertionPointAfter(insertAfter);
     LLVM::DbgValueOp::create(builder, getLoc(), value, getVarInfo(),
                              getLocationExpr());
   }
@@ -1267,14 +1276,40 @@ LLVM::MemsetInlineOp::rewire(const DestructurableMemorySlot &slot,
 // Interfaces for memcpy/memmove
 //===----------------------------------------------------------------------===//
 
+/// Resolves \p ptr through the no-op pass-through pointer operations that
+/// mem2reg's `followPromotableChains` mode transparently promotes through --
+/// zero-offset GEPs, bitcasts and address-space casts -- and returns the
+/// underlying root pointer. In CIR-lowered IR a memcpy/memmove frequently
+/// references an alloca via such a pass-through op (e.g. an array-to-pointer
+/// decay lowered to a zero-index GEP) rather than the alloca directly.
+/// Resolving the chain lets `loadsFrom`/`storesTo` recognise these as accesses
+/// to the slot, which is required for the reaching value to be stored back when
+/// the op is removed -- otherwise the copy's store side is silently dropped.
+static Value resolvePromotablePassThroughChain(Value ptr) {
+  while (Operation *def = ptr.getDefiningOp()) {
+    if (auto gep = dyn_cast<LLVM::GEPOp>(def)) {
+      if (!hasAllZeroIndices(gep))
+        break;
+      ptr = gep.getBase();
+    } else if (auto bitcast = dyn_cast<LLVM::BitcastOp>(def)) {
+      ptr = bitcast.getArg();
+    } else if (auto addrcast = dyn_cast<LLVM::AddrSpaceCastOp>(def)) {
+      ptr = addrcast.getArg();
+    } else {
+      break;
+    }
+  }
+  return ptr;
+}
+
 template <class MemcpyLike>
 static bool memcpyLoadsFrom(MemcpyLike op, const MemorySlot &slot) {
-  return op.getSrc() == slot.ptr;
+  return resolvePromotablePassThroughChain(op.getSrc()) == slot.ptr;
 }
 
 template <class MemcpyLike>
 static bool memcpyStoresTo(MemcpyLike op, const MemorySlot &slot) {
-  return op.getDst() == slot.ptr;
+  return resolvePromotablePassThroughChain(op.getDst()) == slot.ptr;
 }
 
 template <class MemcpyLike>

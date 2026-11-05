@@ -138,9 +138,83 @@ llvm.func @callee() -> (i32) attributes { personality = @personality } {
   llvm.return %0 : i32
 }
 
+// A caller without a personality adopts the callee's, as in
+// `llvm::InlineFunction`.
 // CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: personality = @personality
+// CHECK-NOT: llvm.call @callee
+// CHECK: %[[CST:.+]] = llvm.mlir.constant(42
+// CHECK: llvm.return %[[CST]]
+llvm.func @caller() -> (i32) {
+  %0 = llvm.call @callee() : () -> (i32)
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @personality() -> i32
+
+llvm.func @callee() -> (i32) attributes { personality = @personality } {
+  %0 = llvm.mlir.constant(42 : i32) : i32
+  llvm.return %0 : i32
+}
+
+// Matching personalities inline and leave the caller's attribute untouched.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: personality = @personality
+// CHECK-NOT: llvm.call @callee
+// CHECK: %[[CST:.+]] = llvm.mlir.constant(42
+// CHECK: llvm.return %[[CST]]
+llvm.func @caller() -> (i32) attributes { personality = @personality } {
+  %0 = llvm.call @callee() : () -> (i32)
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @personality() -> i32
+llvm.func @other_personality() -> i32
+
+llvm.func @callee() -> (i32) attributes { personality = @personality } {
+  %0 = llvm.mlir.constant(42 : i32) : i32
+  llvm.return %0 : i32
+}
+
+// Conflicting personalities still block inlining, matching LLVM's
+// "incompatible personality" bail-out.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: personality = @other_personality
 // CHECK-NEXT: llvm.call @callee
-// CHECK-NEXT: return
+// CHECK-NEXT: llvm.return
+llvm.func @caller() -> (i32) attributes { personality = @other_personality } {
+  %0 = llvm.call @callee() : () -> (i32)
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @personality() -> i32
+llvm.mlir.global external constant @_ZTIi() : !llvm.ptr
+llvm.func @may_throw()
+
+// A callee whose body carries landing pads is inlinable too; the personality
+// propagated onto the caller is what keeps `llvm.landingpad` verifiable.
+llvm.func @callee() -> (i32) attributes { personality = @personality } {
+  %0 = llvm.mlir.constant(42 : i32) : i32
+  llvm.invoke @may_throw() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.return %0 : i32
+^bb2:
+  %1 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %1 : !llvm.struct<(ptr, i32)>
+}
+
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: personality = @personality
+// CHECK-NOT: llvm.call @callee
+// CHECK: llvm.invoke @may_throw
+// CHECK: llvm.landingpad
+// CHECK: llvm.resume
 llvm.func @caller() -> (i32) {
   %0 = llvm.call @callee() : () -> (i32)
   llvm.return %0 : i32
@@ -165,15 +239,7 @@ llvm.func @callee_noinline() attributes { no_inline } {
   llvm.return
 }
 
-llvm.func @callee_noduplicate() attributes { passthrough = ["noduplicate"] } {
-  llvm.return
-}
-
 llvm.func @callee_presplitcoroutine() attributes { passthrough = ["presplitcoroutine"] } {
-  llvm.return
-}
-
-llvm.func @callee_returns_twice() attributes { passthrough = ["returns_twice"] } {
   llvm.return
 }
 
@@ -183,16 +249,12 @@ llvm.func @callee_strictfp() attributes { passthrough = ["strictfp"] } {
 
 // CHECK-LABEL: llvm.func @caller
 // CHECK-NEXT: llvm.call @callee_noinline
-// CHECK-NEXT: llvm.call @callee_noduplicate
 // CHECK-NEXT: llvm.call @callee_presplitcoroutine
-// CHECK-NEXT: llvm.call @callee_returns_twice
 // CHECK-NEXT: llvm.call @callee_strictfp
 // CHECK-NEXT: llvm.return
 llvm.func @caller() {
   llvm.call @callee_noinline() : () -> ()
-  llvm.call @callee_noduplicate() : () -> ()
   llvm.call @callee_presplitcoroutine() : () -> ()
-  llvm.call @callee_returns_twice() : () -> ()
   llvm.call @callee_strictfp() : () -> ()
   llvm.return
 }
@@ -570,6 +632,78 @@ llvm.func @test_byval_global() {
 
 // -----
 
+// Check that alignment information is preserved in the memcpy when inlining
+// byval arguments.
+
+llvm.func @byval_aligned_arg(%ptr : !llvm.ptr { llvm.byval = i32, llvm.align = 16 }) {
+  llvm.return
+}
+
+// CHECK-LABEL: llvm.func @test_byval_memcpy_alignment
+// CHECK-SAME: %[[PTR:[a-zA-Z0-9_]+]]: !llvm.ptr
+llvm.func @test_byval_memcpy_alignment(%ptr : !llvm.ptr) {
+  // Verify the memcpy carries the alignment info from the byval attribute.
+  // CHECK: %[[ALLOCA:.+]] = llvm.alloca
+  // CHECK: "llvm.intr.memcpy"(%[[ALLOCA]], %[[PTR]]
+  // CHECK-SAME: {llvm.align = 16 : i64}
+  llvm.call @byval_aligned_arg(%ptr) : (!llvm.ptr) -> ()
+  llvm.return
+}
+
+// -----
+
+// Check that inlining does not hoist byval allocas out of automatic allocation
+// scopes, such as parallel forall regions. Each parallel iteration must have
+// its own private copy of the byval argument.
+
+llvm.func @byval_in_parallel(%ptr : !llvm.ptr { llvm.byval = f32 }) {
+  llvm.return
+}
+
+// CHECK-LABEL: llvm.func @test_byval_in_parallel_region
+// CHECK-SAME: %[[PTR:[a-zA-Z0-9_]+]]: !llvm.ptr
+llvm.func @test_byval_in_parallel_region(%ptr : !llvm.ptr) {
+  %c0 = arith.constant 0 : index
+  // Verify the alloca is not hoisted out of the allocation scope.
+  // CHECK-NOT: llvm.alloca
+  // CHECK: test.alloca_scope_region
+  test.alloca_scope_region {
+    // CHECK: %[[ALLOCA:.+]] = llvm.alloca %{{.+}} x f32
+    // CHECK: "llvm.intr.memcpy"(%[[ALLOCA]], %[[PTR]]
+    llvm.call @byval_in_parallel(%ptr) : (!llvm.ptr) -> ()
+    test.region_yield %c0 : index
+  }
+  llvm.return
+}
+
+// -----
+
+// Check that inlining does not hoist byval allocas out of automatic allocation
+// scopes, such as parallel forall regions. Each parallel iteration must have
+// its own private copy of the byval argument.
+
+llvm.func @byval_in_parallel(%ptr : !llvm.ptr { llvm.byval = f32 }) {
+  llvm.return
+}
+
+// CHECK-LABEL: llvm.func @test_byval_in_parallel_region
+// CHECK-SAME: %[[PTR:[a-zA-Z0-9_]+]]: !llvm.ptr
+llvm.func @test_byval_in_parallel_region(%ptr : !llvm.ptr) {
+  %c0 = arith.constant 0 : index
+  // Verify the alloca is not hoisted out of the allocation scope.
+  // CHECK-NOT: llvm.alloca
+  // CHECK: test.alloca_scope_region
+  test.alloca_scope_region {
+    // CHECK: %[[ALLOCA:.+]] = llvm.alloca %{{.+}} x f32
+    // CHECK: "llvm.intr.memcpy"(%[[ALLOCA]], %[[PTR]]
+    llvm.call @byval_in_parallel(%ptr) : (!llvm.ptr) -> ()
+    test.region_yield %c0 : index
+  }
+  llvm.return
+}
+
+// -----
+
 llvm.func @ignored_attrs(%ptr : !llvm.ptr { llvm.inreg, llvm.nocapture, llvm.nofree, llvm.preallocated = i32, llvm.returned, llvm.alignstack = 32 : i64, llvm.writeonly, llvm.noundef, llvm.nonnull }, %x : i32 { llvm.zeroext }) -> (!llvm.ptr { llvm.noundef, llvm.inreg, llvm.nonnull }) {
   llvm.return %ptr : !llvm.ptr
 }
@@ -655,11 +789,13 @@ llvm.func @vararg_intrinrics() {
   llvm.return
 }
 
+// A variadic callee that never reads its variadic arguments is inlinable; only
+// the callee containing `llvm.intr.vastart` remains a call.
 // CHECK-LABEL: func @caller
 llvm.func @caller() {
-  // CHECK-NEXT: llvm.call @vararg_func()
+  // CHECK-NOT: llvm.call @vararg_func
   llvm.call @vararg_func() vararg(!llvm.func<void (...)>) : () -> ()
-  // CHECK-NEXT: llvm.call @vararg_intrinrics()
+  // CHECK: llvm.call @vararg_intrinrics()
   llvm.call @vararg_intrinrics() : () -> ()
   llvm.return
 }
@@ -708,4 +844,511 @@ func.func @llvm_ret(%arg0 : i32) -> i32 {
   %res = call @func(%arg0) : (i32) -> (i32)
   // CHECK: return %[[R]]
   return %res : i32
+}
+
+// -----
+// Regression test for https://github.com/llvm/llvm-project/issues/118766
+// A callee whose body block ends with an unregistered (non-terminator) op used
+// to crash the inliner. The inliner should skip such callees instead.
+
+llvm.func @callee_malformed_terminator() -> i64 attributes {llvm.emit_c_interface} {
+  // Unregistered op acting as a fake terminator -- the function has no llvm.return.
+  "test.foo"() : () -> ()
+}
+
+// CHECK-LABEL: @caller_malformed_terminator
+llvm.func @caller_malformed_terminator() -> i64 attributes {llvm.emit_c_interface} {
+  // CHECK: llvm.call @callee_malformed_terminator
+  %0 = llvm.call @callee_malformed_terminator() : () -> i64
+  llvm.return %0 : i64
+}
+
+// -----
+// Complement to the above: a callee whose block ends with a registered
+// non-LLVM terminator that genuinely has the IsTerminator trait (cf.br) does
+// NOT trigger the guard. The call is inlined normally via the multi-block path
+// (handleTerminator uses dyn_cast for non-llvm.return ops, so cf.br is left
+// as-is and control flow reaches the llvm.return in the successor block).
+
+llvm.func @callee_cf_br_terminator(%arg0 : i64) -> i64 {
+  cf.br ^exit(%arg0 : i64)
+^exit(%val : i64):
+  llvm.return %val : i64
+}
+
+// CHECK-LABEL: @caller_cf_br_terminator
+llvm.func @caller_cf_br_terminator(%arg0 : i64) -> i64 {
+  // cf.br has IsTerminator, so isLegalToInline allows inlining.
+  // CHECK-NOT: llvm.call @callee_cf_br_terminator
+  // CHECK: llvm.return %arg0
+  %0 = llvm.call @callee_cf_br_terminator(%arg0) : (i64) -> i64
+  llvm.return %0 : i64
+}
+
+// -----
+
+llvm.func @callee_noduplicate(%arg0: i32) -> i32 attributes { passthrough = ["noduplicate"] } {
+  %0 = llvm.add %arg0, %arg0 : i32
+  llvm.return %0 : i32
+}
+
+// `noduplicate` on the callee itself never blocks inlining in LLVM; only
+// duplicating a noduplicate call out of a body does.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: %[[ARG0:[a-zA-Z0-9_]+]]
+// CHECK-NOT: llvm.call @callee_noduplicate
+// CHECK: %[[RES:.+]] = llvm.add %[[ARG0]], %[[ARG0]]
+// CHECK: llvm.return %[[RES]]
+llvm.func @caller(%arg0: i32) -> i32 {
+  %0 = llvm.call @callee_noduplicate(%arg0) : (i32) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+// The attribute has to sit on a declaration: a definition carrying it would
+// simply be inlined into `@holder` first, leaving nothing to detect.
+llvm.func @nodup() attributes { passthrough = ["noduplicate"] }
+
+llvm.func @holder() {
+  llvm.call @nodup() : () -> ()
+  llvm.return
+}
+
+// Two callers means `@holder`'s region is cloned, which would duplicate its
+// `@nodup` call. Both call sites are refused.
+// CHECK-LABEL: llvm.func @caller1
+// CHECK: llvm.call @holder
+llvm.func @caller1() {
+  llvm.call @holder() : () -> ()
+  llvm.return
+}
+
+// CHECK-LABEL: llvm.func @caller2
+// CHECK: llvm.call @holder
+llvm.func @caller2() {
+  llvm.call @holder() : () -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @nodup() attributes { passthrough = ["noduplicate"] }
+
+// `internal` linkage, not just private visibility: discardability follows the
+// LLVM linkage, so an externally-linked callee would still be cloned.
+llvm.func internal @sole_holder() attributes {sym_visibility = "private"} {
+  llvm.call @nodup() : () -> ()
+  llvm.return
+}
+
+// A single call to a discardable callee moves the region instead of copying
+// it, so nothing is duplicated and inlining is allowed. This is LLVM's
+// `isSoleCallToLocalFunction` exemption.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-NOT: llvm.call @sole_holder
+// CHECK: llvm.call @nodup
+llvm.func @caller() {
+  llvm.call @sole_holder() : () -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @callee_returns_twice(%arg0: i32) -> i32 attributes { passthrough = ["returns_twice"] } {
+  %0 = llvm.add %arg0, %arg0 : i32
+  llvm.return %0 : i32
+}
+
+// `returns_twice` on the callee does not block inlining: LLVM treats it as a
+// licence rather than a prohibition.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: %[[ARG0:[a-zA-Z0-9_]+]]
+// CHECK-NOT: llvm.call @callee_returns_twice
+// CHECK: %[[RES:.+]] = llvm.add %[[ARG0]], %[[ARG0]]
+// CHECK: llvm.return %[[RES]]
+llvm.func @caller(%arg0: i32) -> i32 {
+  %0 = llvm.call @callee_returns_twice(%arg0) : (i32) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @setjmp(!llvm.ptr) -> i32 attributes { passthrough = ["returns_twice"] }
+
+llvm.func @callee_marked(%arg0: !llvm.ptr) -> i32 attributes { passthrough = ["returns_twice"] } {
+  %0 = llvm.call @setjmp(%arg0) : (!llvm.ptr) -> i32
+  llvm.return %0 : i32
+}
+
+// A callee that is itself marked `returns_twice` inlines even though its body
+// calls a returns-twice function: the call site had already made the caller
+// call one, so moving the body exposes nothing new.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-NOT: llvm.call @callee_marked
+// CHECK: llvm.call @setjmp
+llvm.func @caller(%arg0: !llvm.ptr) -> i32 {
+  %0 = llvm.call @callee_marked(%arg0) : (!llvm.ptr) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @setjmp(!llvm.ptr) -> i32 attributes { passthrough = ["returns_twice"] }
+
+llvm.func @callee_unmarked(%arg0: !llvm.ptr) -> i32 {
+  %0 = llvm.call @setjmp(%arg0) : (!llvm.ptr) -> i32
+  llvm.return %0 : i32
+}
+
+// An unmarked callee whose body calls a returns-twice function is refused,
+// which is the direction LLVM's `isInlineViable` actually guards.
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call @callee_unmarked
+// CHECK-NOT: llvm.call @setjmp
+llvm.func @caller(%arg0: !llvm.ptr) -> i32 {
+  %0 = llvm.call @callee_unmarked(%arg0) : (!llvm.ptr) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @sink() -> i32
+
+llvm.func @musttail_wrapper() -> i32 {
+  %0 = llvm.call musttail @sink() : () -> i32
+  llvm.return %0 : i32
+}
+
+llvm.func @tail_wrapper() -> i32 {
+  %0 = llvm.call tail @sink() : () -> i32
+  llvm.return %0 : i32
+}
+
+llvm.func @notail_wrapper() -> i32 {
+  %0 = llvm.call notail @sink() : () -> i32
+  llvm.return %0 : i32
+}
+
+// Inlining through a non-tail call site weakens the inlined markers, as in
+// LLVM: `f -> g -> musttail h  ==>  f -> h`. Leaving `musttail` in place would
+// produce IR LLVM's verifier rejects, since the call no longer precedes a
+// return of its own value. `notail` is preserved.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-NOT: llvm.call musttail @sink
+// CHECK-NOT: llvm.call tail @sink
+// CHECK: llvm.call @sink
+// CHECK: llvm.call @sink
+// CHECK: llvm.call notail @sink
+llvm.func @caller() -> i32 {
+  %0 = llvm.call @musttail_wrapper() : () -> i32
+  %1 = llvm.call @tail_wrapper() : () -> i32
+  %2 = llvm.call @notail_wrapper() : () -> i32
+  %3 = llvm.add %0, %1 : i32
+  %4 = llvm.add %3, %2 : i32
+  llvm.return %4 : i32
+}
+
+// -----
+
+llvm.func @sink() -> i32
+
+llvm.func @musttail_callee() -> i32 {
+  %0 = llvm.call musttail @sink() : () -> i32
+  llvm.return %0 : i32
+}
+
+// A musttail call site is the one case where the marker would have to survive
+// inlining, and nothing keeps it adjacent to the caller's return afterwards, so
+// the call is refused instead.
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call musttail @musttail_callee
+llvm.func @caller() -> i32 {
+  %0 = llvm.call musttail @musttail_callee() : () -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @sink() -> i32
+
+llvm.func @musttail_wrapper() -> i32 {
+  %0 = llvm.call musttail @sink() : () -> i32
+  llvm.return %0 : i32
+}
+
+// `notail` on the call site counts as no marker, so the child `musttail` is
+// weakened rather than carried into a position where it no longer precedes the
+// return. Comparing the raw enumerators would keep it, since notail sorts above
+// musttail.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-NOT: llvm.call musttail @sink
+// CHECK: llvm.call @sink
+// CHECK: llvm.add
+llvm.func @caller() -> i32 {
+  %0 = llvm.call notail @musttail_wrapper() : () -> i32
+  %1 = llvm.mlir.constant(1 : i32) : i32
+  %2 = llvm.add %0, %1 : i32
+  llvm.return %2 : i32
+}
+
+// -----
+
+llvm.func @sink() -> i32
+
+llvm.func @musttail_with_alloca() -> i32 {
+  %0 = llvm.mlir.constant(1 : i32) : i32
+  %p = llvm.alloca %0 x i32 : (i32) -> !llvm.ptr
+  llvm.store %0, %p : i32, !llvm.ptr
+  %r = llvm.call musttail @sink() : () -> i32
+  llvm.return %r : i32
+}
+
+// The callee's alloca makes the inliner insert `llvm.intr.lifetime.end` before
+// the return, which would separate a preserved `musttail` from it. Refused for
+// the same reason as above; this is the shape that made the refusal necessary
+// rather than merely conservative.
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call musttail @musttail_with_alloca
+llvm.func @caller(%c: i1) -> i32 {
+  llvm.cond_br %c, ^bb1, ^bb2
+^bb1:
+  %r = llvm.call musttail @musttail_with_alloca() : () -> i32
+  llvm.return %r : i32
+^bb2:
+  %z = llvm.mlir.constant(0 : i32) : i32
+  llvm.return %z : i32
+}
+
+// -----
+
+llvm.func @indirect_br_callee(%addr: !llvm.ptr) -> i32 {
+  llvm.indirectbr %addr : !llvm.ptr, [
+  ^bb1,
+  ^bb2
+  ]
+^bb1:
+  %0 = llvm.mlir.constant(1 : i32) : i32
+  llvm.return %0 : i32
+^bb2:
+  %1 = llvm.mlir.constant(2 : i32) : i32
+  llvm.return %1 : i32
+}
+
+// An `llvm.indirectbr` branches to `llvm.blockaddress` values naming the
+// callee's blocks. Cloning the body would leave the copy branching into the
+// original function, so the callee is not inlinable. Note the addresses are
+// taken outside the callee here, so the `llvm.blocktag` rejection does not
+// cover this.
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call @indirect_br_callee
+llvm.func @caller(%addr: !llvm.ptr) -> i32 {
+  %0 = llvm.call @indirect_br_callee(%addr) : (!llvm.ptr) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @personality() -> i32
+llvm.func @sink()
+
+llvm.func @callee() attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i64)>
+  llvm.resume %0 : !llvm.struct<(ptr, i64)>
+}
+
+// The caller's exception value type disagrees with the callee's. Inlining
+// would trip `LLVMFuncOp::verify`'s landingpad/resume consistency rule, so the
+// call has to stay.
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call @callee
+llvm.func @caller() attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.call @callee() : () -> ()
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %0 : !llvm.struct<(ptr, i32)>
+}
+
+// -----
+
+llvm.func @personality() -> i32
+llvm.func @sink()
+
+llvm.func @callee() attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %0 : !llvm.struct<(ptr, i32)>
+}
+
+// Agreeing exception value types inline, so the guard above is a type check
+// and not a blanket refusal of callees with landing pads.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-NOT: llvm.call @callee
+llvm.func @caller() attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.call @callee() : () -> ()
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %0 : !llvm.struct<(ptr, i32)>
+}
+
+// -----
+
+llvm.func @personality() -> i32
+llvm.func @sink()
+
+// A callee that only rethrows carries an exception value type without any
+// personality attribute, so the guard cannot be gated on the personality.
+llvm.func @rethrow(%e: !llvm.struct<(ptr, i64)>) {
+  llvm.resume %e : !llvm.struct<(ptr, i64)>
+}
+
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call @rethrow
+llvm.func @caller(%e: !llvm.struct<(ptr, i64)>) attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.call @rethrow(%e) : (!llvm.struct<(ptr, i64)>) -> ()
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %0 : !llvm.struct<(ptr, i32)>
+}
+
+// -----
+
+llvm.func @personality() -> i32
+llvm.func @sink()
+
+llvm.func @callee_i32() attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+  llvm.resume %0 : !llvm.struct<(ptr, i32)>
+}
+
+llvm.func @callee_i64() attributes { personality = @personality } {
+  llvm.invoke @sink() to ^bb1 unwind ^bb2 : () -> ()
+^bb1:
+  llvm.return
+^bb2:
+  %0 = llvm.landingpad cleanup : !llvm.struct<(ptr, i64)>
+  llvm.resume %0 : !llvm.struct<(ptr, i64)>
+}
+
+// A caller with no exception handling of its own acquires a type from the
+// first callee inlined into it, which then constrains the second call site.
+// The caller's type must therefore be recomputed per call site, never cached.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-NOT: llvm.call @callee_i32
+// CHECK: llvm.call @callee_i64
+llvm.func @caller() {
+  llvm.call @callee_i32() : () -> ()
+  llvm.call @callee_i64() : () -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @resume_only(%e: !llvm.struct<(ptr, i32)>) {
+  llvm.resume %e : !llvm.struct<(ptr, i32)>
+}
+
+// A single-block callee whose terminator is not `llvm.return` must not take
+// the single-block fast path, which can only rewrite an `llvm.return`. The
+// body is still inlined, via the multi-block path.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: %[[E:[a-zA-Z0-9_]+]]
+// CHECK-NOT: llvm.call @resume_only
+// CHECK: llvm.resume %[[E]]
+llvm.func @caller(%e: !llvm.struct<(ptr, i32)>) {
+  llvm.call @resume_only(%e) : (!llvm.struct<(ptr, i32)>) -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @callee_strictfp() -> f32 attributes { passthrough = ["strictfp"] } {
+  %0 = llvm.mlir.constant(1.000000e+00 : f32) : f32
+  llvm.return %0 : f32
+}
+
+// A strictfp caller can absorb a strictfp callee: its FP operations are
+// already constrained, so there is nothing to convert.
+// CHECK-LABEL: llvm.func @strictfp_caller
+// CHECK-NOT: llvm.call @callee_strictfp
+// CHECK: %[[CST:.+]] = llvm.mlir.constant(1.000000e+00 : f32)
+// CHECK: llvm.return %[[CST]]
+llvm.func @strictfp_caller() -> f32 attributes { passthrough = ["strictfp"] } {
+  %0 = llvm.call @callee_strictfp() : () -> f32
+  llvm.return %0 : f32
+}
+
+// -----
+
+llvm.func @vararg_fixed_args(%arg0: i32, ...) -> i32 {
+  %0 = llvm.add %arg0, %arg0 : i32
+  llvm.return %0 : i32
+}
+
+// A variadic callee is inlinable at a call site passing exactly its fixed
+// arguments.
+// CHECK-LABEL: llvm.func @caller
+// CHECK-SAME: %[[ARG0:[a-zA-Z0-9_]+]]
+// CHECK-NOT: llvm.call @vararg_fixed_args
+// CHECK: %[[RES:.+]] = llvm.add %[[ARG0]], %[[ARG0]]
+// CHECK: llvm.return %[[RES]]
+llvm.func @caller(%arg0: i32) -> i32 {
+  %0 = llvm.call @vararg_fixed_args(%arg0) vararg(!llvm.func<i32 (i32, ...)>) : (i32) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @vararg_generic_vastart(%arg0: i32, ...) -> i32 {
+  %0 = llvm.mlir.constant(1 : i32) : i32
+  %list = llvm.alloca %0 x !llvm.struct<"va_list", (ptr)> : (i32) -> !llvm.ptr
+  llvm.call_intrinsic "llvm.va_start.p0"(%list) : (!llvm.ptr) -> ()
+  llvm.return %arg0 : i32
+}
+
+// `va_start` spelled as a generic intrinsic call blocks inlining just like the
+// dedicated `llvm.intr.vastart` op does. Otherwise it would land in a caller
+// that is not variadic, which LLVM rejects with "va_start called in a
+// non-varargs function".
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call @vararg_generic_vastart
+llvm.func @caller(%arg0: i32) -> i32 {
+  %0 = llvm.call @vararg_generic_vastart(%arg0) vararg(!llvm.func<i32 (i32, ...)>) : (i32) -> i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+llvm.func @vararg_extra_args(%arg0: i32, ...) -> i32 {
+  %0 = llvm.add %arg0, %arg0 : i32
+  llvm.return %0 : i32
+}
+
+// A call passing more operands than the callee has fixed parameters is not
+// inlined: there is no callee block argument to map the trailing operands to.
+// CHECK-LABEL: llvm.func @caller
+// CHECK: llvm.call @vararg_extra_args
+llvm.func @caller(%arg0: i32) -> i32 {
+  %0 = llvm.call @vararg_extra_args(%arg0, %arg0) vararg(!llvm.func<i32 (i32, ...)>) : (i32, i32) -> i32
+  llvm.return %0 : i32
 }

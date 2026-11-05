@@ -936,6 +936,21 @@ void SourceMgrDiagnosticVerifierHandler::process(LocationAttr loc,
 
 namespace mlir {
 namespace detail {
+struct ParallelDiagnosticHandlerImpl;
+
+using ThreadOrderIDs =
+    SmallVector<std::pair<const ParallelDiagnosticHandlerImpl *, size_t>, 4>;
+
+/// The order id of the element each parallel diagnostic handler has this
+/// thread processing, innermost last. A thread waiting in one parallel loop's
+/// element runs elements of other loops meanwhile, so it can be processing
+/// elements of several handlers at once. Only the thread itself reads its
+/// entries, when it emits a diagnostic, so they take no lock.
+static ThreadOrderIDs &getThreadOrderIDs() {
+  static thread_local ThreadOrderIDs threadOrderIDs;
+  return threadOrderIDs;
+}
+
 struct ParallelDiagnosticHandlerImpl : public llvm::PrettyStackTraceEntry {
   struct ThreadDiagnostic {
     ThreadDiagnostic(size_t id, Diagnostic diag)
@@ -953,16 +968,19 @@ struct ParallelDiagnosticHandlerImpl : public llvm::PrettyStackTraceEntry {
 
   ParallelDiagnosticHandlerImpl(MLIRContext *ctx) : context(ctx) {
     handlerID = ctx->getDiagEngine().registerHandler([this](Diagnostic &diag) {
-      uint64_t tid = llvm::get_threadid();
-      llvm::sys::SmartScopedLock<true> lock(mutex);
-
-      // If this thread is not tracked, then return failure to let another
-      // handler process this diagnostic.
-      if (!threadToOrderID.count(tid))
+      // The diagnostic belongs to the innermost element this thread is
+      // processing for a parallel loop on this context. Return failure to let
+      // another handler process it unless that element is this handler's.
+      ThreadOrderIDs &threadOrderIDs = getThreadOrderIDs();
+      auto it = llvm::find_if(
+          llvm::reverse(threadOrderIDs),
+          [&](const auto &entry) { return entry.first->context == context; });
+      if (it == threadOrderIDs.rend() || it->first != this)
         return failure();
 
       // Append a new diagnostic.
-      diagnostics.emplace_back(threadToOrderID[tid], std::move(diag));
+      llvm::sys::SmartScopedLock<true> lock(mutex);
+      diagnostics.emplace_back(it->second, std::move(diag));
       return success();
     });
   }
@@ -993,18 +1011,25 @@ struct ParallelDiagnosticHandlerImpl : public llvm::PrettyStackTraceEntry {
       emitFn(diag.diag);
   }
 
-  /// Set the order id for the current thread.
-  void setOrderIDForThread(size_t orderID) {
-    uint64_t tid = llvm::get_threadid();
-    llvm::sys::SmartScopedLock<true> lock(mutex);
-    threadToOrderID[tid] = orderID;
+  /// This handler's innermost entry in `getThreadOrderIDs()`, or `rend()`.
+  ThreadOrderIDs::reverse_iterator findOrderIDForThread() const {
+    return llvm::find_if(llvm::reverse(getThreadOrderIDs()),
+                         [&](const auto &entry) { return entry.first == this; });
   }
 
-  /// Remove the order id for the current thread.
+  /// Push `orderID` as the element the current thread is processing for this
+  /// handler. Must be paired with `eraseOrderIDForThread` on the same thread;
+  /// pairs nest.
+  void setOrderIDForThread(size_t orderID) {
+    getThreadOrderIDs().emplace_back(this, orderID);
+  }
+
+  /// Remove the innermost order id this handler set for the current thread.
   void eraseOrderIDForThread() {
-    uint64_t tid = llvm::get_threadid();
-    llvm::sys::SmartScopedLock<true> lock(mutex);
-    threadToOrderID.erase(tid);
+    ThreadOrderIDs &threadOrderIDs = getThreadOrderIDs();
+    auto it = findOrderIDForThread();
+    if (it != threadOrderIDs.rend())
+      threadOrderIDs.erase(std::next(it).base());
   }
 
   /// Dump the current diagnostics that were inflight.
@@ -1039,11 +1064,8 @@ struct ParallelDiagnosticHandlerImpl : public llvm::PrettyStackTraceEntry {
     });
   }
 
-  /// A smart mutex to lock access to the internal state.
+  /// A smart mutex to lock access to `diagnostics`.
   llvm::sys::SmartMutex<true> mutex;
-
-  /// A mapping between the thread id and the current order id.
-  DenseMap<uint64_t, size_t> threadToOrderID;
 
   /// An unordered list of diagnostics that were emitted.
   mutable std::vector<ThreadDiagnostic> diagnostics;
@@ -1066,8 +1088,8 @@ void ParallelDiagnosticHandler::setOrderIDForThread(size_t orderID) {
   impl->setOrderIDForThread(orderID);
 }
 
-/// Remove the order id for the current thread. This removes the thread from
-/// diagnostics tracking.
+/// Remove the order id that the matching `setOrderIDForThread` set for the
+/// current thread.
 void ParallelDiagnosticHandler::eraseOrderIDForThread() {
   impl->eraseOrderIDForThread();
 }

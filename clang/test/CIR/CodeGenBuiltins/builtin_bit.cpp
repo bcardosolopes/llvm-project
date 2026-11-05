@@ -398,6 +398,64 @@ int test_builtin_popcountg(unsigned x) {
 // OGCG-LABEL: _Z22test_builtin_popcountgj
 // OGCG:         %{{.+}} = call i32 @llvm.ctpop.i32(i32 %{{.+}})
 
+// Boolean vector arguments to bit count builtins should be bitcast to their
+// integer storage type before the bit operation, matching OGCG behavior.
+typedef bool BoolVec8 __attribute__((ext_vector_type(8)));
+
+int test_builtin_clzg_boolvec(BoolVec8 x) {
+  return __builtin_clzg(x);
+}
+
+// CIR-LABEL: _Z25test_builtin_clzg_boolvecDv8_b
+// CIR:         %[[CAST:.+]] = cir.cast bitcast %{{.+}} : !cir.vector<8 x !cir.bool> -> !u8i
+// CIR:         %[[CLZ:.+]] = cir.clz %[[CAST]] poison_zero : !u8i
+// CIR:         {{%.+}} = cir.cast integral %[[CLZ]] : !u8i -> !s32i
+
+// LLVM-LABEL: _Z25test_builtin_clzg_boolvecDv8_b
+// LLVM:         %[[BC:.+]] = bitcast <8 x i1> %{{.+}} to i8
+// LLVM:         %[[CLZ:.+]] = call i8 @llvm.ctlz.i8(i8 %[[BC]], i1 true)
+// LLVM:         {{%.+}} = zext i8 %[[CLZ]] to i32
+
+// OGCG-LABEL: _Z25test_builtin_clzg_boolvecDv8_b
+// OGCG:         call i8 @llvm.ctlz.i8(i8 %{{.+}}, i1 true)
+// OGCG:         zext i8 %{{.+}} to i32
+
+int test_builtin_ctzg_boolvec(BoolVec8 x) {
+  return __builtin_ctzg(x);
+}
+
+// CIR-LABEL: _Z25test_builtin_ctzg_boolvecDv8_b
+// CIR:         %[[CAST:.+]] = cir.cast bitcast %{{.+}} : !cir.vector<8 x !cir.bool> -> !u8i
+// CIR:         %[[CTZ:.+]] = cir.ctz %[[CAST]] poison_zero : !u8i
+// CIR:         {{%.+}} = cir.cast integral %[[CTZ]] : !u8i -> !s32i
+
+// LLVM-LABEL: _Z25test_builtin_ctzg_boolvecDv8_b
+// LLVM:         %[[BC:.+]] = bitcast <8 x i1> %{{.+}} to i8
+// LLVM:         %[[CTZ:.+]] = call i8 @llvm.cttz.i8(i8 %[[BC]], i1 true)
+// LLVM:         {{%.+}} = zext i8 %[[CTZ]] to i32
+
+// OGCG-LABEL: _Z25test_builtin_ctzg_boolvecDv8_b
+// OGCG:         call i8 @llvm.cttz.i8(i8 %{{.+}}, i1 true)
+// OGCG:         zext i8 %{{.+}} to i32
+
+int test_builtin_popcountg_boolvec(BoolVec8 x) {
+  return __builtin_popcountg(x);
+}
+
+// CIR-LABEL: _Z30test_builtin_popcountg_boolvecDv8_b
+// CIR:         %[[CAST:.+]] = cir.cast bitcast %{{.+}} : !cir.vector<8 x !cir.bool> -> !u8i
+// CIR:         %[[POP:.+]] = cir.popcount %[[CAST]] : !u8i
+// CIR:         {{%.+}} = cir.cast integral %[[POP]] : !u8i -> !s32i
+
+// LLVM-LABEL: _Z30test_builtin_popcountg_boolvecDv8_b
+// LLVM:         %[[BC:.+]] = bitcast <8 x i1> %{{.+}} to i8
+// LLVM:         %[[POP:.+]] = call i8 @llvm.ctpop.i8(i8 %[[BC]])
+// LLVM:         {{%.+}} = zext i8 %[[POP]] to i32
+
+// OGCG-LABEL: _Z30test_builtin_popcountg_boolvecDv8_b
+// OGCG:         call i8 @llvm.ctpop.i8(i8 %{{.+}})
+// OGCG:         zext i8 %{{.+}} to i32
+
 unsigned char test_builtin_bitreverse8(unsigned char x) {
   return __builtin_bitreverse8(x);
 }
@@ -488,6 +546,32 @@ unsigned long long test_builtin_bswap64(unsigned long long x) {
 
 // OGCG-LABEL: @_Z20test_builtin_bswap64y
 // OGCG:         %{{.+}} = call i64 @llvm.bswap.i64(i64 %{{.+}})
+
+int test_builtin_bswapg_signed(int x) {
+  return __builtin_bswapg(x);
+}
+
+// CIR-LABEL: @_Z26test_builtin_bswapg_signedi
+// CIR:         %{{.+}} = cir.byte_swap %{{.+}} : !s32i
+
+// LLVM-LABEL: @_Z26test_builtin_bswapg_signedi
+// LLVM:         %{{.+}} = call i32 @llvm.bswap.i32(i32 %{{.+}})
+
+// OGCG-LABEL: @_Z26test_builtin_bswapg_signedi
+// OGCG:         %{{.+}} = call i32 @llvm.bswap.i32(i32 %{{.+}})
+
+unsigned test_builtin_bswapg_unsigned(unsigned x) {
+  return __builtin_bswapg(x);
+}
+
+// CIR-LABEL: @_Z28test_builtin_bswapg_unsignedj
+// CIR:         %{{.+}} = cir.byte_swap %{{.+}} : !u32i
+
+// LLVM-LABEL: @_Z28test_builtin_bswapg_unsignedj
+// LLVM:         %{{.+}} = call i32 @llvm.bswap.i32(i32 %{{.+}})
+
+// OGCG-LABEL: @_Z28test_builtin_bswapg_unsignedj
+// OGCG:         %{{.+}} = call i32 @llvm.bswap.i32(i32 %{{.+}})
 
 unsigned char test_builtin_rotateleft8(unsigned char x, unsigned char y) {
   return __builtin_rotateleft8(x, y);

@@ -1,0 +1,15 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: failed to lower constant array type
+// CHECK-SAME: !cir.array<!cir.ptr<!cir.int<s, 32>, lang_address_space(offload_global)> x 1>
+// CHECK-NOT: expected non-null subtype
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!p = !cir.ptr<!s32i, lang_address_space(offload_global)>
+
+module {
+  cir.func private @f() {
+    %0 = cir.const #cir.const_array<[#cir.poison : !p]> : !cir.array<!p x 1>
+    cir.return
+  }
+}

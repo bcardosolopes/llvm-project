@@ -1,0 +1,55 @@
+// RUN: cir-link %s %S/Inputs/type-collision-nested-b.cir --warn-odr-divergence -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Renaming a record is not a one-type operation. Three cases here, and each
+// one is a different way to get it wrong:
+//
+//   Inner  collides directly -- the easy case.
+//   Outer  does not collide by its own doing; it collides *because* it holds
+//          a different Inner. Renaming Inner without renaming Outer would
+//          leave one name over two incompatible layouts, which is the exact
+//          bug being fixed, just moved one level up.
+//   Node   is recursive. Building its replacement means mapping a member list
+//          that refers back to the type being built, so the mapping has to be
+//          registered before the body is filled in or the rewrite either
+//          recurses forever or emits a Node that points at the *old* Node.
+
+!s32i = !cir.int<s, 32>
+!rec_Inner = !cir.record<struct "Inner" {!s32i}>
+!rec_Outer = !cir.record<struct "Outer" {!rec_Inner, !s32i}>
+!rec_Node = !cir.record<struct "Node" {!cir.ptr<!cir.record<struct "Node">>, !rec_Inner}>
+
+module {
+  cir.func @a_outer(%arg0: !cir.ptr<!rec_Outer>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @a_node(%arg0: !cir.ptr<!rec_Node>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// STATS: 3 records renamed
+
+// Aliases are spelled out rather than captured. cir-opt derives them from the
+// record name, so they are deterministic (`.` becomes `2E`), and naming them
+// makes the nesting below readable in a way FileCheck captures do not.
+
+// Six record types out, not three.
+// CHECK-DAG: !rec_Inner = !cir.record<struct "Inner" {!s32i}>
+// CHECK-DAG: !rec_Inner2Em1 = !cir.record<struct "Inner.m1" {!cir.float}>
+
+// Outer.m1 holds Inner.m1, not Inner. Getting this wrong is silent: the module
+// still verifies, and the wrong field type only shows up as bad codegen.
+// CHECK-DAG: !rec_Outer = !cir.record<struct "Outer" {!rec_Inner, !s32i}>
+// CHECK-DAG: !rec_Outer2Em1 = !cir.record<struct "Outer.m1" {!rec_Inner2Em1, !s32i}>
+
+// Node.m1's self-pointer is to Node.m1, and its member is Inner.m1.
+// CHECK-DAG: !rec_Node = !cir.record<struct "Node" {!cir.ptr<!cir.record<struct "Node">>, !rec_Inner}>
+// CHECK-DAG: !rec_Node2Em1 = !cir.record<struct "Node.m1" {!cir.ptr<!cir.record<struct "Node.m1">>, !rec_Inner2Em1}>
+
+// CHECK-DAG: cir.func @a_outer(%{{.*}}: !cir.ptr<!rec_Outer>)
+// CHECK-DAG: cir.func @b_outer(%{{.*}}: !cir.ptr<!rec_Outer2Em1>)
+// CHECK-DAG: cir.func @a_node(%{{.*}}: !cir.ptr<!rec_Node>)
+// CHECK-DAG: cir.func @b_node(%{{.*}}: !cir.ptr<!rec_Node2Em1>)

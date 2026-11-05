@@ -7,6 +7,9 @@
 // RUN: %clang_cc1 -triple aarch64-unknown-linux -fsanitize=memtag-stack \
 // RUN:   -disable-O0-optnone -emit-llvm -o - %s | \
 // RUN:   FileCheck -check-prefix=CHECK-MEMTAG %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-unknown-linux -fsanitize=memtag-stack \
+// RUN:   -disable-O0-optnone -emit-llvm -fclangir -o - %s | \
+// RUN:   FileCheck -check-prefix=CHECK-MEMTAG %s %}
 
 // RUN: %clang --target=aarch64-unknown-linux -march=armv8a+memtag \
 // RUN:   -fsanitize=memtag -disable-O0-optnone -S -emit-llvm -o - %s | \
@@ -28,3 +31,5 @@ extern "C" __attribute__((no_sanitize("memtag"))) int NoSanitizeQuoteAddress() {
 // CHECK-MEMTAG: Function Attrs
 // CHECK-MEMTAG-NOT: sanitize_memtag
 // CHECK-MEMTAG-NEXT: define {{.*}} @NoSanitizeQuoteAddress(
+// CHECK-NO-NOT: !"tag-stack-memory-buildattr"
+// CHECK-MEMTAG: !{i32 4, !"tag-stack-memory-buildattr", i32 1}

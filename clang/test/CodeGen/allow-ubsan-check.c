@@ -3,8 +3,53 @@
 // We can't use -fsanitize-skip-hot-cutoff because that includes both -ubsan-guard-checks and
 //-lower-allow-check-percentile-cutoff.
 // RUN: %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s -fsanitize=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -mllvm -ubsan-guard-checks | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s -fsanitize=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -mllvm -ubsan-guard-checks -fclangir | FileCheck %s --check-prefix=CIR %}
 // RUN: %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s -fsanitize=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -mllvm -ubsan-guard-checks -fsanitize-trap=signed-integer-overflow,integer-divide-by-zero,null,local-bounds | FileCheck %s --check-prefixes=TR
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s -fsanitize=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -mllvm -ubsan-guard-checks -fsanitize-trap=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -fclangir | FileCheck %s --check-prefix=CIR-TR %}
 // RUN: %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s -fsanitize=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -mllvm -ubsan-guard-checks -fsanitize-recover=signed-integer-overflow,integer-divide-by-zero,null,local-bounds | FileCheck %s --check-prefixes=REC
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s -fsanitize=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -mllvm -ubsan-guard-checks -fsanitize-recover=signed-integer-overflow,integer-divide-by-zero,null,local-bounds -fclangir | FileCheck %s --check-prefix=CIR-REC %}
+
+// CIR-LABEL: define dso_local noundef i32 @div(
+// CIR: tail call i1 @llvm.allow.ubsan.check(i8 27)
+// CIR: tail call i1 @llvm.allow.ubsan.check(i8 41)
+// CIR: tail call void @__ubsan_handle_divrem_overflow_abort(
+// CIR-LABEL: define dso_local i32 @null(
+// CIR: tail call i1 @llvm.allow.ubsan.check(i8 29)
+// CIR: tail call void @__ubsan_handle_type_mismatch_v1_abort(
+// CIR-LABEL: define dso_local noundef i32 @overflow(
+// CIR: tail call { i32, i1 } @llvm.sadd.with.overflow.i32
+// CIR: tail call i1 @llvm.allow.ubsan.check(i8 41)
+// CIR: tail call void @__ubsan_handle_add_overflow_abort(
+// CIR-LABEL: define dso_local double @lbounds(
+// CIR: call i1 @llvm.allow.ubsan.check(i8 71)
+
+// CIR-TR-LABEL: define dso_local noundef i32 @div(
+// CIR-TR: tail call i1 @llvm.allow.ubsan.check(i8 27)
+// CIR-TR: tail call i1 @llvm.allow.ubsan.check(i8 41)
+// CIR-TR: tail call void @llvm.ubsantrap(i8 3)
+// CIR-TR-LABEL: define dso_local i32 @null(
+// CIR-TR: tail call i1 @llvm.allow.ubsan.check(i8 29)
+// CIR-TR: tail call void @llvm.ubsantrap(i8 22)
+// CIR-TR-LABEL: define dso_local noundef i32 @overflow(
+// CIR-TR: tail call i1 @llvm.allow.ubsan.check(i8 41)
+// CIR-TR: tail call void @llvm.ubsantrap(i8 0)
+// CIR-TR-LABEL: define dso_local double @lbounds(
+// CIR-TR: call i1 @llvm.allow.ubsan.check(i8 71)
+// CIR-TR: call void @llvm.ubsantrap(i8 71)
+
+// CIR-REC-LABEL: define dso_local noundef i32 @div(
+// CIR-REC: tail call i1 @llvm.allow.ubsan.check(i8 27)
+// CIR-REC: tail call i1 @llvm.allow.ubsan.check(i8 41)
+// CIR-REC: tail call void @__ubsan_handle_divrem_overflow(
+// CIR-REC-LABEL: define dso_local i32 @null(
+// CIR-REC: tail call i1 @llvm.allow.ubsan.check(i8 29)
+// CIR-REC: tail call void @__ubsan_handle_type_mismatch_v1(
+// CIR-REC-LABEL: define dso_local noundef i32 @overflow(
+// CIR-REC: tail call i1 @llvm.allow.ubsan.check(i8 41)
+// CIR-REC: tail call void @__ubsan_handle_add_overflow(
+// CIR-REC-LABEL: define dso_local double @lbounds(
+// CIR-REC: call i1 @llvm.allow.ubsan.check(i8 71)
+// CIR-REC: call void @__ubsan_handle_local_out_of_bounds()
 
 
 // CHECK-LABEL: define dso_local noundef i32 @div(

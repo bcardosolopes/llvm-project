@@ -25,11 +25,18 @@ struct Mem2RegStatistics {
 /// Attempts to promote the memory slots of the provided allocators. Iteratively
 /// retries the promotion of all slots as promoting one slot might enable
 /// subsequent promotions. Succeeds if at least one memory slot was promoted.
+///
+/// `followPromotableChains` controls whether the promotion analyzer walks
+/// through indirect users via `PromotableOpInterface` chains (e.g. bitcasts)
+/// when computing liveness and merge points. Defaults to `false` (upstream
+/// LLVM-dialect behaviour). The mem2reg pass exposes it as
+/// `follow-promotable-chains`; CIR's lowering pipeline turns it on.
 LogicalResult
 tryToPromoteMemorySlots(ArrayRef<PromotableAllocationOpInterface> allocators,
                         OpBuilder &builder, const DataLayout &dataLayout,
                         DominanceInfo &dominance,
-                        Mem2RegStatistics statistics = {});
+                        Mem2RegStatistics statistics = {},
+                        bool followPromotableChains = false);
 
 } // namespace mlir
 

@@ -23,6 +23,7 @@
 // CHECKSH: # Crash reproducer
 // CHECKSH-NEXT: # Driver args: "-fsyntax-only"
 // CHECKSH-NEXT: # Original command: {{.*$}}
+// CHECKSH-NEXT: cd "$(dirname "$0")" || exit 1
 // CHECKSH-NEXT: "-cc1"
 // CHECKSH: "-I" "/[[INCPATH:.*]]/foo.hmap"
 // CHECKSH: "crash-vfs-{{[^ ]*}}.m"

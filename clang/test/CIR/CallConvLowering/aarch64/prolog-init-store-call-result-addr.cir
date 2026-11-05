@@ -1,0 +1,64 @@
+// RUN: cir-opt %s --cir-call-conv-lowering -o /dev/null
+
+// Regression test: the prolog cleanup helper `eraseDefOpThroughCast`
+// used to blindly erase the defining op of an arg's init-store target.
+// When that target's defining op was a `cir.call` returning a pointer
+// (not an `alloca`), the CallOp got freed while still tracked in
+// CallConvLowering's `usesByFunction[callee].directCalls`, leading to
+// a use-after-free that ASAN caught and that mimalloc-loaded clang
+// triggered as an `op->use_empty()` assertion downstream.
+//
+// The fix narrows `eraseDefOpThroughCast` to only erase ops it owns
+// (alloca / cast). This test exercises the previously-buggy shape and
+// must reach cir-opt cleanly.
+
+!s32i = !cir.int<s, 32>
+
+module @"test" attributes {
+  cir.ident = "test",
+  cir.lang = #cir.lang<cxx>,
+  cir.sob = #cir.signed_overflow_behavior<undefined>,
+  cir.target_abi = "aapcs",
+  cir.triple = "aarch64-none-linux-android23",
+  cir.type_size_info = #cir.type_size_info<char = 8, int = 32, size_t = 64>,
+  dlti.dl_spec = #dlti.dl_spec<
+    !llvm.ptr<270> = dense<32> : vector<4xi64>,
+    !llvm.ptr<271> = dense<32> : vector<4xi64>,
+    !llvm.ptr<272> = dense<64> : vector<4xi64>,
+    i8 = dense<[8, 32]> : vector<2xi64>,
+    i16 = dense<[16, 32]> : vector<2xi64>,
+    i64 = dense<64> : vector<2xi64>,
+    i128 = dense<128> : vector<2xi64>,
+    !llvm.ptr = dense<64> : vector<4xi64>,
+    i1 = dense<8> : vector<2xi64>,
+    i32 = dense<32> : vector<2xi64>,
+    f16 = dense<16> : vector<2xi64>,
+    f64 = dense<64> : vector<2xi64>,
+    f128 = dense<128> : vector<2xi64>,
+    "dlti.endianness" = "little",
+    "dlti.mangling_mode" = "e",
+    "dlti.legal_int_widths" = array<i32: 32, 64>,
+    "dlti.stack_alignment" = 128 : i64,
+    "dlti.function_pointer_alignment" = #dlti.function_pointer_alignment<32, function_dependent = true>
+  >
+} {
+  // External-style call producing the pointer that becomes the
+  // arg's init-store address. Must be lowered alongside the caller
+  // so the pre-fix bug would have entered usesByFunction[get_slot].
+  cir.func @get_slot() -> !cir.ptr<!s32i> {
+    %0 = cir.const #cir.int<0> : !s32i
+    %1 = cir.alloca !s32i, !cir.ptr<!s32i>, ["s"] {alignment = 4 : i64}
+    cir.store align(4) %0, %1 : !s32i, !cir.ptr<!s32i>
+    cir.return %1 : !cir.ptr<!s32i>
+  }
+
+  // The arg has exactly one use (the store), so findArgInitStoreChain
+  // returns the single-use store. The store's address is %slot — defined
+  // by a CallOp, NOT an alloca. Pre-fix: prolog cleanup erased the
+  // CallOp and freed it while still in directCalls.
+  cir.func @store_arg_to_call_result(%arg0: !s32i) {
+    %slot = cir.call @get_slot() : () -> !cir.ptr<!s32i>
+    cir.store align(4) %arg0, %slot : !s32i, !cir.ptr<!s32i>
+    cir.return
+  }
+}

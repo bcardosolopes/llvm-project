@@ -1,0 +1,188 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Cast int_to_bool: source must be int
+cir.func @cast_int_to_bool_bad_src(%arg0: !cir.float) {
+  // expected-error@+1 {{requires !cir.int type for source}}
+  %0 = cir.cast int_to_bool %arg0 : !cir.float -> !cir.bool
+  cir.return
+}
+
+// -----
+
+// Cast ptr_to_bool: source must be pointer
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_ptr_to_bool_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.ptr type for source}}
+  %0 = cir.cast ptr_to_bool %arg0 : !s32i -> !cir.bool
+  cir.return
+}
+
+// -----
+
+// Cast integral: source must be int
+cir.func @cast_integral_bad_src(%arg0: !cir.float) {
+  // expected-error@+1 {{requires !cir.int type for source}}
+  %0 = cir.cast integral %arg0 : !cir.float -> !cir.int<u, 64>
+  cir.return
+}
+
+// -----
+
+// Cast floating: source must be float
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_floating_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.float type for source and result}}
+  %0 = cir.cast floating %arg0 : !s32i -> !cir.double
+  cir.return
+}
+
+// -----
+
+// Cast float_to_int: source must be float
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_float_to_int_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.float type for source}}
+  %0 = cir.cast float_to_int %arg0 : !s32i -> !cir.int<u, 32>
+  cir.return
+}
+
+// -----
+
+// Cast int_to_ptr: source must be int
+cir.func @cast_int_to_ptr_bad_src(%arg0: !cir.float) {
+  // expected-error@+1 {{requires !cir.int type for source}}
+  %0 = cir.cast int_to_ptr %arg0 : !cir.float -> !cir.ptr<!cir.void>
+  cir.return
+}
+
+// -----
+
+// Cast ptr_to_int: source must be pointer
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_ptr_to_int_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.ptr type for source}}
+  %0 = cir.cast ptr_to_int %arg0 : !s32i -> !cir.int<u, 64>
+  cir.return
+}
+
+// -----
+
+// Cast float_to_bool: source must be float
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_float_to_bool_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.float type for source}}
+  %0 = cir.cast float_to_bool %arg0 : !s32i -> !cir.bool
+  cir.return
+}
+
+// -----
+
+// Cast bool_to_int: source must be bool
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_bool_to_int_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.bool type for source}}
+  %0 = cir.cast bool_to_int %arg0 : !s32i -> !cir.int<u, 32>
+  cir.return
+}
+
+// -----
+
+// Cast int_to_float: source must be int
+cir.func @cast_int_to_float_bad_src(%arg0: !cir.bool) {
+  // expected-error@+1 {{requires !cir.int type for source}}
+  %0 = cir.cast int_to_float %arg0 : !cir.bool -> !cir.float
+  cir.return
+}
+
+// -----
+
+// Cast bool_to_float: source must be bool
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_bool_to_float_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.bool type for source}}
+  %0 = cir.cast bool_to_float %arg0 : !s32i -> !cir.float
+  cir.return
+}
+
+// -----
+
+// Cast address_space: source must be pointer
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_address_space_bad_src(%arg0: !s32i) {
+  // expected-error@+1 {{requires !cir.ptr type for source and result}}
+  %0 = cir.cast address_space %arg0 : !s32i -> !cir.ptr<!cir.void>
+  cir.return
+}
+
+// -----
+
+// Cast float_to_complex: source type must match element type of result
+cir.func @cast_float_to_complex_mismatch(%arg0: !cir.float) {
+  // expected-error@+1 {{requires source type match result element type}}
+  %0 = cir.cast float_to_complex %arg0 : !cir.float -> !cir.complex<!cir.double>
+  cir.return
+}
+
+// -----
+
+// Cast array_to_ptrdecay: source must be ptr to array
+!s32i = !cir.int<s, 32>
+
+cir.func @cast_array_decay_not_array(%arg0: !cir.ptr<!s32i>) {
+  // expected-error@+1 {{requires !cir.array pointee}}
+  %0 = cir.cast array_to_ptrdecay %arg0 : !cir.ptr<!s32i> -> !cir.ptr<!s32i>
+  cir.return
+}
+
+// -----
+
+// Cast array_to_ptrdecay: element type must match result pointee
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+
+cir.func @cast_array_decay_type_mismatch(%arg0: !cir.ptr<!cir.array<!s32i x 10>>) {
+  // expected-error@+1 {{requires same type for array element and pointee result}}
+  %0 = cir.cast array_to_ptrdecay %arg0 : !cir.ptr<!cir.array<!s32i x 10>> -> !cir.ptr<!u64i>
+  cir.return
+}
+
+// -----
+
+// Cast int_to_complex: source type must match element type
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+
+cir.func @cast_int_to_complex_mismatch(%arg0: !s32i) {
+  // expected-error@+1 {{requires source type match result element type}}
+  %0 = cir.cast int_to_complex %arg0 : !s32i -> !cir.complex<!u64i>
+  cir.return
+}
+
+// -----
+
+// Cast float_complex_to_real: result must match element type
+cir.func @cast_float_complex_to_real_mismatch(%arg0: !cir.complex<!cir.float>) {
+  // expected-error@+1 {{requires source element type match result type}}
+  %0 = cir.cast float_complex_to_real %arg0 : !cir.complex<!cir.float> -> !cir.double
+  cir.return
+}
+
+// -----
+
+// Cast int_complex_to_real: result must match element type
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+
+cir.func @cast_int_complex_to_real_mismatch(%arg0: !cir.complex<!s32i>) {
+  // expected-error@+1 {{requires source element type match result type}}
+  %0 = cir.cast int_complex_to_real %arg0 : !cir.complex<!s32i> -> !u64i
+  cir.return
+}

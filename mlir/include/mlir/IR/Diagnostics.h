@@ -683,10 +683,15 @@ public:
   /// '1'; and so on and so forth. This provides a way for the handler to
   /// deterministically order the diagnostics that it receives given the thread
   /// that it is receiving on.
+  ///
+  /// Each call must be paired with a later `eraseOrderIDForThread` on the same
+  /// thread. Pairs nest: before erasing, the thread may set another order id,
+  /// on this handler or another one, and a diagnostic it emits belongs to the
+  /// innermost order id set by a handler on the same context.
   void setOrderIDForThread(size_t orderID);
 
-  /// Remove the order id for the current thread. This removes the thread from
-  /// diagnostics tracking.
+  /// Remove the order id that the matching `setOrderIDForThread` set for the
+  /// current thread.
   void eraseOrderIDForThread();
 
 private:

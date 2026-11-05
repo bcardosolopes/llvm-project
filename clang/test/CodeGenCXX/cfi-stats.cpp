@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -fsanitize=cfi-vcall,cfi-nvcall,cfi-derived-cast,cfi-unrelated-cast,cfi-icall -fsanitize-stats -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -fsanitize=cfi-vcall,cfi-nvcall,cfi-derived-cast,cfi-unrelated-cast,cfi-icall -fsanitize-trap=cfi-vcall -fwhole-program-vtables -fsanitize-stats -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -fsanitize=cfi-vcall,cfi-nvcall,cfi-derived-cast,cfi-unrelated-cast,cfi-icall -fsanitize-stats -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,CIRLLVM %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -fsanitize=cfi-vcall,cfi-nvcall,cfi-derived-cast,cfi-unrelated-cast,cfi-icall -fsanitize-trap=cfi-vcall -fwhole-program-vtables -fsanitize-stats -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,CIRLLVM %}
 
 // CHECK: [[STATS:@[^ ]*]] = internal global { ptr, i32, [5 x [2 x ptr]] } { ptr null, i32 5, [5 x [2 x ptr]]
 // CHECK: {{\[\[}}2 x ptr] zeroinitializer,
@@ -49,3 +51,5 @@ extern "C" void icall(void (*p)()) {
 // CHECK: define internal void [[CTOR]]()
 // CHECK-NEXT: call void @__sanitizer_stat_init(ptr [[STATS]])
 // CHECK-NEXT: ret void
+
+// CIRLLVM-NOT: @__cir_sanitizer_stat_report

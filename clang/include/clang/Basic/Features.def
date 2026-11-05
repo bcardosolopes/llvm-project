@@ -98,6 +98,7 @@ FEATURE(function_sanitizer,
 FEATURE(realtime_sanitizer,
         LangOpts.Sanitize.has(SanitizerKind::Realtime))
 FEATURE(coverage_sanitizer, LangOpts.SanitizeCoverage)
+FEATURE(memory_profiler, LangOpts.MemoryProfiler)
 FEATURE(assume_nonnull, true)
 FEATURE(attribute_analyzer_noreturn, true)
 FEATURE(attribute_availability, true)

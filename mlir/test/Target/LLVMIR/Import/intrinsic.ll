@@ -487,10 +487,10 @@ define void @matrix_intrinsics(<64 x float> %vec1, <48 x float> %vec2, ptr %ptr,
   ; CHECK-SAME:  {columns = 16 : i32, rows = 3 : i32}
   %2 = call <48 x float> @llvm.matrix.transpose.v48f32(<48 x float> %vec2, i32 3, i32 16)
   ; CHECK:  %[[VAL1:.+]] = llvm.intr.matrix.column.major.load %[[PTR]], <stride = %[[STRIDE]]>
-  ; CHECK-SAME:  {columns = 16 : i32, isVolatile = false, rows = 3 : i32}
+  ; CHECK-SAME:  {columns = 16 : i32, isVolatile = false, llvm.call_arg_attrs = [{llvm.align = 4 : i64}, {}, {}, {}, {}], rows = 3 : i32}
   %3 = call <48 x float> @llvm.matrix.column.major.load.v48f32.i64(ptr align 4 %ptr, i64 %stride, i1 false, i32 3, i32 16)
   ; CHECK:  llvm.intr.matrix.column.major.store %[[VAL1]], %[[PTR]], <stride = %[[STRIDE]]>
-  ; CHECK-SAME:  {columns = 16 : i32, isVolatile = true, rows = 3 : i32}
+  ; CHECK-SAME:  {columns = 16 : i32, isVolatile = true, llvm.call_arg_attrs = [{}, {llvm.align = 4 : i64}, {}, {}, {}, {}], rows = 3 : i32}
   call void @llvm.matrix.column.major.store.v48f32.i64(<48 x float> %3, ptr align 4 %ptr, i64 %stride, i1 true, i32 3, i32 16)
   ret void
 }
@@ -507,14 +507,14 @@ define <7 x i1> @get_active_lane_mask(i64 %0, i64 %1) {
 ; CHECK-SAME:  %[[MASK:[a-zA-Z0-9]+]]
 define void @masked_load_store_intrinsics(ptr %vec, <7 x i1> %mask) {
   ; CHECK:  %[[UNDEF:.+]] = llvm.mlir.undef
-  ; CHECK:  %[[VAL1:.+]] = llvm.intr.masked.load %[[VEC]], %[[MASK]], %[[UNDEF]] {alignment = 1 : i32}
+  ; CHECK:  %[[VAL1:.+]] = llvm.intr.masked.load %[[VEC]], %[[MASK]], %[[UNDEF]] {alignment = 1 : i32, llvm.call_arg_attrs = [{llvm.align = 1 : i64}, {}, {}]}
   ; CHECK-SAME:  (!llvm.ptr, vector<7xi1>, vector<7xf32>) -> vector<7xf32>
   %1 = call <7 x float> @llvm.masked.load.v7f32.p0(ptr %vec, i32 1, <7 x i1> %mask, <7 x float> undef)
-  ; CHECK:  %[[VAL2:.+]] = llvm.intr.masked.load %[[VEC]], %[[MASK]], %[[VAL1]] {alignment = 4 : i32}
+  ; CHECK:  %[[VAL2:.+]] = llvm.intr.masked.load %[[VEC]], %[[MASK]], %[[VAL1]] {alignment = 4 : i32, llvm.call_arg_attrs = [{llvm.align = 4 : i64}, {}, {}]}
   %2 = call <7 x float> @llvm.masked.load.v7f32.p0(ptr %vec, i32 4, <7 x i1> %mask, <7 x float> %1)
-  ; CHECK:  %[[VAL3:.+]] = llvm.intr.masked.load %[[VEC]], %[[MASK]], %[[VAL1]] {alignment = 4 : i32, nontemporal}
+  ; CHECK:  %[[VAL3:.+]] = llvm.intr.masked.load %[[VEC]], %[[MASK]], %[[VAL1]] {alignment = 4 : i32, llvm.call_arg_attrs = [{llvm.align = 4 : i64}, {}, {}], nontemporal}
   %3 = call <7 x float> @llvm.masked.load.v7f32.p0(ptr %vec, i32 4, <7 x i1> %mask, <7 x float> %1), !nontemporal !{i32 1}
-  ; CHECK:  llvm.intr.masked.store %[[VAL2]], %[[VEC]], %[[MASK]] {alignment = 8 : i32}
+  ; CHECK:  llvm.intr.masked.store %[[VAL2]], %[[VEC]], %[[MASK]] {alignment = 8 : i32, llvm.call_arg_attrs = [{}, {llvm.align = 8 : i64}, {}]}
   ; CHECK-SAME:  vector<7xf32>, vector<7xi1> into !llvm.ptr
   call void @llvm.masked.store.v7f32.p0(<7 x float> %2, ptr %vec, i32 8, <7 x i1> %mask)
   ret void
@@ -525,12 +525,12 @@ define void @masked_load_store_intrinsics(ptr %vec, <7 x i1> %mask) {
 ; CHECK-SAME:  %[[MASK:[a-zA-Z0-9]+]]
 define void @masked_gather_scatter_intrinsics(<7 x ptr> %vec, <7 x i1> %mask) {
   ; CHECK:  %[[UNDEF:.+]] = llvm.mlir.undef
-  ; CHECK:  %[[VAL1:.+]] = llvm.intr.masked.gather %[[VEC]], %[[MASK]], %[[UNDEF]] {alignment = 1 : i32}
+  ; CHECK:  %[[VAL1:.+]] = llvm.intr.masked.gather %[[VEC]], %[[MASK]], %[[UNDEF]] {alignment = 1 : i32, llvm.call_arg_attrs = [{llvm.align = 1 : i64}, {}, {}]}
   ; CHECK-SAME:  (vector<7x!llvm.ptr>, vector<7xi1>, vector<7xf32>) -> vector<7xf32>
   %1 = call <7 x float> @llvm.masked.gather.v7f32.v7p0(<7 x ptr> %vec, i32 1, <7 x i1> %mask, <7 x float> undef)
-  ; CHECK:  %[[VAL2:.+]] = llvm.intr.masked.gather %[[VEC]], %[[MASK]], %[[VAL1]] {alignment = 4 : i32}
+  ; CHECK:  %[[VAL2:.+]] = llvm.intr.masked.gather %[[VEC]], %[[MASK]], %[[VAL1]] {alignment = 4 : i32, llvm.call_arg_attrs = [{llvm.align = 4 : i64}, {}, {}]}
   %2 = call <7 x float> @llvm.masked.gather.v7f32.v7p0(<7 x ptr> %vec, i32 4, <7 x i1> %mask, <7 x float> %1)
-  ; CHECK:  llvm.intr.masked.scatter %[[VAL2]], %[[VEC]], %[[MASK]] {alignment = 8 : i32}
+  ; CHECK:  llvm.intr.masked.scatter %[[VAL2]], %[[VEC]], %[[MASK]] {alignment = 8 : i32, llvm.call_arg_attrs = [{}, {llvm.align = 8 : i64}, {}]}
   ; CHECK-SAME:  vector<7xf32>, vector<7xi1> into vector<7x!llvm.ptr>
   call void @llvm.masked.scatter.v7f32.v7p0(<7 x float> %2, <7 x ptr> %vec, i32 8, <7 x i1> %mask)
   ret void

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -x c -flax-vector-conversions=none -ffreestanding %s -triple=x86_64-apple-darwin -target-feature +avx -emit-llvm -ffp-exception-behavior=maytrap -o - -Wall -Werror | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -x c -flax-vector-conversions=none -ffreestanding %s -triple=x86_64-apple-darwin -target-feature +avx -emit-llvm -ffp-exception-behavior=maytrap -fclangir -o - -Wall -Werror | FileCheck %s %}
 // RUN: %clang_cc1 -x c -flax-vector-conversions=none -ffreestanding %s -triple=i386-apple-darwin -target-feature +avx -emit-llvm -ffp-exception-behavior=maytrap -o - -Wall -Werror | FileCheck %s
 // RUN: %clang_cc1 -x c++ -flax-vector-conversions=none -ffreestanding %s -triple=x86_64-apple-darwin -target-feature +avx -emit-llvm -ffp-exception-behavior=maytrap -o - -Wall -Werror | FileCheck %s
 // RUN: %clang_cc1 -x c++ -flax-vector-conversions=none -ffreestanding %s -triple=i386-apple-darwin -target-feature +avx -emit-llvm -ffp-exception-behavior=maytrap -o - -Wall -Werror | FileCheck %s

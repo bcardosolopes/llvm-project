@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple arm64e -fptrauth-calls -fptrauth-vtable-pointer-address-discrimination -fptrauth-vtable-pointer-type-discrimination -emit-llvm -fexceptions -fobjc-exceptions -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64e -fptrauth-calls -fptrauth-vtable-pointer-address-discrimination -fptrauth-vtable-pointer-type-discrimination -emit-llvm -fexceptions -fobjc-exceptions -fclangir -o - %s | FileCheck %s --check-prefix=CHECK-CIR %}
 
 __attribute__((objc_root_class))
 @interface Root {
@@ -15,3 +16,4 @@ __attribute__((objc_exception))
 
 // CHECK: @"OBJC_EHTYPE_$_A" = global %struct._objc_typeinfo { ptr ptrauth (ptr getelementptr inbounds (ptr, ptr @objc_ehtype_vtable, i32 2), i32 2), ptr @OBJC_CLASS_NAME_, ptr @"OBJC_CLASS_$_A" }
  //.      @"OBJC_EHTYPE_$_A" = global %struct._objc_typeinfo { ptr getelementptr inbounds (ptr, ptr @objc_ehtype_vtable, i32 2), ptr @OBJC_CLASS_NAME_, ptr @"OBJC_CLASS_$_A" }
+// CHECK-CIR: @"OBJC_EHTYPE_$_A" = global { ptr, ptr, ptr } { ptr ptrauth (ptr getelementptr inbounds (i8, ptr @objc_ehtype_vtable, i64 16), i32 2), ptr @OBJC_CLASS_NAME_, ptr @"OBJC_CLASS_$_A" }

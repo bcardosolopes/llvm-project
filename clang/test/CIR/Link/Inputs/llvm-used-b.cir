@@ -1,0 +1,13 @@
+!s32i = !cir.int<s, 32>
+
+module attributes {
+  cir.llvm_used = [@b_only, @shared_local, @in_both],
+  cir.llvm_compiler_used = [@cu_b]
+} {
+  // Same name as the local in the first input and a different value: these are
+  // two different objects and the merge has to keep them apart.
+  cir.global "private" internal @shared_local = #cir.int<2> : !s32i
+  cir.global external @b_only = #cir.int<1> : !s32i
+  cir.global external @in_both = #cir.int<1> : !s32i
+  cir.global external @cu_b = #cir.int<1> : !s32i
+}

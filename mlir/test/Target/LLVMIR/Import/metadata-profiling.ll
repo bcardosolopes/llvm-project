@@ -105,3 +105,14 @@ bb2:
 }
 
 !0 = !{!"branch_weights", i32 42, i32 99}
+
+; // -----
+
+; CHECK-LABEL: @value_profile
+define void @value_profile(ptr %f) {
+  ; CHECK: llvm.call %{{.*}}() {llvm.value_profile = array<i64: 0, 1600, -7046029254386353131, 1500, 12345, 100>}
+  call void %f(), !prof !0
+  ret void
+}
+
+!0 = !{!"VP", i32 0, i64 1600, i64 -7046029254386353131, i64 1500, i64 12345, i64 100}

@@ -1,0 +1,30 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+#call_attrs = #cir<extra({returns_twice, strictfp, nomerge, nobuiltin, builtin, cold, hot, convergent, noduplicate, cir.noalias_return, no_caller_saved_registers, coro_elide_safe, optsize, minsize, allocsize = "0", "sample-profile-suffix-elision-policy" = "selected", "cir.srcloc" = 77 : i64})>
+
+module {
+  cir.func private @callee() -> ()
+
+  cir.func @caller() {
+    cir.call @callee() : () -> () extra(#call_attrs)
+    cir.return
+  }
+}
+
+// CHECK: llvm.call @callee() {{.*}}cir.call_allocsize = "0"
+// CHECK-SAME: cir.call_builtin
+// CHECK-SAME: cir.call_cold
+// CHECK-SAME: cir.call_coro_elide_safe
+// CHECK-SAME: cir.call_hot
+// CHECK-SAME: cir.call_minsize
+// CHECK-SAME: cir.call_no_caller_saved_registers
+// CHECK-SAME: cir.call_noalias_return
+// CHECK-SAME: cir.call_nobuiltin
+// CHECK-SAME: cir.call_noduplicate
+// CHECK-SAME: cir.call_nomerge
+// CHECK-SAME: cir.call_optsize
+// CHECK-SAME: cir.call_returns_twice
+// CHECK-SAME: cir.call_sample_profile_suffix = "selected"
+// CHECK-SAME: cir.call_srcloc = 77 : i64
+// CHECK-SAME: cir.call_strictfp
+// CHECK-SAME: convergent

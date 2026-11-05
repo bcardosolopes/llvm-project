@@ -1,0 +1,65 @@
+// RUN: cir-opt %s --cir-call-conv-lowering -o /dev/null
+//
+// Regression test for buildFunctionProlog assertion when
+// findArgInitStoreChain returns null for CoerceAndExpand arguments.
+//
+// Previously, buildFunctionProlog unconditionally asserted:
+//   Assertion `(initStore2)' failed.
+// when a CoerceAndExpand arg had zero or multiple uses.
+// The fix adds a fallback path (replaceArgWithoutInitStoreChain) that
+// handles these cases gracefully.
+
+!s32i = !cir.int<s, 32>
+!f32 = !cir.float
+!rec_ThreeFloat = !cir.record<struct "ThreeFloat" {!f32, !f32, !f32}>
+
+module @"test" attributes {
+  cir.ident = "test",
+  cir.lang = #cir.lang<cxx>,
+  cir.sob = #cir.signed_overflow_behavior<undefined>,
+  cir.triple = "x86_64-unknown-linux-gnu",
+  cir.type_size_info = #cir.type_size_info<char = 8, int = 32, size_t = 64>,
+  cir.llvm_datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+  dlti.dl_spec = #dlti.dl_spec<
+    !llvm.ptr<270> = dense<32> : vector<4xi64>,
+    !llvm.ptr<271> = dense<32> : vector<4xi64>,
+    !llvm.ptr<272> = dense<64> : vector<4xi64>,
+    i64 = dense<64> : vector<2xi64>,
+    i128 = dense<128> : vector<2xi64>,
+    f80 = dense<128> : vector<2xi64>,
+    !llvm.ptr = dense<64> : vector<4xi64>,
+    i1 = dense<8> : vector<2xi64>,
+    i8 = dense<8> : vector<2xi64>,
+    i16 = dense<16> : vector<2xi64>,
+    i32 = dense<32> : vector<2xi64>,
+    f16 = dense<16> : vector<2xi64>,
+    f64 = dense<64> : vector<2xi64>,
+    f128 = dense<128> : vector<2xi64>,
+    "dlti.endianness" = "little",
+    "dlti.mangling_mode" = "e",
+    "dlti.legal_int_widths" = array<i32: 8, 16, 32, 64>,
+    "dlti.stack_alignment" = 128 : i64
+  >
+} {
+  // --- Case 1: Unused CoerceAndExpand parameter (zero uses). ---
+  // On x86_64, ThreeFloat is passed as { <2 x float>, float }
+  // (CoerceAndExpand). The original arg has zero uses, so
+  // findArgInitStoreChain returns null.
+  cir.func @unused_coerce_expand_param(%arg0: !rec_ThreeFloat) -> !s32i {
+    %0 = cir.const #cir.int<0> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // --- Case 2: CoerceAndExpand parameter stored to multiple allocas. ---
+  // The original arg has two uses (two stores), so findArgInitStoreChain
+  // returns null (requires exactly one use).
+  cir.func @multi_store_coerce_expand_param(%arg0: !rec_ThreeFloat) -> !f32 {
+    %0 = cir.alloca !rec_ThreeFloat, !cir.ptr<!rec_ThreeFloat>, ["a"] {alignment = 4 : i64}
+    %1 = cir.alloca !rec_ThreeFloat, !cir.ptr<!rec_ThreeFloat>, ["b"] {alignment = 4 : i64}
+    cir.store align(4) %arg0, %0 : !rec_ThreeFloat, !cir.ptr<!rec_ThreeFloat>
+    cir.store align(4) %arg0, %1 : !rec_ThreeFloat, !cir.ptr<!rec_ThreeFloat>
+    %2 = cir.get_member %0[0] {name = "a"} : !cir.ptr<!rec_ThreeFloat> -> !cir.ptr<!f32>
+    %3 = cir.load align(4) %2 : !cir.ptr<!f32>, !f32
+    cir.return %3 : !f32
+  }
+}

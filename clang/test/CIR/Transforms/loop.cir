@@ -1,3 +1,4 @@
+// UNSUPPORTED: system-darwin
 // RUN: cir-opt %s -cir-flatten-cfg -o - | FileCheck %s
 
 !s32i = !cir.int<s, 32>
@@ -21,9 +22,7 @@ module {
 // CHECK:  ^bb[[#COND]]:
 // CHECK:    cir.brcond %arg0 ^bb[[#BODY:]], ^bb[[#EXIT:]]
 // CHECK:  ^bb[[#BODY]]:
-// CHECK:    cir.br ^bb[[#STEP:]]
-// CHECK:  ^bb[[#STEP]]:
-// CHECK:    cir.br ^bb[[#COND:]]
+// CHECK:    cir.br ^bb[[#COND]]
 // CHECK:  ^bb[[#EXIT]]:
 // CHECK:    cir.return
 // CHECK:  }

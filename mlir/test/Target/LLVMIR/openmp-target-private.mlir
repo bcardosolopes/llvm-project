@@ -179,66 +179,215 @@ llvm.func @target_firstprivate_() attributes {fir.internal_name = "_QPtarget_fir
   }
   llvm.return
 }
-// CHECK: define void @target_map_single_private() {
-// CHECK: call void @__omp_offloading_[[MAP_SINGLE_PRIVATE_OFFLOADED_FUNCTION:.*]](ptr {{.*}})
-// CHECK: define void @target_map_2_privates() {
-// CHECK: call void @__omp_offloading_[[MAP_2_PRIVATES_OFFLOADED_FUNCTION:.*]](ptr {{.*}})
-// CHECK: define void @target_op_private_multi_block
-// CHECK: call void @__omp_offloading_[[PRIVATE_MULTI_BLOCK_OFFLOADED_FUNCTION:.*]]()
-// CHECK: define void @target_boxchar_
-// CHECK: call void @__omp_offloading_[[BOXCHAR_OFFLOADED_FUNCTION:.*]](ptr {{.*}}, ptr {{.*}})
-// CHECK: define void @target_firstprivate_()
-// CHECK: call void @__omp_offloading_[[SIMPLE_OFFLOADED_FUNCTION:.*]](ptr {{.*}}, ptr {{.*}})
-
-// CHECK: define internal void @__omp_offloading_[[MAP_SINGLE_PRIVATE_OFFLOADED_FUNCTION]]
-// CHECK: %[[PRIV_ALLOC:.*]] = alloca i32, align 4
-// CHECK: %[[ADD:.*]] = add i32 {{.*}}, 10
-// CHECK: store i32 %[[ADD]], ptr %[[PRIV_ALLOC]], align 4
 
 
 
 
-// CHECK: define internal void @__omp_offloading_[[MAP_2_PRIVATES_OFFLOADED_FUNCTION]]
-// CHECK: %[[PRIV_I32_ALLOC:.*]] = alloca i32, align 4
-// CHECK: %[[PRIV_FLOAT_ALLOC:.*]] = alloca float, align 4
-// CHECK: %[[ADD_I32:.*]] = add i32 {{.*}}, 10
-// CHECK: store i32 %[[ADD_I32]], ptr %[[PRIV_I32_ALLOC]], align 4
-// CHECK: %[[LOAD_I32_AGAIN:.*]] = load i32, ptr %[[PRIV_I32_ALLOC]], align 4
-// CHECK: %[[CAST_TO_FLOAT:.*]] = sitofp i32 %[[LOAD_I32_AGAIN]] to float
-// CHECK: %[[ADD_FLOAT:.*]] = fadd contract float %[[CAST_TO_FLOAT]], 1.100000e+01
-// CHECK: store float %[[ADD_FLOAT]], ptr %[[PRIV_FLOAT_ALLOC]], align 4
-
-// CHECK: define internal void @__omp_offloading_[[PRIVATE_MULTI_BLOCK_OFFLOADED_FUNCTION]]
-// CHECK: %[[PRIV_ALLOC:.*]] = alloca float, align 4
-// CHECK: %[[PHI_ALLOCA:.*]]  = phi ptr [ %[[PRIV_ALLOC]], {{.*}} ]
-// CHECK: %[[RESULT:.*]] = load float, ptr %[[PHI_ALLOCA]], align 4
 
 
-// CHECK: define internal void @__omp_offloading_[[BOXCHAR_OFFLOADED_FUNCTION]](ptr %{{[^,]+}}, ptr %[[MAPPED_ARG:.*]]) {
-// CHECK: %[[BOXCHAR:.*]] = load { ptr, i64 }, ptr %[[MAPPED_ARG]]
-// CHECK: %[[BOXCHAR_PTR:.*]] = extractvalue { ptr, i64 } %[[BOXCHAR]], 0
-// CHECK: %[[BOXCHAR_i64:.*]] = extractvalue { ptr, i64 } %[[BOXCHAR]], 1
-// CHECK: %[[MEM_ALLOC:.*]] = alloca i8, i64 %[[BOXCHAR_i64]]
-// CHECK: %[[PRIV_BOXCHAR0:.*]] = insertvalue { ptr, i64 } undef, ptr %[[MEM_ALLOC]], 0
-// CHECK: %[[PRIV_BOXCHAR1:.*]] = insertvalue { ptr, i64 } %[[PRIV_BOXCHAR0]], i64 %[[BOXCHAR_i64]], 1
 
 
-// CHECK: define internal void @__omp_offloading_[[SIMPLE_OFFLOADED_FUNCTION]](ptr %[[SV:.*]], ptr %[[SF:.*]])
-// CHECK: entry:
-// CHECK-NEXT: %[[SV_PRIV_ALLOCA:.*]] = alloca i32, align 4
-// CHECK-NEXT: %[[SF_PRIV_ALLOCA:.*]] = alloca float, align 4
-// CHECK: omp.private.copy:
-// CHECK-NEXT: %[[INIT_SV:.*]] = load i32, ptr %[[SV]], align 4
-// CHECK-NEXT: store i32 %[[INIT_SV]], ptr %[[SV_PRIV_ALLOCA]], align 4
-// CHECK:  %[[INIT_SF:.*]] = load float, ptr %[[SF]], align 4
+
+
 // CHECK-NEXT  store float %[[INIT_SF]], ptr %[[SF_PRIV_ALLOCA]], align 4
-// CHECK: omp.target
-// CHECK: %[[LOAD_SV:.*]] = load i32, ptr %[[SV_PRIV_ALLOCA]], align 4
-// CHECK-NEXT: %[[ADD_SV:.*]] = add i32 %[[LOAD_SV]], 10
-// CHECK-NEXT: store i32 %[[ADD_SV]], ptr %[[SV_PRIV_ALLOCA]], align 4
-// CHECK: %[[LOAD_SF:.*]] = load float, ptr %[[SF_PRIV_ALLOCA]], align 4
-// CHECK-NEXT: %[[SF_EXT:.*]] = fpext float %[[LOAD_SF]] to double
-// CHECK-NEXT: %[[ADD_SF:.*]] = fadd contract double %[[SF_EXT]], 2.000000e+00
-// CHECK-NEXT: %[[TRUNC_SF:.*]] = fptrunc double %[[ADD_SF]] to float
-// CHECK-NEXT:  store float %[[TRUNC_SF]], ptr %[[SF_PRIV_ALLOCA]], align 4
 
+// CHECK: $_QQclX68656C6C6F = comdat any
+// CHECK: @_QQclX68656C6C6F = linkonce constant [5 x i8] c"hello", comdat
+// CHECK: @0 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @1 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @2 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @3 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @4 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @5 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK-LABEL: define void @target_map_single_private(
+// CHECK:   %[[VAL_0:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca i32, i64 1, align 4
+// CHECK:   store i32 2, ptr %[[VAL_1]], align 4
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_target_map_single_private_l{{.*}}(ptr %[[VAL_1]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define void @target_map_2_privates(
+// CHECK:   %[[VAL_0:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca float, i64 1, align 4
+// CHECK:   %[[VAL_2:.*]] = alloca i32, i64 1, align 4
+// CHECK:   store i32 2, ptr %[[VAL_2]], align 4
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_target_map_2_privates_l{{.*}}(ptr %[[VAL_2]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define void @target_op_private_multi_block(
+// CHECK:   br label %[[VAL_0:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_target_op_private_multi_block_l{{.*}}()
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define void @target_boxchar_(
+// CHECK:   %[[VAL_0:.*]] = alloca i64, align 8
+// CHECK:   %[[VAL_1:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_2:.*]] = alloca {{[{]}} ptr, i64 }, i64 1, align 8
+// CHECK:   %[[VAL_3:.*]] = load i64, ptr %[[VAL_4:.*]], align 4
+// CHECK:   %[[VAL_5:.*]] = icmp sgt i64 %[[VAL_3]], 0
+// CHECK:   %[[VAL_6:.*]] = select i1 %[[VAL_5]], i64 %[[VAL_3]], i64 0
+// CHECK:   %[[VAL_7:.*]] = alloca i8, i64 %[[VAL_6]], align 1
+// CHECK:   %[[VAL_8:.*]] = insertvalue {{[{]}} ptr, i64 } undef, ptr %[[VAL_7]], 0
+// CHECK:   %[[VAL_9:.*]] = insertvalue {{[{]}} ptr, i64 } %[[VAL_8]], i64 %[[VAL_6]], 1
+// CHECK:   store {{[{]}} ptr, i64 } %[[VAL_9]], ptr %[[VAL_2]], align 8
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_11:.*]] = load i32, ptr %[[VAL_1]], align 4
+// CHECK:   store i32 %[[VAL_11]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_12:.*]] = load i64, ptr %[[VAL_0]], align 4
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_target_boxchar__l{{.*}}(i64 %[[VAL_12]], ptr %[[VAL_2]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define void @target_firstprivate_(
+// CHECK:   %[[VAL_0:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca float, i64 1, align 4
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_target_firstprivate__l{{.*}}(ptr %[[VAL_0]], ptr %[[VAL_1]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_target_map_single_private_l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   br label %[[VAL_1:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_5:.*]] = load i32, ptr %[[VAL_6:.*]], align 4
+// CHECK:   %[[VAL_7:.*]] = add i32 %[[VAL_5]], 10
+// CHECK:   store i32 %[[VAL_7]], ptr %[[VAL_0]], align 4
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_target_map_2_privates_l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca float, align 4
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_6:.*]] = load i32, ptr %[[VAL_7:.*]], align 4
+// CHECK:   %[[VAL_8:.*]] = add i32 %[[VAL_6]], 10
+// CHECK:   store i32 %[[VAL_8]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_9:.*]] = load i32, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_10:.*]] = sitofp i32 %[[VAL_9]] to float
+// CHECK:   %[[VAL_11:.*]] = fadd contract float %[[VAL_10]], 1.100000e+01
+// CHECK:   store float %[[VAL_11]], ptr %[[VAL_1]], align 4
+// CHECK:   br label %[[VAL_12:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_target_op_private_multi_block_l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca float, align 4
+// CHECK:   br label %[[VAL_1:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.private.init2:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.private.init1:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   %[[VAL_7:.*]] = phi ptr [ %[[VAL_0]], %[[VAL_6]] ]
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_9:.*]] = load float, ptr %[[VAL_7]], align 4
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.region.cont3:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_target_boxchar__l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i64, align 8
+// CHECK:   store i64 %[[VAL_1:.*]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_2:.*]] = alloca {{[{]}} ptr, i64 }, align 8
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.private.init:
+// CHECK:   %[[VAL_6:.*]] = load {{[{]}} ptr, i64 }, ptr %[[VAL_7:.*]], align 8
+// CHECK:   %[[VAL_8:.*]] = extractvalue {{[{]}} ptr, i64 } %[[VAL_6]], 0
+// CHECK:   %[[VAL_9:.*]] = extractvalue {{[{]}} ptr, i64 } %[[VAL_6]], 1
+// CHECK:   %[[VAL_10:.*]] = alloca i8, i64 %[[VAL_9]], align 1
+// CHECK:   %[[VAL_11:.*]] = insertvalue {{[{]}} ptr, i64 } undef, ptr %[[VAL_10]], 0
+// CHECK:   %[[VAL_12:.*]] = insertvalue {{[{]}} ptr, i64 } %[[VAL_11]], i64 %[[VAL_9]], 1
+// CHECK:   %[[VAL_13:.*]] = load {{[{]}} ptr, i64 }, ptr %[[VAL_7]], align 8
+// CHECK:   br label %[[VAL_14:.*]]
+// CHECK: omp.target3:
+// CHECK:   br label %[[VAL_15:.*]]
+// CHECK: omp.target2:
+// CHECK:   %[[VAL_16:.*]] = getelementptr [1 x i8], ptr %[[VAL_17:.*]], i64 %[[VAL_18:.*]]
+// CHECK:   store [1 x i8] c" ", ptr %[[VAL_16]], align 1
+// CHECK:   %[[VAL_19:.*]] = add i64 %[[VAL_18]], 1
+// CHECK:   %[[VAL_20:.*]] = sub i64 %[[VAL_21:.*]], 1
+// CHECK:   br label %[[VAL_22:.*]]
+// CHECK: omp.target1:
+// CHECK:   %[[VAL_18]] = phi i64 [ %[[VAL_19]], %[[VAL_23:.*]] ], [ %[[VAL_24:.*]], %[[VAL_14]] ]
+// CHECK:   %[[VAL_21]] = phi i64 [ %[[VAL_20]], %[[VAL_23]] ], [ %[[VAL_25:.*]], %[[VAL_14]] ]
+// CHECK:   %[[VAL_26:.*]] = icmp sgt i64 %[[VAL_21]], 0
+// CHECK:   br i1 %[[VAL_26]], label %[[VAL_23]], label %[[VAL_27:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_17]] = extractvalue {{[{]}} ptr, i64 } %[[VAL_12]], 0
+// CHECK:   %[[VAL_28:.*]] = extractvalue {{[{]}} ptr, i64 } %[[VAL_12]], 1
+// CHECK:   store i32 5, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_29:.*]] = icmp slt i64 %[[VAL_28]], 5
+// CHECK:   %[[VAL_24]] = select i1 %[[VAL_29]], i64 %[[VAL_28]], i64 5
+// CHECK:   call void @llvm.memmove.p0.p0.i64(ptr %[[VAL_17]], ptr @_QQclX68656C6C6F, i64 %[[VAL_24]], i1 false)
+// CHECK:   %[[VAL_30:.*]] = sub i64 %[[VAL_28]], 1
+// CHECK:   %[[VAL_31:.*]] = sub i64 %[[VAL_30]], %[[VAL_24]]
+// CHECK:   %[[VAL_25]] = add i64 %[[VAL_31]], 1
+// CHECK:   br label %[[VAL_22]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_target_firstprivate__l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca float, align 4
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.private.copy:
+// CHECK:   %[[VAL_6:.*]] = load i32, ptr %[[VAL_7:.*]], align 4
+// CHECK:   store i32 %[[VAL_6]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_8:.*]] = load float, ptr %[[VAL_9:.*]], align 4
+// CHECK:   store float %[[VAL_8]], ptr %[[VAL_1]], align 4
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_11:.*]] = load i32, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_12:.*]] = add i32 %[[VAL_11]], 10
+// CHECK:   store i32 %[[VAL_12]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_13:.*]] = load float, ptr %[[VAL_1]], align 4
+// CHECK:   %[[VAL_14:.*]] = fpext float %[[VAL_13]] to double
+// CHECK:   %[[VAL_15:.*]] = fadd contract double %[[VAL_14]], 2.000000e+00
+// CHECK:   %[[VAL_16:.*]] = fptrunc double %[[VAL_15]] to float
+// CHECK:   store float %[[VAL_16]], ptr %[[VAL_1]], align 4
+// CHECK:   br label %[[VAL_17:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }

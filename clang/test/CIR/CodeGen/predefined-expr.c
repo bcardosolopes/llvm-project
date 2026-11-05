@@ -6,30 +6,33 @@
 // RUN: FileCheck %s --input-file=%t.ll --check-prefix=OGCG
 
 // CIR: cir.global "private" internal dso_local @staticFuncName.name = #cir.global_view<@".str.4"> : !cir.ptr<!s8i> {alignment = 8 : i64} loc(#loc1)
-// CIR: cir.global "private" constant cir_private dso_local @".str" = #cir.zero : !cir.array<!s8i x 1>
+// CIR: cir.global "private" constant cir_private dso_local @".str" = #cir.zero : !cir.array<!s8i x 1> {{{.*}}unnamed_addr}
 // CIR: cir.global external @func = #cir.global_view<@".str"> : !cir.ptr<!s8i>
-// CIR: cir.global "private" constant cir_private dso_local @__func__.plainFunction = #cir.const_array<"plainFunction\00" : !cir.array<!s8i x 14>>
-// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.plainFunction = #cir.const_array<"void plainFunction(void)\00" : !cir.array<!s8i x 25>>
-// CIR: cir.global "private" constant cir_private dso_local @__func__.externFunction = #cir.const_array<"externFunction\00" : !cir.array<!s8i x 15>>
-// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.externFunction = #cir.const_array<"void externFunction(void)\00" : !cir.array<!s8i x 26>>
-// CIR: cir.global "private" constant cir_private dso_local @__func__.privateExternFunction = #cir.const_array<"privateExternFunction\00" : !cir.array<!s8i x 22>>
-// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.privateExternFunction = #cir.const_array<"void privateExternFunction(void)\00" : !cir.array<!s8i x 33>>
-// CIR: cir.global "private" constant cir_private dso_local @".str.4" = #cir.const_array<"staticFuncName\00" : !cir.array<!s8i x 15>> : !cir.array<!s8i x 15>
-// CIR: cir.global "private" constant cir_private dso_local @__func__.staticFunction = #cir.const_array<"staticFunction\00" : !cir.array<!s8i x 15>>
-// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.staticFunction = #cir.const_array<"void staticFunction(void)\00" : !cir.array<!s8i x 26>>
+// CIR: cir.global "private" constant cir_private dso_local @__func__.plainFunction = #cir.const_array<"plainFunction\00" : !cir.array<!s8i x 14>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.plainFunction = #cir.const_array<"void plainFunction(void)\00" : !cir.array<!s8i x 25>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__func__.externFunction = #cir.const_array<"externFunction\00" : !cir.array<!s8i x 15>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.externFunction = #cir.const_array<"void externFunction(void)\00" : !cir.array<!s8i x 26>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__func__.privateExternFunction = #cir.const_array<"privateExternFunction\00" : !cir.array<!s8i x 22>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.privateExternFunction = #cir.const_array<"void privateExternFunction(void)\00" : !cir.array<!s8i x 33>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__func__.__captured_stmt = #cir.const_array<"functionWithCapturedStmt\00" : !cir.array<!s8i x 25>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.__captured_stmt = #cir.const_array<"void functionWithCapturedStmt(void)\00" : !cir.array<!s8i x 36>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @".str.4" = #cir.const_array<"staticFuncName\00" : !cir.array<!s8i x 15>> : !cir.array<!s8i x 15> {{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__func__.staticFunction = #cir.const_array<"staticFunction\00" : !cir.array<!s8i x 15>> {{.*}}{{{.*}}unnamed_addr}
+// CIR: cir.global "private" constant cir_private dso_local @__PRETTY_FUNCTION__.staticFunction = #cir.const_array<"void staticFunction(void)\00" : !cir.array<!s8i x 26>> {{.*}}{{{.*}}unnamed_addr}
 
-// TODO(cir): These should be unnamed_addr
 // LLVM: @staticFuncName.name = internal global ptr @.str.4, align 8
-// LLVM: @.str = private constant [1 x i8] zeroinitializer, align 1
+// LLVM: @.str = private unnamed_addr constant [1 x i8] zeroinitializer, align 1
 // LLVM: @func = global ptr @.str, align 8
-// LLVM: @__func__.plainFunction = private constant [14 x i8] c"plainFunction\00"
-// LLVM: @__PRETTY_FUNCTION__.plainFunction = private constant [25 x i8] c"void plainFunction(void)\00"
-// LLVM: @__func__.externFunction = private constant [15 x i8] c"externFunction\00"
-// LLVM: @__PRETTY_FUNCTION__.externFunction = private constant [26 x i8] c"void externFunction(void)\00"
-// LLVM: @__func__.privateExternFunction = private constant [22 x i8] c"privateExternFunction\00"
-// LLVM: @__PRETTY_FUNCTION__.privateExternFunction = private constant [33 x i8] c"void privateExternFunction(void)\00"
-// LLVM: @__func__.staticFunction = private constant [15 x i8] c"staticFunction\00"
-// LLVM: @__PRETTY_FUNCTION__.staticFunction = private constant [26 x i8] c"void staticFunction(void)\00"
+// LLVM: @__func__.plainFunction = private unnamed_addr constant [14 x i8] c"plainFunction\00"
+// LLVM: @__PRETTY_FUNCTION__.plainFunction = private unnamed_addr constant [25 x i8] c"void plainFunction(void)\00"
+// LLVM: @__func__.externFunction = private unnamed_addr constant [15 x i8] c"externFunction\00"
+// LLVM: @__PRETTY_FUNCTION__.externFunction = private unnamed_addr constant [26 x i8] c"void externFunction(void)\00"
+// LLVM: @__func__.privateExternFunction = private unnamed_addr constant [22 x i8] c"privateExternFunction\00"
+// LLVM: @__PRETTY_FUNCTION__.privateExternFunction = private unnamed_addr constant [33 x i8] c"void privateExternFunction(void)\00"
+// LLVM: @__func__.__captured_stmt = private unnamed_addr constant [25 x i8] c"functionWithCapturedStmt\00"
+// LLVM: @__PRETTY_FUNCTION__.__captured_stmt = private unnamed_addr constant [36 x i8] c"void functionWithCapturedStmt(void)\00"
+// LLVM: @__func__.staticFunction = private unnamed_addr constant [15 x i8] c"staticFunction\00"
+// LLVM: @__PRETTY_FUNCTION__.staticFunction = private unnamed_addr constant [26 x i8] c"void staticFunction(void)\00"
 
 // OGCG: @.str = private unnamed_addr constant [1 x i8] zeroinitializer, align 1
 // OGCG: @func = global ptr @.str, align 8
@@ -39,6 +42,8 @@
 // OGCG: @__PRETTY_FUNCTION__.externFunction = private unnamed_addr constant [26 x i8] c"void externFunction(void)\00"
 // OGCG: @__func__.privateExternFunction = private unnamed_addr constant [22 x i8] c"privateExternFunction\00"
 // OGCG: @__PRETTY_FUNCTION__.privateExternFunction = private unnamed_addr constant [33 x i8] c"void privateExternFunction(void)\00"
+// OGCG: @__func__.__captured_stmt = private unnamed_addr constant [25 x i8] c"functionWithCapturedStmt\00"
+// OGCG: @__PRETTY_FUNCTION__.__captured_stmt = private unnamed_addr constant [36 x i8] c"void functionWithCapturedStmt(void)\00"
 // OGCG: @staticFuncName.name = internal global ptr @.str.4, align 8
 // OGCG: @__func__.staticFunction = private unnamed_addr constant [15 x i8] c"staticFunction\00"
 // OGCG: @__PRETTY_FUNCTION__.staticFunction = private unnamed_addr constant [26 x i8] c"void staticFunction(void)\00"
@@ -65,7 +70,14 @@ __private_extern__ void privateExternFunction(void) {
   printf("__PRETTY_FUNCTION__ %s\n\n", __PRETTY_FUNCTION__);
 }
 
-// TODO(cir): Add support for __captured_stmt
+void functionWithCapturedStmt(void) {
+  #pragma clang __debug captured
+  {
+    printf("__func__ %s\n", __func__);
+    printf("__FUNCTION__ %s\n", __FUNCTION__);
+    printf("__PRETTY_FUNCTION__ %s\n\n", __PRETTY_FUNCTION__);
+  }
+}
 
 static void staticFunction(void) {
   printf("__func__ %s\n", __func__);
@@ -81,6 +93,7 @@ int main(void) {
   plainFunction();
   externFunction();
   privateExternFunction();
+  functionWithCapturedStmt();
   staticFunction();
   staticFuncName();
   return 0;

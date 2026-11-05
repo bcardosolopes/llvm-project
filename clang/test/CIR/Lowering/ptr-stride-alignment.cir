@@ -1,0 +1,89 @@
+// RUN: cir-opt %s --cir-to-llvm | FileCheck %s
+
+// Verify that vector load/store alignment is correctly reduced when the
+// pointer is offset from a base alloca via get_element, ptr_stride, or
+// get_member.  This is a regression test for a self-host crash where
+// 16-byte-aligned movdqa was emitted at an 8-byte-aligned address
+// (alloca align 16, element offset 24 → effective align 8).
+
+!s64i = !cir.int<s, 64>
+!vec2i64 = !cir.vector<2 x !s64i>
+!ptr_type = !cir.ptr<!s64i>
+!arr_type = !cir.array<!ptr_type x 4>
+
+module {
+  // Vector store through get_element at index 3 (offset 24 bytes from
+  // align-16 base). Effective alignment = MinAlign(16, 24) = 8.
+  // Before fix: alignment was incorrectly 16.
+  // CHECK-LABEL: llvm.func @vec_store_offset_24
+  cir.func @vec_store_offset_24() {
+    %0 = cir.alloca !arr_type, !cir.ptr<!arr_type>, ["arr"] {alignment = 16 : i64}
+    %idx = cir.const #cir.int<3> : !s64i
+    %elem = cir.get_element %0[%idx : !s64i] : !cir.ptr<!arr_type> -> !cir.ptr<!ptr_type>
+    %cast = cir.cast bitcast %elem : !cir.ptr<!ptr_type> -> !cir.ptr<!vec2i64>
+    %one = cir.const #cir.int<1> : !s64i
+    %vec = cir.vec.create(%one, %one : !s64i, !s64i) : !vec2i64
+    cir.store %vec, %cast : !vec2i64, !cir.ptr<!vec2i64>
+    // CHECK: llvm.store %{{.*}}, %{{.*}} {alignment = 8 : i64} : vector<2xi64>, !llvm.ptr
+    cir.return
+  }
+
+  // Vector store through get_element at index 0 (offset 0).
+  // Alignment = MinAlign(16, 0) = 16.
+  // CHECK-LABEL: llvm.func @vec_store_offset_0
+  cir.func @vec_store_offset_0() {
+    %0 = cir.alloca !arr_type, !cir.ptr<!arr_type>, ["arr"] {alignment = 16 : i64}
+    %idx = cir.const #cir.int<0> : !s64i
+    %elem = cir.get_element %0[%idx : !s64i] : !cir.ptr<!arr_type> -> !cir.ptr<!ptr_type>
+    %cast = cir.cast bitcast %elem : !cir.ptr<!ptr_type> -> !cir.ptr<!vec2i64>
+    %one = cir.const #cir.int<1> : !s64i
+    %vec = cir.vec.create(%one, %one : !s64i, !s64i) : !vec2i64
+    cir.store %vec, %cast : !vec2i64, !cir.ptr<!vec2i64>
+    // CHECK: llvm.store %{{.*}}, %{{.*}} {alignment = 16 : i64} : vector<2xi64>, !llvm.ptr
+    cir.return
+  }
+
+  // Vector store through get_element at index 2 (offset 16).
+  // Alignment = MinAlign(16, 16) = 16.
+  // CHECK-LABEL: llvm.func @vec_store_offset_16
+  cir.func @vec_store_offset_16() {
+    %0 = cir.alloca !arr_type, !cir.ptr<!arr_type>, ["arr"] {alignment = 16 : i64}
+    %idx = cir.const #cir.int<2> : !s64i
+    %elem = cir.get_element %0[%idx : !s64i] : !cir.ptr<!arr_type> -> !cir.ptr<!ptr_type>
+    %cast = cir.cast bitcast %elem : !cir.ptr<!ptr_type> -> !cir.ptr<!vec2i64>
+    %one = cir.const #cir.int<1> : !s64i
+    %vec = cir.vec.create(%one, %one : !s64i, !s64i) : !vec2i64
+    cir.store %vec, %cast : !vec2i64, !cir.ptr<!vec2i64>
+    // CHECK: llvm.store %{{.*}}, %{{.*}} {alignment = 16 : i64} : vector<2xi64>, !llvm.ptr
+    cir.return
+  }
+
+  // Vector store through get_element at index 1 (offset 8).
+  // Alignment = MinAlign(16, 8) = 8.
+  // CHECK-LABEL: llvm.func @vec_store_offset_8
+  cir.func @vec_store_offset_8() {
+    %0 = cir.alloca !arr_type, !cir.ptr<!arr_type>, ["arr"] {alignment = 16 : i64}
+    %idx = cir.const #cir.int<1> : !s64i
+    %elem = cir.get_element %0[%idx : !s64i] : !cir.ptr<!arr_type> -> !cir.ptr<!ptr_type>
+    %cast = cir.cast bitcast %elem : !cir.ptr<!ptr_type> -> !cir.ptr<!vec2i64>
+    %one = cir.const #cir.int<1> : !s64i
+    %vec = cir.vec.create(%one, %one : !s64i, !s64i) : !vec2i64
+    cir.store %vec, %cast : !vec2i64, !cir.ptr<!vec2i64>
+    // CHECK: llvm.store %{{.*}}, %{{.*}} {alignment = 8 : i64} : vector<2xi64>, !llvm.ptr
+    cir.return
+  }
+
+  // Vector load through ptr_stride at stride 3 (offset 24 from align-16).
+  // Alignment = MinAlign(16, 24) = 8.
+  // CHECK-LABEL: llvm.func @vec_load_stride_offset_24
+  cir.func @vec_load_stride_offset_24() -> !vec2i64 {
+    %0 = cir.alloca !arr_type, !cir.ptr<!arr_type>, ["arr"] {alignment = 16 : i64}
+    %base = cir.cast bitcast %0 : !cir.ptr<!arr_type> -> !cir.ptr<!ptr_type>
+    %stride = cir.const #cir.int<3> : !s64i
+    %ptr = cir.ptr_stride %base, %stride : (!cir.ptr<!ptr_type>, !s64i) -> !cir.ptr<!ptr_type>
+    %cast = cir.cast bitcast %ptr : !cir.ptr<!ptr_type> -> !cir.ptr<!vec2i64>
+    %vec = cir.load %cast : !cir.ptr<!vec2i64>, !vec2i64
+    // CHECK: llvm.load %{{.*}} {alignment = 8 : i64} : !llvm.ptr -> vector<2xi64>
+    cir.return %vec : !vec2i64
+  }
+}

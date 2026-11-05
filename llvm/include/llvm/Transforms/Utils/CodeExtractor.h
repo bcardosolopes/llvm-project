@@ -102,6 +102,15 @@ public:
     // If true, varargs functions can be extracted.
     bool AllowVarArgs;
 
+    // If true, blocks whose address is taken and blocks that reference a
+    // blockaddress may be extracted, provided every referenced block is itself
+    // part of the extraction set (a self-contained computed goto). The moved
+    // blockaddress constants are then remapped to the outlined function. Only
+    // sound when no control flow enters or leaves the region through those
+    // labels; the OpenMP outliner sets this because an OpenMP structured block
+    // cannot be branched into or out of.
+    bool AllowSelfContainedBlockAddress;
+
     // Bits of intermediate state computed at various phases of extraction.
     SetVector<BasicBlock *> Blocks;
 
@@ -157,7 +166,8 @@ public:
                   AssumptionCache *AC = nullptr, bool AllowVarArgs = false,
                   bool AllowAlloca = false,
                   BasicBlock *AllocationBlock = nullptr,
-                  std::string Suffix = "", bool ArgsInZeroAddressSpace = false);
+                  std::string Suffix = "", bool ArgsInZeroAddressSpace = false,
+                  bool AllowSelfContainedBlockAddress = false);
 
     /// Perform the extraction, returning the new function.
     ///

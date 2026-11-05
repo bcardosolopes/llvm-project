@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: #cir.global_view index 5 is out of bounds for union symbol @g
+// CHECK-NOT: Assertion `Index < Length && "Invalid index!"' failed.
+// CHECK-NOT: Stack dump:
+
+!u8i = !cir.int<u, 8>
+!u16i = !cir.int<u, 16>
+!rec_u = !cir.record<union "U" {!u8i, !u16i}>
+
+module {
+  cir.global external @p = #cir.global_view<@g, [5 : i32]> : !cir.ptr<!u8i>
+  cir.global external @g = #cir.zero : !rec_u
+}

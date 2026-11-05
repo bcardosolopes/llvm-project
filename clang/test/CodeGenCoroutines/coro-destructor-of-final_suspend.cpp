@@ -1,6 +1,8 @@
 // This addresses https://github.com/llvm/llvm-project/issues/57339
 // RUN: %clang_cc1 -triple %itanium_abi_triple -std=c++20 -fcxx-exceptions \
 // RUN:     -fexceptions -emit-llvm -o - %s -O1 | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple %itanium_abi_triple -std=c++20 -fcxx-exceptions \
+// RUN:     -fexceptions -fclangir -emit-llvm -o - %s -O1 | FileCheck %s --check-prefix=CIR %}
 
 #include "Inputs/coroutine.h"
 
@@ -88,3 +90,13 @@ gen no_throwing() {
 // CHECK: call{{.*}}_ZN3gen12promise_type13final_awaiterD1Ev(
 // CHECK: [[CORO_FREE]]:
 // CHECK: call{{.*}}_ZdlPv
+
+// CIR: define{{.*}}@_Z11no_throwingv.destroy({{.*}}%[[ARG:.+]])
+// CIR: %[[RESUME_FN_ADDR:.+]] = load ptr, ptr %[[ARG]]
+// CIR: %[[IF_NULL:.+]] = icmp eq ptr %[[RESUME_FN_ADDR]], null
+// CIR: br i1 %[[IF_NULL]], label %[[AFTERSUSPEND:.+]], label %[[CORO_FREE:.+]]
+// CIR: [[AFTERSUSPEND]]:
+// CIR: call{{.*}}_ZN3gen12promise_type13final_awaiterD1Ev(
+// CIR: [[CORO_FREE]]:
+// CIR-NOT: call{{.*}}@_Z13noexcept_callv
+// CIR: call{{.*}}_ZdlPv

@@ -2,14 +2,19 @@
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fsanitize-trap=cfi-icall -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=TRAP %s
 
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=ABORT %s
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-ABORT %s %}
 
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-recover=cfi-icall -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=RECOVER %s
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-recover=cfi-icall -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-RECOVER %s %}
 
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-minimal-runtime -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=ABORT_MIN %s
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-minimal-runtime -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-ABORT-MIN %s %}
 
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-recover=cfi-icall -fsanitize-minimal-runtime -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=RECOVER_MIN %s
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-recover=cfi-icall -fsanitize-minimal-runtime -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-RECOVER-MIN %s %}
 
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-recover=cfi-icall -fsanitize-minimal-runtime -fsanitize-handler-preserve-all-regs -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=PRESERVE_MIN %s
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-recover=cfi-icall -fsanitize-minimal-runtime -fsanitize-handler-preserve-all-regs -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-PRESERVE-MIN %s %}
 
 // RUN: %clang_cc1 -fsanitize=cfi-icall -fno-sanitize-trap=cfi-icall -fsanitize-minimal-runtime -fsanitize-handler-preserve-all-regs -flto -fvisibility=hidden -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=ABORT_MIN %s
 
@@ -224,3 +229,48 @@ void g(int b) {
 // PRESERVE_MIN: [[META10]] = !{}
 // PRESERVE_MIN: [[PROF11]] = !{!"branch_weights", i32 1048575, i32 1}
 //.
+
+// CIR-ABORT-LABEL: define hidden void @g(
+// CIR-ABORT: call i1 @llvm.type.test(ptr {{%.*}}, metadata !"_ZTSFvE"), !nosanitize [[NOSAN:![0-9]+]]
+// CIR-ABORT: call void @__ubsan_handle_cfi_check_fail_abort(ptr @anon.3d4044d65abdda407a92991f1300ec97.1, i64 {{%.*}}, i64 undef) #[[CALLATTR:[0-9]+]], !nosanitize [[NOSAN]]
+// CIR-ABORT: cont:
+// CIR-ABORT-NEXT: call void (...) {{%.*}}(){{$}}
+// CIR-ABORT: declare void @__ubsan_handle_cfi_check_fail_abort(ptr, i64, i64) #[[DECLATTR:[0-9]+]]
+// CIR-ABORT: attributes #[[DECLATTR]] = { noreturn nounwind uwtable }
+// CIR-ABORT: attributes #[[CALLATTR]] = { nomerge noreturn nounwind }
+
+// CIR-RECOVER-LABEL: define hidden void @g(
+// CIR-RECOVER: call i1 @llvm.type.test(ptr {{%.*}}, metadata !"_ZTSFvE"), !nosanitize [[NOSAN:![0-9]+]]
+// CIR-RECOVER: call void @__ubsan_handle_cfi_check_fail(ptr @anon.3d4044d65abdda407a92991f1300ec97.1, i64 {{%.*}}, i64 undef) #[[CALLATTR:[0-9]+]], !nosanitize [[NOSAN]]
+// CIR-RECOVER: cont:
+// CIR-RECOVER-NEXT: call void (...) {{%.*}}(){{$}}
+// CIR-RECOVER: declare void @__ubsan_handle_cfi_check_fail(ptr, i64, i64) #[[DECLATTR:[0-9]+]]
+// CIR-RECOVER: attributes #[[DECLATTR]] = { uwtable }
+// CIR-RECOVER: attributes #[[CALLATTR]] = { nomerge nounwind }
+
+// CIR-ABORT-MIN-LABEL: define hidden void @g(
+// CIR-ABORT-MIN: call i1 @llvm.type.test(ptr {{%.*}}, metadata !"_ZTSFvE"), !nosanitize [[NOSAN:![0-9]+]]
+// CIR-ABORT-MIN: call void @__ubsan_handle_cfi_check_fail_minimal_abort() #[[CALLATTR:[0-9]+]], !nosanitize [[NOSAN]]
+// CIR-ABORT-MIN: cont:
+// CIR-ABORT-MIN-NEXT: call void (...) {{%.*}}(){{$}}
+// CIR-ABORT-MIN: declare void @__ubsan_handle_cfi_check_fail_minimal_abort() #[[DECLATTR:[0-9]+]]
+// CIR-ABORT-MIN: attributes #[[DECLATTR]] = { noreturn nounwind uwtable }
+// CIR-ABORT-MIN: attributes #[[CALLATTR]] = { nomerge noreturn nounwind }
+
+// CIR-RECOVER-MIN-LABEL: define hidden void @g(
+// CIR-RECOVER-MIN: call i1 @llvm.type.test(ptr {{%.*}}, metadata !"_ZTSFvE"), !nosanitize [[NOSAN:![0-9]+]]
+// CIR-RECOVER-MIN: call void @__ubsan_handle_cfi_check_fail_minimal() #[[CALLATTR:[0-9]+]], !nosanitize [[NOSAN]]
+// CIR-RECOVER-MIN: cont:
+// CIR-RECOVER-MIN-NEXT: call void (...) {{%.*}}(){{$}}
+// CIR-RECOVER-MIN: declare void @__ubsan_handle_cfi_check_fail_minimal() #[[DECLATTR:[0-9]+]]
+// CIR-RECOVER-MIN: attributes #[[DECLATTR]] = { uwtable }
+// CIR-RECOVER-MIN: attributes #[[CALLATTR]] = { nomerge nounwind }
+
+// CIR-PRESERVE-MIN-LABEL: define hidden void @g(
+// CIR-PRESERVE-MIN: call i1 @llvm.type.test(ptr {{%.*}}, metadata !"_ZTSFvE"), !nosanitize [[NOSAN:![0-9]+]]
+// CIR-PRESERVE-MIN: call preserve_allcc void @__ubsan_handle_cfi_check_fail_minimal_preserve() #[[CALLATTR:[0-9]+]], !nosanitize [[NOSAN]]
+// CIR-PRESERVE-MIN: cont:
+// CIR-PRESERVE-MIN-NEXT: call void (...) {{%.*}}(){{$}}
+// CIR-PRESERVE-MIN: declare void @__ubsan_handle_cfi_check_fail_minimal_preserve() #[[DECLATTR:[0-9]+]]
+// CIR-PRESERVE-MIN: attributes #[[DECLATTR]] = { uwtable }
+// CIR-PRESERVE-MIN: attributes #[[CALLATTR]] = { nomerge nounwind }

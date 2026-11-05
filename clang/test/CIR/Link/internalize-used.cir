@@ -1,0 +1,68 @@
+// RUN: cir-link %s --internalize --warn-odr-divergence -o %t.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// --internalize must not internalize anything named by llvm.used, even with an
+// empty keep list.
+//
+// llvm.used is the claim that something outside anything the compiler or the
+// linker can see refers to the symbol -- a linker script, file-scope inline
+// asm, a dlsym by name, a JNI entry point the Java runtime looks up as a
+// string. Internalizing it satisfies the letter of the retention contract, in
+// that the symbol does survive DCE, and defeats its purpose: the name stops
+// being findable from outside, and the failure is a lookup returning null at
+// runtime in a library that built and linked clean.
+//
+// llvm.compiler.used gets no exemption, which is not an oversight. That list
+// promises only that llvm will not delete the symbol; the assembler and linker
+// may. This matches LLVM's -internalize exactly -- see Internalize.cpp, "We
+// must assume that globals in llvm.used have a reference that not even the
+// linker can see" -- and the asymmetry is worth keeping, because the
+// compiler-used list is the much larger of the two: on one real merged library
+// it has 134 entries against llvm.used's twelve.
+
+!s32i = !cir.int<s, 32>
+
+module attributes {
+  cir.llvm_used = [@used_fn, @used_data],
+  cir.llvm_compiler_used = [@compiler_used_fn, @compiler_used_data]
+} {
+  // In llvm.used and in no keep list: stays external anyway.
+  cir.func @used_fn() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.global external @used_data = #cir.int<2> : !s32i
+
+  // In llvm.compiler.used only: internalized, exactly as LLVM does it. The
+  // list still names them, so nothing deletes them before the linker decides.
+  cir.func @compiler_used_fn() -> !s32i {
+    %0 = cir.const #cir.int<3> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.global external @compiler_used_data = #cir.int<4> : !s32i
+
+  // In neither list: the ordinary case, internalized.
+  cir.func @plain_fn() -> !s32i {
+    %0 = cir.const #cir.int<5> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Three internalized: the two compiler-used symbols and the plain one. Not the
+// two in llvm.used.
+// STATS: 3 internalized
+
+// Both lists survive internalization unchanged. Dropping the compiler-used
+// entries once their symbols are internal would let the optimizer delete the
+// very symbols the list exists to hold, which is the LLVM behaviour this
+// mirrors: internalize the symbol, keep the list.
+// CHECK: cir.llvm_compiler_used = [@compiler_used_fn, @compiler_used_data]
+// CHECK-SAME: cir.llvm_used = [@used_fn, @used_data]
+
+// CHECK-DAG: cir.func @used_fn
+// CHECK-DAG: cir.global external @used_data
+
+// CHECK-DAG: cir.func internal private @compiler_used_fn
+// CHECK-DAG: cir.global "private" internal @compiler_used_data
+// CHECK-DAG: cir.func internal private @plain_fn

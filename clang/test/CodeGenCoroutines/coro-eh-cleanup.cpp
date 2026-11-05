@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -std=c++20 -triple=x86_64-pc-windows-msvc18.0.0 -emit-llvm %s -o - -fexceptions -fcxx-exceptions -disable-llvm-passes | FileCheck %s
 // RUN: %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -emit-llvm -o - %s -fexceptions -fcxx-exceptions -disable-llvm-passes | FileCheck --check-prefix=CHECK-LPAD %s
+// RUN: %if cir-support %{ %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -emit-llvm -o - %s -fexceptions -fcxx-exceptions -fclangir -disable-llvm-passes | FileCheck --check-prefix=CHECK-CIR-LPAD %s %}
 
 namespace std {
 template <typename R, typename... T> struct coroutine_traits {
@@ -84,3 +85,38 @@ coro_t f() {
 // CHECK-LPAD-NEXT:  %[[val1:.+]] = insertvalue { ptr, i32 } poison, ptr %[[exn]], 0
 // CHECK-LPAD-NEXT:  %[[val2:.+]] = insertvalue { ptr, i32 } %[[val1]], i32 %[[sel]], 1
 // CHECK-LPAD-NEXT:  resume { ptr, i32 } %[[val2]]
+
+// CHECK-CIR-LPAD: @_Z1fv(
+// CHECK-CIR-LPAD:   invoke void @_Z9may_throwv()
+// CHECK-CIR-LPAD:       to label %{{.+}} unwind label %[[EHCLEANUP:.+]]
+// CHECK-CIR-LPAD: [[EHCLEANUP]]:
+// CHECK-CIR-LPAD:   landingpad { ptr, i32 }
+// CHECK-CIR-LPAD:         cleanup
+// CHECK-CIR-LPAD:         catch ptr null
+// CHECK-CIR-LPAD:   call void @_ZN7CleanupD1Ev(
+// CHECK-CIR-LPAD:   call ptr @__cxa_begin_catch
+// CHECK-CIR-LPAD:   call void @_ZN6coro_t12promise_type19unhandled_exceptionEv
+// CHECK-CIR-LPAD:   invoke void @__cxa_end_catch()
+// CHECK-CIR-LPAD:           to label %{{.+}} unwind label %[[COROENDUNWIND:.+]]
+//
+// CHECK-CIR-LPAD: [[COROENDUNWIND]]:
+// CHECK-CIR-LPAD:   landingpad { ptr, i32 }
+// CHECK-CIR-LPAD:         cleanup
+// CHECK-CIR-LPAD:   call void @llvm.coro.end(ptr null, i1 true, token none)
+// CHECK-CIR-LPAD:   %[[INRAMP:.+]] = call i1 @llvm.coro.is_in_ramp()
+// CHECK-CIR-LPAD:   br i1 %[[INRAMP]], label %[[CLEANUPCONT:.+]], label %[[EHRESUME:.+]]
+//
+// CHECK-CIR-LPAD: [[CLEANUPCONT]]:
+// CHECK-CIR-LPAD:   call void @llvm.lifetime.end.p0(ptr
+// CHECK-CIR-LPAD:   %[[COROFREE:.+]] = call ptr @llvm.coro.free(token
+// CHECK-CIR-LPAD:   %[[HASFREE:.+]] = icmp ne ptr %[[COROFREE]], null
+// CHECK-CIR-LPAD:   br i1 %[[HASFREE]], label %[[CLEANUPDELETE:.+]], label %[[EHRESUME:.+]]
+//
+// CHECK-CIR-LPAD: [[EHRESUME]]:
+// CHECK-CIR-LPAD:   %[[LPADVAL:.+]] = phi { ptr, i32 } [ %{{.+}}, %[[CLEANUPCONT]] ], [ %{{.+}}, %[[CLEANUPDELETE]] ], [ %{{.+}}, %[[COROENDUNWIND]] ]
+// CHECK-CIR-LPAD:   resume { ptr, i32 } %[[LPADVAL]]
+//
+// CHECK-CIR-LPAD: [[CLEANUPDELETE]]:
+// CHECK-CIR-LPAD:   call i64 @llvm.coro.size.i64()
+// CHECK-CIR-LPAD:   call void @_ZdlPvm(ptr noundef
+// CHECK-CIR-LPAD:   br label %[[EHRESUME]]

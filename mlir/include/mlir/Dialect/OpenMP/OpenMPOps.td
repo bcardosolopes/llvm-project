@@ -195,6 +195,7 @@ def ParallelOp : OpenMP_Op<"parallel", traits = [
     RecursiveMemoryEffects
   ], clauses = [
     OpenMP_AllocateClause, OpenMP_IfClause, OpenMP_NumThreadsClause,
+    OpenMP_SeverityClause, OpenMP_MessageClause,
     OpenMP_PrivateClause, OpenMP_ProcBindClause, OpenMP_ReductionClause
   ], singleRegion = true> {
   let summary = "parallel construct";
@@ -1638,7 +1639,8 @@ def OrderedRegionOp : OpenMP_Op<"ordered.region", clauses = [
 // 2.17.5 taskwait Construct
 //===----------------------------------------------------------------------===//
 
-def TaskwaitOp : OpenMP_Op<"taskwait", clauses = [
+def TaskwaitOp : OpenMP_Op<"taskwait", traits = [AttrSizedOperandSegments],
+                          clauses = [
     OpenMP_DependClause, OpenMP_NowaitClause
   ]> {
   let summary = "taskwait construct";
@@ -1650,6 +1652,8 @@ def TaskwaitOp : OpenMP_Op<"taskwait", clauses = [
   let builders = [
     OpBuilder<(ins CArg<"const TaskwaitOperands &">:$clauses)>
   ];
+
+  let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//

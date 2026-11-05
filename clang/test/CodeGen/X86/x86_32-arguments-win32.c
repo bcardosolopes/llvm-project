@@ -1,7 +1,8 @@
 // RUN: %clang_cc1 -fms-extensions -w -triple i386-pc-win32 -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -fms-extensions -w -triple i386-pc-win32 -emit-llvm -fclangir -o - %s | FileCheck %s %}
 
 // CHECK-LABEL: define dso_local i64 @f1_1()
-// CHECK-LABEL: define dso_local void @f1_2(i32 %a0.0, i32 %a0.1)
+// CHECK-LABEL: define dso_local void @f1_2(i32 %{{[^,]+}}, i32 %{{[^)]+}})
 struct s1 {
   int a;
   int b;
@@ -31,7 +32,7 @@ struct s4 {
 struct s4 f4_1(void) { while (1) {} }
 
 // CHECK-LABEL: define dso_local i64 @f5_1()
-// CHECK-LABEL: define dso_local void @f5_2(double %a0.0)
+// CHECK-LABEL: define dso_local void @f5_2(double %{{[^)]+}})
 struct s5 {
   double a;
 };
@@ -39,7 +40,7 @@ struct s5 f5_1(void) { while (1) {} }
 void f5_2(struct s5 a0) {}
 
 // CHECK-LABEL: define dso_local i32 @f6_1()
-// CHECK-LABEL: define dso_local void @f6_2(float %a0.0)
+// CHECK-LABEL: define dso_local void @f6_2(float %{{[^)]+}})
 struct s6 {
   float a;
 };
@@ -72,9 +73,9 @@ void receive_vec_512(__m512 x, __m512 y, __m512 z, __m512 w, __m512 q) {
 void receive_vec_1024(__m1024 x, __m1024 y, __m1024 z, __m1024 w, __m1024 q) {
   gv1024 = x + y + z + w + q;
 }
-// CHECK-LABEL: define dso_local void @receive_vec_128(<4 x float> inreg noundef %x, <4 x float> inreg noundef %y, <4 x float> inreg noundef %z, ptr dead_on_return noundef %0, ptr dead_on_return noundef %1)
-// CHECK-LABEL: define dso_local void @receive_vec_256(<8 x float> inreg noundef %x, <8 x float> inreg noundef %y, <8 x float> inreg noundef %z, ptr dead_on_return noundef %0, ptr dead_on_return noundef %1)
-// CHECK-LABEL: define dso_local void @receive_vec_512(<16 x float> inreg noundef %x, <16 x float> inreg noundef %y, <16 x float> inreg noundef %z, ptr dead_on_return noundef %0, ptr dead_on_return noundef %1)
+// CHECK-LABEL: define dso_local void @receive_vec_128(<4 x float> inreg noundef %{{[^,]+}}, <4 x float> inreg noundef %{{[^,]+}}, <4 x float> inreg noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^)]+}})
+// CHECK-LABEL: define dso_local void @receive_vec_256(<8 x float> inreg noundef %{{[^,]+}}, <8 x float> inreg noundef %{{[^,]+}}, <8 x float> inreg noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^)]+}})
+// CHECK-LABEL: define dso_local void @receive_vec_512(<16 x float> inreg noundef %{{[^,]+}}, <16 x float> inreg noundef %{{[^,]+}}, <16 x float> inreg noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^)]+}})
 // CHECK-LABEL: define dso_local void @receive_vec_1024(ptr dead_on_return noundef %0, ptr dead_on_return noundef %1, ptr dead_on_return noundef %2, ptr dead_on_return noundef %3, ptr dead_on_return noundef %4)
 
 void pass_vec_128(void) {
@@ -89,7 +90,7 @@ void pass_vec_128(void) {
 void __fastcall fastcall_indirect_vec(__m128 x, __m128 y, __m128 z, __m128 w, int edx, __m128 q) {
   gv128 = x + y + z + w + q;
 }
-// CHECK-LABEL: define dso_local x86_fastcallcc void @"\01@fastcall_indirect_vec@84"(<4 x float> inreg noundef %x, <4 x float> inreg noundef %y, <4 x float> inreg noundef %z, ptr dead_on_return inreg noundef %0, i32 inreg noundef %edx, ptr dead_on_return noundef %1)
+// CHECK-LABEL: define dso_local x86_fastcallcc void @"\01@fastcall_indirect_vec@84"(<4 x float> inreg noundef %{{[^,]+}}, <4 x float> inreg noundef %{{[^,]+}}, <4 x float> inreg noundef %{{[^,]+}}, ptr dead_on_return inreg noundef %{{[^,]+}}, i32 inreg noundef %{{[^,]+}}, ptr dead_on_return noundef %{{[^)]+}})
 
 struct __declspec(align(1)) Align1 { unsigned long long x; };
 struct __declspec(align(4)) Align4 { unsigned long long x; };

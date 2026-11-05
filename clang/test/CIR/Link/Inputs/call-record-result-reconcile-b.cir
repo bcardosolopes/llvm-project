@@ -1,0 +1,15 @@
+// Second input for ../call-record-result-reconcile.cir. Not a test on its own.
+//
+// Defines the callee returning its own spelling of the record: same body,
+// different name.
+
+!s64i = !cir.int<s, 64>
+!rec_impl = !cir.record<struct "impl::T" {!cir.ptr<!cir.void>, !s64i, !s64i, !s64i}>
+
+module {
+  cir.func @make() -> !rec_impl {
+    %0 = cir.alloca !rec_impl, !cir.ptr<!rec_impl>, ["__retval"] {alignment = 8 : i64}
+    %1 = cir.load %0 : !cir.ptr<!rec_impl>, !rec_impl
+    cir.return %1 : !rec_impl
+  }
+}

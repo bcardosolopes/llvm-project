@@ -4,6 +4,10 @@
 // RUN: %clang_cc1 %s       -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -emit-llvm -o- | FileCheck --check-prefixes=CHECK,ZERO %s
 // RUN: %clang_cc1 -xc++ %s -fptrauth-function-pointer-type-discrimination -triple arm64-apple-ios13 -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -emit-llvm -o- | FileCheck --check-prefixes=CHECK,TYPE,CHECK-CXX %s
 // RUN: %clang_cc1 -xc++ %s -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -emit-llvm -o- | FileCheck --check-prefixes=CHECK,TYPE,CHECK-CXX %s
+// RUN: %if cir-support %{ %clang_cc1 %s       -fptrauth-function-pointer-type-discrimination -triple arm64-apple-ios13 -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm -o- | FileCheck --check-prefix=CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 %s       -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm -o- | FileCheck --check-prefix=CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 -xc++ %s -fptrauth-function-pointer-type-discrimination -triple arm64-apple-ios13 -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm -o- | FileCheck --check-prefixes=CIR,CIR-CXX %s %}
+// RUN: %if cir-support %{ %clang_cc1 -xc++ %s -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm -o- | FileCheck --check-prefixes=CIR,CIR-CXX %s %}
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,7 +18,26 @@ void (* __ptrauth(0, 0, 42) f2ptr_42_discm)(int);
 void f(int);
 void (* const __ptrauth(0, 0, 42) f_const_ptr)(int) = &f;
 
+// CIR-CXX-LABEL: define {{.*}}internal void @__cxx_global_var_init()
+// CIR-CXX: [[CALL:%.*]] = call ptr @get_fptr()
+// CIR-CXX: [[CMP:%.*]] = icmp ne ptr [[CALL]], null
+// CIR-CXX: [[TOINT:%.*]] = ptrtoint ptr [[CALL]] to i64
+// CIR-CXX: call i64 @llvm.ptrauth.resign(i64 [[TOINT]], i32 0, i64 2712, i32 0, i64 42)
+// CIR-CXX: [[PHI:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+// CIR-CXX: store ptr [[PHI]], ptr @f_const_ptr2, align 8
+
+// CIR-CXX-LABEL: define {{.*}}internal void @__cxx_global_var_init.1()
+// CIR-CXX: [[LOAD:%.*]] = load ptr, ptr @f_const_ptr2, align 8
+// CIR-CXX: [[BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 ptrtoint (ptr @_ZGR5f_ref_ to i64), i64 43)
+// CIR-CXX: [[CMP:%.*]] = icmp ne ptr [[LOAD]], null
+// CIR-CXX: [[TOINT:%.*]] = ptrtoint ptr [[LOAD]] to i64
+// CIR-CXX: call i64 @llvm.ptrauth.resign(i64 [[TOINT]], i32 0, i64 42, i32 0, i64 [[BLEND]])
+// CIR-CXX: [[PHI:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+// CIR-CXX: store ptr [[PHI]], ptr @_ZGR5f_ref_, align 8
+// CIR-CXX: store ptr @_ZGR5f_ref_, ptr @f_ref, align 8
+
 // CHECK-LABEL: define {{.*}}void @test_assign_to_qualified
+// CIR-LABEL: define {{.*}}void @test_assign_to_qualified
 void test_assign_to_qualified() {
   f2ptr_42_discm = (void (*)(int))fptr;
 
@@ -47,9 +70,20 @@ void test_assign_to_qualified() {
   // TYPE-NEXT: [[FPTR10:%.*]] = phi ptr [ null, %[[JOIN1]] ], [ [[FPTR9]], %[[RESIGN2]] ]
   // ZERO-NEXT: [[FPTR10:%.*]] = phi ptr [ null, %[[ENTRY]] ], [ [[FPTR9]], %[[RESIGN2]] ]
   // CHECK-NEXT store void (i32)* [[FPTR10]], void (i32)** @f2ptr_42_discm
+  // CIR: [[FPTR:%.*]] = load ptr, ptr @fptr
+  // CIR: [[CMP1:%.*]] = icmp ne ptr [[FPTR]], null
+  // CIR: [[TOINT1:%.*]] = ptrtoint ptr [[FPTR]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT1]], i32 0, i64 18983, i32 0, i64 2712)
+  // CIR: [[PHI1:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+  // CIR: [[CMP2:%.*]] = icmp ne ptr [[PHI1]], null
+  // CIR: [[TOINT2:%.*]] = ptrtoint ptr [[PHI1]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT2]], i32 0, i64 2712, i32 0, i64 42)
+  // CIR: [[PHI2:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+  // CIR: store ptr [[PHI2]], ptr @f2ptr_42_discm, align 8
 }
 
 // CHECK-LABEL: define {{.*}}void @test_assign_from_qualified
+// CIR-LABEL: define {{.*}}void @test_assign_from_qualified
 void test_assign_from_qualified() {
   fptr = (void (*)(void))f2ptr_42_discm;
 
@@ -82,14 +116,26 @@ void test_assign_from_qualified() {
   // TYPE-NEXT: [[FPTR9:%.*]] = phi ptr [ null, %[[JOIN1]] ], [ [[FPTR8]], %[[RESIGN2]] ]
   // ZERO-NEXT: [[FPTR9:%.*]] = phi ptr [ null, %[[ENTRY]] ], [ [[FPTR8]], %[[RESIGN2]] ]
   // CHECK-NEXT store void ()* [[FPTR10]], void ()** @f2ptr_42_discm
+  // CIR: [[FPTR:%.*]] = load ptr, ptr @f2ptr_42_discm
+  // CIR: [[CMP1:%.*]] = icmp ne ptr [[FPTR]], null
+  // CIR: [[TOINT1:%.*]] = ptrtoint ptr [[FPTR]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT1]], i32 0, i64 42, i32 0, i64 2712)
+  // CIR: [[PHI1:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+  // CIR: [[CMP2:%.*]] = icmp ne ptr [[PHI1]], null
+  // CIR: [[TOINT2:%.*]] = ptrtoint ptr [[PHI1]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT2]], i32 0, i64 2712, i32 0, i64 18983)
+  // CIR: [[PHI2:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+  // CIR: store ptr [[PHI2]], ptr @fptr, align 8
 }
 
 // CHECK-LABEL: define {{.*}}void @test_const_ptr_function_call()
+// CIR-LABEL: define {{.*}}void @test_const_ptr_function_call()
 void test_const_ptr_function_call(void) {
   f_const_ptr(1);
 
   // TYPE: call void ptrauth (ptr @f, i32 0, i64 2712)(i32 noundef 1) [ "ptrauth"(i32 0, i64 2712) ]
   // ZERO: call void ptrauth (ptr @f, i32 0)(i32 noundef 1) [ "ptrauth"(i32 0, i64 0) ]
+  // CIR: call void ptrauth (ptr @f, i32 0, i64 2712)(i32 noundef 1) [ "ptrauth"(i32 0, i64 2712) ]
 }
 
 #ifdef __cplusplus
@@ -132,6 +178,7 @@ void (* const __ptrauth(0, 1, 43) &f_ref)(int) = f_const_ptr2;
 // CHECK-CXX: store ptr @_ZGR5f_ref_, ptr @f_ref, align 8
 
 // CHECK-CXX-LABEL: define {{.*}}void @test_const_ptr_ref_function_call()
+// CIR-CXX-LABEL: define {{.*}}void @test_const_ptr_ref_function_call()
 void test_const_ptr_ref_function_call(void) {
   f_ref(1);
 
@@ -140,6 +187,11 @@ void test_const_ptr_ref_function_call(void) {
   // CHECK-CXX: %[[V2:.*]] = ptrtoint ptr %[[V0]] to i64
   // CHECK-CXX: %[[V3:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V2]], i64 43)
   // CHECK-CXX: call void %[[V1]](i32 noundef 1) [ "ptrauth"(i32 0, i64 %[[V3]]) ]
+  // CIR-CXX: [[REF:%.*]] = load ptr, ptr @f_ref, align 8
+  // CIR-CXX: [[PTR:%.*]] = load ptr, ptr [[REF]], align 8
+  // CIR-CXX: [[REFINT:%.*]] = ptrtoint ptr [[REF]] to i64
+  // CIR-CXX: [[BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[REFINT]], i64 43)
+  // CIR-CXX: call void [[PTR]](i32 noundef 1) [ "ptrauth"(i32 0, i64 [[BLEND]]) ]
 }
 }
 #endif

@@ -56,6 +56,47 @@ void test_mm_sfence(void) {
   // OGCG: call void @llvm.x86.sse.sfence()
 }
 
+void test_mm_prefetch(char const* p) {
+  // CIR-LABEL: test_mm_prefetch
+  // LLVM-LABEL: test_mm_prefetch
+  // OGCG-LABEL: test_mm_prefetch
+  _mm_prefetch(p, 0);
+  // CIR: cir.prefetch read locality(0) %{{.*}} : !cir.ptr<!void>
+  // LLVM: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 0, i32 1)
+  // OGCG: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 0, i32 1)
+}
+
+void test_mm_prefetch_hint_imm8_mask(char const *p) {
+  // CIR-LABEL: test_mm_prefetch_hint_imm8_mask
+  // LLVM-LABEL: test_mm_prefetch_hint_imm8_mask
+  // OGCG-LABEL: test_mm_prefetch_hint_imm8_mask
+  _mm_prefetch(p, 8);
+  // Immediate 8 must be masked to low 3 bits by ICE folding.
+  // CIR: cir.prefetch read locality(0) %{{.*}} : !cir.ptr<!void>
+  // LLVM: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 0, i32 1)
+  // OGCG: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 0, i32 1)
+}
+
+void test_mm_prefetch_local(char const* p) {
+  // CIR-LABEL: test_mm_prefetch_local
+  // LLVM-LABEL: test_mm_prefetch_local
+  // OGCG-LABEL: test_mm_prefetch_local
+  _mm_prefetch(p, 3);
+  // CIR: cir.prefetch read locality(3) %{{.*}} : !cir.ptr<!void>
+  // LLVM: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 3, i32 1)
+  // OGCG: call void @llvm.prefetch.p0(ptr {{.*}}, i32 0, i32 3, i32 1)
+}
+
+void test_mm_prefetch_write(char const* p) {
+  // CIR-LABEL: test_mm_prefetch_write
+  // LLVM-LABEL: test_mm_prefetch_write
+  // OGCG-LABEL: test_mm_prefetch_write
+  _mm_prefetch(p, 7);
+  // CIR: cir.prefetch write locality(3) %{{.*}} : !cir.ptr<!void>
+  // LLVM: call void @llvm.prefetch.p0(ptr {{.*}}, i32 1, i32 3, i32 1)
+  // OGCG: call void @llvm.prefetch.p0(ptr {{.*}}, i32 1, i32 3, i32 1)
+}
+
 __m128 test_mm_undefined_ps(void) {
   // CIR-LABEL: _mm_undefined_ps
   // CIR: %[[A:.*]] = cir.const #cir.zero : !cir.vector<2 x !cir.double>
@@ -63,9 +104,7 @@ __m128 test_mm_undefined_ps(void) {
   // CIR: cir.return %{{.*}} : !cir.vector<4 x !cir.float>
 
   // LLVM-LABEL: test_mm_undefined_ps
-  // LLVM: store <4 x float> zeroinitializer, ptr %[[A:.*]], align 16
-  // LLVM: %{{.*}} = load <4 x float>, ptr %[[A]], align 16
-  // LLVM: ret <4 x float> %{{.*}}
+  // LLVM: ret <4 x float> zeroinitializer
 
   // OGCG-LABEL: test_mm_undefined_ps
   // OGCG: ret <4 x float> zeroinitializer

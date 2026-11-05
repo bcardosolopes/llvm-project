@@ -21,6 +21,8 @@
 #include "llvm/ADT/Bitfields.h"
 #include "llvm/ADT/PointerIntPair.h"
 
+#include <atomic>
+
 namespace mlir {
 namespace LLVM {
 namespace detail {
@@ -35,6 +37,9 @@ namespace detail {
 /// - a bit indicating whether a struct is literal or identified;
 /// - for identified structs, in addition to the bit:
 ///   - a string identifier;
+///   - a bit indicating whether the struct is frozen;
+///   - for frozen structs only: the opaque bit, the packed bit and the list of
+///     contained types;
 /// - for literal structs, in addition to the bit:
 ///   - a list of contained types;
 ///   - a bit indicating whether the literal struct is packed.
@@ -46,6 +51,11 @@ namespace detail {
 ///   - a bit indicating whether the identified struct has been initialized.
 /// Uninitialized structs are considered opaque by the user, and can be mutated.
 /// Initialized and still opaque structs cannot be mutated.
+///
+/// Frozen identified structs are created fully initialized and never change.
+/// Two frozen structs with the same name but a different body or packedness
+/// are different types. A frozen struct is never equal to a non-frozen struct
+/// with the same name.
 ///
 /// The struct storage consists of:
 ///   - immutable part:
@@ -68,19 +78,29 @@ public:
   /// construction.
   class Key {
   public:
+    struct FrozenTag {};
+
     /// Constructs a key for an identified struct.
     Key(StringRef name, bool opaque, ArrayRef<Type> types = {})
         : types(types), name(name), identified(true), packed(false),
-          opaque(opaque) {}
+          opaque(opaque), frozen(false) {}
+    /// Constructs a key for a frozen identified struct.
+    Key(FrozenTag, StringRef name, bool opaque, ArrayRef<Type> types,
+        bool packed)
+        : types(types), name(name), identified(true), packed(packed),
+          opaque(opaque), frozen(true) {}
     /// Constructs a key for a literal struct.
     Key(ArrayRef<Type> types, bool packed)
-        : types(types), identified(false), packed(packed), opaque(false) {}
+        : types(types), identified(false), packed(packed), opaque(false),
+          frozen(false) {}
 
     /// Checks a specific property of the struct.
     bool isIdentified() const { return identified; }
+    bool isFrozen() const { return frozen; }
     bool isPacked() const {
-      assert(!isIdentified() &&
-             "'packed' bit is not part of the key for identified structs");
+      assert((!isIdentified() || isFrozen()) &&
+             "'packed' bit is not part of the key for non-frozen identified "
+             "structs");
       return packed;
     }
     bool isOpaque() const {
@@ -111,17 +131,25 @@ public:
     }
 
     /// Returns the hash value of the key. This combines various flags into a
-    /// single value: the identified flag sets the first bit, and the packedness
-    /// flag sets the second bit. Opacity bit is only used for construction and
-    /// does not participate in uniquing.
+    /// single value: the identified flag sets the first bit, the packedness
+    /// flag sets the second bit, and the frozen flag sets the third bit. For
+    /// non-frozen identified structs, the opacity bit is only used for
+    /// construction and does not participate in uniquing.
     llvm::hash_code hashValue() const {
       constexpr static unsigned kIdentifiedHashFlag = 1;
       constexpr static unsigned kPackedHashFlag = 2;
+      constexpr static unsigned kFrozenHashFlag = 4;
 
       unsigned flags = 0;
       if (isIdentified()) {
         flags |= kIdentifiedHashFlag;
-        return llvm::hash_combine(flags, getIdentifier());
+        if (!isFrozen())
+          return llvm::hash_combine(flags, getIdentifier());
+        flags |= kFrozenHashFlag;
+        if (isPacked())
+          flags |= kPackedHashFlag;
+        return llvm::hash_combine(flags, getIdentifier(), isOpaque(),
+                                  getIdentifiedStructBody());
       }
       if (isPacked())
         flags |= kPackedHashFlag;
@@ -130,8 +158,15 @@ public:
 
     /// Compares two keys.
     bool operator==(const Key &other) const {
-      if (isIdentified())
-        return other.isIdentified() && other.getIdentifier() == getIdentifier();
+      if (isIdentified()) {
+        if (!other.isIdentified() || other.isFrozen() != isFrozen() ||
+            other.getIdentifier() != getIdentifier())
+          return false;
+        return !isFrozen() ||
+               (other.isOpaque() == isOpaque() &&
+                other.isPacked() == isPacked() &&
+                other.getIdentifiedStructBody() == getIdentifiedStructBody());
+      }
 
       return !other.isIdentified() && other.isPacked() == isPacked() &&
              other.getTypeList() == getTypeList();
@@ -139,6 +174,9 @@ public:
 
     /// Copies dynamically-sized components of the key into the given allocator.
     Key copyIntoAllocator(TypeStorageAllocator &allocator) const {
+      if (isIdentified() && isFrozen())
+        return Key(FrozenTag{}, allocator.copyInto(name), opaque,
+                   allocator.copyInto(types), packed);
       if (isIdentified())
         return Key(allocator.copyInto(name), opaque);
       return Key(allocator.copyInto(types), packed);
@@ -150,6 +188,7 @@ public:
     bool identified;
     bool packed;
     bool opaque;
+    bool frozen;
   };
   using KeyTy = Key;
 
@@ -171,7 +210,11 @@ public:
     // If this triggers, use getTypeList() instead.
     assert(isIdentified() &&
            "requested struct body on a non-identified struct");
-    return ArrayRef<Type>(identifiedBodyArray, identifiedBodySize());
+    unsigned word = loadMutableWord();
+    if (!llvm::Bitfield::get<MutableFlagInitialized>(word))
+      return {};
+    return ArrayRef<Type>(identifiedBodyArray,
+                          llvm::Bitfield::get<MutableSize>(word));
   }
 
   /// Checks whether the struct is identified.
@@ -179,25 +222,29 @@ public:
     return llvm::Bitfield::get<KeyFlagIdentified>(keySizeAndFlags);
   }
 
+  /// Checks whether the struct is a frozen identified struct.
+  bool isFrozen() const {
+    return llvm::Bitfield::get<KeyFlagFrozen>(keySizeAndFlags);
+  }
+
   /// Checks whether the struct is packed (both literal and identified structs).
   bool isPacked() const {
-    return isIdentified() ? llvm::Bitfield::get<MutableFlagPacked>(
-                                identifiedBodySizeAndFlags)
-                          : llvm::Bitfield::get<KeyFlagPacked>(keySizeAndFlags);
+    return isIdentified()
+               ? llvm::Bitfield::get<MutableFlagPacked>(loadMutableWord())
+               : llvm::Bitfield::get<KeyFlagPacked>(keySizeAndFlags);
   }
 
   /// Checks whether a struct is marked as intentionally opaque (an
   /// uninitialized struct is also considered opaque by the user, call
   /// isInitialized to check that).
   bool isOpaque() const {
-    return llvm::Bitfield::get<MutableFlagOpaque>(identifiedBodySizeAndFlags);
+    return llvm::Bitfield::get<MutableFlagOpaque>(loadMutableWord());
   }
 
   /// Checks whether an identified struct has been explicitly initialized either
   /// by setting its body or by marking it as intentionally opaque.
   bool isInitialized() const {
-    return llvm::Bitfield::get<MutableFlagInitialized>(
-        identifiedBodySizeAndFlags);
+    return llvm::Bitfield::get<MutableFlagInitialized>(loadMutableWord());
   }
 
   /// Constructs the storage from the given key. This sets up the uniquing key
@@ -218,16 +265,39 @@ public:
     setKeySize(name.size());
     llvm::Bitfield::set<KeyFlagIdentified>(keySizeAndFlags, true);
 
-    // If the struct is being constructed directly as opaque, mark it as
-    // initialized.
-    llvm::Bitfield::set<MutableFlagInitialized>(identifiedBodySizeAndFlags,
-                                                key.isOpaque());
-    llvm::Bitfield::set<MutableFlagOpaque>(identifiedBodySizeAndFlags,
-                                           key.isOpaque());
+    unsigned word = 0;
+    if (key.isFrozen()) {
+      llvm::Bitfield::set<KeyFlagFrozen>(keySizeAndFlags, true);
+      ArrayRef<Type> body = key.getIdentifiedStructBody();
+      identifiedBodyArray = body.data();
+      llvm::Bitfield::set<MutableSize>(word, body.size());
+      llvm::Bitfield::set<MutableFlagPacked>(word, key.isPacked());
+      llvm::Bitfield::set<MutableFlagOpaque>(word, key.isOpaque());
+      llvm::Bitfield::set<MutableFlagInitialized>(word, true);
+    } else {
+      // If the struct is being constructed directly as opaque, mark it as
+      // initialized.
+      llvm::Bitfield::set<MutableFlagInitialized>(word, key.isOpaque());
+      llvm::Bitfield::set<MutableFlagOpaque>(word, key.isOpaque());
+    }
+    identifiedBodySizeAndFlags.store(word, std::memory_order_relaxed);
   }
 
-  /// Hook into the type uniquing infrastructure.
-  bool operator==(const KeyTy &other) const { return getAsKey() == other; };
+  /// Hook into the type uniquing infrastructure. Lookups may run on other
+  /// threads while `mutate` runs without a common lock, so this must only read
+  /// fields that are fixed at construction. For non-frozen identified structs
+  /// that is only the name.
+  bool operator==(const KeyTy &other) const {
+    if (!isIdentified())
+      return !other.isIdentified() && other.isPacked() == isPacked() &&
+             other.getTypeList() == getTypeList();
+    if (!other.isIdentified() || other.isFrozen() != isFrozen() ||
+        other.getIdentifier() != getIdentifier())
+      return false;
+    return !isFrozen() ||
+           (other.isOpaque() == isOpaque() && other.isPacked() == isPacked() &&
+            other.getIdentifiedStructBody() == getIdentifiedStructBody());
+  }
   static llvm::hash_code hashKey(const KeyTy &key) { return key.hashValue(); }
   static LLVMStructTypeStorage *construct(TypeStorageAllocator &allocator,
                                           const KeyTy &key) {
@@ -247,19 +317,24 @@ public:
       return success(!isOpaque() && body == getIdentifiedStructBody() &&
                      packed == isPacked());
 
-    llvm::Bitfield::set<MutableFlagInitialized>(identifiedBodySizeAndFlags,
-                                                true);
-    llvm::Bitfield::set<MutableFlagPacked>(identifiedBodySizeAndFlags, packed);
-
+    // Readers take no lock. Write the body before the release store that sets
+    // the initialized bit, so a reader that sees the bit also sees the body.
     ArrayRef<Type> typesInAllocator = allocator.copyInto(body);
     identifiedBodyArray = typesInAllocator.data();
-    setIdentifiedBodySize(typesInAllocator.size());
+    unsigned word = loadMutableWord();
+    llvm::Bitfield::set<MutableSize>(word, typesInAllocator.size());
+    llvm::Bitfield::set<MutableFlagPacked>(word, packed);
+    llvm::Bitfield::set<MutableFlagInitialized>(word, true);
+    identifiedBodySizeAndFlags.store(word, std::memory_order_release);
 
     return success();
   }
 
   /// Returns the key for the current storage.
   Key getAsKey() const {
+    if (isIdentified() && isFrozen())
+      return Key(Key::FrozenTag{}, getIdentifier(), isOpaque(),
+                 getIdentifiedStructBody(), isPacked());
     if (isIdentified())
       return Key(getIdentifier(), isOpaque(), getIdentifiedStructBody());
     return Key(getTypeList(), isPacked());
@@ -276,25 +351,23 @@ private:
     llvm::Bitfield::set<KeySize>(keySizeAndFlags, value);
   }
 
-  /// Returns the number of types contained in an identified struct.
-  unsigned identifiedBodySize() const {
-    return llvm::Bitfield::get<MutableSize>(identifiedBodySizeAndFlags);
-  }
-  /// Sets the number of types contained in an identified struct.
-  void setIdentifiedBodySize(unsigned value) {
-    llvm::Bitfield::set<MutableSize>(identifiedBodySizeAndFlags, value);
+  /// Returns the word that holds the mutable component of identified structs.
+  unsigned loadMutableWord() const {
+    return identifiedBodySizeAndFlags.load(std::memory_order_acquire);
   }
 
   /// Bitfield elements for `keyAndSizeFlags`:
   ///   - bit 0: identified key flag;
   ///   - bit 1: packed key flag;
-  ///   - bits 2..bitwidth(unsigned): size of the key.
+  ///   - bit 2: frozen key flag;
+  ///   - bits 3..bitwidth(unsigned): size of the key.
   using KeyFlagIdentified =
       llvm::Bitfield::Element<bool, /*Offset=*/0, /*Size=*/1>;
   using KeyFlagPacked = llvm::Bitfield::Element<bool, /*Offset=*/1, /*Size=*/1>;
+  using KeyFlagFrozen = llvm::Bitfield::Element<bool, /*Offset=*/2, /*Size=*/1>;
   using KeySize =
-      llvm::Bitfield::Element<unsigned, /*Offset=*/2,
-                              std::numeric_limits<unsigned>::digits - 2>;
+      llvm::Bitfield::Element<unsigned, /*Offset=*/3,
+                              std::numeric_limits<unsigned>::digits - 3>;
 
   /// Bitfield elements for `identifiedBodySizeAndFlags`:
   ///   - bit 0: opaque flag;
@@ -316,7 +389,8 @@ private:
   // address alignment.
   const void *keyPtr = nullptr;
 
-  /// Pointer to the first type contained in an identified struct.
+  /// Pointer to the first type contained in an identified struct. Only valid
+  /// once the initialized bit is set.
   const Type *identifiedBodyArray = nullptr;
 
   /// Size of the uniquing key combined with identified/literal and
@@ -325,7 +399,7 @@ private:
 
   /// Number of the types contained in an identified struct combined with
   /// mutable flags. Must only be used through the Mutable* bitfields.
-  unsigned identifiedBodySizeAndFlags = 0;
+  std::atomic<unsigned> identifiedBodySizeAndFlags = 0;
 };
 } // end namespace detail
 } // end namespace LLVM
@@ -344,6 +418,11 @@ struct AttrTypeSubElementHandler<LLVM::detail::LLVMStructTypeStorage::Key> {
   replace(const LLVM::detail::LLVMStructTypeStorage::Key &param,
           AttrSubElementReplacements &attrRepls,
           TypeSubElementReplacements &typeRepls) {
+    using Key = LLVM::detail::LLVMStructTypeStorage::Key;
+    if (param.isIdentified() && param.isFrozen())
+      return Key(Key::FrozenTag{}, param.getIdentifier(), param.isOpaque(),
+                 typeRepls.take_front(param.getIdentifiedStructBody().size()),
+                 param.isPacked());
     // TODO: It's not clear how we support replacing sub-elements of mutable
     // types.
     if (param.isIdentified())

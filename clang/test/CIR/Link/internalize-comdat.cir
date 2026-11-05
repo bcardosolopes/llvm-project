@@ -1,0 +1,50 @@
+// RUN: cir-link %s --internalize --keep=main -o %t.cir
+// RUN: cir-opt %t.cir | FileCheck %s --implicit-check-not=comdat
+
+// Internalizing has to take the comdat with it.
+//
+// A comdat in CIR is a UnitAttr -- "this symbol is its own comdat group" --
+// and it lowers to an ELF section group whose signature is the symbol's name.
+// Once the symbol is internal that group has nothing left to deduplicate,
+// because nothing outside can reference the symbol. Worse, it is a liability:
+// any other object in the final link carrying a group with the same signature
+// wins, and ours is discarded along with the section holding the body. The
+// link then fails with
+//
+//   `.text.inline_fn' referenced in section `.text' of x.o:
+//   defined in discarded section `.text.inline_fn[inline_fn]' of x.o
+//
+// Reproduced end to end before the fix, against a hand-written object whose
+// only content was `$inline_fn = comdat any`. A link error rather than a
+// miscompile, but triggered by an *unrelated* object happening to pick the
+// same name -- which is exactly the mixed CIR/LLVM-path container this is
+// meant to support, and not something the CIR side can predict or avoid.
+//
+// The symbol keeps its body and its new internal linkage; only the group
+// goes.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func comdat linkonce_odr @inline_fn() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.global linkonce_odr comdat @inline_var = #cir.int<7> : !s32i
+
+  cir.func @main() -> !s32i {
+    %0 = cir.call @inline_fn() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Internal, and no longer comdat. The --implicit-check-not on the RUN line is
+// the load-bearing part: it asserts `comdat` appears *nowhere* in the output,
+// which an ordinary CHECK-NOT cannot say -- it only covers the span between
+// two matches.
+// CHECK-DAG: cir.func internal private @inline_fn()
+// CHECK-DAG: cir.global "private"{{ +}}internal{{ +}}@inline_var = #cir.int<7> : !s32i
+
+// main is kept, so it is untouched and keeps external linkage.
+// CHECK-DAG: cir.func @main()

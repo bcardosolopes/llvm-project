@@ -1,0 +1,11 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: #cir.global_view references undefined symbol @missing
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!p8 = !cir.ptr<!u8i>
+!arrp = !cir.array<!p8 x 1>
+module attributes {cir.global_annotations = #cir<global_annotations [["a", #cir.annotation<name = "bad", args = [#cir.const_array<[#cir.global_view<@missing> : !p8]> : !arrp]>]]>} {
+  cir.global external @a = #cir.int<0> : !s32i
+}

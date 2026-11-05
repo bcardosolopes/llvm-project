@@ -26,72 +26,41 @@ llvm.func @_QPfoo(%arg0: !llvm.ptr {fir.bindc_name = "array", llvm.nocapture}, %
 
 // CHECK-LABEL: @_QPfoo
 // ...
+// CHECK:       entry:
+// CHECK-NEXT:    %[[VAL_15:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:         br i1 %{{.*}}, label %omp_if.then, label %omp_if.else
 // CHECK:       omp_loop.preheader:                               ; preds =
 // CHECK:         store i32 0, ptr %[[LB_ADDR:.*]], align 4
 // CHECK:         store i32 9, ptr %[[UB_ADDR:.*]], align 4
 // CHECK:         store i32 1, ptr %[[STEP_ADDR:.*]], align 4
-// CHECK:         %[[VAL_15:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
-// CHECK:         call void @__kmpc_for_static_init_4u(ptr @1, i32 %[[VAL_15]], i32 34, ptr %{{.*}}, ptr %[[LB_ADDR]], ptr %[[UB_ADDR]], ptr %[[STEP_ADDR]], i32 1, i32 0)
-// CHECK:         %[[LB:.*]] = load i32, ptr %[[LB_ADDR]], align 4
-// CHECK:         %[[UB:.*]] = load i32, ptr %[[UB_ADDR]], align 4
-// CHECK:         %[[VAL_18:.*]] = sub i32 %[[UB]], %[[LB]]
-// CHECK:         %[[COUNT:.*]] = add i32 %[[VAL_18]], 1
-// CHECK:         br label %[[OMP_LOOP_HEADER:.*]]
-// CHECK:       omp_loop.header:                                  ; preds = %[[OMP_LOOP_INC:.*]], %[[OMP_LOOP_PREHEADER:.*]]
-// CHECK:         %[[IV:.*]] = phi i32 [ 0, %[[OMP_LOOP_PREHEADER]] ], [ %[[NEW_IV:.*]], %[[OMP_LOOP_INC]] ]
-// CHECK:         br label %[[OMP_LOOP_COND:.*]]
-// CHECK:       omp_loop.cond:                                    ; preds = %[[OMP_LOOP_HEADER]]
-// CHECK:         %[[VAL_25:.*]] = icmp ult i32 %[[IV]], %[[COUNT]]
-// CHECK:         br i1 %[[VAL_25]], label %[[OMP_LOOP_BODY:.*]], label %[[OMP_LOOP_EXIT:.*]]
-// CHECK:       omp_loop.body:                                    ; preds = %[[OMP_LOOP_COND]]
-// CHECK:         %[[VAL_28:.*]] = add i32 %[[IV]], %[[LB]]
-// This is the IF clause:
-// CHECK:         br i1 %{{.*}}, label %[[SIMD_IF_THEN:.*]], label %[[SIMD_IF_ELSE:.*]]
+// CHECK:         call void @__kmpc_for_static_init_4u(ptr @1, i32 %[[VAL_15]], i32 34, ptr %{{.*}}, ptr %[[LB_ADDR]], ptr %[[UB_ADDR]], ptr %[[STEP_ADDR]], i32 1, i32 1)
+// CHECK:       omp.loop_nest.region:                             ; preds = %omp_loop.body
+// CHECK:         store i32 %{{.*}}, ptr %{{.*}}, align 4, !llvm.access.group !1
+// CHECK:         %{{.*}} = load i32, ptr %{{.*}}, align 4, !llvm.access.group !1
+// CHECK:         %{{.*}} = getelementptr i32, ptr %{{.*}}, i64 %{{.*}}
+// CHECK:         store i32 %{{.*}}, ptr %{{.*}}, align 4, !llvm.access.group !1
 
-// CHECK:       simd.if.then:                                     ; preds = %[[OMP_LOOP_BODY]]
-// CHECK:         %[[VAL_29:.*]] = mul i32 %[[VAL_28]], 1
-// CHECK:         %[[VAL_30:.*]] = add i32 %[[VAL_29]], 1
-// CHECK:         br label %[[VAL_33:.*]]
-// CHECK:       omp.loop_nest.region:                             ; preds = %[[SIMD_IF_THEN]]
-// This version contains !llvm.access.group metadata for SIMD
-// CHECK:         store i32 %[[VAL_30]], ptr %{{.*}}, align 4, !llvm.access.group !1
-// CHECK:         %[[VAL_34:.*]] = load i32, ptr %{{.*}}, align 4, !llvm.access.group !1
-// CHECK:         %[[VAL_35:.*]] = sext i32 %[[VAL_34]] to i64
-// CHECK:         %[[VAL_36:.*]] = getelementptr i32, ptr %[[VAL_37:.*]], i64 %[[VAL_35]]
-// CHECK:         store i32 %[[VAL_34]], ptr %[[VAL_36]], align 4, !llvm.access.group !1
-// CHECK:         br label %[[OMP_REGION_CONT3:.*]]
-// CHECK:       omp.region.cont3:                                 ; preds = %[[VAL_33]]
-// CHECK:         br label %[[SIMD_PRE_LATCH:.*]]
+// CHECK:       omp_loop.preheader6:                              ; preds =
+// CHECK:         store i32 0, ptr %[[LB_ADDR2:.*]], align 4
+// CHECK:         store i32 9, ptr %[[UB_ADDR2:.*]], align 4
+// CHECK:         store i32 1, ptr %[[STEP_ADDR2:.*]], align 4
+// CHECK:         call void @__kmpc_for_static_init_4u(ptr @1, i32 %[[VAL_15]], i32 34, ptr %{{.*}}, ptr %[[LB_ADDR2]], ptr %[[UB_ADDR2]], ptr %[[STEP_ADDR2]], i32 1, i32 1)
+// CHECK:       omp.loop_nest.region17:                           ; preds = %omp_loop.body9
+// CHECK-NOT:    !llvm.access.group
+// CHECK:         store i32 %{{.*}}, ptr %{{.*}}, align 4
+// CHECK-NOT:    !llvm.access.group
+// CHECK:         %{{.*}} = load i32, ptr %{{.*}}, align 4
+// CHECK:         %{{.*}} = getelementptr i32, ptr %{{.*}}, i64 %{{.*}}
+// CHECK:         store i32 %{{.*}}, ptr %{{.*}}, align 4
 
-// CHECK:       simd.pre_latch:                                   ; preds = %[[OMP_REGION_CONT3]], %[[OMP_REGION_CONT35:.*]]
-// CHECK:         br label %[[OMP_LOOP_INC]]
-// CHECK:       omp_loop.inc:                                     ; preds = %[[SIMD_PRE_LATCH]]
-// CHECK:         %[[NEW_IV]] = add nuw i32 %[[IV]], 1
-// CHECK:         br label %[[OMP_LOOP_HEADER]], !llvm.loop !2
-
-// CHECK:       simd.if.else:                                     ; preds = %[[OMP_LOOP_BODY]]
-// CHECK:         br label %[[SIMD_IF_ELSE2:.*]]
-// CHECK:       simd.if.else5:
-// CHECK:         %[[MUL:.*]] = mul i32 %[[VAL_28]], 1
-// CHECK:         %[[ADD:.*]] = add i32 %[[MUL]], 1
-// CHECK:         br label %[[LOOP_NEST_REGION:.*]]
-// CHECK:       omp.loop_nest.region6:                            ; preds = %[[SIMD_IF_ELSE2]]
-// No llvm.access.group metadata for else clause
-// CHECK:         store i32 %[[ADD]], ptr %{{.*}}, align 4
-// CHECK:         %[[VAL_42:.*]] = load i32, ptr %{{.*}}, align 4
-// CHECK:         %[[VAL_43:.*]] = sext i32 %[[VAL_42]] to i64
-// CHECK:         %[[VAL_44:.*]] = getelementptr i32, ptr %[[VAL_37]], i64 %[[VAL_43]]
-// CHECK:         store i32 %[[VAL_42]], ptr %[[VAL_44]], align 4
-// CHECK:         br label %[[OMP_REGION_CONT35]]
-// CHECK:       omp.region.cont37:                                ; preds = %[[LOOP_NEST_REGION]]
-// CHECK:         br label %[[SIMD_PRE_LATCH]]
-
-// CHECK:       omp_loop.exit:                                    ; preds = %[[OMP_LOOP_COND]]
+// CHECK:       omp_if.end:                                       ; preds =
 // CHECK:         call void @__kmpc_for_static_fini(ptr @1, i32 %[[VAL_15]])
-// CHECK:         %[[VAL_45:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
-// CHECK:         call void @__kmpc_barrier(ptr @2, i32 %[[VAL_45]])
+// CHECK-NOT:    call i32 @__kmpc_global_thread_num
+// CHECK:         call void @__kmpc_barrier(ptr @2, i32 %[[VAL_15]])
 
 // CHECK: !1 = distinct !{}
-// CHECK: !2 = distinct !{!2, !3}
+// CHECK: !2 = distinct !{!2, !3, !4}
 // CHECK: !3 = !{!"llvm.loop.parallel_accesses", !1}
-// CHECK-NOT: llvm.loop.vectorize
+// CHECK: !4 = !{!"llvm.loop.vectorize.enable", i1 true}
+// CHECK: !5 = distinct !{!5, !6}
+// CHECK: !6 = !{!"llvm.loop.vectorize.enable", i1 false}

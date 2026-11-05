@@ -1,10 +1,12 @@
 // RUN: echo "int extra_global;" > %t.extra-source.cpp
 // RUN: echo "global:*ignorelisted_global*" > %t.ignorelist
 // RUN: %clang_cc1 -include %t.extra-source.cpp -fsanitize=address -fsanitize-ignorelist=%t.ignorelist -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,GLOBS,ASAN
+// RUN: %if cir-support %{ %clang_cc1 -include %t.extra-source.cpp -fsanitize=address -fsanitize-ignorelist=%t.ignorelist -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR-GLOBS %}
 // RUN: %clang_cc1 -include %t.extra-source.cpp -fsanitize=kernel-address -fsanitize-ignorelist=%t.ignorelist -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,GLOBS,KASAN
 // The ignorelist file uses regexps, so Windows path backslashes.
 // RUN: echo "src:%s" | sed -e 's/\\/\\\\/g' > %t.ignorelist-src
 // RUN: %clang_cc1 -include %t.extra-source.cpp -fsanitize=address -fsanitize-ignorelist=%t.ignorelist-src -emit-llvm -o - %s | FileCheck %s --check-prefix=IGNORELIST-SRC
+// RUN: %if cir-support %{ %clang_cc1 -include %t.extra-source.cpp -fsanitize=address -fsanitize-ignorelist=%t.ignorelist-src -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR-IGNORELIST-SRC %}
 // RUN: %clang_cc1 -include %t.extra-source.cpp -fsanitize=kernel-address -fsanitize-ignorelist=%t.ignorelist-src -emit-llvm -o - %s | FileCheck %s --check-prefix=IGNORELIST-SRC
 
 int global;
@@ -35,6 +37,19 @@ void func() {
 // GLOBS:     @{{.*}}attributed_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
 // GLOBS:     @{{.*}}disable_instrumentation_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
 // GLOBS:     @{{.*}}ignorelisted_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+
+// CIR-GLOBS:     @{{.*}}extra_global{{.*}} ={{.*}} global
+// CIR-GLOBS-NOT: no_sanitize_address
+// CIR-GLOBS:     @{{.*}}global{{.*}} ={{.*}} global
+// CIR-GLOBS-NOT: no_sanitize_address
+// CIR-GLOBS:     @{{.*}}dyn_init_global{{.*}} ={{.*}} global {{.*}}, sanitize_address_dyninit
+// CIR-GLOBS-NOT: no_sanitize_address
+// CIR-GLOBS:     @{{.*}}attributed_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-GLOBS:     @{{.*}}disable_instrumentation_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-GLOBS:     @{{.*}}ignorelisted_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-GLOBS:     @{{.*}}external_global{{.*}} ={{.*}} no_sanitize_address
+// CIR-GLOBS-LABEL: define internal void @asan.module_ctor()
+// CIR-GLOBS: call void @__asan_register_globals({{.*}}, i{{32|64}} 7)
 
 // ASAN:     @{{.*}}sectioned_global{{.*}} ={{.*}} global { i32, [28 x i8] }{{.*}}, align 32
 // ASAN-NOT: no_sanitize_address
@@ -88,3 +103,18 @@ void func() {
 // IGNORELIST-SRC:     @{{.*}}static_var{{.*}} ={{.*}} global {{.*}} no_sanitize_address
 // IGNORELIST-SRC:     @{{.*}} ={{.*}} c"Hello, world!\00"{{.*}} no_sanitize_address
 // IGNORELIST-SRC:     @{{.*}}external_global{{.*}} ={{.*}} no_sanitize_address
+
+// CIR-IGNORELIST-SRC:     @{{[^ ]*}}static_var{{[^ ]*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}extra_global{{.*}} ={{.*}} global
+// CIR-IGNORELIST-SRC-NOT: no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}dyn_init_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}attributed_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}disable_instrumentation_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}ignorelisted_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}sectioned_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}__special_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}} ={{.*}} c"Hello, world!\00"{{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC:     @{{.*}}external_global{{.*}} ={{.*}} no_sanitize_address
+// CIR-IGNORELIST-SRC-LABEL: define internal void @asan.module_ctor()
+// CIR-IGNORELIST-SRC: call void @__asan_register_globals({{.*}}, i{{32|64}} 1)

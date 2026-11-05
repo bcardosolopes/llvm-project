@@ -2,6 +2,7 @@
 // RUN: %clang_cc1 -ffp-exception-behavior=maytrap -fexperimental-strict-floating-point -emit-llvm -o - -triple arm-none-linux-gnueabi %s | FileCheck %s --check-prefix=NOTNATIVE --check-prefix=CHECK -vv -dump-input=fail
 // RUN: %clang_cc1 -ffp-exception-behavior=maytrap -emit-llvm -o - -triple aarch64 %s | FileCheck %s --check-prefix=NOTNATIVE --check-prefix=CHECK
 // RUN: %clang_cc1 -ffp-exception-behavior=maytrap -fexperimental-strict-floating-point -emit-llvm -o - -triple x86_64-linux-gnu %s | FileCheck %s --check-prefix=NOTNATIVE --check-prefix=CHECK
+// RUN: %if cir-support %{ %clang_cc1 -ffp-exception-behavior=maytrap -fexperimental-strict-floating-point -emit-llvm -o - -triple x86_64-linux-gnu -fclangir %s | FileCheck %s --check-prefix=NOTNATIVE-CIR %}
 // RUN: %clang_cc1 -ffp-exception-behavior=maytrap -fexperimental-strict-floating-point -emit-llvm -o - -triple arm-none-linux-gnueabi -fnative-half-type %s \
 // RUN:   | FileCheck %s --check-prefix=NATIVE-HALF --check-prefix=CHECK
 // RUN: %clang_cc1 -ffp-exception-behavior=maytrap -emit-llvm -o - -triple aarch64 -fnative-half-type %s \
@@ -24,6 +25,7 @@ short s0;
 
 void foo(void) {
   // CHECK-LABEL: define{{.*}} void @foo()
+  // NOTNATIVE-CIR-LABEL: define{{.*}} void @foo()
 
   // Check unary ops
 
@@ -37,6 +39,9 @@ void foo(void) {
   // NOTNATIVE: call float @llvm.experimental.constrained.uitofp.f32.i32(i32 %{{.*}}, metadata !"round.tonearest", metadata !"fpexcept.strict")
   // NOTNATIVE: call half @llvm.experimental.constrained.fptrunc.f16.f32(float %{{.*}}, metadata !"round.tonearest", metadata !"fpexcept.strict")
   // CHECK: store {{.*}} half {{.*}}, ptr
+  // NOTNATIVE-CIR: [[UI:%.*]] = call float @llvm.experimental.constrained.uitofp.f32.i32(i32 %{{.*}}, metadata !"round.tonearest", metadata !"fpexcept.strict")
+  // NOTNATIVE-CIR-NEXT: [[UI_TRUNC:%.*]] = call half @llvm.experimental.constrained.fptrunc.f16.f32(float [[UI]], metadata !"round.tonearest", metadata !"fpexcept.strict")
+  // NOTNATIVE-CIR-NEXT: store volatile half [[UI_TRUNC]], ptr @h0
   h0 = (test);
 
   // NATIVE-HALF: call i1 @llvm.experimental.constrained.fcmp.f16(half %{{.*}}, half 0xH0000, metadata !"une", metadata !"fpexcept.strict")
@@ -735,4 +740,3 @@ void testTypeDef() {
   float16_t t1 __attribute__((vector_size(8)));
   t1 = t0 + t1;
 }
-

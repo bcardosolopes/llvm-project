@@ -3,6 +3,9 @@
 // RUN: %clang_cc1 %s -x c++ -std=c++23  -triple arm64-apple-ios -fptrauth-calls -fptrauth-vtable-pointer-type-discrimination -emit-llvm -O1 -disable-llvm-passes -no-enable-noundef-analysis   -o - | FileCheck --check-prefix=CHECK-TYPEAUTH %s
 // RUN: %clang_cc1 %s -x c++ -std=c++23  -triple arm64-apple-ios -fptrauth-calls -fptrauth-vtable-pointer-address-discrimination -emit-llvm -O1 -disable-llvm-passes -no-enable-noundef-analysis  -o - | FileCheck --check-prefix=CHECK-ADDRESSAUTH %s
 // RUN: %clang_cc1 %s -x c++ -std=c++23  -triple arm64-apple-ios -fptrauth-calls -fptrauth-vtable-pointer-type-discrimination -fptrauth-vtable-pointer-address-discrimination -emit-llvm -O1 -disable-llvm-passes -no-enable-noundef-analysis  -o - | FileCheck --check-prefix=CHECK-BOTHAUTH %s
+// RUN: %if cir-support %{ %clang_cc1 %s -x c++ -std=c++23  -triple arm64-apple-ios -fptrauth-calls -fptrauth-vtable-pointer-type-discrimination -fclangir -emit-llvm -O1 -disable-llvm-passes -no-enable-noundef-analysis   -o - | FileCheck --check-prefix=CIR-TYPEAUTH %s %}
+// RUN: %if cir-support %{ %clang_cc1 %s -x c++ -std=c++23  -triple arm64-apple-ios -fptrauth-calls -fptrauth-vtable-pointer-address-discrimination -fclangir -emit-llvm -O1 -disable-llvm-passes -no-enable-noundef-analysis  -o - | FileCheck --check-prefix=CIR-ADDRESSAUTH %s %}
+// RUN: %if cir-support %{ %clang_cc1 %s -x c++ -std=c++23  -triple arm64-apple-ios -fptrauth-calls -fptrauth-vtable-pointer-type-discrimination -fptrauth-vtable-pointer-address-discrimination -fclangir -emit-llvm -O1 -disable-llvm-passes -no-enable-noundef-analysis  -o - | FileCheck --check-prefix=CIR-BOTHAUTH %s %}
 // FIXME: Assume load should not require -fstrict-vtable-pointers
 
 namespace test1 {
@@ -35,6 +38,56 @@ template <class A, class B> struct same_type {
 template <class A> struct same_type<A, A> {
   static const bool value = true;
 };
+
+// CIR-TYPEAUTH-LABEL: define ptr @_ZN5test11aEPNS_1AE(
+// CIR-TYPEAUTH: [[OBJ:%.*]] = load ptr, ptr [[O_ADDR:%.*]], align 8, !tbaa [[TBAA_ARG:![0-9]+]]
+// CIR-TYPEAUTH: [[VTABLE:%.*]] = load ptr, ptr [[OBJ]], align 8, !tbaa [[TBAA_VPTR:![0-9]+]]
+// CIR-TYPEAUTH: [[VTABLE_INT:%.*]] = ptrtoint ptr [[VTABLE]] to i64
+// CIR-TYPEAUTH: [[AUTH_INT:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[VTABLE_INT]], i32 2, i64 48388)
+// CIR-TYPEAUTH: [[AUTH_PTR:%.*]] = inttoptr i64 [[AUTH_INT]] to ptr
+// CIR-TYPEAUTH: load volatile i8, ptr [[AUTH_PTR]], align 8
+//
+// CIR-ADDRESSAUTH-LABEL: define ptr @_ZN5test11aEPNS_1AE(
+// CIR-ADDRESSAUTH: [[OBJ:%.*]] = load ptr, ptr [[O_ADDR:%.*]], align 8, !tbaa [[TBAA_ARG:![0-9]+]]
+// CIR-ADDRESSAUTH: [[VTABLE:%.*]] = load ptr, ptr [[OBJ]], align 8, !tbaa [[TBAA_VPTR:![0-9]+]]
+// CIR-ADDRESSAUTH: [[OBJ_INT:%.*]] = ptrtoint ptr [[OBJ]] to i64
+// CIR-ADDRESSAUTH: [[VTABLE_INT:%.*]] = ptrtoint ptr [[VTABLE]] to i64
+// CIR-ADDRESSAUTH: [[AUTH_INT:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[VTABLE_INT]], i32 2, i64 [[OBJ_INT]])
+// CIR-ADDRESSAUTH: [[AUTH_PTR:%.*]] = inttoptr i64 [[AUTH_INT]] to ptr
+// CIR-ADDRESSAUTH: load volatile i8, ptr [[AUTH_PTR]], align 8
+//
+// CIR-ADDRESSAUTH-LABEL: define ptr @_ZN5test16c_as_BEPNS_1CE(
+// CIR-ADDRESSAUTH: [[ISNULL:%.*]] = icmp eq ptr [[OBJ:%.*]], null
+// CIR-ADDRESSAUTH: [[B_OFF:%.*]] = getelementptr inbounds i8, ptr [[OBJ]], i64 8
+// CIR-ADDRESSAUTH: [[B_OBJ:%.*]] = select i1 [[ISNULL]], ptr [[OBJ]], ptr [[B_OFF]]
+// CIR-ADDRESSAUTH: [[VTABLE:%.*]] = load ptr, ptr [[B_OBJ]], align 8, !tbaa [[TBAA_VPTR]]
+// CIR-ADDRESSAUTH: [[B_OBJ_INT:%.*]] = ptrtoint ptr [[B_OBJ]] to i64
+// CIR-ADDRESSAUTH: [[VTABLE_INT:%.*]] = ptrtoint ptr [[VTABLE]] to i64
+// CIR-ADDRESSAUTH: [[AUTH_INT:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[VTABLE_INT]], i32 2, i64 [[B_OBJ_INT]])
+// CIR-ADDRESSAUTH: [[AUTH_PTR:%.*]] = inttoptr i64 [[AUTH_INT]] to ptr
+// CIR-ADDRESSAUTH: load volatile i8, ptr [[AUTH_PTR]], align 8
+//
+// CIR-BOTHAUTH-LABEL: define ptr @_ZN5test11aEPNS_1AE(
+// CIR-BOTHAUTH: [[OBJ:%.*]] = load ptr, ptr [[O_ADDR:%.*]], align 8, !tbaa [[TBAA_ARG:![0-9]+]]
+// CIR-BOTHAUTH: [[VTABLE:%.*]] = load ptr, ptr [[OBJ]], align 8, !tbaa [[TBAA_VPTR:![0-9]+]]
+// CIR-BOTHAUTH: [[OBJ_INT:%.*]] = ptrtoint ptr [[OBJ]] to i64
+// CIR-BOTHAUTH: [[BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[OBJ_INT]], i64 48388)
+// CIR-BOTHAUTH: [[VTABLE_INT:%.*]] = ptrtoint ptr [[VTABLE]] to i64
+// CIR-BOTHAUTH: [[AUTH_INT:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[VTABLE_INT]], i32 2, i64 [[BLEND]])
+// CIR-BOTHAUTH: [[AUTH_PTR:%.*]] = inttoptr i64 [[AUTH_INT]] to ptr
+// CIR-BOTHAUTH: load volatile i8, ptr [[AUTH_PTR]], align 8
+//
+// CIR-BOTHAUTH-LABEL: define ptr @_ZN5test16c_as_BEPNS_1CE(
+// CIR-BOTHAUTH: [[ISNULL:%.*]] = icmp eq ptr [[OBJ:%.*]], null
+// CIR-BOTHAUTH: [[B_OFF:%.*]] = getelementptr inbounds i8, ptr [[OBJ]], i64 8
+// CIR-BOTHAUTH: [[B_OBJ:%.*]] = select i1 [[ISNULL]], ptr [[OBJ]], ptr [[B_OFF]]
+// CIR-BOTHAUTH: [[VTABLE:%.*]] = load ptr, ptr [[B_OBJ]], align 8, !tbaa [[TBAA_VPTR]]
+// CIR-BOTHAUTH: [[B_OBJ_INT:%.*]] = ptrtoint ptr [[B_OBJ]] to i64
+// CIR-BOTHAUTH: [[BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[B_OBJ_INT]], i64 48388)
+// CIR-BOTHAUTH: [[VTABLE_INT:%.*]] = ptrtoint ptr [[VTABLE]] to i64
+// CIR-BOTHAUTH: [[AUTH_INT:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[VTABLE_INT]], i32 2, i64 [[BLEND]])
+// CIR-BOTHAUTH: [[AUTH_PTR:%.*]] = inttoptr i64 [[AUTH_INT]] to ptr
+// CIR-BOTHAUTH: load volatile i8, ptr [[AUTH_PTR]], align 8
 
 // CHECK-NOAUTH-LABEL: define ptr @_ZN5test11aEPNS_1AE(
 // CHECK-NOAUTH-SAME: ptr [[O:%.*]]) #[[ATTR0:[0-9]+]] {

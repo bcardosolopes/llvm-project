@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-freebsd -emit-llvm -fno-use-init-array -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s -check-prefix=CHECK-NEW
 // RUN: %clang_cc1 -triple x86_64-pc-windows-msvc -emit-llvm -fno-use-init-array -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s -check-prefix=CHECK-WIN
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-pc-windows-msvc -emit-llvm -fno-use-init-array -fobjc-runtime=gnustep-2.0 -fclangir -o - %s | FileCheck %s -check-prefix=CHECK-WIN-CIR %}
 // RUN: %clang_cc1 -triple x86_64-unknown-freebsd -emit-llvm -fno-use-init-array -fobjc-runtime=gnustep-1.8 -o - %s | FileCheck %s -check-prefix=CHECK-OLD
 // RUN: %clang_cc1 -triple x86_64-unknown-freebsd -emit-llvm -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s -check-prefix=CHECK-INIT_ARRAY
 
@@ -103,3 +104,26 @@
 // Make sure we do not have dllimport on the load function
 // CHECK-WIN: declare dso_local void @__objc_load
 
+// CHECK-WIN-CIR-DAG: @"$_OBJC_REF_CLASS_X" = {{.*}}section ".objcrt$CLR$m"
+// CHECK-WIN-CIR-DAG: @"$_OBJC_INIT_CLASS_X" = {{.*}}section ".objcrt$CLS$m"
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$SEL" = linkonce_odr hidden global {{.*}} section ".objcrt$SEL$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$SEL" = linkonce_odr hidden global {{.*}} section ".objcrt$SEL$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$CLS" = linkonce_odr hidden global {{.*}} section ".objcrt$CLS$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$CLS" = linkonce_odr hidden global {{.*}} section ".objcrt$CLS$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$CLR" = linkonce_odr hidden global {{.*}} section ".objcrt$CLR$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$CLR" = linkonce_odr hidden global {{.*}} section ".objcrt$CLR$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$CAT" = linkonce_odr hidden global {{.*}} section ".objcrt$CAT$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$CAT" = linkonce_odr hidden global {{.*}} section ".objcrt$CAT$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$PCL" = linkonce_odr hidden global {{.*}} section ".objcrt$PCL$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$PCL" = linkonce_odr hidden global {{.*}} section ".objcrt$PCL$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$PCR" = linkonce_odr hidden global {{.*}} section ".objcrt$PCR$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$PCR" = linkonce_odr hidden global {{.*}} section ".objcrt$PCR$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$CAL" = linkonce_odr hidden global {{.*}} section ".objcrt$CAL$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$CAL" = linkonce_odr hidden global {{.*}} section ".objcrt$CAL$z", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__start_.objcrt$STR" = linkonce_odr hidden global {{.*}} section ".objcrt$STR$a", comdat, align 8
+// CHECK-WIN-CIR-DAG: @"__stop.objcrt$STR" = linkonce_odr hidden global {{.*}} section ".objcrt$STR$z", comdat, align 8
+// CHECK-WIN-CIR: @.objc_init = linkonce_odr hidden global { i64, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr } { i64 0, ptr @"__start_.objcrt$SEL", ptr @"__stop.objcrt$SEL", ptr @"__start_.objcrt$CLS", ptr @"__stop.objcrt$CLS", ptr @"__start_.objcrt$CLR", ptr @"__stop.objcrt$CLR", ptr @"__start_.objcrt$CAT", ptr @"__stop.objcrt$CAT", ptr @"__start_.objcrt$PCL", ptr @"__stop.objcrt$PCL", ptr @"__start_.objcrt$PCR", ptr @"__stop.objcrt$PCR", ptr @"__start_.objcrt$CAL", ptr @"__stop.objcrt$CAL", ptr @"__start_.objcrt$STR", ptr @"__stop.objcrt$STR" }, comdat, align 8
+// CHECK-WIN-CIR: @.objc_ctor = linkonce hidden global ptr @.objcv2_load_function, section ".CRT$XCLz", comdat
+// CHECK-WIN-CIR: define linkonce_odr hidden void @.objcv2_load_function() comdat {
+// CHECK-WIN-CIR: declare dso_local void @__objc_load
+// CHECK-WIN-CIR-NOT: @.objc_null_

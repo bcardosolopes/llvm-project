@@ -1,5 +1,6 @@
 // This tests that the symmetric transfer at the final suspend point could happen successfully.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O2 -emit-llvm %s -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O2 -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=CIR %}
 
 #include "Inputs/coroutine.h"
 
@@ -66,3 +67,8 @@ Task task0() {
 // CHECK-NOT: {{^}}}
 // CHECK: musttail call fastcc void
 // CHECK-NEXT: ret void
+
+// CIR-LABEL: define{{.*}} void @_Z5task0v.destroy
+// CIR-NOT: musttail call fastcc void
+// CIR: tail call void @_ZdlPvm
+// CIR-NEXT: ret void

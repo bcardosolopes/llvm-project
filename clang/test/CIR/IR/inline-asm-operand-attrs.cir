@@ -1,0 +1,55 @@
+// RUN: cir-opt -emit-bytecode %s | cir-opt | FileCheck %s
+
+// `operand_attrs` is positional: entry i describes asm operand i, so an operand
+// with no attributes still needs a slot. That slot used to be a null Attribute,
+// which is not a legal ArrayAttr element -- both the asm printer and the
+// bytecode writer assert on one. The effect was that any module containing a
+// cir.asm crashed cir-opt on -emit-bytecode and on --cir-to-llvm. This pins the
+// serialize path; the verifier's rejections are in invalid-inline-asm.cir.
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+
+module {
+  // No operands at all: the array is empty.
+  cir.func @none() {
+    cir.asm(x86_att,
+      out = [],
+      in = [],
+      in_out = [],
+      {"" "~{dirflag},~{fpsr},~{flags}"})
+    cir.return
+  }
+
+  // An operand carrying no attributes -- this is the slot that used to be null.
+  cir.func @plain(%arg0: !u32i) -> !u32i {
+    %0 = cir.asm(x86_att,
+      out = [],
+      in = [],
+      in_out = [%arg0 : !u32i],
+      {"addl $$42, $0" "=r,0,~{dirflag},~{fpsr},~{flags}"}) side_effects -> !u32i
+    cir.return %0 : !u32i
+  }
+
+  // A marked operand next to unmarked ones, so a placeholder that swallowed the
+  // marker (or shifted the array) would show up as a moved (maybe_memory).
+  cir.func @mixed(%arg0: !s32i) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init] {alignment = 4 : i64}
+    cir.store %arg0, %0 : !s32i, !cir.ptr<!s32i>
+    cir.asm(x86_att,
+      out = [],
+      in = [%0 : !cir.ptr<!s32i> (maybe_memory), %arg0 : !s32i],
+      in_out = [],
+      {"" "*m,r,~{dirflag},~{fpsr},~{flags}"}) side_effects
+    cir.return
+  }
+}
+
+// CHECK-LABEL: cir.func {{.*}}@none
+// CHECK:         in = [],
+
+// CHECK-LABEL: cir.func {{.*}}@plain
+// CHECK:         in_out = [%{{.*}} : !u32i],
+
+// CHECK-LABEL: cir.func {{.*}}@mixed
+// CHECK:         in = [%{{.*}} : !cir.ptr<!s32i> (maybe_memory), %{{.*}} : !s32i],

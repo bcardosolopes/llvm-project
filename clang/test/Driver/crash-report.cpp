@@ -89,7 +89,8 @@ int a = 0;
 // CHECKSH-SAME: "-D" "FOO=BAR"
 // CHECKSH-SAME: "-D" "BAR=BAZ QUX"
 // CHECKSH-NEXT: # Original command: {{.*$}}
-// CHECKSH-NEXT: "-cc1"
+// CHECKSH-NEXT: cd "$(dirname "$0")" || exit 1
+// CHECKSH: "-cc1"
 // CHECKSH: "-main-file-name" "crash-report.cpp"
 // CHECKSH-NOT: "-header-include-file"
 // CHECKSH-NOT: "-diagnostic-log-file"

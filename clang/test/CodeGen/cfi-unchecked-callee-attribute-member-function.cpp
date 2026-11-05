@@ -1,10 +1,12 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm -fsanitize=cfi-mfcall -o - %s -fvisibility=hidden | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm -fsanitize=cfi-mfcall -o - %s -fvisibility=hidden -fclangir | FileCheck %s --check-prefix=CIR %}
 
 #define CFI_UNCHECKED_CALLEE __attribute__((cfi_unchecked_callee))
 
 class A {};
 
 // CHECK-LABEL: _Z14MemberFuncCallP1AMS_FvvE
+// CIR-LABEL: _Z14MemberFuncCallP1AMS_FvvE
 void MemberFuncCall(A *s, void (A::*p)()) {
   // CHECK:      memptr.virtual:
   // CHECK-NEXT:   [[VTABLE:%.*]] = load ptr, ptr {{.*}}, align 8
@@ -30,11 +32,14 @@ void MemberFuncCall(A *s, void (A::*p)()) {
 
   // CHECK:      memptr.end:
   // CHECK-NEXT:   {{.*}} = phi ptr [ %memptr.virtualfn, %[[CONT]] ], [ %memptr.nonvirtualfn, %[[CONT2]] ]
+  // CIR: call void @__ubsan_handle_cfi_check_fail_abort(ptr {{.*}}, i64 {{.*}}, i64 {{.*}})
+  // CIR: call void @__ubsan_handle_cfi_check_fail_abort(ptr {{.*}}, i64 {{.*}}, i64 undef)
   (s->*p)();
 }
 
 // CHECK-LABEL: _Z19MemberFuncCallNoCFIP1AMS_FvvE
 // CHECK-NOT: llvm.type.test
+// CIR-LABEL: _Z19MemberFuncCallNoCFIP1AMS_FvvE
 void MemberFuncCallNoCFI(A *s, void (CFI_UNCHECKED_CALLEE A::*p)()) {
   // CHECK:      memptr.virtual:
   // CHECK-NEXT:   [[VTABLE:%.*]] = load ptr, ptr {{.*}}, align 8
@@ -49,5 +54,8 @@ void MemberFuncCallNoCFI(A *s, void (CFI_UNCHECKED_CALLEE A::*p)()) {
 
   // CHECK:      memptr.end:
   // CHECK-NEXT:   {{.*}} = phi ptr [ %memptr.virtualfn, %memptr.virtual ], [ %memptr.nonvirtualfn, %memptr.nonvirtual ]
+  // CIR-NOT: call{{.*}}@llvm.type.test
   (s->*p)();
 }
+
+// CIR: declare void @__ubsan_handle_cfi_check_fail_abort(ptr, i64, i64)

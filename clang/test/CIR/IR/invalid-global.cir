@@ -1,0 +1,19 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify GlobalOp: public visibility with internal linkage
+!s32i = !cir.int<s, 32>
+
+module {
+  // expected-error@+1 {{public visibility not allowed with 'internal' linkage}}
+  cir.global "public" internal @g1 = #cir.int<0> : !s32i
+}
+
+// -----
+
+// Verify GlobalOp: public visibility with cir_private linkage
+!s32i = !cir.int<s, 32>
+
+module {
+  // expected-error@+1 {{public visibility not allowed with 'cir_private' linkage}}
+  cir.global "public" cir_private @g2 = #cir.int<0> : !s32i
+}

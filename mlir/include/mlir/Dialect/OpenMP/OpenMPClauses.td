@@ -291,20 +291,27 @@ class OpenMP_DependClauseSkip<
     bit description = false, bit extraClassDeclaration = false
   > : OpenMP_Clause<traits, arguments, assemblyFormat, description,
                     extraClassDeclaration> {
+  // `depend_sizes` is not present in upstream LLVM. CIR's frontend uses it
+  // to thread runtime-known byte lengths for `depend(iterator)` clauses and
+  // similar dynamic-span depend forms through to the OpenMP-to-LLVM
+  // translator.
   let arguments = (ins
     OptionalAttr<TaskDependArrayAttr>:$depend_kinds,
-    Variadic<OpenMP_PointerLikeType>:$depend_vars
+    Variadic<OpenMP_PointerLikeType>:$depend_vars,
+    Variadic<AnyInteger>:$depend_sizes
   );
 
   let optAssemblyFormat = [{
     `depend` `(`
-      custom<DependVarList>($depend_vars, type($depend_vars), $depend_kinds) `)`
+      custom<DependVarList>($depend_vars, type($depend_vars), $depend_kinds,
+                            $depend_sizes, type($depend_sizes)) `)`
   }];
 
   let description = [{
     The `depend_kinds` and `depend_vars` arguments are variadic lists of values
     that specify the dependencies of this particular task in relation to other
-    tasks.
+    tasks. The optional `depend_sizes` operands provide explicit byte lengths
+    for each dependence entry when the lowered span is only known at runtime.
   }];
 }
 
@@ -1034,20 +1041,80 @@ class OpenMP_NumThreadsClauseSkip<
   > : OpenMP_Clause<traits, arguments, assemblyFormat, description,
                     extraClassDeclaration> {
   let arguments = (ins
+    OptionalAttr<NumThreadsModifierAttr>:$num_threads_modifier,
     Optional<IntLikeType>:$num_threads
   );
 
   let optAssemblyFormat = [{
-    `num_threads` `(` $num_threads `:` type($num_threads) `)`
+    `num_threads` `(` custom<NumThreadsClause>($num_threads_modifier,
+                                               $num_threads,
+                                               type($num_threads)) `)`
   }];
 
   let description = [{
     The optional `num_threads` parameter specifies the number of threads which
-    should be used to execute the parallel region.
+    should be used to execute the parallel region. The optional
+    `num_threads_modifier` currently supports the OpenMP 6.0 `strict`
+    modifier.
   }];
 }
 
 def OpenMP_NumThreadsClause : OpenMP_NumThreadsClauseSkip<>;
+
+//===----------------------------------------------------------------------===//
+// V6.0: [10.4] `severity` clause
+//===----------------------------------------------------------------------===//
+
+// The OpenMP 6.0 `severity` clause is not present in upstream LLVM. CIR is the only
+// in-tree producer (Flang doesn't yet emit it).
+class OpenMP_SeverityClauseSkip<
+    bit traits = false, bit arguments = false, bit assemblyFormat = false,
+    bit description = false, bit extraClassDeclaration = false
+  > : OpenMP_Clause<traits, arguments, assemblyFormat, description,
+                    extraClassDeclaration> {
+  let arguments = (ins
+    OptionalAttr<SeverityKindAttr>:$severity_kind
+  );
+
+  let optAssemblyFormat = [{
+    `severity` `(` custom<ClauseAttr>($severity_kind) `)`
+  }];
+
+  let description = [{
+    The optional `severity_kind` attribute specifies the severity level used
+    by a strict `num_threads` clause when the requested thread count cannot be
+    satisfied.
+  }];
+}
+
+def OpenMP_SeverityClause : OpenMP_SeverityClauseSkip<>;
+
+//===----------------------------------------------------------------------===//
+// V6.0: [10.4] `message` clause
+//===----------------------------------------------------------------------===//
+
+// The OpenMP 6.0 `message` clause is not present in upstream LLVM. CIR is the
+// only in-tree producer.
+class OpenMP_MessageClauseSkip<
+    bit traits = false, bit arguments = false, bit assemblyFormat = false,
+    bit description = false, bit extraClassDeclaration = false
+  > : OpenMP_Clause<traits, arguments, assemblyFormat, description,
+                    extraClassDeclaration> {
+  let arguments = (ins
+    Optional<OpenMP_PointerLikeType>:$message_var
+  );
+
+  let optAssemblyFormat = [{
+    `message` `(` $message_var `:` type($message_var) `)`
+  }];
+
+  let description = [{
+    The optional `message_var` operand provides the runtime message payload
+    used by a strict `num_threads` clause.
+  }];
+}
+
+def OpenMP_MessageClause : OpenMP_MessageClauseSkip<>;
 
 //===----------------------------------------------------------------------===//
 // V5.2: [10.3] `order` clause

@@ -1,0 +1,41 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// The generic form is used throughout: the custom parser cannot express these
+// shapes, which is the point -- the verifier is what stops an in-memory op
+// built by CIRGen or by a pass from reaching the printer or the bytecode
+// writer, where a bad `operand_attrs` array turns into an assertion failure
+// rather than a diagnostic.
+
+!s32i = !cir.int<s, 32>
+
+cir.func @too_few(%arg0: !s32i) {
+  // expected-error @below {{expects one 'operand_attrs' entry per asm operand, but got 0 for 1 operands}}
+  "cir.asm"(%arg0) <{asm_flavor = 0 : i32, asm_string = "", constraints = "",
+                     operand_attrs = [],
+                     operands_segments = array<i32: 0, 1, 0>}> : (!s32i) -> ()
+  cir.return
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+
+cir.func @too_many(%arg0: !s32i) {
+  // expected-error @below {{expects one 'operand_attrs' entry per asm operand, but got 2 for 1 operands}}
+  "cir.asm"(%arg0) <{asm_flavor = 0 : i32, asm_string = "", constraints = "",
+                     operand_attrs = [unit, unit],
+                     operands_segments = array<i32: 0, 1, 0>}> : (!s32i) -> ()
+  cir.return
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+
+cir.func @wrong_kind(%arg0: !s32i) {
+  // expected-error @below {{'operand_attrs' entry #0 must be a unit or a dictionary attribute, but got 42 : i32}}
+  "cir.asm"(%arg0) <{asm_flavor = 0 : i32, asm_string = "", constraints = "",
+                     operand_attrs = [42 : i32],
+                     operands_segments = array<i32: 0, 1, 0>}> : (!s32i) -> ()
+  cir.return
+}

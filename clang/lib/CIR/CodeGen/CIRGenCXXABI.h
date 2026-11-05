@@ -20,6 +20,7 @@
 #include "CIRGenModule.h"
 
 #include "clang/AST/Mangle.h"
+#include "clang/Basic/Thunk.h"
 
 namespace clang::CIRGen {
 
@@ -137,6 +138,14 @@ public:
   /// parameter to point to some artificial offset in a complete object due to
   /// vbases being reordered.
   virtual const clang::CXXRecordDecl *
+  getThisArgumentTypeForMethod(clang::GlobalDecl gd) {
+    return cast<clang::CXXMethodDecl>(gd.getDecl())->getParent();
+  }
+
+  /// Convenience overload for non-ctor/dtor call sites. Cannot dispatch to
+  /// ABI-specific overrides that need the ctor/dtor kind from GlobalDecl.
+  /// Use the GlobalDecl overload in arrangeCXXStructorDeclaration.
+  const clang::CXXRecordDecl *
   getThisArgumentTypeForMethod(const clang::CXXMethodDecl *md) {
     return md->getParent();
   }
@@ -154,6 +163,11 @@ public:
                                                            bool virtualCall) {
     return thisPtr;
   }
+
+  /// Determine whether 'this' is known to be a complete object within the
+  /// given function. Used to select full vs. non-virtual alignment for 'this'
+  /// in types with virtual bases. Matches OGCG's CGCXXABI::isThisCompleteObject.
+  virtual bool isThisCompleteObject(clang::GlobalDecl gd) const = 0;
 
   /// Build a parameter variable suitable for 'this'.
   void buildThisParam(CIRGenFunction &cgf, FunctionArgList &params);
@@ -193,6 +207,13 @@ public:
   virtual void registerGlobalDtor(const VarDecl *vd, cir::FuncOp dtor,
                                   mlir::Value addr) = 0;
 
+  /// Emit the guarded initialization code for a static local variable.
+  /// This emits inline code in the current function body that checks and
+  /// sets a guard variable using __cxa_guard_acquire/__cxa_guard_release,
+  /// initializes the variable if needed, and registers its destructor.
+  virtual void emitGuardedInit(CIRGenFunction &cgf, const VarDecl &d,
+                               cir::GlobalOp var, bool shouldPerformInit);
+
   virtual void emitVirtualObjectDelete(CIRGenFunction &cgf,
                                        const CXXDeleteExpr *de, Address ptr,
                                        QualType elementType,
@@ -205,6 +226,11 @@ public:
   virtual bool
   isVirtualOffsetNeededForVTableField(CIRGenFunction &cgf,
                                       CIRGenFunction::VPtr vptr) = 0;
+
+  /// Determine whether it's possible to emit a vtable for \p RD, even
+  /// though we do not know that the vtable has been marked as used by semantic
+  /// analysis.
+  virtual bool canSpeculativelyEmitVTable(const CXXRecordDecl *rd) const = 0;
 
   /// Emits the VTable definitions required for the given record type.
   virtual void emitVTableDefinitions(CIRGenVTables &cgvt,
@@ -222,6 +248,32 @@ public:
   /// Emit any tables needed to implement virtual inheritance.  For Itanium,
   /// this emits virtual table tables.
   virtual void emitVirtualInheritanceTables(const CXXRecordDecl *rd) = 0;
+
+  virtual bool exportThunk() = 0;
+  virtual void setThunkLinkage(cir::FuncOp thunkFn, bool forVTable,
+                               GlobalDecl gd, bool returnAdjustment) = 0;
+
+  /// Perform adjustment on the this pointer for a thunk.
+  /// Returns the adjusted this pointer value.
+  virtual mlir::Value
+  performThisAdjustment(CIRGenFunction &cgf, Address thisAddr,
+                        const CXXRecordDecl *unadjustedClass,
+                        const ThunkInfo &ti) = 0;
+
+  /// Perform adjustment on a return pointer for a thunk (covariant returns).
+  /// Returns the adjusted return pointer value.
+  virtual mlir::Value
+  performReturnAdjustment(CIRGenFunction &cgf, Address ret,
+                          const CXXRecordDecl *unadjustedClass,
+                          const ReturnAdjustment &ra) = 0;
+
+  virtual void adjustCallArgsForDestructorThunk(CIRGenFunction &cgf,
+                                                GlobalDecl gd,
+                                                CallArgList &callArgs) {}
+
+  /// Emit a return from a thunk.
+  virtual void emitReturnFromThunk(CIRGenFunction &cgf, RValue rv,
+                                   QualType resultType);
 
   /// Returns true if the given destructor type should be emitted as a linkonce
   /// delegating thunk, regardless of whether the dtor is defined in this TU or
@@ -271,13 +323,25 @@ public:
   virtual bool
   doStructorsInitializeVPtrs(const clang::CXXRecordDecl *vtableClass) = 0;
 
+  /// Returns true if constructors and destructors return 'this'.
+  /// The base implementation checks the CodeGen option; ARM overrides to true.
+  virtual bool constructorsAndDestructorsReturnThis() const {
+    return cgm.getCodeGenOpts().CtorDtorReturnThis;
+  }
+
   /// Returns true if the given constructor or destructor is one of the kinds
   /// that the ABI says returns 'this' (only applies when called non-virtually
   /// for destructors).
   ///
   /// There currently is no way to indicate if a destructor returns 'this' when
   /// called virtually, and CIR generation does not support this case.
-  virtual bool hasThisReturn(clang::GlobalDecl gd) const { return false; }
+  virtual bool hasThisReturn(clang::GlobalDecl gd) const {
+    if (isa<clang::CXXConstructorDecl>(gd.getDecl()) ||
+        (isa<clang::CXXDestructorDecl>(gd.getDecl()) &&
+         gd.getDtorType() != clang::Dtor_Deleting))
+      return constructorsAndDestructorsReturnThis();
+    return false;
+  }
 
   virtual bool hasMostDerivedReturn(clang::GlobalDecl gd) const {
     return false;
@@ -292,6 +356,20 @@ public:
   /// allowed; in other words, does the target do strict checking of signatures
   /// for all calls.
   virtual bool canCallMismatchedFunctionType() const { return true; }
+
+  /// Create a MethodAttr for the given member function.
+  /// Handles both virtual and non-virtual member functions.
+  /// \p thisAdjustment is the 'this' pointer adjustment for conversions
+  /// through non-primary bases (e.g., &B::foo as void (C::*)() where
+  /// B is a non-primary base of C).
+  virtual cir::MethodAttr
+  emitMemberFunctionPointer(const CXXMethodDecl *md, clang::QualType memPtrTy,
+                            cir::MethodType ty,
+                            CharUnits thisAdjustment = CharUnits::Zero()) = 0;
+
+  /// Return true if the given member pointer can be zero-initialized
+  /// (in the C++ sense) with an LLVM zeroinitializer.
+  virtual bool isZeroInitializable(const MemberPointerType *mpt);
 
   /// Gets the mangle context.
   clang::MangleContext &getMangleContext() { return *mangleContext; }
@@ -310,6 +388,11 @@ public:
 
   /**************************** Array cookies ******************************/
 
+  /// Return whether delete[] requires an array cookie for this element type.
+  /// Mirrors OGCG's CXXDeleteExpr overload to allow ABI-specific overrides.
+  virtual bool requiresArrayCookie(const CXXDeleteExpr *e,
+                                   QualType elementType);
+
   /// Returns the extra size required in order to store the array
   /// cookie for the given new-expression.  May return 0 to indicate that no
   /// array cookie is required.
@@ -320,6 +403,11 @@ public:
   ///
   /// \param e - the new-expression being allocated.
   virtual CharUnits getArrayCookieSize(const CXXNewExpr *e);
+
+  /// Returns the cookie size for array delete operations.
+  CharUnits getArrayCookieSizeForType(QualType elementType) {
+    return getArrayCookieSizeImpl(elementType);
+  }
 
   /// Initialize the array cookie for the given allocation.
   ///
@@ -335,15 +423,40 @@ public:
                                         const CXXNewExpr *e,
                                         QualType elementType) = 0;
 
+  /// Read the array cookie associated with the given delete-expression, if it
+  /// has one. Mirrors OGCG's CGCXXABI::ReadArrayCookie wrapper so ABI-specific
+  /// cookie layout and sanitizer hooks stay out of CIRGenExprCXX.cpp.
+  virtual void readArrayCookie(CIRGenFunction &cgf, Address ptr,
+                               const CXXDeleteExpr *e, QualType elementType,
+                               mlir::Value &numElements, mlir::Value &allocPtr,
+                               CharUnits &cookieSize);
+
+  /// Read the array cookie for an allocation known to require one.
+  void readArrayCookie(CIRGenFunction &cgf, Address ptr, QualType elementType,
+                       mlir::Value &numElements, mlir::Value &allocPtr,
+                       CharUnits &cookieSize);
+
 protected:
   /// Returns the extra size required in order to store the array
   /// cookie for the given type.  Assumes that an array cookie is
   /// required.
   virtual CharUnits getArrayCookieSizeImpl(QualType elementType) = 0;
+
+  /// Read the array cookie for an allocation known to have one. This is called
+  /// by the standard readArrayCookie wrappers above.
+  virtual mlir::Value readArrayCookieImpl(CIRGenFunction &cgf, Address ptr,
+                                          CharUnits cookieSize) = 0;
+
+public:
+  /// Emit TLS wrapper functions for thread-local variables collected during
+  /// this translation unit. Called at end-of-TU from CIRGenModule::release().
+  virtual void emitCXXThreadLocalInitFuncs() {}
 };
 
 /// Creates and Itanium-family ABI
 CIRGenCXXABI *CreateCIRGenItaniumCXXABI(CIRGenModule &cgm);
+/// Creates a Microsoft-family ABI.
+CIRGenCXXABI *CreateCIRGenMicrosoftCXXABI(CIRGenModule &cgm);
 
 } // namespace clang::CIRGen
 

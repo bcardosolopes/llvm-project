@@ -1,0 +1,21 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @omp_task_1() {
+    omp.task {
+      cir.call @work() : () -> ()
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @work() loc(#loc1)
+}
+
+#loc1 = loc("task.cir":1:1)
+
+// CHECK-LABEL: define void @omp_task_1()
+// CHECK: call i32 @__kmpc_global_thread_num(ptr {{.*}})
+// CHECK: call ptr @__kmpc_omp_task_alloc(
+// CHECK: call i32 @__kmpc_omp_task(ptr {{.*}})
+// CHECK: ret void

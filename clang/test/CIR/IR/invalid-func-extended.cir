@@ -1,0 +1,47 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify FuncOp: function alias shall not have a body
+cir.func @l0() {
+  cir.return
+}
+
+cir.func @l1() alias(@l0) { // expected-error {{function alias shall not have a body}}
+  cir.return
+}
+
+// -----
+
+// Verify FuncOp: goto/label mismatch
+// expected-error@+1 {{goto/label mismatch}}
+cir.func @goto_no_label() {
+  cir.scope {
+    cir.goto "nonexistent"
+  }
+  cir.return
+}
+
+// -----
+
+// Verify FuncOp: blockaddress label mismatch
+// expected-error@+1 {{expects an existing label target in the referenced function}}
+cir.func @blockaddr_missing_label() {
+  %0 = cir.block_address <@blockaddr_missing_label, "missing"> : !cir.ptr<!cir.void>
+  cir.br ^bb1
+^bb1:
+  cir.label "present"
+  cir.return
+}
+
+// -----
+
+// Verify FuncOp: duplicate unresolved gotos still fail verification
+// expected-error@+1 {{goto/label mismatch}}
+cir.func @duplicate_goto_no_label() {
+  cir.scope {
+    cir.goto "never_defined"
+  }
+  cir.scope {
+    cir.goto "never_defined"
+  }
+  cir.return
+}

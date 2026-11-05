@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-linux-gnu -gkey-instructions %s -gno-column-info -debug-info-kind=line-tables-only -emit-llvm -o - \
 // RUN: | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-linux-gnu -std=c++17 -gkey-instructions %s -gno-column-info -debug-info-kind=line-tables-only -emit-llvm -fclangir -fexceptions -fcxx-exceptions -o - \
+// RUN: | FileCheck %s --check-prefix=CIR %}
 
 // g::h and i can be memcpy'd, check the assignment gets Key Instructions metadata.
 
@@ -47,10 +49,23 @@ struct g {
 // CHECK-NEXT: ret void, !dbg
 
 // CHECK: [[S1:!.*]] = distinct !DISubprogram(name: "operator=",
-// CHECK: [[S1_G1R1]] = !DILocation(line: 11, scope: [[S1]], atomGroup: 1, atomRank: 1)
+// CHECK: [[S1_G1R1]] = !DILocation(line: 13, scope: [[S1]], atomGroup: 1, atomRank: 1)
 
 // CHECK: [[S2:!.*]] = distinct !DISubprogram(name: "g",
-// CHECK: [[S2_G1R1]] = !DILocation(line: 11, scope: [[S2]], atomGroup: 1, atomRank: 1)
+// CHECK: [[S2_G1R1]] = !DILocation(line: 13, scope: [[S2]], atomGroup: 1, atomRank: 1)
+
+// CIR-LABEL: define linkonce_odr void @_ZN1gC{{[12]}}ERS_
+// CIR: call void @llvm.memcpy{{.*}}, !dbg [[CIR_S2_G1R1:!.*]]
+// CIR-NEXT: ret void, !dbg [[CIR_S2_G2R1:!.*]]
+// CIR-LABEL: define linkonce_odr noundef nonnull align 4 dereferenceable(12) ptr @_ZN1gaSERKS_
+// CIR: call void @llvm.memcpy{{.*}}, !dbg [[CIR_S1_G1R1:!.*]]
+// CIR: ret ptr %{{.*}}, !dbg [[CIR_S1_G2R1:!.*]]
+// CIR: [[CIR_S2:!.*]] = distinct !DISubprogram(name: {{.*}}"_ZN1gC{{[12]}}ERS_",
+// CIR: [[CIR_S2_G1R1]] = !DILocation(line: 13, scope: [[CIR_S2]], atomGroup: 1, atomRank: 1)
+// CIR: [[CIR_S2_G2R1]] = !DILocation(line: 13, scope: [[CIR_S2]], atomGroup: 2, atomRank: 1)
+// CIR: [[CIR_S1:!.*]] = distinct !DISubprogram(name: {{.*}}"_ZN1gaSERKS_",
+// CIR: [[CIR_S1_G1R1]] = !DILocation(line: 13, scope: [[CIR_S1]], atomGroup: 1, atomRank: 1)
+// CIR: [[CIR_S1_G2R1]] = !DILocation(line: 13, scope: [[CIR_S1]], atomGroup: 2, atomRank: 1)
 
 [[gnu::nodebug]]
 void fun(g *x) {

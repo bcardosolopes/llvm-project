@@ -23,15 +23,44 @@ llvm.func @callee_(%arg0: !llvm.ptr, %arg1: !llvm.ptr) {
   llvm.return
 }
 
-
-// CHECK: define internal void @__omp_offloading_{{.*}}_caller__{{.*}}(ptr %[[X_PARAM:.*]], ptr %[[I_PARAM:.*]]) {
-
-// CHECK:   %[[I_VAL:.*]] = load i32, ptr %[[I_PARAM]], align 4
-// CHECK:   %[[I_VAL_FL:.*]] = sitofp i32 %[[I_VAL]] to float
-// CHECK:   store float %[[I_VAL_FL]], ptr %[[X_PARAM]], align 4
-// CHECK:   call void @callee_(ptr %[[X_PARAM]], ptr %[[X_PARAM]])
-// CHECK:   br label %[[REGION_CONT:.*]]
-
-// CHECK: [[REGION_CONT]]:
+// CHECK: @0 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @1 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK-LABEL: define void @caller_(
+// CHECK:   %[[VAL_0:.*]] = alloca i64, align 8
+// CHECK:   %[[VAL_1:.*]] = alloca i64, align 8
+// CHECK:   %[[VAL_2:.*]] = alloca float, i64 1, align 4
+// CHECK:   %[[VAL_3:.*]] = alloca i32, i64 1, align 4
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_5:.*]] = load float, ptr %[[VAL_2]], align 4
+// CHECK:   store float %[[VAL_5]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_6:.*]] = load i64, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_7:.*]] = load i32, ptr %[[VAL_3]], align 4
+// CHECK:   store i32 %[[VAL_7]], ptr %[[VAL_1]], align 4
+// CHECK:   %[[VAL_8:.*]] = load i64, ptr %[[VAL_1]], align 4
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_caller__l{{.*}}(i64 %[[VAL_6]], i64 %[[VAL_8]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define void @callee_(
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_caller__l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i64, align 8
+// CHECK:   store i64 %[[VAL_1:.*]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_2:.*]] = alloca i64, align 8
+// CHECK:   store i64 %[[VAL_3:.*]], ptr %[[VAL_2]], align 4
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_7:.*]] = load i32, ptr %[[VAL_2]], align 4
+// CHECK:   %[[VAL_8:.*]] = sitofp i32 %[[VAL_7]] to float
+// CHECK:   store float %[[VAL_8]], ptr %[[VAL_0]], align 4
+// CHECK:   call void @callee_(ptr %[[VAL_0]], ptr %[[VAL_0]])
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.region.cont:
 // CHECK:   ret void
 // CHECK: }

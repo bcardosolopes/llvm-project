@@ -1,4 +1,5 @@
-// RUN: %clang_cc1 -triple aarch64-pc-windows-msvc -fobjc-runtime=gnustep-2.2 -fobjc-dispatch-method=non-legacy -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple aarch64-pc-windows-msvc -fobjc-runtime=gnustep-2.2 -fobjc-dispatch-method=non-legacy -emit-llvm -o - %s | FileCheck %s --check-prefix=CHECK
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-pc-windows-msvc -fobjc-runtime=gnustep-2.2 -fobjc-dispatch-method=non-legacy -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CHECK %}
 
 // Pass and return for type size <= 8 bytes.
 struct S1 {

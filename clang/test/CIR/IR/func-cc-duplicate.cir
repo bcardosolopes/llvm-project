@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+
+// A second cc(...) is rejected rather than left for the module parser, and the
+// caret lands on the duplicate rather than just past it. The column is pinned
+// because that is the only part a silent regression would change.
+
+module {
+  // CHECK: :[[@LINE+1]]:67: error: {{.*}}cc already specified for this function
+  cir.func private @twice_cc() cc(preserve_most) global_ctor(101) cc(spir_kernel)
+}

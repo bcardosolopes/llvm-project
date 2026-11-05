@@ -28,14 +28,14 @@ void foo() {
 // CIR:   %[[ARRAY:.*]] = cir.alloca !cir.array<!rec_S x 42>, !cir.ptr<!cir.array<!rec_S x 42>>, ["s", init]
 // CIR:   %[[CONST42:.*]] = cir.const #cir.int<42> : !u64i
 // CIR:   %[[DECAY:.*]] = cir.cast array_to_ptrdecay %[[ARRAY]] : !cir.ptr<!cir.array<!rec_S x 42>> -> !cir.ptr<!rec_S>
-// CIR:   %[[END_PTR:.*]] = cir.ptr_stride %[[DECAY]], %[[CONST42]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
+// CIR:   %[[END_PTR:.*]] = cir.ptr_stride inbounds %[[DECAY]], %[[CONST42]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
 // CIR:   %[[ITER:.*]] = cir.alloca !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>, ["__array_idx"]
 // CIR:   cir.store %[[DECAY]], %[[ITER]] : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
 // CIR:   cir.do {
 // CIR:     %[[CURRENT:.*]] = cir.load %[[ITER]] : !cir.ptr<!cir.ptr<!rec_S>>, !cir.ptr<!rec_S>
-// CIR:     cir.call @_ZN1SC1Ev(%[[CURRENT]]) : (!cir.ptr<!rec_S>) -> ()
 // CIR:     %[[CONST1:.*]] = cir.const #cir.int<1> : !u64i
-// CIR:     %[[NEXT:.*]] = cir.ptr_stride %[[CURRENT]], %[[CONST1]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
+// CIR:     %[[NEXT:.*]] = cir.ptr_stride inbounds %[[CURRENT]], %[[CONST1]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
+// CIR:     cir.call @_ZN1SC1Ev(%[[CURRENT]]) : (!cir.ptr<!rec_S>) -> ()
 // CIR:     cir.store %[[NEXT]], %[[ITER]] : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
 // CIR:     cir.yield
 // CIR:   } while {
@@ -48,8 +48,8 @@ void foo() {
 
 // LLVM: define dso_local void @_Z3foov()
 // LLVM: %[[ARRAY:.*]] = alloca [42 x %struct.S]
-// LLVM: %[[START:.*]] = getelementptr %struct.S, ptr %[[ARRAY]], i32 0
-// LLVM: %[[END:.*]] = getelementptr %struct.S, ptr %[[START]], i64 42
+// LLVM: %[[START:.*]] = getelementptr inbounds nuw %struct.S, ptr %[[ARRAY]], i32 0
+// LLVM: %[[END:.*]] = getelementptr inbounds %struct.S, ptr %[[START]], i64 42
 // LLVM: %[[ITER:.*]] = alloca ptr
 // LLVM: store ptr %[[START]], ptr %[[ITER]]
 // LLVM: br label %[[LOOP:.*]]
@@ -59,8 +59,8 @@ void foo() {
 // LLVM: br i1 %[[DONE]], label %[[LOOP]], label %[[EXIT:.*]]
 // LLVM: [[LOOP]]:
 // LLVM: %[[CURRENT:.*]] = load ptr, ptr %[[ITER]]
-// LLVM: call void @_ZN1SC1Ev(ptr %[[CURRENT]])
-// LLVM: %[[NEXT:.*]] = getelementptr %struct.S, ptr %[[CURRENT]], i64 1
+// LLVM: %[[NEXT:.*]] = getelementptr inbounds %struct.S, ptr %[[CURRENT]], i64 1
+// LLVM: call void @_ZN1SC1Ev(ptr {{[^%]*}}%[[CURRENT]])
 // LLVM: store ptr %[[NEXT]], ptr %[[ITER]]
 // LLVM: br label %[[COND]]
 // LLVM: [[EXIT]]:
@@ -85,12 +85,12 @@ void zero_sized() {
 }
 
 // CIR-BEFORE-LPP:     cir.func {{.*}} @_Z10zero_sizedv()
-// CIR-BEFORE-LPP:       cir.alloca !cir.array<!rec_S x 0>, !cir.ptr<!cir.array<!rec_S x 0>>, ["s"]
+// CIR-BEFORE-LPP:       cir.alloca !cir.array<!rec_S x 0>, !cir.ptr<!cir.array<!rec_S x 0>>, ["s", init]
 // CIR-BEFORE-LPP-NOT:   cir.array.ctor
 // CIR-BEFORE-LPP:       cir.return
 
 // CIR:     cir.func {{.*}} @_Z10zero_sizedv()
-// CIR:       cir.alloca !cir.array<!rec_S x 0>, !cir.ptr<!cir.array<!rec_S x 0>>, ["s"]
+// CIR:       cir.alloca !cir.array<!rec_S x 0>, !cir.ptr<!cir.array<!rec_S x 0>>, ["s", init]
 // CIR-NOT:   cir.do
 // CIR-NOT:   cir.call @_ZN1SC1Ev
 // CIR:       cir.return
@@ -123,14 +123,14 @@ void multi_dimensional() {
 // CIR:       %[[S:.*]] = cir.alloca !cir.array<!cir.array<!rec_S x 5> x 3>, !cir.ptr<!cir.array<!cir.array<!rec_S x 5> x 3>>, ["s", init]
 // CIR:       %[[CONST15:.*]] = cir.const #cir.int<15> : !u64i
 // CIR:       %[[DECAY:.*]] = cir.cast array_to_ptrdecay {{.*}} : !cir.ptr<!cir.array<!rec_S x 15>> -> !cir.ptr<!rec_S>
-// CIR:       %[[END_PTR:.*]] = cir.ptr_stride %[[DECAY]], %[[CONST15]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
+// CIR:       %[[END_PTR:.*]] = cir.ptr_stride inbounds %[[DECAY]], %[[CONST15]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
 // CIR:       %[[ITER:.*]] = cir.alloca !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>, ["__array_idx"]
 // CIR:       cir.store %[[DECAY]], %[[ITER]] : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
 // CIR:       cir.do {
 // CIR:         %[[CURRENT:.*]] = cir.load %[[ITER]] : !cir.ptr<!cir.ptr<!rec_S>>, !cir.ptr<!rec_S>
-// CIR:         cir.call @_ZN1SC1Ev(%[[CURRENT]]) : (!cir.ptr<!rec_S>) -> ()
 // CIR:         %[[CONST1:.*]] = cir.const #cir.int<1> : !u64i
-// CIR:         %[[NEXT:.*]] = cir.ptr_stride %[[CURRENT]], %[[CONST1]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
+// CIR:         %[[NEXT:.*]] = cir.ptr_stride inbounds %[[CURRENT]], %[[CONST1]] : (!cir.ptr<!rec_S>, !u64i) -> !cir.ptr<!rec_S>
+// CIR:         cir.call @_ZN1SC1Ev(%[[CURRENT]]) : (!cir.ptr<!rec_S>) -> ()
 // CIR:         cir.store %[[NEXT]], %[[ITER]] : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
 // CIR:         cir.yield
 // CIR:       } while {
@@ -142,8 +142,8 @@ void multi_dimensional() {
 
 // LLVM:     define{{.*}} @_Z17multi_dimensionalv()
 // LLVM:       %[[S:.*]] = alloca [3 x [5 x %struct.S]]
-// LLVM:       %[[START:.*]] = getelementptr %struct.S, ptr %[[S]], i32 0
-// LLVM:       %[[END:.*]] = getelementptr %struct.S, ptr %[[START]], i64 15
+// LLVM:       %[[START:.*]] = getelementptr inbounds nuw %struct.S, ptr %[[S]], i32 0
+// LLVM:       %[[END:.*]] = getelementptr inbounds %struct.S, ptr %[[START]], i64 15
 // LLVM:       %[[ITER:.*]] = alloca ptr
 // LLVM:       store ptr %[[START]], ptr %[[ITER]]
 // LLVM:       br label %[[LOOP:.*]]
@@ -153,8 +153,8 @@ void multi_dimensional() {
 // LLVM:       br i1 %[[DONE]], label %[[LOOP]], label %[[EXIT:.*]]
 // LLVM:     [[LOOP]]:
 // LLVM:       %[[CURRENT:.*]] = load ptr, ptr %[[ITER]]
-// LLVM:       call void @_ZN1SC1Ev(ptr %[[CURRENT]])
-// LLVM:       %[[NEXT:.*]] = getelementptr %struct.S, ptr %[[CURRENT]], i64 1
+// LLVM:       %[[NEXT:.*]] = getelementptr inbounds %struct.S, ptr %[[CURRENT]], i64 1
+// LLVM:       call void @_ZN1SC1Ev(ptr {{[^%]*}}%[[CURRENT]])
 // LLVM:       store ptr %[[NEXT]], ptr %[[ITER]]
 // LLVM:       br label %[[COND]]
 // LLVM:     [[EXIT]]:

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm -fsanitize=cfi-icall -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm -fsanitize=cfi-icall -fclangir -o - %s | FileCheck %s %}
 
 #if !__has_builtin(__builtin_function_start)
 #error "missing __builtin_function_start"
@@ -31,26 +32,26 @@ void A::f() {}
 void A::g() {}
 void A::h() {}
 
-// CHECK: define {{.*}}i32 @_ZNK1A1iEv(ptr {{.*}}%this)
+// CHECK: define {{.*}}i32 @_ZNK1A1iEv(ptr {{.*}})
 int A::i() const { return 0; }
 
-// CHECK: define {{.*}}i32 @_ZNK1A1iEi(ptr noundef {{.*}}%this, i32 noundef %n)
+// CHECK: define {{.*}}i32 @_ZNK1A1iEi(ptr noundef {{.*}}, i32 noundef {{.*}})
 int A::i(int n) const { return 0; }
 
 void h(void) {
-  // CHECK: store ptr no_cfi @_Z1bv, ptr %g
+  // CHECK: store ptr no_cfi @_Z1bv, ptr {{.*}}
   void *g = __builtin_function_start(b);
   // CHECK: call void @_Z1cPv(ptr noundef no_cfi @_Z1av)
   c(__builtin_function_start(a));
 
-  // CHECK: store ptr no_cfi @_ZN1A1fEv, ptr %Af
+  // CHECK: store ptr no_cfi @_ZN1A1fEv, ptr {{.*}}
   void *Af = __builtin_function_start(&A::f);
-  // CHECK: store ptr no_cfi @_ZN1A1gEv, ptr %Ag
+  // CHECK: store ptr no_cfi @_ZN1A1gEv, ptr {{.*}}
   void *Ag = __builtin_function_start(&A::g);
-  // CHECK: store ptr no_cfi @_ZN1A1hEv, ptr %Ah
+  // CHECK: store ptr no_cfi @_ZN1A1hEv, ptr {{.*}}
   void *Ah = __builtin_function_start(&A::h);
-  // CHECK: store ptr no_cfi @_ZNK1A1iEv, ptr %Ai1
+  // CHECK: store ptr no_cfi @_ZNK1A1iEv, ptr {{.*}}
   void *Ai1 = __builtin_function_start((int(A::*)() const) & A::i);
-  // CHECK: store ptr no_cfi @_ZNK1A1iEi, ptr %Ai2
+  // CHECK: store ptr no_cfi @_ZNK1A1iEi, ptr {{.*}}
   void *Ai2 = __builtin_function_start((int(A::*)(int) const) & A::i);
 }

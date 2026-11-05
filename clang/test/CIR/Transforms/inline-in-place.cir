@@ -1,0 +1,64 @@
+// The CIR inliner makes the droppable functions private to MLIR while it runs,
+// so a callee inlined into its only caller is moved there, not copied, and
+// erased; the droppable functions that survive get their visibility back.
+//
+// RUN: cir-opt %s --cir-inline -o %t.cir
+// RUN: FileCheck --input-file=%t.cir %s
+
+!s32i = !cir.int<s, 32>
+!fnptr = !cir.ptr<!cir.func<(!s32i) -> !s32i>>
+module {
+  // Too large for the size rule and called twice: stays, and stays public.
+  // CHECK-NOT: private
+  // CHECK: cir.func linkonce_odr hidden @big(
+  cir.func linkonce_odr hidden @big(%arg0: !s32i) -> !s32i {
+    %0 = cir.binop(mul, %arg0, %arg0) : !s32i
+    %1 = cir.binop(add, %0, %arg0) : !s32i
+    %2 = cir.binop(sub, %1, %0) : !s32i
+    %3 = cir.binop(mul, %2, %1) : !s32i
+    %4 = cir.binop(add, %3, %2) : !s32i
+    %5 = cir.binop(xor, %4, %3) : !s32i
+    cir.return %5 : !s32i
+  }
+
+  // Large too, but its only use: inlined into @f and gone.
+  // CHECK-NOT: @once
+  cir.func linkonce_odr hidden @once(%arg0: !s32i) -> !s32i {
+    %0 = cir.binop(mul, %arg0, %arg0) : !s32i
+    %1 = cir.binop(add, %0, %arg0) : !s32i
+    %2 = cir.binop(sub, %1, %0) : !s32i
+    %3 = cir.binop(mul, %2, %1) : !s32i
+    %4 = cir.binop(add, %3, %2) : !s32i
+    %5 = cir.call @big(%4) : (!s32i) -> !s32i
+    cir.return %5 : !s32i
+  }
+
+  // Its address is taken, which is a use MLIR sees: stays, and stays public.
+  // CHECK: cir.func linkonce_odr hidden @taken(
+  cir.func linkonce_odr hidden @taken(%arg0: !s32i) -> !s32i {
+    %0 = cir.binop(mul, %arg0, %arg0) : !s32i
+    %1 = cir.binop(add, %0, %arg0) : !s32i
+    %2 = cir.binop(sub, %1, %0) : !s32i
+    %3 = cir.binop(mul, %2, %1) : !s32i
+    %4 = cir.binop(add, %3, %2) : !s32i
+    cir.return %4 : !s32i
+  }
+
+  // CHECK: cir.func @f(
+  // CHECK-NOT: cir.call @once
+  // CHECK:   cir.binop(add
+  // CHECK:   cir.call @big(
+  // CHECK:   cir.call @big(
+  cir.func @f(%arg0: !s32i) -> !s32i {
+    %0 = cir.call @once(%arg0) : (!s32i) -> !s32i
+    %1 = cir.call @big(%0) : (!s32i) -> !s32i
+    cir.return %1 : !s32i
+  }
+
+  // CHECK: cir.func @g(
+  // CHECK:   cir.get_global @taken
+  cir.func @g() -> !fnptr {
+    %0 = cir.get_global @taken : !fnptr
+    cir.return %0 : !fnptr
+  }
+}

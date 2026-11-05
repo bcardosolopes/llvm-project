@@ -3,6 +3,7 @@
 // For clang, "internal" is just an alias for "hidden". We could use it for some
 // optimization purposes on 32-bit x86, but it's not worth it.
 // RUN: %clang_cc1 %s -std=c++11 -triple=x86_64-apple-darwin10 -fvisibility=internal -emit-llvm -o - | FileCheck %s -check-prefix=CHECK-HIDDEN
+// RUN: %if cir-support %{ %clang_cc1 %s -std=c++11 -triple=x86_64-apple-darwin10 -fclangir -mconstructor-aliases -emit-llvm -o - | FileCheck %s -check-prefix=CHECK-CIR-CTOR-ALIASES %}
 
 #define HIDDEN __attribute__((visibility("hidden")))
 #define PROTECTED __attribute__((visibility("protected")))
@@ -1545,6 +1546,7 @@ namespace pragma_test {
   };
 
   S::S() = default;
+  // CHECK-CIR-CTOR-ALIASES: @_ZN11pragma_test1SC1Ev = hidden unnamed_addr alias void (ptr), ptr @_ZN11pragma_test1SC2Ev
   // CHECK-LABEL: define hidden void @_ZN11pragma_test1SC2Ev(
   // CHECK-HIDDEN-LABEL: define hidden void @_ZN11pragma_test1SC2Ev(
 }
@@ -1557,6 +1559,7 @@ namespace no_pragma_test {
   };
 
   S::S() = default;
+  // CHECK-CIR-CTOR-ALIASES: @_ZN14no_pragma_test1SC1Ev = unnamed_addr alias void (ptr), ptr @_ZN14no_pragma_test1SC2Ev
   // CHECK-LABEL: define void @_ZN14no_pragma_test1SC2Ev(
   // CHECK-HIDDEN-LABEL: define hidden void @_ZN14no_pragma_test1SC2Ev(
 }

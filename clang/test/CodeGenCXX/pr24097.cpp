@@ -18,3 +18,11 @@ void bar() {
 
 // Test that it is not hidden
 // CHECK: define available_externally noundef zeroext i1 @_ZThn8_N17SyncMessageFilter4SendEv
+// CHECK-SAME: (
+// CHECK: tail call noundef zeroext i1 @_ZN17SyncMessageFilter4SendEv
+// CHECK-NOT: alloca i8
+// CHECK-NOT: zext i1
+// CHECK-NOT: store i8
+// CHECK-NOT: load i8
+// CHECK-NOT: trunc i8
+// CHECK: ret i1

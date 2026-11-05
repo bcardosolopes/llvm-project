@@ -264,12 +264,14 @@ class LLVM_Op<string mnemonic, list<Trait> traits = []> :
 class LLVM_MemAccessOpBase<string mnemonic, list<Trait> traits = []> :
     LLVM_Op<mnemonic, !listconcat([
       DeclareOpInterfaceMethods<AccessGroupOpInterface>,
+      DeclareOpInterfaceMethods<AnnotationOpInterface>,
       DeclareOpInterfaceMethods<AliasAnalysisOpInterface>], traits)>,
     LLVM_MemOpPatterns {
   dag aliasAttrs = (ins OptionalAttr<LLVM_AccessGroupArrayAttr>:$access_groups,
                     OptionalAttr<LLVM_AliasScopeArrayAttr>:$alias_scopes,
                     OptionalAttr<LLVM_AliasScopeArrayAttr>:$noalias_scopes,
-                    OptionalAttr<LLVM_TBAATagArrayAttr>:$tbaa);
+                    OptionalAttr<LLVM_TBAATagArrayAttr>:$tbaa,
+                    OptionalAttr<ArrayAttr>:$annotations);
 }
 
 // Base class for LLVM intrinsics operation. It is similar to LLVM_Op, but
@@ -312,7 +314,8 @@ class LLVM_IntrOpBase<Dialect dialect, string opName, string enumName,
         !if(!gt(requiresAccessGroup, 0),
             [DeclareOpInterfaceMethods<AccessGroupOpInterface>], []),
         !if(!gt(requiresAliasAnalysis, 0),
-            [DeclareOpInterfaceMethods<AliasAnalysisOpInterface>], []),
+            [DeclareOpInterfaceMethods<AliasAnalysisOpInterface>,
+             DeclareOpInterfaceMethods<AnnotationOpInterface>], []),
         !if(!gt(requiresFastmath, 0),
             [DeclareOpInterfaceMethods<FastmathFlagsInterface>], []),
         !if(!gt(requiresArgAndResultAttrs, 0),
@@ -327,7 +330,8 @@ class LLVM_IntrOpBase<Dialect dialect, string opName, string enumName,
         !if(!gt(requiresAliasAnalysis, 0),
             (ins OptionalAttr<LLVM_AliasScopeArrayAttr>:$alias_scopes,
                  OptionalAttr<LLVM_AliasScopeArrayAttr>:$noalias_scopes,
-                 OptionalAttr<LLVM_TBAATagArrayAttr>:$tbaa),
+                 OptionalAttr<LLVM_TBAATagArrayAttr>:$tbaa,
+                 OptionalAttr<ArrayAttr>:$annotations),
             (ins )),
         !if(!gt(requiresArgAndResultAttrs, 0),
             (ins OptionalAttr<DictArrayAttr>:$arg_attrs,
@@ -476,9 +480,10 @@ class LLVM_OneResultIntrOp<string mnem, list<int> overloadedResults = [],
                            bit requiresFastmath = 0,
                            bit requiresArgAndResultAttrs = 0,
                            list<int> immArgPositions = [],
-                           list<string> immArgAttrNames = []>
+                           list<string> immArgAttrNames = [],
+                           bit requiresAliasAnalysis = 0>
     : LLVM_IntrOp<mnem, overloadedResults, overloadedOperands, traits, 1,
-                  /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/0,
+                  /*requiresAccessGroup=*/0, requiresAliasAnalysis,
                   requiresFastmath, requiresArgAndResultAttrs,
                   /*requiresOpBundles=*/0, immArgPositions,
                   immArgAttrNames>;

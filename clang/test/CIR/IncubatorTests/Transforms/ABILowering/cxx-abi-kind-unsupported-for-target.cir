@@ -1,0 +1,44 @@
+// RUN: cir-opt --cir-cxxabi-lowering -o %t.cir %s
+// RUN: FileCheck --check-prefix=ITANIUM --input-file %t.cir %s
+// RUN: sed -e 's/x86_64-unknown-linux-gnu/aarch64-unknown-linux-gnu/' -e 's/"mips"/"not-an-abi"/' %s > %t.unknown.cir
+// RUN: cir-opt --cir-cxxabi-lowering -o %t.unknown.out.cir %t.unknown.cir
+// RUN: FileCheck --check-prefix=ARM --input-file %t.unknown.out.cir %s
+
+// "mips" is a real C++ ABI spelling that x86_64 does not support, and
+// createCXXABI has no case for it. CompilerInvocation rejects -fc++-abi=mips
+// on this target, so CIRGen never writes the attribute, but textual CIR can.
+// It must be ignored in favour of the target default instead of aborting.
+
+!s32i = !cir.int<s, 32>
+!s64i = !cir.int<s, 64>
+!void = !cir.void
+!S = !cir.record<struct "S" {!s32i}>
+!Method = !cir.method<!cir.func<(!s32i)> in !S>
+
+module attributes {
+  cir.lang = #cir.lang<cxx>,
+  cir.triple = "x86_64-unknown-linux-gnu",
+  cir.cxx_abi_kind = "mips",
+  dlti.dl_spec = #dlti.dl_spec<i128 = dense<128> : vector<2xi64>, f80 = dense<128> : vector<2xi64>, !llvm.ptr<271> = dense<32> : vector<4xi64>, !llvm.ptr<272> = dense<64> : vector<4xi64>, i64 = dense<64> : vector<2xi64>, f16 = dense<16> : vector<2xi64>, i32 = dense<32> : vector<2xi64>, f128 = dense<128> : vector<2xi64>, !llvm.ptr<270> = dense<32> : vector<4xi64>, f64 = dense<64> : vector<2xi64>, !llvm.ptr = dense<64> : vector<4xi64>, i1 = dense<8> : vector<2xi64>, i8 = dense<8> : vector<2xi64>, i16 = dense<16> : vector<2xi64>, "dlti.stack_alignment" = 128 : i64, "dlti.endianness" = "little">
+} {
+  cir.func @f(%arg0: !Method) -> !Method {
+    cir.return %arg0 : !Method
+  }
+  // The two-word record is what the x86_64 default ABI lowers a member
+  // pointer to, so this pins the fallback rather than only survival.
+
+  // ITANIUM:      !rec_anon_struct = !cir.record<struct {{.*}}{!s64i, !s64i}>
+  // ITANIUM:      cir.func @f(%[[ARG0:.+]]: !rec_anon_struct) -> !rec_anon_struct {
+  // ITANIUM-NEXT:   cir.return %[[ARG0]] : !rec_anon_struct
+  // ITANIUM-NEXT: }
+
+  cir.func @call(%arg0: !cir.ptr<!S>, %arg1: !Method) {
+    %0, %1, %2 = cir.get_method %arg1, %arg0 : (!Method, !cir.ptr<!S>) -> (!cir.ptr<!cir.func<(!cir.ptr<!void>, !s32i)>>, !cir.ptr<!void>, !s64i)
+    cir.return
+  }
+
+  // ARM-LABEL: cir.func @call
+  // ARM:         %[[ADJ:.+]] = cir.extract_member %{{.+}}[1]
+  // ARM:         %{{.+}} = cir.shift(right, %[[ADJ]] : !s64i
+  // ARM:         %{{.+}} = cir.binop(and, %[[ADJ]],
+}

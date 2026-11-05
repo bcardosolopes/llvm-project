@@ -74,7 +74,9 @@ static void addScopeToFunction(LLVM::LLVMFuncOp llvmFunc,
   // declarations only and are defined in a different compile unit, so mark
   // them appropriately in `subprogramFlags` and set an empty `compileUnitAttr`.
   DistinctAttr id;
-  auto subprogramFlags = LLVM::DISubprogramFlags::Optimized;
+  auto subprogramFlags = static_cast<LLVM::DISubprogramFlags>(0);
+  if (compileUnitAttr && compileUnitAttr.getIsOptimized())
+    subprogramFlags |= LLVM::DISubprogramFlags::Optimized;
   if (!llvmFunc.isExternal()) {
     id = DistinctAttr::create(UnitAttr::get(context));
     subprogramFlags |= LLVM::DISubprogramFlags::Definition;
@@ -85,8 +87,10 @@ static void addScopeToFunction(LLVM::LLVMFuncOp llvmFunc,
   auto subprogramAttr = LLVM::DISubprogramAttr::get(
       context, id, compileUnitAttr, fileAttr, funcNameAttr, funcNameAttr,
       fileAttr,
-      /*line=*/line, /*scopeLine=*/line, subprogramFlags, subroutineTypeAttr,
-      /*retainedNodes=*/{}, /*annotations=*/{});
+      /*line=*/line, /*scopeLine=*/line,
+      /*flags=*/LLVM::DIFlags::Zero, subprogramFlags, subroutineTypeAttr,
+      /*retainedNodes=*/{}, /*annotations=*/{},
+      /*keyInstructions=*/false);
   llvmFunc->setLoc(FusedLoc::get(context, {loc}, subprogramAttr));
 }
 
@@ -117,6 +121,12 @@ static void setLexicalBlockFileAttr(Operation *op) {
   if (auto callSiteLoc = dyn_cast<CallSiteLoc>(opLoc)) {
     auto callerLoc = callSiteLoc.getCaller();
     auto calleeLoc = callSiteLoc.getCallee();
+    // An inliner that knew the callee has already given the frame the callee's
+    // scope; a lexical block of the caller would replace it with the wrong
+    // function.
+    if (auto scoped = dyn_cast<FusedLoc>(calleeLoc);
+        scoped && isa_and_present<LLVM::DILocalScopeAttr>(scoped.getMetadata()))
+      return;
     LLVM::DIScopeAttr scopeAttr;
     // We assemble the full inline stack so the parent of this loc must be a
     // function

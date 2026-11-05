@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios7.0 -target-abi darwinpcs -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,DARWIN
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios7.0 -target-abi darwinpcs -emit-llvm -fclangir -o - %s | FileCheck %s --check-prefix=DARWIN-CIR %}
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -emit-llvm -o - -x c %s | FileCheck %s --check-prefixes=CHECK,C,AAPCS
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,CXX,AAPCS
 
@@ -94,6 +95,8 @@ EXTERNC struct SortOfEmpty sort_of_empty_ret(void) {
 EXTERNC struct Empty empty_arg_variadic(int a, ...) {
 // CHECK-LABEL: @empty_arg_variadic(
 // DARWIN-NOT: {{ getelementptr }}
+// DARWIN-CIR-LABEL: @empty_arg_variadic(
+// DARWIN-CIR-NOT: {{getelementptr}}
 // C-NOT: {{ getelementptr }}
 // CXX: %new_reg_offs = add i32 %gr_offs, 8
 // CXX: %new_stack = getelementptr inbounds i8, ptr %stack, i64 8
@@ -107,6 +110,8 @@ EXTERNC struct Empty empty_arg_variadic(int a, ...) {
 EXTERNC struct SuperEmpty super_empty_arg_variadic(int a, ...) {
 // CHECK-LABEL: @super_empty_arg_variadic(
 // DARWIN-NOT: {{ getelementptr }}
+// DARWIN-CIR-LABEL: @super_empty_arg_variadic(
+// DARWIN-CIR-NOT: {{getelementptr}}
 // C-NOT: {{ getelementptr }}
 // CXX-NOT: {{ getelementptr }}
   va_list vl;
@@ -119,6 +124,8 @@ EXTERNC struct SuperEmpty super_empty_arg_variadic(int a, ...) {
 EXTERNC struct SortOfEmpty sort_of_empty_arg_variadic(int a, ...) {
 // CHECK-LABEL: @sort_of_empty_arg_variadic(
 // DARWIN: %argp.next = getelementptr inbounds i8, ptr %argp.cur, i64 0
+// DARWIN-CIR-LABEL: @sort_of_empty_arg_variadic(
+// DARWIN-CIR: getelementptr inbounds i8, ptr
 // C-NOT: {{ getelementptr }}
 // CXX-NOT: {{ getelementptr }}
   va_list vl;

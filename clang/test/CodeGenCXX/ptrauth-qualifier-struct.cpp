@@ -1,11 +1,88 @@
-// RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -std=c++11 -emit-llvm %s  -o - | FileCheck -check-prefixes=CHECK,IOS %s
-// RUN: %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -std=c++11 -emit-llvm %s  -o - | FileCheck %s
+// RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -std=c++11 -emit-llvm %s -o - | FileCheck -check-prefixes=CHECK,OGCG %s
+// RUN: %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -std=c++11 -emit-llvm %s -o - | FileCheck -check-prefixes=CHECK,OGCG %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -std=c++11 -emit-llvm -fclangir %s -o - | FileCheck -check-prefixes=CHECK,CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -std=c++11 -emit-llvm -fclangir %s -o - | FileCheck -check-prefixes=CHECK,CIR %s %}
 
 #define AQ __ptrauth(1,1,50)
 #define IQ __ptrauth(1,0,50)
 
 // CHECK: %[[STRUCT_SA:.*]] = type { ptr, ptr }
 // CHECK: %[[STRUCT_SI:.*]] = type { ptr }
+// CHECK: define {{.*}}void @_Z18testParamTrivialSA9TrivialSA(ptr dead_on_return noundef %{{.*}})
+
+// OGCG-LABEL: define {{.*}}void @_Z19testCopyConstructor2SA(ptr
+// OGCG: call {{.*}}@_ZN2SAC1ERKS_(
+// OGCG-LABEL: define {{.*}}@_ZN2SAC1ERKS_(
+// OGCG: call {{.*}}@_ZN2SAC2ERKS_(
+// OGCG-LABEL: define {{.*}}void @_Z19testMoveConstructor2SA(ptr
+// OGCG: call {{.*}}@_ZN2SAC1EOS_(
+// OGCG-LABEL: define {{.*}}@_ZN2SAC1EOS_(
+// OGCG: call {{.*}}@_ZN2SAC2EOS_(
+// OGCG-LABEL: define {{.*}}void @_Z18testCopyAssignment2SA(ptr
+// OGCG: call {{.*}}@_ZN2SAaSERKS_(
+// OGCG-LABEL: define {{.*}}@_ZN2SAaSERKS_(
+// OGCG-NOT: @llvm.ptrauth.auth(
+// OGCG-NOT: @llvm.ptrauth.sign(
+// OGCG: @llvm.ptrauth.resign(
+// OGCG-LABEL: define {{.*}}void @_Z18testMoveAssignment2SA(ptr
+// OGCG: call {{.*}}@_ZN2SAaSEOS_(
+// OGCG-LABEL: define {{.*}}@_ZN2SAaSEOS_(
+// OGCG-NOT: @llvm.ptrauth.auth(
+// OGCG-NOT: @llvm.ptrauth.sign(
+// OGCG: @llvm.ptrauth.resign(
+// OGCG-LABEL: define {{.*}}void @_Z19testCopyConstructor2SI(
+// OGCG: call void @llvm.memcpy.p0.p0.i64(
+// OGCG-LABEL: define {{.*}}void @_Z19testMoveConstructor2SI(
+// OGCG: call void @llvm.memcpy.p0.p0.i64(
+// OGCG-LABEL: define {{.*}}void @_Z18testCopyAssignment2SI(
+// OGCG: call void @llvm.memcpy.p0.p0.i64(
+// OGCG-LABEL: define {{.*}}void @_Z18testMoveAssignment2SI(
+// OGCG: call void @llvm.memcpy.p0.p0.i64(
+// OGCG-LABEL: define {{.*}}@_ZN2SAC2ERKS_(
+// OGCG-NOT: @llvm.ptrauth.auth(
+// OGCG-NOT: @llvm.ptrauth.sign(
+// OGCG: @llvm.ptrauth.resign(
+// OGCG-LABEL: define {{.*}}@_ZN2SAC2EOS_(
+// OGCG-NOT: @llvm.ptrauth.auth(
+// OGCG-NOT: @llvm.ptrauth.sign(
+// OGCG: @llvm.ptrauth.resign(
+
+// CIR-LABEL: define {{.*}}@_ZN2SAC2ERKS_(
+// CIR-NOT: @llvm.ptrauth.auth(
+// CIR-NOT: @llvm.ptrauth.sign(
+// CIR: @llvm.ptrauth.resign(
+// CIR-LABEL: define {{.*}}@_ZN2SAC1ERKS_(
+// CIR: call {{.*}}@_ZN2SAC2ERKS_(
+// CIR-LABEL: define {{.*}}void @_Z19testCopyConstructor2SA(ptr
+// CIR: call {{.*}}@_ZN2SAC1ERKS_(
+// CIR-LABEL: define {{.*}}@_ZN2SAC2EOS_(
+// CIR-NOT: @llvm.ptrauth.auth(
+// CIR-NOT: @llvm.ptrauth.sign(
+// CIR: @llvm.ptrauth.resign(
+// CIR-LABEL: define {{.*}}@_ZN2SAC1EOS_(
+// CIR: call {{.*}}@_ZN2SAC2EOS_(
+// CIR-LABEL: define {{.*}}void @_Z19testMoveConstructor2SA(ptr
+// CIR: call {{.*}}@_ZN2SAC1EOS_(
+// CIR-LABEL: define {{.*}}@_ZN2SAaSERKS_(
+// CIR-NOT: @llvm.ptrauth.auth(
+// CIR-NOT: @llvm.ptrauth.sign(
+// CIR: @llvm.ptrauth.resign(
+// CIR-LABEL: define {{.*}}void @_Z18testCopyAssignment2SA(ptr
+// CIR: call {{.*}}@_ZN2SAaSERKS_(
+// CIR-LABEL: define {{.*}}@_ZN2SAaSEOS_(
+// CIR-NOT: @llvm.ptrauth.auth(
+// CIR-NOT: @llvm.ptrauth.sign(
+// CIR: @llvm.ptrauth.resign(
+// CIR-LABEL: define {{.*}}void @_Z18testMoveAssignment2SA(ptr
+// CIR: call {{.*}}@_ZN2SAaSEOS_(
+// CIR-LABEL: define {{.*}}void @_Z19testCopyConstructor2SI(
+// CIR: call void @llvm.memcpy.p0.p0.i64(
+// CIR-LABEL: define {{.*}}void @_Z19testMoveConstructor2SI(
+// CIR: call void @llvm.memcpy.p0.p0.i64(
+// CIR-LABEL: define {{.*}}void @_Z18testCopyAssignment2SI(
+// CIR: call void @llvm.memcpy.p0.p0.i64(
+// CIR-LABEL: define {{.*}}void @_Z18testMoveAssignment2SI(
+// CIR: call void @llvm.memcpy.p0.p0.i64(
 
 struct SA {
   int * AQ m0; // Signed using address discrimination.
@@ -21,148 +98,40 @@ struct __attribute__((trivial_abi)) TrivialSA {
   int * AQ m1; // Signed using address discrimination.
 };
 
-// Check that TrivialSA is passed indirectly despite being annotated with
-// 'trivial_abi'.
-
-// CHECK: define {{.*}}void @_Z18testParamTrivialSA9TrivialSA(ptr dead_on_return noundef %{{.*}})
-
-void testParamTrivialSA(TrivialSA a) {
-}
-
-// CHECK: define {{.*}}void @_Z19testCopyConstructor2SA(ptr
-// CHECK: call {{.*}}@_ZN2SAC1ERKS_(
-
-// CHECK: define linkonce_odr {{.*}}@_ZN2SAC1ERKS_(
-// CHECK: call {{.*}}@_ZN2SAC2ERKS_(
+void testParamTrivialSA(TrivialSA a) {}
 
 void testCopyConstructor(SA a) {
   SA t = a;
 }
 
-// CHECK: define {{.*}}void @_Z19testMoveConstructor2SA(ptr
-// CHECK: call {{.*}}@_ZN2SAC1EOS_(
-
-// CHECK: define linkonce_odr {{.*}}@_ZN2SAC1EOS_(
-// CHECK: call {{.*}}@_ZN2SAC2EOS_(
-
 void testMoveConstructor(SA a) {
   SA t = static_cast<SA &&>(a);
 }
-
-// CHECK: define {{.*}}void @_Z18testCopyAssignment2SA(ptr
-// CHECK: call noundef nonnull align 8 dereferenceable(16) ptr @_ZN2SAaSERKS_(
-
-// CHECK: define {{.*}}linkonce_odr noundef nonnull align 8 dereferenceable(16) ptr @_ZN2SAaSERKS_(ptr noundef nonnull align 8 dereferenceable(16) %[[THIS:.*]], ptr noundef nonnull align 8 dereferenceable(16) %0)
-// CHECK: %[[THIS_ADDR:.*]] = alloca ptr, align 8
-// CHECK: %[[_ADDR:.*]] = alloca ptr, align 8
-// CHECK: store ptr %[[THIS]], ptr %[[THIS_ADDR]], align 8
-// CHECK: store ptr %[[V0:.*]], ptr %[[_ADDR]], align 8
-// CHECK: %[[THISI:.*]] = load ptr, ptr %[[THIS_ADDR]], align 8
-// CHECK: %[[M0:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[THISI]], i32 0, i32 0
-// CHECK: %[[V1:.*]] = load ptr, ptr %[[_ADDR]], align 8
-// CHECK: %[[M02:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[V1]], i32 0, i32 0
-// CHECK: %[[V2:.*]] = load ptr, ptr %[[M02]], align 8
-// CHECK: %[[V3:.*]] = ptrtoint ptr %[[M02]] to i64
-// CHECK: %[[V4:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V3]], i64 50)
-// CHECK: %[[V5:.*]] = ptrtoint ptr %[[M0]] to i64
-// CHECK: %[[V6:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V5]], i64 50)
-// CHECK: %[[V8:.*]] = ptrtoint ptr %[[V2]] to i64
-// CHECK: %[[V9:.*]] = call i64 @llvm.ptrauth.resign(i64 %[[V8]], i32 1, i64 %[[V4]], i32 1, i64 %[[V6]])
 
 void testCopyAssignment(SA a) {
   SA t;
   t = a;
 }
 
-// CHECK: define {{.*}}void @_Z18testMoveAssignment2SA(ptr
-// CHECK: call noundef nonnull align 8 dereferenceable(16) ptr @_ZN2SAaSEOS_(
-
-// CHECK: define {{.*}}linkonce_odr noundef nonnull align 8 dereferenceable(16) ptr @_ZN2SAaSEOS_(ptr noundef nonnull align 8 dereferenceable(16) %[[THIS:.*]], ptr noundef nonnull align 8 dereferenceable(16) %0)
-// CHECK: %[[THIS_ADDR:.*]] = alloca ptr, align 8
-// CHECK: %[[_ADDR:.*]] = alloca ptr, align 8
-// CHECK: store ptr %[[THIS]], ptr %[[THIS_ADDR]], align 8
-// CHECK: store ptr %[[V0:.*]], ptr %[[_ADDR]], align 8
-// CHECK: %[[THISI:.*]] = load ptr, ptr %[[THIS_ADDR]], align 8
-// CHECK: %[[M0:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[THISI]], i32 0, i32 0
-// CHECK: %[[V1:.*]] = load ptr, ptr %[[_ADDR]], align 8
-// CHECK: %[[M02:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[V1]], i32 0, i32 0
-// CHECK: %[[V2:.*]] = load ptr, ptr %[[M02]], align 8
-// CHECK: %[[V3:.*]] = ptrtoint ptr %[[M02]] to i64
-// CHECK: %[[V4:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V3]], i64 50)
-// CHECK: %[[V5:.*]] = ptrtoint ptr %[[M0]] to i64
-// CHECK: %[[V6:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V5]], i64 50)
-// CHECK: %[[V8:.*]] = ptrtoint ptr %[[V2]] to i64
-// CHECK: %[[V9:.*]] = call i64 @llvm.ptrauth.resign(i64 %[[V8]], i32 1, i64 %[[V4]], i32 1, i64 %[[V6]])
-
 void testMoveAssignment(SA a) {
   SA t;
   t = static_cast<SA &&>(a);
 }
 
-// CHECK: define {{.*}}void @_Z19testCopyConstructor2SI(
-// CHECK: call void @llvm.memcpy.p0.p0.i64(
-
 void testCopyConstructor(SI a) {
   SI t = a;
 }
 
-// CHECK: define {{.*}}void @_Z19testMoveConstructor2SI(
-// CHECK: call void @llvm.memcpy.p0.p0.i64(
-
 void testMoveConstructor(SI a) {
   SI t = static_cast<SI &&>(a);
 }
-
-// CHECK: define {{.*}}void @_Z18testCopyAssignment2SI(
-// CHECK: call void @llvm.memcpy.p0.p0.i64(
 
 void testCopyAssignment(SI a) {
   SI t;
   t = a;
 }
 
-// CHECK: define {{.*}}void @_Z18testMoveAssignment2SI(
-// CHECK: call void @llvm.memcpy.p0.p0.i64(
-
 void testMoveAssignment(SI a) {
   SI t;
   t = static_cast<SI &&>(a);
 }
-
-// CHECK: define linkonce_odr {{.*}}@_ZN2SAC2ERKS_(ptr noundef nonnull align 8 dereferenceable(16) %[[THIS:.*]], ptr noundef nonnull align 8 dereferenceable(16) %0)
-// IOS: %[[RETVAL:.*]] = alloca ptr, align 8
-// CHECK: %[[THIS_ADDR:.*]] = alloca ptr, align 8
-// CHECK: %[[_ADDR:.*]] = alloca ptr, align 8
-// CHECK: store ptr %[[THIS]], ptr %[[THIS_ADDR]], align 8
-// CHECK: store ptr %[[V0:.*]], ptr %[[_ADDR]], align 8
-// CHECK: %[[THIS1:.*]] = load ptr, ptr %[[THIS_ADDR]], align 8
-// IOS: store ptr %[[THIS1]], ptr %[[RETVAL]], align 8
-// CHECK: %[[M0:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[THIS1]], i32 0, i32 0
-// CHECK: %[[V1:.*]] = load ptr, ptr %[[_ADDR]], align 8
-// CHECK: %[[M02:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[V1]], i32 0, i32 0
-// CHECK: %[[V2:.*]] = load ptr, ptr %[[M02]], align 8
-// CHECK: %[[V3:.*]] = ptrtoint ptr %[[M02]] to i64
-// CHECK: %[[V4:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V3]], i64 50)
-// CHECK: %[[V5:.*]] = ptrtoint ptr %[[M0]] to i64
-// CHECK: %[[V6:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V5]], i64 50)
-// CHECK: %[[V8:.*]] = ptrtoint ptr %[[V2]] to i64
-// CHECK: %[[V9:.*]] = call i64 @llvm.ptrauth.resign(i64 %[[V8]], i32 1, i64 %[[V4]], i32 1, i64 %[[V6]])
-
-// CHECK: define linkonce_odr {{.*}}@_ZN2SAC2EOS_(ptr noundef nonnull align 8 dereferenceable(16) %[[THIS:.*]], ptr noundef nonnull align 8 dereferenceable(16) %0)
-// IOS: %[[RETVAL:.*]] = alloca ptr, align 8
-// CHECK: %[[THIS_ADDR:.*]] = alloca ptr, align 8
-// CHECK: %[[_ADDR:.*]] = alloca ptr, align 8
-// CHECK: store ptr %[[THIS]], ptr %[[THIS_ADDR]], align 8
-// CHECK: store ptr %[[V0:.*]], ptr %[[_ADDR]], align 8
-// CHECK: %[[THIS1:.*]] = load ptr, ptr %[[THIS_ADDR]], align 8
-// IOS: store ptr %[[THIS1]], ptr %[[RETVAL]], align 8
-// CHECK: %[[M0:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[THIS1]], i32 0, i32 0
-// CHECK: %[[V1:.*]] = load ptr, ptr %[[_ADDR]], align 8
-// CHECK: %[[M02:.*]] = getelementptr inbounds nuw %[[STRUCT_SA]], ptr %[[V1]], i32 0, i32 0
-// CHECK: %[[V2:.*]] = load ptr, ptr %[[M02]], align 8
-// CHECK: %[[V3:.*]] = ptrtoint ptr %[[M02]] to i64
-// CHECK: %[[V4:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V3]], i64 50)
-// CHECK: %[[V5:.*]] = ptrtoint ptr %[[M0]] to i64
-// CHECK: %[[V6:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V5]], i64 50)
-// CHECK: %[[V8:.*]] = ptrtoint ptr %[[V2]] to i64
-// CHECK: %[[V9:.*]] = call i64 @llvm.ptrauth.resign(i64 %[[V8]], i32 1, i64 %[[V4]], i32 1, i64 %[[V6]])

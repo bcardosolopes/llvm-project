@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: #cir.global_view with indices cannot reference function symbol @f
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.global external @g = #cir.global_view<@f, [1 : i32]> : !cir.ptr<!s32i>
+  cir.func private @f() -> !s32i {
+    %0 = cir.const #cir.int<0> : !s32i
+    cir.return %0 : !s32i
+  }
+}

@@ -1,0 +1,43 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify nsw/nuw flags only allowed on integer operations
+!s32i = !cir.int<s, 32>
+
+cir.func @binop_nowrap_on_float(%arg0: !cir.float) {
+  // expected-error@+1 {{only operations on integer values may have nsw/nuw flags}}
+  %0 = cir.binop(add, %arg0, %arg0) nsw : !cir.float
+  cir.return
+}
+
+// -----
+
+// Verify nsw/nuw only on add/sub/mul
+!s32i = !cir.int<s, 32>
+
+cir.func @binop_nowrap_on_div(%arg0: !s32i) {
+  // expected-error@+1 {{The nsw/nuw flags are applicable to opcodes: 'add', 'sub' and 'mul'}}
+  %0 = cir.binop(div, %arg0, %arg0) nsw : !s32i
+  cir.return
+}
+
+// -----
+
+// Verify saturated only on add/sub
+!s32i = !cir.int<s, 32>
+
+cir.func @binop_saturated_on_mul(%arg0: !s32i) {
+  // expected-error@+1 {{The saturated flag is applicable to opcodes: 'add' and 'sub'}}
+  %0 = cir.binop(mul, %arg0, %arg0) sat : !s32i
+  cir.return
+}
+
+// -----
+
+// Verify nsw and saturated are mutually exclusive
+!s32i = !cir.int<s, 32>
+
+cir.func @binop_nsw_and_saturated(%arg0: !s32i) {
+  // expected-error@+1 {{The nsw/nuw flags and the saturated flag are mutually exclusive}}
+  %0 = cir.binop(add, %arg0, %arg0) nsw sat : !s32i
+  cir.return
+}

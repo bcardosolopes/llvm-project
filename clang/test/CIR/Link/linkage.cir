@@ -1,0 +1,59 @@
+// RUN: cir-link %s %S/Inputs/linkage-b.cir --warn-odr-divergence -o %t.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s --implicit-check-not="cir.int<111>"
+
+// "Defined twice" means three different things, and only one is an ODR problem.
+//
+//   weak   + weak    every header-defined inline function and every template
+//                    instantiation looks like this. It is the common case and
+//                    has to resolve silently -- a two-file program sharing one
+//                    header already hits it three times, so reporting it would
+//                    bury any real finding under thousands of lines.
+//   strong + weak    the strong definition wins whichever order it arrives in.
+//                    Getting this wrong is a miscompile: the out-of-line
+//                    definition is the one the program is entitled to call.
+//   strong + strong  the genuine divergence, and the only thing worth warning
+//                    about.
+//
+// All three are in one test because the bug to guard against is a rule that
+// gets one right by breaking another.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func linkonce_odr @inline_fn() -> !s32i {
+    %0 = cir.const #cir.int<11> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Weak here, strong in B. B must win regardless of B being second.
+  cir.func linkonce_odr @has_strong_def() -> !s32i {
+    %0 = cir.const #cir.int<111> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @genuinely_conflicting() -> !s32i {
+    %0 = cir.const #cir.int<10> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Exactly one warning, for the strong-vs-strong pair. The weak duplicates
+// must not appear here at all.
+// STATS-NOT: 'inline_fn'
+// STATS-NOT: 'has_strong_def'
+// STATS: warning: 'genuinely_conflicting' defined in more than one input
+// STATS: 1 weak deduped, 1 weak replaced by strong, 0 -fno-rtti copies replaced, 1 ODR divergences
+
+// The strong definition displaced the weak one, so 222 survives. The
+// implicit-check-not on the RUN line is the assertion that would have caught
+// the original bug: it fails if 111 -- the weak body -- is anywhere in the
+// output, which is what first-wins produced before linkage was consulted.
+// CHECK-DAG: cir.func @has_strong_def
+// CHECK-DAG: cir.const #cir.int<222>
+
+// First wins among the genuinely conflicting pair, and among the weak copies.
+// CHECK-DAG: cir.func linkonce_odr @inline_fn
+// CHECK-DAG: cir.const #cir.int<11>
+// CHECK-DAG: cir.func @genuinely_conflicting
+// CHECK-DAG: cir.const #cir.int<10>

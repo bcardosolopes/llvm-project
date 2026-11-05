@@ -845,6 +845,16 @@ public:
   /// Returns a range of all uses, which is useful for iterating over all uses.
   use_range getUses() { return getResults().getUses(); }
 
+  /// Returns the number of live uses for this operation.
+  unsigned getNumLiveUses() {
+    unsigned NumUses = 0;
+    for (Operation *user : getUsers())
+      if (user->getNumLiveUses())
+        ++NumUses;
+
+    return NumUses;
+  }
+
   /// Returns true if this operation has exactly one use.
   bool hasOneUse() { return llvm::hasSingleElement(getUses()); }
 

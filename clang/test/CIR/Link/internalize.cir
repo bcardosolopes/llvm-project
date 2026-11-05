@@ -1,0 +1,83 @@
+// RUN: cir-link %s --warn-odr-divergence -o %t.none.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STATS-NONE
+// RUN: cir-opt %t.none.cir | FileCheck %s --check-prefix=NONE
+
+// RUN: cir-link %s --internalize --keep=exported --keep=exported_data \
+// RUN:   --warn-odr-divergence -o %t.int.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STATS-INT
+// RUN: cir-opt %t.int.cir | FileCheck %s --check-prefix=INT
+
+// RUN: echo "exported" > %t.keep
+// RUN: echo "# a comment, and a blank line follow" >> %t.keep
+// RUN: echo "" >> %t.keep
+// RUN: echo "exported_data" >> %t.keep
+// RUN: cir-link %s --internalize --keep-list=%t.keep -o %t.list.cir
+// RUN: cir-opt %t.list.cir | FileCheck %s --check-prefix=INT
+
+// Internalization is what makes merging *shrink* anything. Inlining across a
+// TU boundary does not remove the callee: while it is externally visible the
+// backend must still emit it, because something outside the merged set might
+// call it. Only after the linker asserts that nothing outside does can it go.
+// Measured on a two-TU program, -O2 after lowering: 3 functions survive
+// without --internalize, 1 with it.
+//
+// The keep list *is* the claim about what this unit exports, so there is no
+// default -- an empty keep set means "nothing is exported", which is a real
+// answer rather than a mistake to guess around.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // Named by --keep, so it must stay external.
+  cir.func @exported() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Not kept: becomes internal, and the optimizer may then delete it.
+  cir.func @not_exported() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.global external @exported_data = #cir.int<3> : !s32i
+  cir.global external @private_data = #cir.int<4> : !s32i
+
+  // A declaration has no body to hide. Internalizing one would leave a symbol
+  // that is undefined and unreachable at the same time -- it must be left
+  // alone even though it is not in the keep list.
+  cir.func private @declared_elsewhere() -> !s32i
+
+  // The same applies to *globals*, and getting it wrong is not cosmetic. A
+  // module that throws references this vtable, which libc++abi defines, as an
+  // external global with no initializer. Internalizing it produced a local
+  // empty array, so the typeinfo built on top of it pointed at nothing and
+  // every program that threw segfaulted. It must stay external.
+  cir.global "private" external @_ZTVN10__cxxabiv117__class_type_infoE : !cir.array<!cir.ptr<!s32i> x 0>
+
+  // Already local, so internalization is a no-op and must not double-count.
+  cir.func internal private @already_local() -> !s32i {
+    %0 = cir.const #cir.int<5> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Without the flag nothing changes.
+// STATS-NONE: 0 internalized
+// NONE: cir.func @exported
+// NONE-DAG: cir.func @not_exported
+// NONE-DAG: cir.global external @exported_data
+// NONE-DAG: cir.global external @private_data
+// NONE-DAG: cir.global "private" external @_ZTVN10__cxxabiv117__class_type_infoE
+
+// With it: the two unkept definitions, and nothing else. Not the declaration,
+// not the already-local function, not the kept symbol.
+// STATS-INT: 2 internalized
+
+// INT-DAG: cir.func @exported
+// INT-DAG: cir.global external @exported_data
+// INT-DAG: cir.func internal private @not_exported
+// INT-DAG: cir.global "private" internal @private_data
+// INT-DAG: cir.func private @declared_elsewhere
+// INT-DAG: cir.global "private" external @_ZTVN10__cxxabiv117__class_type_infoE
+// INT-DAG: cir.func internal private @already_local

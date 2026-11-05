@@ -31,7 +31,7 @@ void test(const char *fmt, __builtin_va_list ap) {
   vprintf(fmt, ap);
 }
 
-// CIR: cir.func always_inline internal private @__vprintfieee128.inline({{.*}}) -> !s32i
+// CIR: cir.func always_inline internal private {{.*}}@__vprintfieee128.inline({{.*}}) -> {{.*}}!s32i
 // CIR:   cir.call @__vfprintf_chkieee128(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}})
 //
 // CIR: cir.func {{.*}} @test({{.*}})
@@ -39,12 +39,13 @@ void test(const char *fmt, __builtin_va_list ap) {
 
 
 // LLVM: define internal i32 @__vprintfieee128.inline({{.*}}) #[[ALWAYS_INLINE_ATTR:.*]] {
-// LLVM:   call i32 @__vfprintf_chkieee128(ptr %{{.*}}, i32 1, ptr %{{.*}}, ptr %{{.*}})
+// LLVM:   call i32 @__vfprintf_chkieee128(ptr noundef %{{.*}}, i32 noundef 1, ptr noundef %{{.*}}, ptr noundef %{{.*}})
+// LLVM: declare i32 @__vprintfieee128(ptr{{.*}}, ptr{{.*}}) #{{[0-9]+}}
 //
 // LLVM: define {{.*}} void @test{{.*}}
-// LLVM:   call i32 @__vprintfieee128.inline(ptr %{{.*}}, ptr %{{.*}})
+// LLVM:   call i32 @__vprintfieee128.inline(ptr noundef %{{.*}}, ptr noundef %{{.*}})
 //
-// LLVM: attributes #[[ALWAYS_INLINE_ATTR]] = { alwaysinline }
+// LLVM: attributes #[[ALWAYS_INLINE_ATTR]] = { alwaysinline {{.*}} }
 
 // Note: OGCG emits these in the opposite order, but the content is the same.
 
@@ -52,7 +53,9 @@ void test(const char *fmt, __builtin_va_list ap) {
 // OGCG: define {{.*}} void @test{{.*}}
 // OGCG:   call i32 @__vprintfieee128.inline(ptr noundef %{{.*}}, ptr noundef %{{.*}})
 //
+// OGCG: declare i32 @__vprintfieee128(ptr noundef, ptr noundef) #{{[0-9]+}}
 // OGCG: define internal i32 @__vprintfieee128.inline({{.*}}) #[[ALWAYS_INLINE_ATTR:.*]] {
 // OGCG:   call i32 @__vfprintf_chkieee128(ptr noundef %{{.*}}, i32 noundef 1, ptr noundef %{{.*}}, ptr noundef %{{.*}})
 //
+// OGCG: attributes #{{[0-9]+}} = { alwaysinline nobuiltin nounwind {{.*}} }
 // OGCG: attributes #[[ALWAYS_INLINE_ATTR]] = { alwaysinline {{.*}} }

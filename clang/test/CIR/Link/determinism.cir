@@ -1,0 +1,60 @@
+// RUN: cir-link %s %S/Inputs/determinism-b.cir %S/Inputs/determinism-c.cir \
+// RUN:   %S/Inputs/determinism-d.cir -o %t1.cir
+// RUN: cir-link %s %S/Inputs/determinism-b.cir %S/Inputs/determinism-c.cir \
+// RUN:   %S/Inputs/determinism-d.cir -o %t2.cir
+// RUN: cir-link %s %S/Inputs/determinism-b.cir %S/Inputs/determinism-c.cir \
+// RUN:   %S/Inputs/determinism-d.cir -o %t3.cir
+// RUN: cmp %t1.cir %t2.cir
+// RUN: cmp %t1.cir %t3.cir
+// RUN: cir-opt %t1.cir | FileCheck %s
+
+// Four inputs, one record name, three distinct bodies -- b and c agree.
+//
+// This is the only ordering in record renaming that decides anything, and it
+// is worth being precise about why. Within a single input MLIR uniques
+// identified records by name, so an input can never hold two records called
+// `Alpha`; whatever order they are walked in, there is nothing to choose
+// between. What the order does decide is *across* inputs: which body keeps
+// the plain name and which get `.1`, `.2`. That order is the command line,
+// which the caller supplies, so the output is a function of the inputs.
+//
+// The three-way cmp is a regression guard rather than a live hazard, then --
+// it exists so that a later change which starts consulting a hash container
+// on this path fails here instead of silently making the artifact
+// unreproducible. A build that differs run to run cannot be cached, compared
+// or bisected, and it will not announce itself: every individual output is
+// perfectly correct.
+//
+// The substantive assertion is the one below about c: three inputs sharing a
+// body that a fourth contradicts must produce two types, not three. Getting
+// that wrong is invisible in a two-input test and costs a duplicate record
+// per extra TU in a real library.
+
+!s32i = !cir.int<s, 32>
+!rec_Alpha = !cir.record<struct "Alpha" {!s32i}>
+!rec_Wrap = !cir.record<struct "Wrap" {!rec_Alpha}>
+
+module {
+  cir.func @a_use(%a: !cir.ptr<!rec_Wrap>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Three bodies in, three types out -- not four.
+// CHECK-DAG: !rec_Alpha = !cir.record<struct "Alpha" {!s32i}>
+// CHECK-DAG: !rec_Alpha2Em1 = !cir.record<struct "Alpha.m1" {!u8i}>
+// CHECK-DAG: !rec_Alpha2Em2 = !cir.record<struct "Alpha.m2" {!cir.float}>
+// CHECK-NOT: "Alpha.m3"
+
+// The wrapper is renamed alongside, and tracks the same reuse.
+// CHECK-DAG: !rec_Wrap = !cir.record<struct "Wrap" {!rec_Alpha}>
+// CHECK-DAG: !rec_Wrap2Em1 = !cir.record<struct "Wrap.m1" {!rec_Alpha2Em1}>
+// CHECK-DAG: !rec_Wrap2Em2 = !cir.record<struct "Wrap.m2" {!rec_Alpha2Em2}>
+// CHECK-NOT: "Wrap.m3"
+
+// b and c agreed, so they share one type. This is the reuse rule.
+// CHECK-DAG: cir.func @a_use(%{{.*}}: !cir.ptr<!rec_Wrap>)
+// CHECK-DAG: cir.func @b_use(%{{.*}}: !cir.ptr<!rec_Wrap2Em1>)
+// CHECK-DAG: cir.func @c_use(%{{.*}}: !cir.ptr<!rec_Wrap2Em1>)
+// CHECK-DAG: cir.func @d_use(%{{.*}}: !cir.ptr<!rec_Wrap2Em2>)

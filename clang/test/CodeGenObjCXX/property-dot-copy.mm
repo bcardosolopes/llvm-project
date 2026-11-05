@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -disable-llvm-passes -fclangir -o - %s | FileCheck %s %}
 
 struct Vector3D
 {
@@ -63,4 +64,3 @@ bool operator==(const CGPoint& a, const CGPoint& b);
   exit(1);
 }
 @end
-

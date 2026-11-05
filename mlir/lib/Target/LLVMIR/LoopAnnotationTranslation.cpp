@@ -18,9 +18,11 @@ namespace {
 struct LoopAnnotationConversion {
   LoopAnnotationConversion(LoopAnnotationAttr attr, Operation *op,
                            LoopAnnotationTranslation &loopAnnotationTranslation,
-                           llvm::LLVMContext &ctx)
+                           llvm::LLVMContext &ctx,
+                           DenseMap<Attribute, llvm::MDNode *> &cache)
       : attr(attr), op(op),
-        loopAnnotationTranslation(loopAnnotationTranslation), ctx(ctx) {}
+        loopAnnotationTranslation(loopAnnotationTranslation), ctx(ctx),
+        cache(cache) {}
 
   /// Converts this struct's loop annotation into a corresponding LLVMIR
   /// metadata representation.
@@ -33,7 +35,7 @@ struct LoopAnnotationConversion {
   void convertBoolNode(StringRef name, BoolAttr attr, bool negated = false);
   void convertI32Node(StringRef name, IntegerAttr attr);
   void convertFollowupNode(StringRef name, LoopAnnotationAttr attr);
-  void convertLocation(FusedLoc attr);
+  void convertLocation(LocationAttr attr);
 
   /// Conversion functions for each for each loop annotation sub-attribute.
   void convertLoopOptions(LoopVectorizeAttr options);
@@ -51,6 +53,7 @@ struct LoopAnnotationConversion {
   LoopAnnotationTranslation &loopAnnotationTranslation;
   llvm::LLVMContext &ctx;
   llvm::SmallVector<llvm::Metadata *> metadataNodes;
+  DenseMap<Attribute, llvm::MDNode *> &cache;
 };
 } // namespace
 
@@ -95,11 +98,23 @@ void LoopAnnotationConversion::convertFollowupNode(StringRef name,
   if (!attr)
     return;
 
-  llvm::MDNode *node =
-      loopAnnotationTranslation.translateLoopAnnotation(attr, op);
+  // Convert the followup annotation to a flat metadata node matching clang's
+  // CGLoopInfo::createFollowupMetadata: !{name, entry1, entry2, ...} instead
+  // of !{name, !distinctLoopID}. This avoids creating unnecessary distinct
+  // loop ID nodes for simple followup annotations.
+  LoopAnnotationConversion followupConversion(attr, op,
+                                              loopAnnotationTranslation, ctx,
+                                              cache);
+  auto followupEntries = followupConversion.convert();
 
-  metadataNodes.push_back(
-      llvm::MDNode::get(ctx, {llvm::MDString::get(ctx, name), node}));
+  // Build flat node: skip the self-referencing first operand (operand 0) of
+  // the followup loop ID since followup_all entries are not self-referential.
+  SmallVector<llvm::Metadata *> args;
+  args.push_back(llvm::MDString::get(ctx, name));
+  for (unsigned i = 1; i < followupEntries->getNumOperands(); ++i)
+    args.push_back(followupEntries->getOperand(i));
+
+  metadataNodes.push_back(llvm::MDNode::get(ctx, args));
 }
 
 void LoopAnnotationConversion::convertLoopOptions(LoopVectorizeAttr options) {
@@ -186,11 +201,24 @@ void LoopAnnotationConversion::convertLoopOptions(LoopPeeledAttr options) {
 void LoopAnnotationConversion::convertLoopOptions(LoopUnswitchAttr options) {
   addUnitNode("llvm.loop.unswitch.partial.disable",
               options.getPartialDisable());
+  addUnitNode("llvm.loop.unswitch.injection.disable",
+              options.getInjectionDisable());
 }
 
-void LoopAnnotationConversion::convertLocation(FusedLoc location) {
-  auto localScopeAttr =
-      dyn_cast_or_null<DILocalScopeAttr>(location.getMetadata());
+void LoopAnnotationConversion::convertLocation(LocationAttr location) {
+  // The scope lives on the FusedLoc; for an inlined location that is the
+  // callee side of the CallSiteLoc.
+  auto fusedLoc = dyn_cast<FusedLoc>(location);
+  if (auto callSiteLoc = dyn_cast<CallSiteLoc>(location))
+    fusedLoc = dyn_cast<FusedLoc>(callSiteLoc.getCallee());
+  DILocalScopeAttr localScopeAttr;
+  if (fusedLoc)
+    localScopeAttr = dyn_cast_or_null<DILocalScopeAttr>(fusedLoc.getMetadata());
+  if (!localScopeAttr)
+    if (auto func = op->getParentOfType<LLVMFuncOp>())
+      if (auto subprogramLoc =
+              func.getLoc()->findInstanceOf<FusedLocWith<DISubprogramAttr>>())
+        localScopeAttr = subprogramLoc.getMetadata();
   if (!localScopeAttr)
     return;
   auto *localScope = dyn_cast<llvm::DILocalScope>(
@@ -209,17 +237,17 @@ llvm::MDNode *LoopAnnotationConversion::convert() {
   auto dummy = llvm::MDNode::getTemporary(ctx, {});
   metadataNodes.push_back(dummy.get());
 
-  if (FusedLoc startLoc = attr.getStartLoc())
+  if (LocationAttr startLoc = attr.getStartLoc())
     convertLocation(startLoc);
 
-  if (FusedLoc endLoc = attr.getEndLoc())
+  if (LocationAttr endLoc = attr.getEndLoc())
     convertLocation(endLoc);
 
   addUnitNode("llvm.loop.disable_nonforced", attr.getDisableNonforced());
   addUnitNode("llvm.loop.mustprogress", attr.getMustProgress());
-  // "isvectorized" is encoded as an i32 value.
-  if (BoolAttr isVectorized = attr.getIsVectorized())
-    addI32NodeWithVal("llvm.loop.isvectorized", isVectorized.getValue());
+  // "isvectorized" is a unit node (no value), matching clang's emission.
+  addUnitNode("llvm.loop.isvectorized", attr.getIsVectorized());
+  convertI32Node("llvm.loop.align", attr.getCodeAlign());
 
   if (auto options = attr.getVectorize())
     convertLoopOptions(options);
@@ -264,16 +292,33 @@ LoopAnnotationTranslation::translateLoopAnnotation(LoopAnnotationAttr attr,
   if (!attr)
     return nullptr;
 
-  llvm::MDNode *loopMD = lookupLoopMetadata(attr);
+  // The module-level map, not a cache created per top-level call. A loop
+  // annotation carries an identity of its own, so two of them are equal only
+  // when they describe the same loop and one attribute has to come out as one
+  // `!llvm.loop` node. A per-call cache gave every carrier of the same loop --
+  // the latch branch, and each access naming it in
+  // `!llvm.mem.parallel_loop_access` -- a node of its own, and consumers check
+  // `is_contained(operands, loopID)`, for which an equal-but-separate node is
+  // no use.
+  return translateLoopAnnotation(attr, op, loopMetadataMapping);
+}
+
+llvm::MDNode *LoopAnnotationTranslation::translateLoopAnnotation(
+    LoopAnnotationAttr attr, Operation *op,
+    DenseMap<Attribute, llvm::MDNode *> &cache) {
+  if (!attr)
+    return nullptr;
+
+  // Check the per-invocation cache for followup annotations.
+  llvm::MDNode *loopMD = cache.lookup(attr);
   if (loopMD)
     return loopMD;
 
   loopMD =
-      LoopAnnotationConversion(attr, op, *this, this->llvmModule.getContext())
+      LoopAnnotationConversion(attr, op, *this, this->llvmModule.getContext(),
+                               cache)
           .convert();
-  // Store a map from this Attribute to the LLVM metadata in case we
-  // encounter it again.
-  mapLoopMetadata(attr, loopMD);
+  cache.try_emplace(attr, loopMD);
   return loopMD;
 }
 

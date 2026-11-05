@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: llvm.aarch64.stxr requires constant integer elemBits operand > 0
+// CHECK-NOT: invalid element type width
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @foo(%val: !s32i, %ptr: !cir.ptr<!s32i>, %bits: !s32i) {
+    %r = cir.call_llvm_intrinsic "aarch64.stxr" %val, %ptr, %bits : (!s32i, !cir.ptr<!s32i>, !s32i) -> !s32i
+    cir.return
+  }
+}

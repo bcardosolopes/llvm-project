@@ -24,6 +24,10 @@ clang_tablegen(CIRLowering.inc -gen-cir-lowering
                SOURCE CIROps.td
                TARGET CIRLowering)
 
+set(LLVM_TARGET_DEFINITIONS CIRDialectBytecode.td)
+mlir_tablegen(CIRDialectBytecode.cpp.inc -gen-bytecode -bytecode-dialect="CIR")
+add_public_tablegen_target(MLIRCIRDialectBytecodeIncGen)
+
 set(LLVM_TARGET_DEFINITIONS CIRTypeConstraints.td)
 mlir_tablegen(CIRTypeConstraints.h.inc -gen-type-constraint-decls)
 mlir_tablegen(CIRTypeConstraints.cpp.inc -gen-type-constraint-defs)

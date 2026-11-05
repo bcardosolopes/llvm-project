@@ -318,6 +318,18 @@ llvm.func @fold_gep_neg(%x : !llvm.ptr) -> !llvm.ptr {
 
 // -----
 
+// CHECK-LABEL: fold_gep_inrange_neg
+// CHECK-SAME: %[[ARG:[[:alnum:]]+]]
+// CHECK-NEXT: %[[RES:.*]] = llvm.getelementptr inrange(-8, 8) %[[ARG]][0]
+// CHECK-NEXT: llvm.return %[[RES]]
+llvm.func @fold_gep_inrange_neg(%x : !llvm.ptr) -> !llvm.ptr {
+  %c0 = arith.constant 0 : i32
+  %c = llvm.getelementptr inrange(-8, 8) %x[%c0] : (!llvm.ptr, i32) -> !llvm.ptr, i8
+  llvm.return %c : !llvm.ptr
+}
+
+// -----
+
 // CHECK-LABEL: fold_gep_canon
 // CHECK-SAME: %[[ARG:[[:alnum:]]+]]
 // CHECK-NEXT: %[[RES:.*]] = llvm.getelementptr %[[ARG]][2]

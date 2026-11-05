@@ -29,33 +29,33 @@ int (*inline_hint_ptr)(int) = &inline_hint_function;
 int (*noinline_ptr)(int) = &noinline_function;
 int (*regular_ptr)(int) = &regular_function;
 
-// CIR-LABEL: cir.func no_inline dso_local @_Z17noinline_functioni(%arg0: !s32i {{.*}}) -> !s32i
+// CIR-LABEL: cir.func no_inline dso_local @_Z17noinline_functioni(%arg0: !s32i {{.*}}) -> {{.*}}!s32i
 
-// CIR-LABEL: cir.func dso_local @_Z16regular_functioni(%arg0: !s32i {{.*}}) -> !s32i
+// CIR-LABEL: cir.func dso_local @_Z16regular_functioni(%arg0: !s32i {{.*}}) -> {{.*}}!s32i
 // CIR-NOT: no_inline
 // CIR-NOT: always_inline
 // CIR-NOT: inline_hint
 // CIR-SAME: {
 
-// CIR-LABEL: cir.func{{.*}} always_inline {{.*}}@_Z22always_inline_functioni(%arg0: !s32i {{.*}}) -> !s32i
+// CIR-LABEL: cir.func{{.*}} always_inline {{.*}}@_Z22always_inline_functioni(%arg0: !s32i {{.*}}) -> {{.*}}!s32i
 
-// CIR-LABEL: cir.func{{.*}} inline_hint {{.*}}@_Z20inline_hint_functioni(%arg0: !s32i {{.*}}) -> !s32i
+// CIR-LABEL: cir.func{{.*}} inline_hint {{.*}}@_Z20inline_hint_functioni(%arg0: !s32i {{.*}}) -> {{.*}}!s32i
 
 // LLVM: ; Function Attrs:{{.*}} noinline
-// LLVM: define{{.*}} i32 @_Z17noinline_functioni
+// LLVM: define{{.*}} noundef i32 @_Z17noinline_functioni
 
 // LLVM: ; Function Attrs:
 // LLVM-NOT: noinline
 // LLVM-NOT: alwaysinline
 // LLVM-NOT: inlinehint
 // LLVM-SAME: {{$}}
-// LLVM: define{{.*}} i32 @_Z16regular_functioni
+// LLVM: define{{.*}} noundef i32 @_Z16regular_functioni
 
 // LLVM: ; Function Attrs:{{.*}} alwaysinline
-// LLVM: define{{.*}} i32 @_Z22always_inline_functioni
+// LLVM: define{{.*}} noundef i32 @_Z22always_inline_functioni
 
 // LLVM: ; Function Attrs:{{.*}} inlinehint
-// LLVM: define{{.*}} i32 @_Z20inline_hint_functioni
+// LLVM: define{{.*}} noundef i32 @_Z20inline_hint_functioni
 
 // OGCG: ; Function Attrs:{{.*}} noinline
 // OGCG: define{{.*}} i32 @_Z17noinline_functioni

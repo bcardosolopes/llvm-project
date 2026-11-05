@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++11 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -std=c++11 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s -check-prefix=CIR
 // RUN: %clang_cc1 -std=c++11 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=LLVM
@@ -27,14 +27,12 @@ int is_constant_evaluated() {
   return __builtin_is_constant_evaluated();
 }
 
-// CIR: cir.func{{.*}} @_Z21is_constant_evaluatedv() -> !s32i
-// CIR: %[[ZERO:.+]] = cir.const #cir.int<0>
+// CIR: cir.func{{.*}} @_Z21is_constant_evaluatedv() -> (!s32i {cir.noundef})
+// CIR: cir.const
+// CIR: cir.cast bool_to_int
 
-// LLVM: define {{.*}}i32 @_Z21is_constant_evaluatedv()
-// LLVM: %[[MEM:.+]] = alloca i32
-// LLVM: store i32 0, ptr %[[MEM]]
-// LLVM: %[[RETVAL:.+]] = load i32, ptr %[[MEM]]
-// LLVM: ret i32 %[[RETVAL]]
+// LLVM: define {{.*}}noundef i32 @_Z21is_constant_evaluatedv()
+// LLVM: ret i32 0
 // LLVM: }
 
 // OGCG: define {{.*}}i32 @_Z21is_constant_evaluatedv()
@@ -45,14 +43,11 @@ long double constant_fp_builtin_ld() {
   return __builtin_fabsl(-0.1L);
 }
 
-// CIR: cir.func{{.*}} @_Z22constant_fp_builtin_ldv() -> !cir.long_double<!cir.f80>
+// CIR: cir.func{{.*}} @_Z22constant_fp_builtin_ldv() -> (!cir.long_double<!cir.f80> {cir.noundef})
 // CIR: %[[PONE:.+]] = cir.const #cir.fp<1.000000e-01> : !cir.long_double<!cir.f80>
 
 // LLVM: define {{.*}}x86_fp80 @_Z22constant_fp_builtin_ldv()
-// LLVM: %[[MEM:.+]] = alloca x86_fp80
-// LLVM: store x86_fp80 0xK3FFBCCCCCCCCCCCCCCCD, ptr %[[MEM]]
-// LLVM: %[[RETVAL:.+]] = load x86_fp80, ptr %[[MEM]]
-// LLVM: ret x86_fp80 %[[RETVAL]]
+// LLVM: ret x86_fp80 0xK3FFBCCCCCCCCCCCCCCCD
 // LLVM: }
 
 // OGCG: define {{.*}}x86_fp80 @_Z22constant_fp_builtin_ldv()
@@ -63,14 +58,11 @@ float constant_fp_builtin_single() {
   return __builtin_fabsf(-0.1f);
 }
 
-// CIR: cir.func{{.*}} @_Z26constant_fp_builtin_singlev() -> !cir.float
+// CIR: cir.func{{.*}} @_Z26constant_fp_builtin_singlev() -> (!cir.float {cir.noundef})
 // CIR: %[[PONE:.+]] = cir.const #cir.fp<1.000000e-01> : !cir.float
 
-// LLVM: define {{.*}}float @_Z26constant_fp_builtin_singlev()
-// LLVM: %[[MEM:.+]] = alloca float
-// LLVM: store float 0x3FB99999A0000000, ptr %[[MEM]]
-// LLVM: %[[RETVAL:.+]] = load float, ptr %[[MEM]]
-// LLVM: ret float %[[RETVAL]]
+// LLVM: define {{.*}}noundef float @_Z26constant_fp_builtin_singlev()
+// LLVM: ret float 0x3FB99999A0000000
 // LLVM: }
 
 // OGCG: define {{.*}}float @_Z26constant_fp_builtin_singlev()
@@ -84,11 +76,11 @@ void library_builtins() {
 
 // CIR: cir.func{{.*}} @_Z16library_builtinsv()
 // CIR: %[[NULL:.+]] = cir.const #cir.ptr<null> : !cir.ptr<!s8i>
-// CIR: cir.call @printf(%[[NULL]]) nothrow : (!cir.ptr<!s8i>) -> !s32i
-// CIR: cir.call @abort() nothrow : () -> ()
+// CIR: cir.call @printf(%[[NULL]]) nothrow : (!cir.ptr<!s8i>) -> !s32i extra(#fn_attr{{[0-9]+}})
+// CIR: cir.call @abort() nothrow : () -> () extra(#fn_attr{{[0-9]+}})
 
 // LLVM: define{{.*}} void @_Z16library_builtinsv()
-// LLVM: call i32 (ptr, ...) @printf(ptr null)
+// LLVM: call i32 (ptr, ...) @printf(ptr noundef null)
 // LLVM: call void @abort()
 
 // OGCG: define{{.*}} void @_Z16library_builtinsv()
@@ -132,7 +124,7 @@ void *assume_aligned_misalignment(void *ptr, unsigned misalignment) {
 }
 
 // CIR: @_Z27assume_aligned_misalignmentPvj
-// CIR:   %{{.+}} = cir.assume_aligned %{{.+}} alignment 16[offset %{{.+}} : !u64i] : !cir.ptr<!void>
+// CIR:   %{{.+}} = cir.assume_aligned %{{.+}} alignment 16 [offset %{{.+}} : !u64i] : !cir.ptr<!void>
 // CIR: }
 
 // LLVM: @_Z27assume_aligned_misalignmentPvj
@@ -176,7 +168,7 @@ void expect(int x, int y) {
 // LLVM-NEXT:    %[[X_LONG:.+]] = sext i32 %[[X]] to i64
 // LLVM-NEXT:    %[[Y:.+]] = load i32, ptr %{{.+}}, align 4
 // LLVM-NEXT:    %[[Y_LONG:.+]] = sext i32 %[[Y]] to i64
-// LLVM-NEXT:    %{{.+}} = call i64 @llvm.expect.i64(i64 %[[X_LONG]], i64 %[[Y_LONG]])
+// LLVM-NOT:     @llvm.expect
 // LLVM:       }
 
 void expect_prob(int x, int y) {
@@ -191,12 +183,12 @@ void expect_prob(int x, int y) {
 // CIR-NEXT:    %{{.+}} = cir.expect(%[[X_LONG]], %[[Y_LONG]], 2.500000e-01) : !s64i
 // CIR:       }
 
-// LLVM:       define{{.*}} void @_Z11expect_probii
+// LLVM-LABEL: define{{.*}} void @_Z11expect_probii
 // LLVM:         %[[X:.+]] = load i32, ptr %{{.+}}, align 4
 // LLVM-NEXT:    %[[X_LONG:.+]] = sext i32 %[[X]] to i64
 // LLVM-NEXT:    %[[Y:.+]] = load i32, ptr %{{.+}}, align 4
 // LLVM-NEXT:    %[[Y_LONG:.+]] = sext i32 %[[Y]] to i64
-// LLVM-NEXT:    %{{.+}} = call i64 @llvm.expect.with.probability.i64(i64 %[[X_LONG]], i64 %[[Y_LONG]], double 2.500000e-01)
+// LLVM-NOT:     @llvm.expect
 // LLVM:       }
 
 void unreachable() {
@@ -223,14 +215,10 @@ void unreachable2() {
 
 // CIR-LABEL: @_Z12unreachable2v
 // CIR:         cir.unreachable
-// CIR-NEXT:  ^{{.+}}:
-// CIR-NEXT:    cir.call @_Z2f1v() : () -> ()
 // CIR:       }
 
 // LLVM-LABEL: @_Z12unreachable2v
 // LLVM:         unreachable
-// LLVM:       {{.+}}:
-// LLVM-NEXT:    call void @_Z2f1v()
 // LLVM:       }
 
 // OGCG-LABEL: @_Z12unreachable2v
@@ -241,7 +229,7 @@ void trap() {
 }
 
 // CIR-LABEL: @_Z4trapv
-// CIR:         cir.trap
+// CIR:         cir.call_llvm_intrinsic "trap"
 // CIR:       }
 
 // LLVM-LABEL: @_Z4trapv
@@ -258,15 +246,12 @@ void trap2() {
 }
 
 // CIR-LABEL: @_Z5trap2v
-// CIR:         cir.trap
-// CIR-NEXT:  ^{{.+}}:
-// CIR-NEXT:    cir.call @_Z2f1v() : () -> ()
+// CIR:         cir.call_llvm_intrinsic "trap"
+// CIR:         cir.call @_Z2f1v()
 // CIR:       }
 
 // LLVM-LABEL: @_Z5trap2v
 // LLVM:         call void @llvm.trap()
-// LLVM-NEXT:    unreachable
-// LLVM:       {{.+}}:
 // LLVM-NEXT:    call void @_Z2f1v()
 // LLVM:       }
 

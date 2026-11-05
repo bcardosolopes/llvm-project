@@ -1,0 +1,96 @@
+// A cir.alias resolves by its own linkage, and by its weak flag, like any other
+// definition. It is not a global-value interface op, and asked through that
+// interface every alias was strong:
+//
+// - __attribute__((weak, alias(...))) next to a strong definition of the
+//   same name kept whichever came first, so with the alias first the strong
+//   definition was dropped;
+// - a linkonce_odr alias in two inputs, as relative vtables are emitted, was
+//   a strong-strong divergence;
+// - an internal alias in two inputs was one symbol, not two TU-local ones, and
+//   the second input's alias was dropped.
+//
+// RUN: rm -rf %t && split-file %s %t
+// RUN: cir-link %t/a.cir %t/b.cir --odr-events=%t/ab.json -o %t/ab.cir
+// RUN: FileCheck %s --input-file=%t/ab.cir --check-prefix=STRONG
+// RUN: FileCheck %s --input-file=%t/ab.cir --check-prefixes=MERGED,MERGED-AB
+// RUN: FileCheck %s --input-file=%t/ab.json --check-prefixes=EVENTS,EVENTS-AB
+// RUN: cir-link %t/b.cir %t/a.cir --odr-events=%t/ba.json -o %t/ba.cir
+// RUN: FileCheck %s --input-file=%t/ba.cir --check-prefix=STRONG
+// RUN: FileCheck %s --input-file=%t/ba.cir --check-prefixes=MERGED,MERGED-BA
+// RUN: FileCheck %s --input-file=%t/ba.json --check-prefixes=EVENTS,EVENTS-BA
+// RUN: cir-link %t/a.cir %t/b.cir --warn-odr-divergence -o %t/warn.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WARN
+
+// The strong definition is kept in either order, and the weak alias is gone.
+// STRONG-NOT:  cir.alias {{.*}}@weak_alias =
+// STRONG:      cir.func @weak_alias() -> !s32i {
+// STRONG-NEXT:   cir.const #cir.int<2>
+// STRONG-NOT:  cir.alias {{.*}}@weak_alias =
+
+// One copy of the linkonce_odr alias, and both internal aliases, each still
+// naming its own input's global.
+// MERGED-DAG: cir.alias linkonce_odr @odr_alias = @odr_alias.local :
+// MERGED-DAG: cir.alias internal @local_alias = @local_alias.target :
+// MERGED-DAG: cir.alias internal @local_alias.cirlink.1 = @local_alias.target.cirlink.1 :
+// MERGED-AB-DAG: @local_alias.target = #cir.int<10>
+// MERGED-AB-DAG: @local_alias.target.cirlink.1 = #cir.int<20>
+// MERGED-BA-DAG: @local_alias.target = #cir.int<20>
+// MERGED-BA-DAG: @local_alias.target.cirlink.1 = #cir.int<10>
+// MERGED-NOT: cir.alias linkonce_odr @odr_alias =
+
+// EVENTS:          "symbol": "weak_alias",
+// EVENTS:              "kind": "strong-over-weak",
+// EVENTS-NEXT:         "kept": {
+// EVENTS-AB-NEXT:        "input": 1,
+// EVENTS-BA-NEXT:        "input": 0,
+// EVENTS-NEXT:           "linkage": "external",
+// EVENTS:              "dropped": {
+// EVENTS-AB-NEXT:        "input": 0,
+// EVENTS-BA-NEXT:        "input": 1,
+// EVENTS-NEXT:           "linkage": "weak",
+// EVENTS-NOT:      "symbol": "odr_alias"
+// EVENTS-NOT:      "symbol": "local_alias"
+// EVENTS:      "stats": {
+// EVENTS-NEXT:   "weak_copies_equal": 2,
+// EVENTS-NEXT:   "weak_copies_differ": 0,
+// EVENTS-NEXT:   "weak-weak": 0,
+// EVENTS-NEXT:   "strong-over-weak": 1,
+// EVENTS-NEXT:   "rtti-over-nortti": 0,
+// EVENTS-NEXT:   "strong-strong": 0,
+
+// WARN-NOT: defined in more than one input
+// WARN:     2 locals renamed,
+// WARN-SAME: 2 weak deduped, 1 weak replaced by strong,
+// WARN-SAME: 0 ODR divergences,
+
+//--- a.cir
+!s32i = !cir.int<s, 32>
+module {
+  cir.func @weak_alias.impl() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.alias external weak @weak_alias = @weak_alias.impl : !cir.func<() -> !s32i>
+
+  cir.global linkonce_odr @odr_alias.local = #cir.int<1> : !s32i
+  cir.alias linkonce_odr @odr_alias = @odr_alias.local : !s32i
+
+  cir.global "private" internal dso_local @local_alias.target = #cir.int<10> : !s32i
+  cir.alias internal @local_alias = @local_alias.target : !s32i
+}
+
+//--- b.cir
+!s32i = !cir.int<s, 32>
+module {
+  cir.func @weak_alias() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.global linkonce_odr @odr_alias.local = #cir.int<1> : !s32i
+  cir.alias linkonce_odr @odr_alias = @odr_alias.local : !s32i
+
+  cir.global "private" internal dso_local @local_alias.target = #cir.int<20> : !s32i
+  cir.alias internal @local_alias = @local_alias.target : !s32i
+}

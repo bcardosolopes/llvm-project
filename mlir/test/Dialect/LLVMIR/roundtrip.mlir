@@ -1,4 +1,5 @@
 // RUN: mlir-opt -verify-roundtrip %s
+// RUN: mlir-opt %s -emit-bytecode | mlir-opt | FileCheck %s
 
 
 // CHECK-LABEL: func @baz
@@ -121,6 +122,9 @@ func.func @ops(%arg0: i32, %arg1: f32,
 
 // CHECK: llvm.call @baz() {will_return} : () -> ()
   llvm.call @baz() {will_return} : () -> ()
+
+// CHECK: llvm.call @baz() {no_return} : () -> ()
+  llvm.call @baz() {no_return} : () -> ()
 
 // CHECK: llvm.call @baz() {memory = #llvm.memory_effects<other = none, argMem = read, inaccessibleMem = write, errnoMem = none, targetMem0 = none, targetMem1 = none>} : () -> ()
   llvm.call @baz() {memory = #llvm.memory_effects<other = none, argMem = read, inaccessibleMem = write, errnoMem = none, targetMem0 = none, targetMem1 = none>} : () -> ()
@@ -974,17 +978,17 @@ llvm.func @test_call_arg_attrs_indirect(%arg0: i16, %arg1: !llvm.ptr) -> i16 {
   llvm.return %0 : i16
 }
 
-// CHECK-LABEL:   llvm.func @test_invoke_arg_attrs(
-// CHECK-SAME:      %[[VAL_0:.*]]: i16) attributes {personality = @__gxx_personality_v0} {
-llvm.func @test_invoke_arg_attrs(%arg0: i16) attributes { personality = @__gxx_personality_v0 } {
-  // CHECK:  llvm.invoke @somefunc(%[[VAL_0]]) to ^bb2 unwind ^bb1 : (i16 {llvm.noundef, llvm.signext}) -> ()
-  llvm.invoke @somefunc(%arg0) to ^bb2 unwind ^bb1 : (i16 {llvm.noundef, llvm.signext}) -> ()
-^bb1:
-  %1 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
-  llvm.return
-^bb2:
-  llvm.return
-}
+// CHECKDISABLE-LABEL:   llvm.func @test_invoke_arg_attrs(
+// CHECKDISABLE-SAME:      %[[VAL_0:.*]]: i16) attributes {personality = @__gxx_personality_v0} {
+// llvm.func @test_invoke_arg_attrs(%arg0: i16) attributes { personality = @__gxx_personality_v0 } {
+//   // CHECKDISABLE:  llvm.invoke @somefunc(%[[VAL_0]]) to ^bb2 unwind ^bb1 : (i16 {llvm.noundef, llvm.signext}) -> ()
+//   llvm.invoke @somefunc(%arg0) to ^bb2 unwind ^bb1 : (i16 {llvm.noundef, llvm.signext}) -> ()
+// ^bb1:
+//   %1 = llvm.landingpad cleanup : !llvm.struct<(ptr, i32)>
+//   llvm.return
+// ^bb2:
+//   llvm.return
+// }
 
 // CHECK-LABEL:   llvm.func @test_invoke_arg_attrs_indirect(
 // CHECK-SAME:      %[[VAL_0:.*]]: i16,

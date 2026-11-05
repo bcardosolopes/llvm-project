@@ -31,10 +31,8 @@ X *castAtoX(A *a) {
 
 // Note: Because the offset is 0, a null check is not needed.
 
-// LLVM: define {{.*}} ptr @_Z8castAtoXP1A(ptr %[[ARG0:.*]])
-// LLVM:   %[[A_ADDR:.*]] = alloca ptr
-// LLVM:   store ptr %[[ARG0]], ptr %[[A_ADDR]]
-// LLVM:   %[[X:.*]] = load ptr, ptr %[[A_ADDR]]
+// LLVM: define {{.*}} noundef ptr @_Z8castAtoXP1A(ptr noundef %[[ARG0:.*]])
+// LLVM:   ret ptr %[[ARG0]]
 
 // OGCG: define {{.*}} ptr @_Z8castAtoXP1A(ptr {{.*}} %[[ARG0:.*]])
 // OGCG:   %[[A_ADDR:.*]] = alloca ptr
@@ -51,12 +49,12 @@ X *castBtoX(B *b) {
 // CIR:   %[[B:.*]] = cir.load{{.*}} %[[B_ADDR]] : !cir.ptr<!cir.ptr<!rec_B>>, !cir.ptr<!rec_B>
 // CIR:   %[[X:.*]] = cir.derived_class_addr %[[B]] : !cir.ptr<!rec_B> [4] -> !cir.ptr<!rec_X>
 
-// LLVM: define {{.*}} ptr @_Z8castBtoXP1B(ptr %[[ARG0:.*]])
+// LLVM: define {{.*}} noundef ptr @_Z8castBtoXP1B(ptr noundef %[[ARG0:.*]])
 // LLVM:   %[[B_ADDR:.*]] = alloca ptr, i64 1, align 8
 // LLVM:   store ptr %[[ARG0]], ptr %[[B_ADDR]], align 8
 // LLVM:   %[[B:.*]] = load ptr, ptr %[[B_ADDR]], align 8
 // LLVM:   %[[IS_NULL:.*]] = icmp eq ptr %[[B]], null
-// LLVM:   %[[B_NON_NULL:.*]] = getelementptr inbounds i8, ptr %[[B]], i32 -4
+// LLVM:   %[[B_NON_NULL:.*]] = getelementptr inbounds i8, ptr %[[B]], i64 -4
 // LLVM:   %[[X:.*]] = select i1 %[[IS_NULL]], ptr %[[B]], ptr %[[B_NON_NULL]]
 
 // OGCG: define {{.*}} ptr @_Z8castBtoXP1B(ptr {{.*}} %[[ARG0:.*]])
@@ -84,11 +82,11 @@ X &castBReftoXRef(B &b) {
 // CIR:   %[[B:.*]] = cir.load{{.*}} %[[B_ADDR]] : !cir.ptr<!cir.ptr<!rec_B>>, !cir.ptr<!rec_B>
 // CIR:   %[[X:.*]] = cir.derived_class_addr %[[B]] : !cir.ptr<!rec_B> nonnull [4] -> !cir.ptr<!rec_X>
 
-// LLVM: define {{.*}} ptr @_Z14castBReftoXRefR1B(ptr %[[ARG0:.*]])
+// LLVM: define {{.*}} noundef nonnull align 4 dereferenceable(12) ptr @_Z14castBReftoXRefR1B(ptr noundef nonnull align 4 dereferenceable(4) %[[ARG0:.*]])
 // LLVM:   %[[B_ADDR:.*]] = alloca ptr
 // LLVM:   store ptr %[[ARG0]], ptr %[[B_ADDR]]
 // LLVM:   %[[B:.*]] = load ptr, ptr %[[B_ADDR]]
-// LLVM:   %[[X:.*]] = getelementptr inbounds i8, ptr %[[B]], i32 -4
+// LLVM:   %[[X:.*]] = getelementptr inbounds i8, ptr %[[B]], i64 -4
 
 // OGCG: define {{.*}} ptr @_Z14castBReftoXRefR1B(ptr {{.*}} %[[ARG0:.*]])
 // OGCG:   %[[B_ADDR:.*]] = alloca ptr

@@ -12,6 +12,7 @@
 #include "clang/CodeGen/BackendUtil.h"
 #include "clang/CodeGen/CodeGenAction.h"
 
+#include "llvm/ADT/Hashing.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/Timer.h"
 
@@ -100,8 +101,15 @@ public:
     bool &BadDebugInfo, StringRef &Filename,
     unsigned &Line, unsigned &Column) const;
 
-  std::optional<FullSourceLoc> getFunctionSourceLocation(
-    const llvm::Function &F) const;
+  std::optional<FullSourceLoc>
+  getFunctionSourceLocation(const llvm::Function &F) const;
+  // CIR-only consumer at `clang/lib/CIR/CodeGen/CIRGenerator.cpp` uses this
+  // to seed the diagnostic-location map for functions that go through CIR
+  // codegen rather than direct OG emission.
+  void addFunctionSourceLocation(llvm::StringRef MangledName,
+                                 FullSourceLoc Loc) {
+    ManglingFullSourceLocs.emplace_back(llvm::hash_value(MangledName), Loc);
+  }
 
   void DiagnosticHandlerImpl(const llvm::DiagnosticInfo &DI);
   /// Specialized handler for InlineAsm diagnostic.
@@ -139,6 +147,16 @@ public:
   /// Note that misexpect remarks are emitted through ORE
   void MisExpectDiagHandler(const llvm::DiagnosticInfoMisExpect &D);
 };
+
+// Public factory + destructor that let CIR's `CIRGenAction.cpp` construct
+// and tear down a `BackendConsumer` from outside `BackendUtil.cpp` /
+// `CodeGenAction.cpp`.
+BackendConsumer *CreateBackendConsumer(
+    CompilerInstance &CI, BackendAction Action,
+    IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS, llvm::LLVMContext &C,
+    StringRef InFile, std::unique_ptr<raw_pwrite_stream> OS,
+    CoverageSourceInfo *CoverageInfo, llvm::Module *CurLinkModule = nullptr);
+void DestroyBackendConsumer(BackendConsumer *BC);
 
 } // namespace clang
 #endif

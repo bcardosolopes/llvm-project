@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -emit-llvm -fexceptions -fptrauth-intrinsics -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -emit-llvm -fexceptions -fptrauth-intrinsics -fclangir -disable-llvm-passes -o - %s | FileCheck %s --check-prefix=CIR %}
 
 typedef void (*func)();
 
@@ -25,6 +26,11 @@ __attribute__((objc_root_class))
 // CHECK: [[CAST_ADDR:%.*]] = ptrtoint ptr [[ADDR]] to i64
 // CHECK: [[BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CAST_ADDR]], i64 1)
 // CHECK: [[RESULT:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[LOAD]], i32 1, i64 [[BLEND]])
+// CIR-LABEL: define internal ptr @"\01-[Root field1]"
+// CIR: [[CIR_FIELD1_ADDR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 8
+// CIR: [[CIR_FIELD1_LOAD:%.*]] = load atomic i64, ptr [[CIR_FIELD1_ADDR]] unordered, align 8
+// CIR: [[CIR_FIELD1_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 {{.*}}, i64 1)
+// CIR: call i64 @llvm.ptrauth.auth(i64 [[CIR_FIELD1_LOAD]], i32 1, i64 [[CIR_FIELD1_BLEND]])
 
 // CHECK-LABEL: define internal void @"\01-[Root setField1:]"
 // CHECK: [[CAST_ADDR:%.*]] = ptrtoint ptr [[ADDR:%.*]] to i64
@@ -32,6 +38,12 @@ __attribute__((objc_root_class))
 // CHECK: [[RESULT:%.*]] = call i64 @llvm.ptrauth.sign(i64 [[VALUE:%.*]], i32 1, i64 [[BLEND]])
 // CHECK: [[PHI:%.*]] = phi i64 [ 0, {{%.*}} ], [ [[RESULT]], {{%.*}} ]
 // CHECK: store atomic i64 [[PHI]], ptr [[ADDR]] unordered
+// CIR-LABEL: define internal void @"\01-[Root setField1:]"
+// CIR: [[CIR_SET1_ADDR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 8
+// CIR: [[CIR_SET1_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 {{.*}}, i64 1)
+// CIR: [[CIR_SET1_VALUE:%.*]] = ptrtoint ptr %{{.*}} to i64
+// CIR: call i64 @llvm.ptrauth.sign(i64 [[CIR_SET1_VALUE]], i32 1, i64 [[CIR_SET1_BLEND]])
+// CIR: store atomic i64 {{%.*}}, ptr [[CIR_SET1_ADDR]] unordered, align 8
 
 // CHECK-LABEL: define internal ptr @"\01-[Root field2]"
 // CHECK: load ptr, ptr
@@ -55,6 +67,11 @@ __attribute__((objc_root_class))
 // CHECK: [[CASTED_ADDR:%.*]] = ptrtoint ptr [[ADDR]] to i64
 // CHECK: [[BLENDED:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CASTED_ADDR]], i64 1)
 // CHECK: {{%.*}} = call i64 @llvm.ptrauth.resign(i64 [[VALUE]], i32 1, i64 [[BLENDED]], i32 0, i64 0
+// CIR-LABEL: define internal ptr @"\01-[Root field3]"
+// CIR: [[CIR_FIELD3_ADDR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 24
+// CIR: [[CIR_FIELD3_LOAD:%.*]] = load atomic i64, ptr [[CIR_FIELD3_ADDR]] unordered, align 8
+// CIR: [[CIR_FIELD3_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 {{.*}}, i64 1)
+// CIR: call i64 @llvm.ptrauth.resign(i64 [[CIR_FIELD3_LOAD]], i32 1, i64 [[CIR_FIELD3_BLEND]], i32 0, i64 0)
 
 // CHECK-LABEL: define internal void @"\01-[Root setField3:]"
 // CHECK: [[VALUE:%.*]] = load i64, ptr {{%.*}}, align 8
@@ -62,6 +79,12 @@ __attribute__((objc_root_class))
 // CHECK: [[BLENDED:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CASTED_ADDR]], i64 1)
 // CHECK: {{%.*}} = call i64 @llvm.ptrauth.resign(i64 [[VALUE]], i32 0, i64 0, i32 1, i64 [[BLENDED]])
 // CHECK: store atomic i64
+// CIR-LABEL: define internal void @"\01-[Root setField3:]"
+// CIR: [[CIR_SET3_ADDR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 24
+// CIR: [[CIR_SET3_INPUT:%.*]] = load ptr, ptr %{{.*}}, align 8
+// CIR: [[CIR_SET3_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 {{.*}}, i64 1)
+// CIR: call i64 @llvm.ptrauth.resign(i64 {{%.*}}, i32 0, i64 0, i32 1, i64 [[CIR_SET3_BLEND]])
+// CIR: store atomic i64 {{%.*}}, ptr [[CIR_SET3_ADDR]] unordered, align 8
 
 // CHECK-LABEL: define internal ptr @"\01-[Root field4]"
 // CHECK: load ptr, ptr
@@ -77,4 +100,3 @@ __attribute__((objc_root_class))
 // CHECK: resign.nonnull:
 // CHECK: [[VALUE:%.*]] = ptrtoint ptr %1 to i64
 // CHECK: {{%.*}} = call i64 @llvm.ptrauth.resign(i64 [[VALUE]], i32 0, i64 0, i32 1, i64 [[BLENDED]])
-

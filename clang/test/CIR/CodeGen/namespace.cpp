@@ -24,8 +24,6 @@ namespace test {
 // CHECK-DAG: cir.global external @_ZN4test2g2E = #cir.int<2> : !s32i
 // CHECK-DAG: cir.global external @_ZN4test5test22g3E = #cir.int<3> : !s32i
 // CHECK-DAG: cir.func{{.*}} @_ZN12_GLOBAL__N_12f1Ev()
-// CHECK-DAG: cir.func{{.*}} @_ZN4test2f2Ev()
-// CHECK-DAG: cir.func{{.*}} @_ZN4test5test22f3Ev()
 
 using namespace test;
 
@@ -50,6 +48,8 @@ int f4(void) {
 // CHECK:   %[[G3_ADDR:.*]] = cir.get_global @_ZN4test5test22g3E : !cir.ptr<!s32i>
 // CHECK:   %[[G3_VAL:.*]] = cir.load{{.*}} %[[G3_ADDR]] : !cir.ptr<!s32i>, !s32i
 // CHECK:   %[[SUM2:.*]] = cir.binop(add, %[[SUM]], %[[G3_VAL]]) nsw : !s32i
+// CHECK: cir.func{{.*}} @_ZN4test5test22f3Ev()
+// CHECK: cir.func{{.*}} @_ZN4test2f2Ev()
 
 using test2::f3;
 using test2::g3;

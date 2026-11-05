@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc -DREGION_HOST
+// RUN: %if cir-support %{ %clang_cc1 -verify -fopenmp -fclangir -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o /dev/null -DREGION_HOST %}
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_20 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o %t-out.ll -DREGION_DEVICE
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_21 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o %t-out.ll -DREGION_DEVICE
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_30 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o %t-out.ll -DREGION_DEVICE
@@ -14,6 +15,8 @@
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_70 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o %t-out.ll -DREGION_DEVICE_NO_ERR
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_72 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o %t-out.ll -DREGION_DEVICE_NO_ERR
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_75 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o %t-out.ll -DREGION_DEVICE_NO_ERR
+// RUN: %if cir-support %{ %clang_cc1 -verify -fopenmp -fclangir -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_20 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o /dev/null -DREGION_DEVICE %}
+// RUN: %if cir-support %{ %clang_cc1 -verify -fopenmp -fclangir -x c++ -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -target-cpu sm_60 -emit-llvm %s -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o /dev/null -DREGION_DEVICE_NO_ERR %}
 
 #if defined(REGION_HOST) || defined(REGION_DEVICE_NO_ERR)
 // expected-no-diagnostics

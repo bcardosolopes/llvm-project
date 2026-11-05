@@ -1,0 +1,16 @@
+// RUN: cir-opt %s --cir-to-llvm | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // CHECK-LABEL: llvm.func @lifetime_markers
+  // CHECK:         %[[ADDR:.*]] = llvm.alloca
+  // CHECK:         llvm.intr.lifetime.start %[[ADDR]]
+  // CHECK:         llvm.intr.lifetime.end %[[ADDR]]
+  cir.func @lifetime_markers() {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["x"] {alignment = 4 : i64}
+    cir.lifetime.start %0 : !cir.ptr<!s32i>
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.return
+  }
+}

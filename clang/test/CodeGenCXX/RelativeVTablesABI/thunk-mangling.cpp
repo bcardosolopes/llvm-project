@@ -6,10 +6,12 @@
 // ABIs, but we should still be able to link.
 
 // RUN: %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O1 -o - -emit-llvm | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O1 -fclangir -emit-llvm -o - | FileCheck %s --check-prefix=CIR %}
 
 // This would be normally n24 (3 ptr widths) but is 12 since the vtable is
 // entierely made of i32s now.
 // CHECK: _ZTv0_n12_N7Derived1fEi
+// CIR: _ZTv0_n12_N7Derived1fEi
 
 class Base {
 public:

@@ -582,6 +582,7 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
   if (FrontendOpts.ShowStats)
     CodeGenOpts.ClearASTBeforeBackend = false;
   LangOpts.SanitizeCoverage = CodeGenOpts.hasSanitizeCoverage();
+  LangOpts.MemoryProfiler = !CodeGenOpts.MemoryProfileOutput.empty();
   LangOpts.ForceEmitVTables = CodeGenOpts.ForceEmitVTables;
   LangOpts.SpeculativeLoadHardening = CodeGenOpts.SpeculativeLoadHardening;
   LangOpts.CurrentModule = LangOpts.ModuleName;
@@ -2771,6 +2772,7 @@ static const auto &getFrontendActionTable() {
       {frontend::EmitAssembly, OPT_S},
       {frontend::EmitBC, OPT_emit_llvm_bc},
       {frontend::EmitCIR, OPT_emit_cir},
+      {frontend::EmitMLIR, OPT_emit_mlir_EQ},
       {frontend::EmitHTML, OPT_emit_html},
       {frontend::EmitLLVM, OPT_emit_llvm},
       {frontend::EmitLLVMOnly, OPT_emit_llvm_only},
@@ -2884,6 +2886,15 @@ static void GenerateFrontendArgs(const FrontendOptions &Opts,
   if (Opts.ProgramAction == frontend::FixIt && !Opts.FixItSuffix.empty()) {
     GenerateProgramAction = [&]() {
       GenerateArg(Consumer, OPT_fixit_EQ, Opts.FixItSuffix);
+    };
+  }
+
+  if (Opts.ProgramAction == frontend::EmitMLIR) {
+    GenerateProgramAction = [&]() {
+      if (!Opts.ClangIREmitMLIR.empty())
+        GenerateArg(Consumer, OPT_emit_mlir_EQ, Opts.ClangIREmitMLIR);
+      else
+        GenerateArg(Consumer, OPT_emit_mlir_EQ, "llvm");
     };
   }
 
@@ -3135,8 +3146,15 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
   if (Opts.ProgramAction != frontend::GenerateModule && Opts.IsSystemModule)
     Diags.Report(diag::err_drv_argument_only_allowed_with) << "-fsystem-module"
                                                            << "-emit-module";
-  if (Args.hasArg(OPT_fclangir) || Args.hasArg(OPT_emit_cir))
+  if (Args.hasArg(OPT_emit_cir) || Args.hasArg(OPT_emit_mlir_EQ))
     Opts.UseClangIRPipeline = true;
+
+  // A fat object's CIR is captured before CallConvLowering, and whoever lowers
+  // it runs the pass; built with the pass off, the native code and the CIR
+  // would disagree about the calling convention.
+  if (Opts.ClangIRFatObjects && !Opts.ClangIRCallConvLowering)
+    Diags.Report(diag::err_drv_argument_not_allowed_with)
+        << "-fno-clangir-call-conv-lowering" << "-fclangir-fat-objects";
 
 #if CLANG_ENABLE_CIR
   if (Args.hasArg(OPT_clangir_disable_passes))
@@ -3144,6 +3162,47 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
 
   if (Args.hasArg(OPT_clangir_disable_verifier))
     Opts.ClangIRDisableCIRVerifier = true;
+
+  if (Args.hasArg(OPT_clangir_verify_diagnostics))
+    Opts.ClangIRVerifyDiags = true;
+
+  if (const Arg *A = Args.getLastArg(OPT_fclangir_lifetime_check,
+                                     OPT_fclangir_lifetime_check_EQ)) {
+    Opts.ClangIRLifetimeCheck = true;
+    Opts.ClangIRLifetimeCheckOpts = A->getValue();
+  }
+
+  if (const Arg *A = Args.getLastArg(OPT_fclangir_idiom_recognizer,
+                                     OPT_fclangir_idiom_recognizer_EQ)) {
+    Opts.ClangIRIdiomRecognizer = true;
+    if (A->getOption().matches(OPT_fclangir_idiom_recognizer_EQ))
+      Opts.ClangIRIdiomRecognizerOpts = A->getValue();
+  }
+
+  if (const Arg *A =
+          Args.getLastArg(OPT_fclangir_lib_opt, OPT_fclangir_lib_opt_EQ)) {
+    Opts.ClangIRLibOpt = true;
+    if (A->getOption().matches(OPT_fclangir_lib_opt_EQ))
+      Opts.ClangIRLibOptOpts = A->getValue();
+  }
+
+  if (const Arg *A = Args.getLastArg(OPT_emit_mlir_EQ))
+    Opts.ClangIREmitMLIR = A->getValue();
+
+  if (const Arg *A = Args.getLastArg(OPT_fstd_lib_stats_EQ)) {
+    Opts.StdLibStats = true;
+    Opts.StdLibStatsMode = A->getValue();
+    if (Opts.StdLibStatsMode != "json" && Opts.StdLibStatsMode != "embed")
+      Diags.Report(diag::err_drv_invalid_value)
+          << A->getAsString(Args) << A->getValue();
+  } else if (Args.hasArg(OPT_fstd_lib_stats)) {
+    Opts.StdLibStats = true;
+  }
+  if (Opts.StdLibStats && Opts.StdLibStatsMode.empty())
+    Opts.StdLibStatsMode = "json";
+
+  if (const Arg *A = Args.getLastArg(OPT_fstd_lib_stats_libs_EQ))
+    Opts.StdLibStatsLibs = A->getValue();
 #endif // CLANG_ENABLE_CIR
 
   if (Args.hasArg(OPT_aux_target_cpu))
@@ -4658,6 +4717,7 @@ static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   case frontend::EmitAssembly:
   case frontend::EmitBC:
   case frontend::EmitCIR:
+  case frontend::EmitMLIR:
   case frontend::EmitHTML:
   case frontend::EmitLLVM:
   case frontend::EmitLLVMOnly:
@@ -4700,6 +4760,7 @@ static bool isCodeGenAction(frontend::ActionKind Action) {
   case frontend::EmitAssembly:
   case frontend::EmitBC:
   case frontend::EmitCIR:
+  case frontend::EmitMLIR:
   case frontend::EmitHTML:
   case frontend::EmitLLVM:
   case frontend::EmitLLVMOnly:

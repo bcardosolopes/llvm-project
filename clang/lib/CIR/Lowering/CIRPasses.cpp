@@ -10,23 +10,60 @@
 //
 //===----------------------------------------------------------------------===//
 
-// #include "clang/AST/ASTContext.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/CIR/Dialect/Passes.h"
 #include "llvm/Support/TimeProfiler.h"
 
 namespace cir {
-mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
-                                      mlir::MLIRContext &mlirContext,
-                                      clang::ASTContext &astContext,
-                                      bool enableVerifier,
-                                      bool enableCIRSimplify) {
+mlir::LogicalResult runCIRToCIRPasses(
+    mlir::ModuleOp theModule, mlir::MLIRContext &mlirContext,
+    clang::ASTContext &astContext, bool enableVerifier, bool enableLifetime,
+    llvm::StringRef lifetimeOpts, bool enableCIRSimplify, bool enableCIRMoveOpt,
+    bool enableIdiomRecognizer, llvm::StringRef idiomRecognizerOpts,
+    bool enableLibOpt, llvm::StringRef libOptOpts,
+    std::string &passOptParsingFailure) {
 
   llvm::TimeTraceScope scope("CIR To CIR Passes");
 
   mlir::PassManager pm(&mlirContext);
   pm.addPass(mlir::createCIRCanonicalizePass());
+
+  auto errorHandler = [](const llvm::Twine &) -> mlir::LogicalResult {
+    return mlir::LogicalResult::failure();
+  };
+
+  if (enableLifetime) {
+    auto lifetimePass = mlir::createLifetimeCheckPass(&astContext);
+    if (lifetimePass->initializeOptions(lifetimeOpts, errorHandler).failed()) {
+      passOptParsingFailure = lifetimeOpts;
+      return mlir::failure();
+    }
+    pm.addPass(std::move(lifetimePass));
+  }
+
+  if (enableIdiomRecognizer) {
+    auto idiomPass = mlir::createIdiomRecognizerPass(&astContext);
+    if (idiomPass->initializeOptions(idiomRecognizerOpts, errorHandler)
+            .failed()) {
+      passOptParsingFailure = idiomRecognizerOpts;
+      return mlir::failure();
+    }
+    pm.addPass(std::move(idiomPass));
+  }
+
+  if (enableLibOpt) {
+    auto libOpPass = mlir::createLibOptPass(&astContext);
+    if (libOpPass->initializeOptions(libOptOpts, errorHandler).failed()) {
+      passOptParsingFailure = libOptOpts;
+      return mlir::failure();
+    }
+    pm.addPass(std::move(libOpPass));
+  }
+
+  if (enableCIRMoveOpt)
+    pm.addPass(mlir::createMoveOptPass(&astContext));
 
   if (enableCIRSimplify)
     pm.addPass(mlir::createCIRSimplifyPass());
@@ -34,19 +71,14 @@ mlir::LogicalResult runCIRToCIRPasses(mlir::ModuleOp theModule,
   pm.addPass(mlir::createCXXABILoweringPass());
   pm.addPass(mlir::createLoweringPreparePass(&astContext));
 
-  pm.enableVerifier(enableVerifier);
+  // Disable inter-pass verification. The CIR module is verified once before
+  // this pass pipeline runs (in HandleTranslationUnit). Per-pass verification
+  // costs ~0.5s per pass due to symbol-table walks, and with 4+ passes in the
+  // pipeline, the cumulative cost is significant (~2s). The passes are
+  // well-tested and verification is redundant during normal compilation.
+  pm.enableVerifier(false);
   (void)mlir::applyPassManagerCLOptions(pm);
   return pm.run(theModule);
 }
 
 } // namespace cir
-
-namespace mlir {
-
-void populateCIRPreLoweringPasses(OpPassManager &pm) {
-  pm.addPass(createHoistAllocasPass());
-  pm.addPass(createCIRFlattenCFGPass());
-  pm.addPass(createGotoSolverPass());
-}
-
-} // namespace mlir

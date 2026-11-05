@@ -40,8 +40,10 @@ bool test_add_overflow_xint31_xint31_xint31(_BitInt(31) x, _BitInt(31) y, _BitIn
 }
 
 //      CIR: cir.func {{.*}} @_Z38test_add_overflow_xint31_xint31_xint31DB31_S_PS_
-//      CIR:   %[[#LHS:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.int<s, 31>>, !cir.int<s, 31>
-// CIR-NEXT:   %[[#RHS:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.int<s, 31>>, !cir.int<s, 31>
+//      CIR:   %[[#LHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#LHS:]] = cir.cast integral %[[#LHS_STORAGE]] : !s32i -> !cir.int<s, 31>
+// CIR-NEXT:   %[[#RHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#RHS:]] = cir.cast integral %[[#RHS_STORAGE]] : !s32i -> !cir.int<s, 31>
 // CIR-NEXT:   %[[#RES_PTR:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!cir.int<s, 31>>>, !cir.ptr<!cir.int<s, 31>>
 // CIR-NEXT:   %[[RES:.+]], %{{.+}} = cir.binop.overflow(add, %[[#LHS]], %[[#RHS]]) : !cir.int<s, 31>, (!cir.int<s, 31>, !cir.bool)
 // CIR-NEXT:   cir.store{{.*}} %[[RES]], %[[#RES_PTR]] : !cir.int<s, 31>, !cir.ptr<!cir.int<s, 31>>
@@ -76,8 +78,10 @@ bool test_sub_overflow_xint31_xint31_xint31(_BitInt(31) x, _BitInt(31) y, _BitIn
 }
 
 //      CIR: cir.func {{.*}} @_Z38test_sub_overflow_xint31_xint31_xint31DB31_S_PS_
-//      CIR:   %[[#LHS:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.int<s, 31>>, !cir.int<s, 31>
-// CIR-NEXT:   %[[#RHS:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.int<s, 31>>, !cir.int<s, 31>
+//      CIR:   %[[#LHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#LHS:]] = cir.cast integral %[[#LHS_STORAGE]] : !s32i -> !cir.int<s, 31>
+// CIR-NEXT:   %[[#RHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#RHS:]] = cir.cast integral %[[#RHS_STORAGE]] : !s32i -> !cir.int<s, 31>
 // CIR-NEXT:   %[[#RES_PTR:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!cir.int<s, 31>>>, !cir.ptr<!cir.int<s, 31>>
 // CIR-NEXT:   %[[RES:.+]], %{{.+}} = cir.binop.overflow(sub, %[[#LHS]], %[[#RHS]]) : !cir.int<s, 31>, (!cir.int<s, 31>, !cir.bool)
 // CIR-NEXT:   cir.store{{.*}} %[[RES]], %[[#RES_PTR]] : !cir.int<s, 31>, !cir.ptr<!cir.int<s, 31>>
@@ -112,8 +116,10 @@ bool test_mul_overflow_xint31_xint31_xint31(_BitInt(31) x, _BitInt(31) y, _BitIn
 }
 
 //      CIR: cir.func {{.*}} @_Z38test_mul_overflow_xint31_xint31_xint31DB31_S_PS_
-//      CIR:   %[[#LHS:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.int<s, 31>>, !cir.int<s, 31>
-// CIR-NEXT:   %[[#RHS:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.int<s, 31>>, !cir.int<s, 31>
+//      CIR:   %[[#LHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#LHS:]] = cir.cast integral %[[#LHS_STORAGE]] : !s32i -> !cir.int<s, 31>
+// CIR-NEXT:   %[[#RHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#RHS:]] = cir.cast integral %[[#RHS_STORAGE]] : !s32i -> !cir.int<s, 31>
 // CIR-NEXT:   %[[#RES_PTR:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!cir.int<s, 31>>>, !cir.ptr<!cir.int<s, 31>>
 // CIR-NEXT:   %[[RES:.+]], %{{.+}} = cir.binop.overflow(mul, %[[#LHS]], %[[#RHS]]) : !cir.int<s, 31>, (!cir.int<s, 31>, !cir.bool)
 // CIR-NEXT:   cir.store{{.*}} %[[RES]], %[[#RES_PTR]] : !cir.int<s, 31>, !cir.ptr<!cir.int<s, 31>>
@@ -372,3 +378,47 @@ bool test_smulll_overflow(long long x, long long y, long long *res) {
 // CIR-NEXT:   %[[RES:.+]], %{{.+}} = cir.binop.overflow(mul, %[[#X]], %[[#Y]]) : !s64i, (!s64i, !cir.bool)
 // CIR-NEXT:   cir.store{{.*}} %[[RES]], %[[#RES_PTR]] : !s64i, !cir.ptr<!s64i>
 //      CIR: }
+
+// Test _Bool result type - the result of the overflow op must be cast from
+// IntType to BoolType before storing.
+bool test_mul_overflow_bool_result(int x, int y, bool *res) {
+  return __builtin_mul_overflow(x, y, res);
+}
+
+//      CIR: cir.func {{.*}} @_Z29test_mul_overflow_bool_resultiiPb
+//      CIR:   %[[#X:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#Y:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#RES_PTR:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!cir.bool>>, !cir.ptr<!cir.bool>
+// CIR-NEXT:   %[[RES:.+]], %{{.+}} = cir.binop.overflow(mul, %[[#X]], %[[#Y]]) : !s32i, (!cir.int<u, 1>, !cir.bool)
+// CIR-NEXT:   %[[BOOLRES:.+]] = cir.cast int_to_bool %[[RES]] : !cir.int<u, 1> -> !cir.bool
+// CIR-NEXT:   cir.store{{.*}} %[[BOOLRES]], %[[#RES_PTR]] : !cir.bool, !cir.ptr<!cir.bool>
+//      CIR: }
+
+// Test _BitInt(31) with local variable result - the result must be extended
+// from the semantic type (i31) to the storage type (i32) before storing.
+int test_add_overflow_xint31_local(_BitInt(31) x, _BitInt(31) y) {
+  _BitInt(31) r;
+  if (__builtin_add_overflow(x, y, &r))
+    return -1;
+  return r;
+}
+
+//      CIR: cir.func {{.*}} @_Z30test_add_overflow_xint31_localDB31_S_
+//      CIR:   %[[#LHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#LHS:]] = cir.cast integral %[[#LHS_STORAGE]] : !s32i -> !cir.int<s, 31>
+// CIR-NEXT:   %[[#RHS_STORAGE:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!s32i>, !s32i
+// CIR-NEXT:   %[[#RHS:]] = cir.cast integral %[[#RHS_STORAGE]] : !s32i -> !cir.int<s, 31>
+// CIR-NEXT:   %[[RES:.+]], %[[OVF:.+]] = cir.binop.overflow(add, %[[#LHS]], %[[#RHS]]) : !cir.int<s, 31>, (!cir.int<s, 31>, !cir.bool)
+// CIR-NEXT:   %[[CONV:.+]] = cir.cast integral %[[RES]] : !cir.int<s, 31> -> !s32i
+// CIR-NEXT:   cir.store{{.*}} %[[CONV]], %{{.+}} : !s32i, !cir.ptr<!s32i>
+//      CIR: }
+
+// LLVM: define{{.*}} i32 @_Z30test_add_overflow_xint31_localDB31_S_(i31{{.*}}, i31{{.*}})
+// LLVM:   call { i31, i1 } @llvm.sadd.with.overflow.i31(i31 %{{.+}}, i31 %{{.+}})
+// LLVM:   sext i31 %{{.+}} to i32
+// LLVM:   store i32 %{{.+}}, ptr %{{.+}}
+
+// OGCG: define{{.*}} i32 @_Z30test_add_overflow_xint31_localDB31_S_(i31{{.*}}, i31{{.*}})
+// OGCG:   call { i31, i1 } @llvm.sadd.with.overflow.i31(i31 %{{.+}}, i31 %{{.+}})
+// OGCG:   sext i31 %{{.+}} to i32
+// OGCG:   store i32 %{{.+}}, ptr %{{.+}}

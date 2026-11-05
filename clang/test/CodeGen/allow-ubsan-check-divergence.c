@@ -8,6 +8,11 @@
 // RUN:     -fsanitize-skip-hot-cutoff=signed-integer-overflow=1.0 \
 // RUN:     -fallow-runtime-check-skip-hot-cutoff=1.0 \
 // RUN:     | FileCheck %s --check-prefixes=UBSAN-O1
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-pc-linux-gnu -emit-llvm -O1 -o - %s \
+// RUN:     -fsanitize=signed-integer-overflow \
+// RUN:     -fsanitize-skip-hot-cutoff=signed-integer-overflow=1.0 \
+// RUN:     -fallow-runtime-check-skip-hot-cutoff=1.0 \
+// RUN:     -fclangir | FileCheck %s --check-prefixes=CIR-UBSAN-O1 %}
 
 // This test shows that -fsanitize-skip-hot-cutoff=...=1.0 plus
 // -fallow-runtime-check-skip-hot-cutoff=1.0 does not perfectly undo the
@@ -24,6 +29,10 @@
 // UBSAN-O1-NEXT:  [[ENTRY:.*:]]
 // UBSAN-O1-NEXT:    [[TMP0:%.*]] = add i32 [[X]], [[Y]]
 // UBSAN-O1-NEXT:    ret i32 [[TMP0]]
+//
+// CIR-UBSAN-O1-LABEL: define dso_local noundef i32 @overflow(
+// CIR-UBSAN-O1: [[TMP0:%.*]] = add i32 [[X:%.*]], [[Y:%.*]]
+// CIR-UBSAN-O1-NEXT: ret i32 [[TMP0]]
 //
 int overflow(int x, int y) {
   return x + y;

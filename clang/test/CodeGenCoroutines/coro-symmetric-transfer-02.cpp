@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O1 -emit-llvm %s -o - -disable-llvm-passes | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O1 -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=CIR %}
 
 #include "Inputs/coroutine.h"
 
@@ -112,3 +113,18 @@ Task bar() {
 // CHECK:       [[CASE2_AWAIT_CLEANUP]]:
 // make sure that the awaiter eventually gets cleaned up.
 // CHECK:         call void @{{.+Awaiter.+}}
+
+// CIR-LABEL: define internal fastcc void @_Z3barv.destroy(
+// CIR: %[[INDEX_ADDR:.+]] = getelementptr inbounds nuw i8, ptr %[[FRAME:.+]], i64 17
+// CIR: %[[INDEX:.+]] = load i2, ptr %[[INDEX_ADDR]], align 1
+// CIR: %[[RESUME_FN:.+]] = load ptr, ptr %[[FRAME]], align 8
+// CIR: %[[IS_NULL:.+]] = icmp eq ptr %[[RESUME_FN]], null
+// CIR: %[[IS_INIT:.+]] = icmp eq i2 %[[INDEX]], 0
+// CIR: %[[NEEDS_FREE_ONLY:.+]] = select i1 %[[IS_NULL]], i1 true, i1 %[[IS_INIT]]
+// CIR: br i1 %[[NEEDS_FREE_ONLY]], label %[[FREE:.+]], label %[[CLEANUP:.+]]
+// CIR: [[CLEANUP]]:
+// CIR: call void @_ZN4Task7AwaiterD1Ev(
+// CIR: call void @_ZN4TaskD1Ev(
+// CIR: br label %[[FREE]]
+// CIR: [[FREE]]:
+// CIR: call void @_ZdlPvm(

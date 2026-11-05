@@ -134,6 +134,41 @@ static LLVMStructType trySetStructBody(LLVMStructType type,
   return LLVMStructType();
 }
 
+namespace {
+/// One frame per identified struct body being parsed on this thread.
+struct StructParseFrame {
+  LLVMStructType placeholder;
+  bool inCycle;
+};
+
+/// A struct parse runs start to end on one thread, so a thread-local stack
+/// mirrors the parser's cyclic parse stack.
+SmallVector<StructParseFrame> &getStructParseFrames() {
+  thread_local SmallVector<StructParseFrame> structParseFrames;
+  return structParseFrames;
+}
+
+class StructParseFrameGuard {
+public:
+  explicit StructParseFrameGuard(LLVMStructType placeholder) {
+    getStructParseFrames().push_back({placeholder, false});
+  }
+  ~StructParseFrameGuard() { getStructParseFrames().pop_back(); }
+  bool inCycle() const { return getStructParseFrames().back().inCycle; }
+};
+
+/// Marks every struct from the innermost one out to `target` as part of a
+/// cycle. All of them must use the mutable placeholder so that the result does
+/// not depend on which struct of the cycle the printer started from.
+void markStructCycle(LLVMStructType target) {
+  for (StructParseFrame &frame : llvm::reverse(getStructParseFrames())) {
+    frame.inCycle = true;
+    if (frame.placeholder == target)
+      return;
+  }
+}
+} // namespace
+
 /// Parses an LLVM dialect structure type.
 ///   llvm-type ::= `struct<` (string-literal `,`)? `packed`?
 ///                 `(` llvm-type-list `)` `>`
@@ -162,6 +197,7 @@ Type LLVMStructType::parse(AsmParser &parser) {
         return nullptr;
       }
 
+      markStructCycle(type);
       return type;
     }
     if (failed(parser.parseComma()))
@@ -176,25 +212,23 @@ Type LLVMStructType::parse(AsmParser &parser) {
              LLVMStructType();
     if (failed(parser.parseGreater()))
       return LLVMStructType();
-    auto type = LLVMStructType::getOpaqueChecked(
-        [loc] { return emitError(loc); }, loc.getContext(), name);
-    if (!type.isOpaque()) {
-      parser.emitError(kwLoc, "redeclaring defined struct as opaque");
-      return LLVMStructType();
-    }
-    return type;
+    return LLVMStructType::getFrozenOpaque(loc.getContext(), name);
   }
 
   FailureOr<AsmParser::CyclicParseReset> cyclicParse;
+  LLVMStructType placeholder;
+  std::optional<StructParseFrameGuard> frame;
+  // A full definition inside an enclosing struct of the same name is a
+  // different struct. The printer emits this for a frozen struct whose body
+  // holds another frozen struct with the same name. It is only an error if the
+  // inner struct is recursive, because both would need the same placeholder.
+  bool redefinesEnclosingStruct = false;
   if (isIdentified) {
-    cyclicParse =
-        parser.tryStartCyclicParse(LLVMStructType::getIdentifiedChecked(
-            [loc] { return emitError(loc); }, loc.getContext(), name));
-    if (failed(cyclicParse)) {
-      parser.emitError(kwLoc,
-                       "identifier already used for an enclosing struct");
-      return nullptr;
-    }
+    placeholder = LLVMStructType::getIdentifiedChecked(
+        [loc] { return emitError(loc); }, loc.getContext(), name);
+    cyclicParse = parser.tryStartCyclicParse(placeholder);
+    redefinesEnclosingStruct = failed(cyclicParse);
+    frame.emplace(placeholder);
   }
 
   // Check for packedness.
@@ -202,22 +236,36 @@ Type LLVMStructType::parse(AsmParser &parser) {
   if (failed(parser.parseLParen()))
     return LLVMStructType();
 
+  // A struct that is part of a recursive cycle needs the mutable placeholder.
+  // Any other identified struct is frozen, so it does not depend on what other
+  // threads or earlier inputs put in the context.
+  auto finishIdentified = [&](ArrayRef<Type> body,
+                              SMLoc bodyLoc) -> LLVMStructType {
+    if (frame->inCycle() && redefinesEnclosingStruct) {
+      parser.emitError(kwLoc,
+                       "identifier already used for an enclosing struct");
+      return LLVMStructType();
+    }
+    if (frame->inCycle())
+      return trySetStructBody(placeholder, body, isPacked, parser, bodyLoc);
+    return LLVMStructType::getFrozenIdentified(loc.getContext(), name, body,
+                                               isPacked);
+  };
+
   // Fast pass for structs with zero subtypes.
+  SMLoc subtypesLoc = parser.getCurrentLocation();
   if (succeeded(parser.parseOptionalRParen())) {
     if (failed(parser.parseGreater()))
       return LLVMStructType();
     if (!isIdentified)
       return LLVMStructType::getLiteralChecked([loc] { return emitError(loc); },
                                                loc.getContext(), {}, isPacked);
-    auto type = LLVMStructType::getIdentifiedChecked(
-        [loc] { return emitError(loc); }, loc.getContext(), name);
-    return trySetStructBody(type, {}, isPacked, parser, kwLoc);
+    return finishIdentified({}, subtypesLoc);
   }
 
   // Parse subtypes. For identified structs, put the identifier of the struct on
   // the stack to support self-references in the recursive calls.
   SmallVector<Type, 4> subtypes;
-  SMLoc subtypesLoc = parser.getCurrentLocation();
   do {
     Type type;
     if (dispatchParse(parser, type))
@@ -232,9 +280,14 @@ Type LLVMStructType::parse(AsmParser &parser) {
   if (!isIdentified)
     return LLVMStructType::getLiteralChecked(
         [loc] { return emitError(loc); }, loc.getContext(), subtypes, isPacked);
-  auto type = LLVMStructType::getIdentifiedChecked(
-      [loc] { return emitError(loc); }, loc.getContext(), name);
-  return trySetStructBody(type, subtypes, isPacked, parser, subtypesLoc);
+  for (Type t : subtypes) {
+    if (!LLVMStructType::isValidElementType(t)) {
+      parser.emitError(subtypesLoc)
+          << "invalid LLVM structure element type: " << t;
+      return LLVMStructType();
+    }
+  }
+  return finishIdentified(subtypes, subtypesLoc);
 }
 
 /// Parses a type appearing inside another LLVM dialect-compatible type. This

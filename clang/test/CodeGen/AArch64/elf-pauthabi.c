@@ -18,6 +18,8 @@
 
 // RUN: %clang_cc1 -triple aarch64-linux -emit-llvm -o - \
 // RUN:   -fptrauth-calls %s | FileCheck %s --check-prefix=CALL
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux -emit-llvm -o - \
+// RUN:   -fptrauth-calls -fclangir %s | FileCheck %s --check-prefix=CALL %}
 
 // RUN: %clang_cc1 -triple aarch64-linux -emit-llvm -o - \
 // RUN:   -fptrauth-returns %s | FileCheck %s --check-prefix=RET
@@ -54,15 +56,34 @@
 // RUN: %clang_cc1 -triple aarch64-linux -emit-llvm -o - \
 // RUN:   -fptrauth-calls -fptrauth-function-pointer-type-discrimination %s | \
 // RUN:   FileCheck %s --check-prefix=FPTRTYPE
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux -emit-llvm -o - \
+// RUN:   -fclangir \
+// RUN:   -fptrauth-intrinsics \
+// RUN:   -fptrauth-calls \
+// RUN:   -fptrauth-returns \
+// RUN:   -fptrauth-auth-traps \
+// RUN:   -fptrauth-vtable-pointer-address-discrimination \
+// RUN:   -fptrauth-vtable-pointer-type-discrimination \
+// RUN:   -fptrauth-init-fini \
+// RUN:   -fptrauth-init-fini-address-discrimination \
+// RUN:   -fptrauth-elf-got \
+// RUN:   -fptrauth-indirect-gotos \
+// RUN:   -fptrauth-type-info-vtable-pointer-discrimination \
+// RUN:   -fptrauth-function-pointer-type-discrimination %s | \
+// RUN:   FileCheck %s --check-prefix=ALL %}
 
-// ALL: !{i32 1, !"aarch64-elf-pauthabi-platform", i32 268435458}
-// ALL: !{i32 1, !"aarch64-elf-pauthabi-version", i32 4095}
+// ALL: attributes #0 = { {{.*}}"ptrauth-auth-traps"{{.*}}"ptrauth-calls"{{.*}}"ptrauth-indirect-gotos"{{.*}}"ptrauth-returns"{{.*}} }
+// ALL-DAG: !{i32 1, !"aarch64-elf-pauthabi-platform", i32 268435458}
+// ALL-DAG: !{i32 1, !"aarch64-elf-pauthabi-version", i32 4095}
+// ALL-DAG: !{i32 8, !"ptrauth-sign-personality", i32 1}
 
 // INTRIN: !{i32 1, !"aarch64-elf-pauthabi-platform", i32 268435458}
 // INTRIN: !{i32 1, !"aarch64-elf-pauthabi-version", i32 1}
 
-// CALL: !{i32 1, !"aarch64-elf-pauthabi-platform", i32 268435458}
-// CALL: !{i32 1, !"aarch64-elf-pauthabi-version", i32 2}
+// CALL: attributes #0 = { {{.*}}"ptrauth-calls"{{.*}} }
+// CALL-DAG: !{i32 1, !"aarch64-elf-pauthabi-platform", i32 268435458}
+// CALL-DAG: !{i32 1, !"aarch64-elf-pauthabi-version", i32 2}
+// CALL-DAG: !{i32 8, !"ptrauth-sign-personality", i32 1}
 
 // RET: !{i32 1, !"aarch64-elf-pauthabi-platform", i32 268435458}
 // RET: !{i32 1, !"aarch64-elf-pauthabi-version", i32 4}

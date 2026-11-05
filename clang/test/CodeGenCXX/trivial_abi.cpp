@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios11 -std=c++11 -fcxx-exceptions -fexceptions -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple arm64-apple-ios11 -std=c++11 -fcxx-exceptions -fexceptions -fclang-abi-compat=4.0 -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios11 -std=c++11 -fcxx-exceptions -fexceptions -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR %}
 
 // CHECK: %[[STRUCT_SMALL:.*]] = type { ptr }
 // CHECK: %[[STRUCT_LARGE:.*]] = type { ptr, [128 x i32] }
@@ -167,6 +168,10 @@ Large testReturnLarge() {
 // CHECK: %[[CALL2:.*]] = call noundef ptr @_ZN5LargeD1Ev(ptr {{[^,]*}} %[[T]])
 // CHECK: ret void
 // CHECK: }
+// CIR-LABEL: define void @_Z14testCallLarge0v()
+// CIR-NOT: @llvm.memcpy
+// CIR: call void @_Z14testParamLarge5Large(ptr dead_on_return noundef %{{.*}})
+// CIR: ret void
 
 void testCallLarge0() {
   Large t;
@@ -179,6 +184,10 @@ void testCallLarge0() {
 // CHECK: call void @_Z14testParamLarge5Large(ptr dead_on_return noundef %[[AGG_TMP]])
 // CHECK: ret void
 // CHECK: }
+// CIR-LABEL: define void @_Z14testCallLarge1v()
+// CIR-NOT: @llvm.memcpy
+// CIR: call void @_Z14testParamLarge5Large(ptr dead_on_return noundef %{{.*}})
+// CIR: ret void
 
 void testCallLarge1() {
   testParamLarge(testReturnLarge());
@@ -252,6 +261,10 @@ void testExceptionSmall() {
 // CHECK: br
 
 // CHECK: resume { ptr, i32 }
+// CIR-LABEL: define void @_Z18testExceptionLargev()
+// CIR-NOT: @llvm.memcpy
+// CIR: call void @_Z20calleeExceptionLarge5LargeS_(ptr dead_on_return noundef %{{.*}}, ptr dead_on_return noundef %{{.*}})
+// CIR: ret void
 
 void calleeExceptionLarge(Large, Large);
 

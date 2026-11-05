@@ -110,4 +110,59 @@ module {
   // CHECK-NEXT:   }
   // CHECK-NEXT:   cir.return
   // CHECK-NEXT: }
+
+  // Test: const alloca with store in for-loop condition region (opt level > 0)
+  // The const flag should be removed when hoisting because the value changes
+  // on each loop iteration.
+  cir.func @for_cond_var() {
+    cir.scope {
+      %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init, const] {alignment = 4 : i64}
+      cir.for : cond {
+        %1 = cir.const #cir.int<1> : !s32i
+        cir.store %1, %0 : !s32i, !cir.ptr<!s32i>
+        %2 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+        %3 = cir.cast int_to_bool %2 : !s32i -> !cir.bool
+        cir.condition(%3)
+      } body {
+        cir.yield
+      } step {
+        cir.yield
+      }
+    }
+    cir.return
+  }
+  // The const flag must be removed so the optimizer doesn't treat loads
+  // as invariant across loop iterations.
+  // CHECK:      cir.func{{.*}} @for_cond_var
+  // CHECK-NEXT:   %[[X:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init] {alignment = 4 : i64}
+  // CHECK-NOT:    const
+  // CHECK:        cir.for
+  // CHECK:        cir.store
+  // CHECK:      cir.return
+  // CHECK-NEXT: }
+
+  // Test: const alloca with store in while-loop condition region
+  // Same pattern, but for while instead of for.
+  cir.func @while_cond_var() {
+    cir.scope {
+      %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["y", init, const] {alignment = 4 : i64}
+      cir.while {
+        %1 = cir.const #cir.int<1> : !s32i
+        cir.store %1, %0 : !s32i, !cir.ptr<!s32i>
+        %2 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+        %3 = cir.cast int_to_bool %2 : !s32i -> !cir.bool
+        cir.condition(%3)
+      } do {
+        cir.yield
+      }
+    }
+    cir.return
+  }
+  // CHECK:      cir.func{{.*}} @while_cond_var
+  // CHECK-NEXT:   %[[Y:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["y", init] {alignment = 4 : i64}
+  // CHECK-NOT:    const
+  // CHECK:        cir.while
+  // CHECK:        cir.store
+  // CHECK:      cir.return
+  // CHECK-NEXT: }
 }

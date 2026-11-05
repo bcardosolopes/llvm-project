@@ -1,6 +1,7 @@
 // RUN: %clang -x c++ -fsanitize=implicit-bitfield-conversion -target x86_64-linux -S -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-BITFIELD-CONVERSION
 // RUN: %clang -x c++ -fsanitize=implicit-integer-conversion -target x86_64-linux -S -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK
 // RUN: %clang -x c++ -fsanitize=implicit-conversion -target x86_64-linux -S -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-BITFIELD-CONVERSION
+// RUN: %if cir-support %{ %clang_cc1 -x c++ -triple x86_64-unknown-linux-gnu -fclangir -fsanitize=implicit-bitfield-conversion -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR %}
 
 struct S {
   int a:3;
@@ -16,6 +17,10 @@ S s;
 C c;
 
 // CHECK-LABEL: define{{.*}} void @{{.*foo1.*}}
+// CIR-LABEL: define{{.*}} void @{{.*foo1.*}}(
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: ret void
 void foo1(int x) {
   s.a = x;
   // CHECK: store i8 %{{.*}}
@@ -36,6 +41,10 @@ void foo1(int x) {
 }
 
 // CHECK-LABEL: define{{.*}} void @{{.*foo2.*}}
+// CIR-LABEL: define{{.*}} void @{{.*foo2.*}}(
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: ret void
 void foo2(int x) {
   s.b = x;
   // CHECK: store i8 %{{.*}}
@@ -54,6 +63,10 @@ void foo2(int x) {
 }
 
 // CHECK-LABEL: define{{.*}} void @{{.*foo3.*}}
+// CIR-LABEL: define{{.*}} void @{{.*foo3.*}}(
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: ret void
 void foo3() {
   s.a++;
   // CHECK: store i8 %{{.*}}
@@ -74,6 +87,10 @@ void foo3() {
 }
 
 // CHECK-LABEL: define{{.*}} void @{{.*foo4.*}}
+// CIR-LABEL: define{{.*}} void @{{.*foo4.*}}(
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: call void @__ubsan_handle_implicit_conversion_abort
+// CIR: ret void
 void foo4(int x) {
   s.a += x;
   // CHECK: store i8 %{{.*}}

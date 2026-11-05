@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir  %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s --check-prefix=CIR
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t.cir.ll
+// RUN: FileCheck --input-file=%t.cir.ll %s --check-prefix=LLVM
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-llvm  %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s --check-prefix=OGCG
 
@@ -14,9 +16,9 @@ LABEL_A:
 // CIR:    [[BLOCK:%.*]] = cir.block_address <@A, "LABEL_A"> : !cir.ptr<!void>
 // CIR:    cir.store align(8) [[BLOCK]], [[PTR]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
 // CIR:    [[BLOCKADD:%.*]] = cir.load align(8) [[PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
-// CIR:    cir.br ^bb1([[BLOCKADD]] : !cir.ptr<!void>)
-// CIR:  ^bb1([[PHI:%.*]]: !cir.ptr<!void> {{.*}}):  // pred: ^bb0
-// CIR:    cir.indirect_br [[PHI]] : !cir.ptr<!void>, [
+// CIR:    cir.indirect_goto [[BLOCKADD]] : !cir.ptr<!void>
+// CIR:  ^bb1({{.*}}: !cir.ptr<!void> {{.*}}):  // no predecessors
+// CIR:    cir.indirect_br {{.*}} : !cir.ptr<!void>, [
 // CIR:    ^bb2
 // CIR:    ]
 // CIR:  ^bb2:  // pred: ^bb1
@@ -34,6 +36,10 @@ LABEL_A:
 // OGCG:   %indirect.goto.dest = phi ptr [ [[BLOCKADD]], %entry ]
 // OGCG:   indirectbr ptr %indirect.goto.dest, [label %LABEL_A]
 
+// LLVM: define{{.*}} void @A()
+// LLVM:   store ptr blockaddress(@A, %[[A_LABEL:[^ ]+]]), ptr
+// LLVM:   indirectbr ptr %{{.*}}, [label %[[A_LABEL]]]
+
 void B(void) {
 LABEL_B:
   void *ptr = &&LABEL_B;
@@ -48,9 +54,9 @@ LABEL_B:
 // CIR:    [[BLOCK:%.*]] = cir.block_address <@B, "LABEL_B"> : !cir.ptr<!void>
 // CIR:    cir.store align(8) [[BLOCK]], [[PTR]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
 // CIR:    [[BLOCKADD:%.*]] = cir.load align(8) [[PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
-// CIR:    cir.br ^bb2([[BLOCKADD]] : !cir.ptr<!void>)
-// CIR:  ^bb2([[PHI:%.*]]: !cir.ptr<!void> {{.*}}):  // pred: ^bb1
-// CIR:    cir.indirect_br [[PHI]] : !cir.ptr<!void>, [
+// CIR:    cir.indirect_goto [[BLOCKADD]] : !cir.ptr<!void>
+// CIR:  ^bb2({{.*}}: !cir.ptr<!void> {{.*}}):  // no predecessors
+// CIR:    cir.indirect_br {{.*}} : !cir.ptr<!void>, [
 // CIR-NEXT:    ^bb1
 // CIR:    ]
 
@@ -64,6 +70,10 @@ LABEL_B:
 // OGCG: indirectgoto:                                     ; preds = %LABEL_B
 // OGCG:   %indirect.goto.dest = phi ptr [ [[BLOCKADD]], %LABEL_B ]
 // OGCG:   indirectbr ptr %indirect.goto.dest, [label %LABEL_B]
+
+// LLVM: define{{.*}} void @B()
+// LLVM:   store ptr blockaddress(@B, %[[B_LABEL:[^ ]+]]), ptr
+// LLVM:   indirectbr ptr %{{.*}}, [label %[[B_LABEL]]]
 
 void C(int x) {
   void *ptr = (x == 0) ? &&LABEL_A : &&LABEL_B;
@@ -80,9 +90,9 @@ LABEL_B:
 // CIR:    [[COND:%.*]] = cir.select if [[CMP:%.*]] then [[BLOCK1]] else [[BLOCK2]] : (!cir.bool, !cir.ptr<!void>, !cir.ptr<!void>) -> !cir.ptr<!void>
 // CIR:    cir.store align(8) [[COND]], [[PTR:%.*]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
 // CIR:    [[BLOCKADD:%.*]] = cir.load align(8) [[PTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
-// CIR:    cir.br ^bb1([[BLOCKADD]] : !cir.ptr<!void>)
-// CIR:  ^bb1([[PHI:%.*]]: !cir.ptr<!void> {{.*}}):  // pred: ^bb0
-// CIR:    cir.indirect_br [[PHI]] : !cir.ptr<!void>, [
+// CIR:    cir.indirect_goto [[BLOCKADD]] : !cir.ptr<!void>
+// CIR:  ^bb1({{.*}}: !cir.ptr<!void> {{.*}}):  // no predecessors
+// CIR:    cir.indirect_br {{.*}} : !cir.ptr<!void>, [
 // CIR-NEXT:    ^bb2,
 // CIR-NEXT:    ^bb4
 // CIR:    ]
@@ -127,9 +137,9 @@ LABEL_A:
 // CIR:    cir.store align(8) %[[BLK1]], %[[PTR]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
 // CIR:    %[[BLK2:.*]] = cir.block_address <@D, "LABEL_A"> : !cir.ptr<!void>
 // CIR:    cir.store align(8) %[[BLK2]], %[[PTR2]] : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
-// CIR:    cir.br ^bb1
-// CIR:  ^bb1([[PHI:%*.]]: !cir.ptr<!void> {{.*}}):  // pred: ^bb0
-// CIR:    cir.indirect_br [[PHI]] : !cir.ptr<!void>, [
+// CIR:    cir.indirect_goto {{.*}} : !cir.ptr<!void>
+// CIR:  ^bb1({{.*}}: !cir.ptr<!void> {{.*}}):  // no predecessors
+// CIR:    cir.indirect_br {{.*}} : !cir.ptr<!void>, [
 // CIR-DAG:    ^bb2,
 // CIR-DAG:    ^bb2,
 // CIR-DAG:    ^bb2
@@ -202,3 +212,21 @@ LABEL_D:
 // OGCG:   ret void
 // OGCG: indirectgoto:                                     ; No predecessors!
 // OGCG:   indirectbr ptr poison, [label %LABEL_D, label %LABEL_C, label %LABEL_B, label %LABEL_A]
+
+// Test that goto *&&label (constant indirect goto target) is folded into
+// a direct goto, matching OGCG's EmitBranchThroughCleanup optimization.
+void F(void) {
+  goto *&&TARGET;
+TARGET:
+  return;
+}
+
+// CIR:  cir.func {{.*}} @F()
+// CIR:    cir.goto "TARGET"
+// CIR:    cir.label "TARGET"
+// CIR:    cir.return
+
+// OGCG: define dso_local void @F()
+// OGCG:   br label %TARGET
+// OGCG: TARGET:
+// OGCG:   ret void

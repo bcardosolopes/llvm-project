@@ -15,6 +15,20 @@ module {
   // CHECK: cir.func{{.*}} @vector_ternary_fold_test() -> !cir.vector<4 x !s32i> {
   // CHECK-NEXT: %[[RES:.*]] = cir.const #cir.const_vector<[#cir.int<1> : !s32i, #cir.int<6> : !s32i, #cir.int<3> : !s32i, #cir.int<8> : !s32i]> : !cir.vector<4 x !s32i>
   // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<4 x !s32i>
+
+  // Test VecTernaryOp fold with a boolean vector condition.
+  // [true, false, false, true] ? [10, 20, 30, 40] : [50, 60, 70, 80]
+  // should fold to [10, 60, 70, 40].
+  cir.func @vector_ternary_bool_cond_fold() -> !cir.vector<4 x !s32i> {
+    %cond = cir.const #cir.const_vector<[#cir.bool<true> : !cir.bool, #cir.bool<false> : !cir.bool, #cir.bool<false> : !cir.bool, #cir.bool<true> : !cir.bool]> : !cir.vector<4 x !cir.bool>
+    %lhs = cir.const #cir.const_vector<[#cir.int<10> : !s32i, #cir.int<20> : !s32i, #cir.int<30> : !s32i, #cir.int<40> : !s32i]> : !cir.vector<4 x !s32i>
+    %rhs = cir.const #cir.const_vector<[#cir.int<50> : !s32i, #cir.int<60> : !s32i, #cir.int<70> : !s32i, #cir.int<80> : !s32i]> : !cir.vector<4 x !s32i>
+    %res = cir.vec.ternary(%cond, %lhs, %rhs) : !cir.vector<4 x !cir.bool>, !cir.vector<4 x !s32i>
+    cir.return %res : !cir.vector<4 x !s32i>
+  }
+  // CHECK: cir.func{{.*}} @vector_ternary_bool_cond_fold() -> !cir.vector<4 x !s32i> {
+  // CHECK-NEXT: %[[RES:.*]] = cir.const #cir.const_vector<[#cir.int<10> : !s32i, #cir.int<60> : !s32i, #cir.int<70> : !s32i, #cir.int<40> : !s32i]> : !cir.vector<4 x !s32i>
+  // CHECK-NEXT: cir.return %[[RES]] : !cir.vector<4 x !s32i>
 }
 
 

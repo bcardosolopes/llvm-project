@@ -439,6 +439,21 @@ LLVMStructType LLVMStructType::getIdentifiedChecked(
   return Base::getChecked(emitError, context, name, /*opaque=*/false);
 }
 
+LLVMStructType LLVMStructType::getFrozenIdentified(MLIRContext *context,
+                                                   StringRef name,
+                                                   ArrayRef<Type> elements,
+                                                   bool isPacked) {
+  return Base::get(context, detail::LLVMStructTypeStorage::Key::FrozenTag{},
+                   name, /*opaque=*/false, elements, isPacked);
+}
+
+LLVMStructType LLVMStructType::getFrozenOpaque(MLIRContext *context,
+                                               StringRef name) {
+  return Base::get(context, detail::LLVMStructTypeStorage::Key::FrozenTag{},
+                   name, /*opaque=*/true, ArrayRef<Type>(),
+                   /*packed=*/false);
+}
+
 LLVMStructType LLVMStructType::getNewIdentified(MLIRContext *context,
                                                 StringRef name,
                                                 ArrayRef<Type> elements,
@@ -492,6 +507,9 @@ bool LLVMStructType::isOpaque() const {
          (getImpl()->isOpaque() || !getImpl()->isInitialized());
 }
 bool LLVMStructType::isInitialized() { return getImpl()->isInitialized(); }
+bool LLVMStructType::isFrozen() const {
+  return getImpl()->isIdentified() && getImpl()->isFrozen();
+}
 StringRef LLVMStructType::getName() const { return getImpl()->getIdentifier(); }
 ArrayRef<Type> LLVMStructType::getBody() const {
   return isIdentified() ? getImpl()->getIdentifiedStructBody()
@@ -666,6 +684,7 @@ LogicalResult LLVMStructType::verifyEntries(DataLayoutEntryListRef entries,
 //===----------------------------------------------------------------------===//
 
 static constexpr llvm::StringRef kSpirvPrefix = "spirv.";
+static constexpr llvm::StringRef kSpirvPadding = "spirv.Padding";
 static constexpr llvm::StringRef kArmSVCount = "aarch64.svcount";
 static constexpr llvm::StringRef kAMDGCNNamedBarrier = "amdgcn.named.barrier";
 
@@ -676,6 +695,9 @@ bool LLVM::LLVMTargetExtType::hasProperty(Property prop) const {
   if (getExtTypeName().starts_with(kSpirvPrefix))
     properties |=
         (LLVMTargetExtType::HasZeroInit | LLVM::LLVMTargetExtType::CanBeGlobal);
+
+  if (getExtTypeName() == kArmSVCount)
+    properties |= LLVMTargetExtType::HasZeroInit;
 
   if (getExtTypeName() == kAMDGCNNamedBarrier)
     properties |= LLVMTargetExtType::CanBeGlobal;
@@ -692,6 +714,54 @@ bool LLVM::LLVMTargetExtType::supportsMemOps() const {
     return true;
 
   return false;
+}
+
+static Type getTargetExtLayoutType(LLVM::LLVMTargetExtType type) {
+  MLIRContext *ctx = type.getContext();
+
+  if (type.getExtTypeName() == kArmSVCount)
+    return VectorType::get(16, IntegerType::get(ctx, 1), {true});
+
+  if (type.getExtTypeName() == kSpirvPadding)
+    return LLVMArrayType::get(IntegerType::get(ctx, 8),
+                              type.getIntParams().front());
+
+  if (type.getExtTypeName().starts_with(kSpirvPrefix))
+    return LLVMPointerType::get(ctx, 0);
+
+  // Conservative fallback for any other target extension type whose layout
+  // is not modeled here: treat it as an opaque pointer in the default
+  // address space. This matches LLVM's general convention for opaque target
+  // types and avoids crashing non-CIR consumers (SPIR-V, etc.) that might
+  // query DataLayout on a target-ext type whose name we don't recognize.
+  return LLVMPointerType::get(ctx, 0);
+}
+
+llvm::TypeSize
+LLVM::LLVMTargetExtType::getTypeSize(const DataLayout &dataLayout,
+                                     DataLayoutEntryListRef params) const {
+  return dataLayout.getTypeSize(getTargetExtLayoutType(*this));
+}
+
+llvm::TypeSize
+LLVM::LLVMTargetExtType::getTypeSizeInBits(const DataLayout &dataLayout,
+                                           DataLayoutEntryListRef params) const {
+  return dataLayout.getTypeSizeInBits(getTargetExtLayoutType(*this));
+}
+
+uint64_t
+LLVM::LLVMTargetExtType::getABIAlignment(const DataLayout &dataLayout,
+                                         DataLayoutEntryListRef params) const {
+  if (getExtTypeName() == kArmSVCount)
+    return 2;
+  return dataLayout.getTypeABIAlignment(getTargetExtLayoutType(*this));
+}
+
+uint64_t LLVM::LLVMTargetExtType::getPreferredAlignment(
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  if (getExtTypeName() == kArmSVCount)
+    return 2;
+  return dataLayout.getTypePreferredAlignment(getTargetExtLayoutType(*this));
 }
 
 //===----------------------------------------------------------------------===//

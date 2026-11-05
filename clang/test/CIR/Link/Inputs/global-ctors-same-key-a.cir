@@ -1,0 +1,10 @@
+!s32i = !cir.int<s, 32>
+module attributes {cir.global_ctors = [#cir.global_ctor<"init_a1", 65535, "g">, #cir.global_ctor<"init_a2", 65535, "g">], cir.triple = "aarch64-unknown-linux-android"} {
+  cir.global linkonce_odr comdat @g = #cir.int<0> : !s32i
+  cir.func internal private @init_a1() {
+    cir.return
+  }
+  cir.func internal private @init_a2() {
+    cir.return
+  }
+}

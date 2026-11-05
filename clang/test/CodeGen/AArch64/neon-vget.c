@@ -189,14 +189,14 @@ uint64_t test_vgetq_lane_u64(uint64x2_t a) {
 }
 
 
-// CHECK-LABEL: define{{.*}} <8 x i8> @test_vset_lane_u8(i8 noundef %a, <8 x i8> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vset_lane_u8(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <8 x i8> %b, i8 %a, i32 7
 // CHECK:   ret <8 x i8> [[VSET_LANE]]
 uint8x8_t test_vset_lane_u8(uint8_t a, uint8x8_t b) {
   return vset_lane_u8(a, b, 7);
 }
 
-// CHECK-LABEL: define{{.*}} <4 x i16> @test_vset_lane_u16(i16 noundef %a, <4 x i16> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vset_lane_u16(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <4 x i16> %b, i16 %a, i32 3
 // CHECK:   ret <4 x i16> [[VSET_LANE]]
 uint16x4_t test_vset_lane_u16(uint16_t a, uint16x4_t b) {
@@ -210,14 +210,14 @@ uint32x2_t test_vset_lane_u32(uint32_t a, uint32x2_t b) {
   return vset_lane_u32(a, b, 1);
 }
 
-// CHECK-LABEL: define{{.*}} <8 x i8> @test_vset_lane_s8(i8 noundef %a, <8 x i8> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vset_lane_s8(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <8 x i8> %b, i8 %a, i32 7
 // CHECK:   ret <8 x i8> [[VSET_LANE]]
 int8x8_t test_vset_lane_s8(int8_t a, int8x8_t b) {
   return vset_lane_s8(a, b, 7);
 }
 
-// CHECK-LABEL: define{{.*}} <4 x i16> @test_vset_lane_s16(i16 noundef %a, <4 x i16> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vset_lane_s16(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <4 x i16> %b, i16 %a, i32 3
 // CHECK:   ret <4 x i16> [[VSET_LANE]]
 int16x4_t test_vset_lane_s16(int16_t a, int16x4_t b) {
@@ -231,14 +231,14 @@ int32x2_t test_vset_lane_s32(int32_t a, int32x2_t b) {
   return vset_lane_s32(a, b, 1);
 }
 
-// CHECK-LABEL: define{{.*}} <8 x i8> @test_vset_lane_p8(i8 noundef %a, <8 x i8> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vset_lane_p8(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <8 x i8> %b, i8 %a, i32 7
 // CHECK:   ret <8 x i8> [[VSET_LANE]]
 poly8x8_t test_vset_lane_p8(poly8_t a, poly8x8_t b) {
   return vset_lane_p8(a, b, 7);
 }
 
-// CHECK-LABEL: define{{.*}} <4 x i16> @test_vset_lane_p16(i16 noundef %a, <4 x i16> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vset_lane_p16(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <4 x i16> %b, i16 %a, i32 3
 // CHECK:   ret <4 x i16> [[VSET_LANE]]
 poly16x4_t test_vset_lane_p16(poly16_t a, poly16x4_t b) {
@@ -269,14 +269,14 @@ float16x4_t test_vset_lane_f16(float16_t *a, float16x4_t b) {
   return vset_lane_f16(*a, b, 3);
 }
 
-// CHECK-LABEL: define{{.*}} <16 x i8> @test_vsetq_lane_u8(i8 noundef %a, <16 x i8> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vsetq_lane_u8(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <16 x i8> %b, i8 %a, i32 15
 // CHECK:   ret <16 x i8> [[VSET_LANE]]
 uint8x16_t test_vsetq_lane_u8(uint8_t a, uint8x16_t b) {
   return vsetq_lane_u8(a, b, 15);
 }
 
-// CHECK-LABEL: define{{.*}} <8 x i16> @test_vsetq_lane_u16(i16 noundef %a, <8 x i16> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vsetq_lane_u16(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <8 x i16> %b, i16 %a, i32 7
 // CHECK:   ret <8 x i16> [[VSET_LANE]]
 uint16x8_t test_vsetq_lane_u16(uint16_t a, uint16x8_t b) {
@@ -290,14 +290,14 @@ uint32x4_t test_vsetq_lane_u32(uint32_t a, uint32x4_t b) {
   return vsetq_lane_u32(a, b, 3);
 }
 
-// CHECK-LABEL: define{{.*}} <16 x i8> @test_vsetq_lane_s8(i8 noundef %a, <16 x i8> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vsetq_lane_s8(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <16 x i8> %b, i8 %a, i32 15
 // CHECK:   ret <16 x i8> [[VSET_LANE]]
 int8x16_t test_vsetq_lane_s8(int8_t a, int8x16_t b) {
   return vsetq_lane_s8(a, b, 15);
 }
 
-// CHECK-LABEL: define{{.*}} <8 x i16> @test_vsetq_lane_s16(i16 noundef %a, <8 x i16> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vsetq_lane_s16(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <8 x i16> %b, i16 %a, i32 7
 // CHECK:   ret <8 x i16> [[VSET_LANE]]
 int16x8_t test_vsetq_lane_s16(int16_t a, int16x8_t b) {
@@ -311,14 +311,14 @@ int32x4_t test_vsetq_lane_s32(int32_t a, int32x4_t b) {
   return vsetq_lane_s32(a, b, 3);
 }
 
-// CHECK-LABEL: define{{.*}} <16 x i8> @test_vsetq_lane_p8(i8 noundef %a, <16 x i8> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vsetq_lane_p8(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <16 x i8> %b, i8 %a, i32 15
 // CHECK:   ret <16 x i8> [[VSET_LANE]]
 poly8x16_t test_vsetq_lane_p8(poly8_t a, poly8x16_t b) {
   return vsetq_lane_p8(a, b, 15);
 }
 
-// CHECK-LABEL: define{{.*}} <8 x i16> @test_vsetq_lane_p16(i16 noundef %a, <8 x i16> noundef %b) #0 {
+// CHECK-LABEL: define{{.*}} @test_vsetq_lane_p16(
 // CHECK:   [[VSET_LANE:%.*]] = insertelement <8 x i16> %b, i16 %a, i32 7
 // CHECK:   ret <8 x i16> [[VSET_LANE]]
 poly16x8_t test_vsetq_lane_p16(poly16_t a, poly16x8_t b) {

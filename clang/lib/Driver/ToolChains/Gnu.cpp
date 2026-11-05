@@ -582,6 +582,57 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.addAllArgs(CmdArgs, {options::OPT_T, options::OPT_t});
 
   const char *Exec = Args.MakeArgString(ToolChain.GetLinkerPath());
+
+  // -fclangir-lto: run the link through cir-link-wrapper, which merges the
+  // ClangIR carried by the input objects, lowers it as one module, and then
+  // runs the real linker with that object in place of the ones it came from.
+  //
+  // Substituting the linker is how clang-linker-wrapper does the equivalent
+  // for offloading, and it is what keeps the build system out of this: the
+  // relink is already a clang invocation, so nothing upstream has to learn a
+  // new step. The wrapper is transparent when no input carries ClangIR, so a
+  // link that has none is unaffected.
+  // Not on a relocatable link: -r produces an object for a later link, and
+  // absorbing the CIR into a lowered one here would consume it before that
+  // link ever sees it.
+  if (!Args.hasArg(options::OPT_r) &&
+      Args.hasFlag(options::OPT_fclangir_lto, options::OPT_fno_clangir_lto,
+                   false)) {
+    ArgStringList WrapperArgs;
+    WrapperArgs.reserve(CmdArgs.size() + 5);
+    WrapperArgs.push_back(Args.MakeArgString(Twine("--linker-path=") + Exec));
+    WrapperArgs.push_back(Args.MakeArgString(
+        Twine("--cir-triple=") + ToolChain.getTripleString()));
+    // Before the pass-through arguments, so that anything the build system
+    // says here is seen by the wrapper's own option parsing rather than
+    // handed on to the linker.
+    for (const Arg *A : Args.filtered(options::OPT_Xclangir_lto)) {
+      A->claim();
+      WrapperArgs.push_back(A->getValue());
+    }
+    // -fclangir-inline[-threshold=] means the same at the link as in a
+    // compile: the CIR inliner runs when the merged module is lowered.
+    if (Args.hasFlag(options::OPT_fclangir_inline,
+                     options::OPT_fno_clangir_inline, false))
+      WrapperArgs.push_back("--cir-inline");
+    if (const Arg *A =
+            Args.getLastArg(options::OPT_fclangir_inline_threshold_EQ))
+      WrapperArgs.push_back(
+          Args.MakeArgString(Twine("--cir-inline-threshold=") + A->getValue()));
+    llvm::append_range(WrapperArgs, CmdArgs);
+    CmdArgs = std::move(WrapperArgs);
+    // GetProgramPath returns its argument unchanged when the tool is not
+    // found, so without -fclangir-lto-wrapper= a missing wrapper surfaces as
+    // posix_spawn failing on a bare name rather than as a diagnostic. Under a
+    // build system that gives every binary its own output directory the
+    // wrapper is never a sibling of clang, so the explicit path is the normal
+    // case there rather than an override.
+    if (const Arg *A = Args.getLastArg(options::OPT_fclangir_lto_wrapper_EQ))
+      Exec = Args.MakeArgString(A->getValue());
+    else
+      Exec = Args.MakeArgString(ToolChain.GetProgramPath("cir-link-wrapper"));
+  }
+
   C.addCommand(std::make_unique<Command>(JA, *this,
                                          ResponseFileSupport::AtFileCurCP(),
                                          Exec, CmdArgs, Inputs, Output));

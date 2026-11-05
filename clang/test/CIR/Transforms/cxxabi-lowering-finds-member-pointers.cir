@@ -1,0 +1,39 @@
+// CXXABILowering finds its work from the IR: no module marker says whether
+// there are member pointers. A module from CIRGen (it has cir.lang) used to be
+// skipped whole unless CIRGen had marked it.
+//
+// RUN: cir-opt --cir-cxxabi-lowering %s -o - \
+// RUN:   | FileCheck %s --implicit-check-not='!cir.method' \
+// RUN:                  --implicit-check-not='!cir.data_member'
+
+!s32i = !cir.int<s, 32>
+!S = !cir.record<struct "S" {!s32i}>
+!DM = !cir.data_member<!s32i in !S>
+!Method = !cir.method<!cir.func<(!s32i)> in !S>
+// Reached only through Outer: the record to rewrite is Inner.
+!Inner = !cir.record<struct "Inner" {!Method}>
+!Outer = !cir.record<struct "Outer" {!s32i, !Inner}>
+
+module attributes {
+  cir.lang = #cir.lang<cxx>,
+  cir.triple = "x86_64-unknown-linux-gnu",
+  dlti.dl_spec = #dlti.dl_spec<i128 = dense<128> : vector<2xi64>, f80 = dense<128> : vector<2xi64>, !llvm.ptr<271> = dense<32> : vector<4xi64>, !llvm.ptr<272> = dense<64> : vector<4xi64>, i64 = dense<64> : vector<2xi64>, f16 = dense<16> : vector<2xi64>, i32 = dense<32> : vector<2xi64>, f128 = dense<128> : vector<2xi64>, !llvm.ptr<270> = dense<32> : vector<4xi64>, f64 = dense<64> : vector<2xi64>, !llvm.ptr = dense<64> : vector<4xi64>, i1 = dense<8> : vector<2xi64>, i8 = dense<8> : vector<2xi64>, i16 = dense<16> : vector<2xi64>, "dlti.stack_alignment" = 128 : i64, "dlti.endianness" = "little">
+} {
+  // A data member pointer in a signature becomes the Itanium offset.
+  // CHECK: cir.func @takes_data_member(%arg0: !s64i)
+  cir.func @takes_data_member(%arg0: !DM) {
+    cir.return
+  }
+
+  // CHECK: cir.func @uses_outer(%arg0: !cir.ptr<!rec_Outer>)
+  cir.func @uses_outer(%arg0: !cir.ptr<!Outer>) {
+    cir.return
+  }
+
+  // Nothing to lower here, and nothing changes.
+  // CHECK: cir.func @plain(%arg0: !s32i) -> !s32i
+  // CHECK-NEXT: cir.return %arg0 : !s32i
+  cir.func @plain(%arg0: !s32i) -> !s32i {
+    cir.return %arg0 : !s32i
+  }
+}

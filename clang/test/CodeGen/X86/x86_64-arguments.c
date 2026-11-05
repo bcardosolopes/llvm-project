@@ -431,7 +431,13 @@ void test53(__m256 *m, __builtin_va_list argList) {
   *m = __builtin_va_arg(argList, __m256);
 }
 // AVX-LABEL: define{{.*}} void @test53
-// AVX-NOT: br i1
+// AVX: getelementptr inbounds nuw %struct.__va_list_tag, ptr {{.*}}, i32 0, i32 2
+// AVX: load ptr, ptr {{.*}}, align 8
+// AVX: call ptr @llvm.ptrmask.p0.i64(ptr {{.*}}, i64 -32)
+// AVX: getelementptr i8, ptr {{.*}}, i32 32
+// AVX: store ptr {{.*}}, ptr {{.*}}, align 8
+// AVX: load <8 x float>, ptr {{.*}}, align 32
+// AVX-NOT: va_arg ptr
 // AVX: ret void
 
 void test54_helper(__m256, ...);
@@ -503,7 +509,13 @@ void f62(void) {
 // need to use the register save area.
 //
 // AVX512-LABEL: define{{.*}} void @f63
-// AVX512-NOT: br i1
+// AVX512: getelementptr inbounds nuw %struct.__va_list_tag, ptr {{.*}}, i32 0, i32 2
+// AVX512: load ptr, ptr {{.*}}, align 8
+// AVX512: call ptr @llvm.ptrmask.p0.i64(ptr {{.*}}, i64 -64)
+// AVX512: getelementptr i8, ptr {{.*}}, i32 64
+// AVX512: store ptr {{.*}}, ptr {{.*}}, align 8
+// AVX512: load <16 x float>, ptr {{.*}}, align 64
+// AVX512-NOT: va_arg ptr
 // AVX512: ret void
 void f63(__m512 *m, __builtin_va_list argList) {
   *m = __builtin_va_arg(argList, __m512);

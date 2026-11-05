@@ -1,0 +1,17 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: invalid signed bitfield range: offset 20 plus size 17 exceeds storage width 32
+// CHECK-NOT: Assertion
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+!rec_S = !cir.record<struct "S" {!u32i}>
+#bfi_bad = #cir.bitfield_info<name = "c", storage_type = !u32i, size = 17, offset = 20, is_signed = true>
+
+module {
+  cir.func dso_local @f(%arg0: !cir.ptr<!rec_S>) {
+    %0 = cir.get_member %arg0[0] {name = "c"} : !cir.ptr<!rec_S> -> !cir.ptr<!u32i>
+    %1 = cir.get_bitfield(#bfi_bad, %0 : !cir.ptr<!u32i>) -> !s32i
+    cir.return
+  }
+}

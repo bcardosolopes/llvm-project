@@ -1,0 +1,38 @@
+// RUN: cir-opt -cir-flatten-cfg %s -o - | FileCheck %s
+
+// A cleanup that cannot fall through -- here a noreturn destructor -- leaves
+// CIRGen with an unwind region whose entry block ends in cir.unreachable and
+// whose cir.resume is stranded in a block with no predecessors. Flattening has
+// to cope with that shape instead of assuming the region is a single block
+// terminated by the resume.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+module {
+  cir.func private @_ZN1SD1Ev(!cir.ptr<!rec_S>)
+  cir.func private @may_throw()
+
+  cir.func @unwind_cleanup_does_not_return(%arg0: !cir.ptr<!rec_S>) {
+    cir.try synthetic cleanup {
+      cir.call exception @may_throw() : () -> ()
+      cir.yield
+    } unwind {
+      cir.call @_ZN1SD1Ev(%arg0) nothrow : (!cir.ptr<!rec_S>) -> ()
+      cir.unreachable
+    ^bb1:  // no predecessors
+      cir.resume
+    }
+    cir.return
+  }
+}
+
+// The landing pad keeps the cleanup call and its unreachable terminator, and
+// the stranded resume is dropped rather than lowered to a resume_flat that
+// would read the landing pad's arguments from unreachable code.
+
+// CHECK-LABEL: cir.func {{.*}}@unwind_cleanup_does_not_return
+// CHECK:         cir.try_call @may_throw()
+// CHECK:         cir.eh.inflight_exception
+// CHECK:         cir.call @_ZN1SD1Ev
+// CHECK:         cir.unreachable
+// CHECK-NOT:     cir.resume

@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-linux -emit-llvm  -target-feature +sse2 < %s | FileCheck %s --check-prefixes=CHECK
 // RUN: %clang_cc1 -triple x86_64-linux -emit-llvm  -target-feature -sse2 < %s | FileCheck %s --check-prefixes=CHECK
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-linux -emit-llvm -fclangir -target-feature +sse2 < %s | FileCheck %s --check-prefixes=CHECK %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-linux -emit-llvm -fclangir -target-feature -sse2 < %s | FileCheck %s --check-prefixes=CHECK %}
 
 struct st1 {
   __float128 a;

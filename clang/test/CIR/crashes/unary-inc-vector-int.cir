@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: unary increment on vector type is not supported
+// CHECK-NOT: ++ not allowed on vector types
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @f(%arg0: !cir.vector<4 x !s32i>) -> !cir.vector<4 x !s32i> {
+    %0 = cir.unary(inc, %arg0) : !cir.vector<4 x !s32i>, !cir.vector<4 x !s32i>
+    cir.return %0 : !cir.vector<4 x !s32i>
+  }
+}

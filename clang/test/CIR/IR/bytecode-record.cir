@@ -1,0 +1,70 @@
+// RUN: cir-opt -emit-bytecode %s | cir-opt | FileCheck %s
+// RUN: cir-opt -emit-bytecode %s | FileCheck %s --check-prefix=NATIVE
+
+// The NATIVE run keeps this honest. A round-trip alone proves nothing: the
+// assembly fallback round-trips correctly too, just far larger, so the first
+// RUN line passes even with the record encoding bypassed. What must not be in
+// the blob is the record's printed form, which only the fallback embeds.
+//
+// NATIVE-NOT: cir.record
+
+// cir.record through bytecode, including the self-referential case.
+//
+// This is the type that motivated the whole exercise. It is mutable, so it
+// used to be excluded from custom encodings outright and fell back to having
+// its fully expanded printed form embedded in the blob -- which is O(n^depth)
+// in nesting where the text printer, which emits one alias per record, is
+// linear. Measured before: 900,645 bytes for a depth-9 chain that is 628 bytes
+// of text. After: 400 bytes.
+//
+// A record cannot be built from a fully-read parameter list, because its body
+// may refer back to it. The reader creates it incomplete, publishes it with
+// DialectBytecodeReader::tryStartCyclicRead, reads the body -- a reference
+// back to the record resolves to the incomplete value rather than re-entering
+// the entry -- and then completes it in place.
+
+!u8i = !cir.int<u, 8>
+!s32i = !cir.int<s, 32>
+
+// A plain record.
+!flat = !cir.record<struct "Flat" {!s32i, !u8i}>
+
+// Nested, so a reader that lost a member type one level down would not
+// round-trip.
+!outer = !cir.record<struct "Outer" {!flat, !cir.ptr<!flat>}>
+
+// Self-referential: the member list mentions the record being defined. This is
+// the case that deadlocks a reader without a cyclic hook.
+!node = !cir.record<struct "Node" {!s32i, !cir.ptr<!cir.record<struct "Node">>}>
+
+// Mutually recursive, so the cycle spans two entries rather than one.
+!a = !cir.record<struct "A" {!cir.ptr<!cir.record<struct "B" {!cir.ptr<!cir.record<struct "A">>}>>}>
+
+// The other record kinds, and the packed/padded flags, which are separate
+// parameters a transposition could swap.
+!cls = !cir.record<class "Cls" {!s32i}>
+!uni = !cir.record<union "Uni" {!s32i, !u8i}>
+!pk = !cir.record<struct "Packed" packed {!u8i, !s32i}>
+
+// An anonymous record has no name to unique on, so it takes the separate
+// always-complete path in the reader.
+!anon = !cir.record<struct {!s32i, !u8i}>
+
+module {
+  cir.func private @f(!flat, !outer, !node, !a, !cls, !uni, !pk, !anon)
+}
+
+// CHECK-DAG: !rec_Cls = !cir.record<class "Cls" {!s32i}>
+// CHECK-DAG: !rec_Flat = !cir.record<struct "Flat" {!s32i, !u8i}>
+// CHECK-DAG: !rec_Packed = !cir.record<struct "Packed" packed {!u8i, !s32i}>
+// CHECK-DAG: !rec_Uni = !cir.record<union "Uni" {!s32i, !u8i}>
+// CHECK-DAG: !rec_anon_struct = !cir.record<struct  {!s32i, !u8i}>
+// CHECK-DAG: !rec_Node = !cir.record<struct "Node" {!s32i, !cir.ptr<!cir.record<struct "Node">>}>
+// CHECK-DAG: !rec_Outer = !cir.record<struct "Outer" {!rec_Flat, !cir.ptr<!rec_Flat>}>
+
+// The mutual cycle: whichever of A/B is printed second refers to the other by
+// alias, and the one printed first expands it once. Either way both survive.
+// CHECK-DAG: !rec_B = !cir.record<struct "B" {!cir.ptr<!cir.record<struct "A" {!cir.ptr<!cir.record<struct "B">>}>>}>
+// CHECK-DAG: !rec_A = !cir.record<struct "A" {!cir.ptr<!rec_B>}>
+
+// CHECK: cir.func private @f(!rec_Flat, !rec_Outer, !rec_Node, !rec_A, !rec_Cls, !rec_Uni, !rec_Packed, !rec_anon_struct)

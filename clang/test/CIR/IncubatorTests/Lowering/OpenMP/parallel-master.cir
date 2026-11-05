@@ -1,0 +1,26 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @omp_parallel_master_1() {
+    omp.parallel {
+      cir.scope {
+        omp.master {
+          cir.call @work() : () -> ()
+          omp.terminator
+        }
+      }
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @work() loc(#loc1)
+}
+
+#loc1 = loc("parallel-master.cir":1:1)
+
+// CHECK-LABEL: define void @omp_parallel_master_1()
+// CHECK: call void (ptr, i32, ptr, ...) @__kmpc_fork_call(
+// CHECK: call i32 @__kmpc_master(
+// CHECK: call void @work()
+// CHECK: call void @__kmpc_end_master(

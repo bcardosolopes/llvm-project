@@ -1,0 +1,51 @@
+// RUN: cir-opt -cir-flatten-cfg %s -o - | FileCheck %s
+
+// A cir.cleanup.scope nested inside another. FlattenCFG must CHAIN the inner
+// scope's cleanup dispatch into the enclosing scope's cleanupBody (threading the
+// exception token as block arguments) rather than have the inner scope re-emit
+// the outer cleanup or resume straight out. This is what keeps nested
+// initializer_list construction O(N) instead of O(N*depth).
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+module {
+  cir.func private @_ZN1SC1Ei(!cir.ptr<!rec_S>, !s32i)
+  cir.func private @_ZN1SD1Ev(!cir.ptr<!rec_S>)
+  cir.func private @inner_dtor()
+  cir.func @test(%o: !cir.ptr<!rec_S>, %i: !cir.ptr<!rec_S>) {
+    cir.cleanup.scope {
+      %c0 = cir.const #cir.int<0> : !s32i
+      cir.call exception @_ZN1SC1Ei(%o, %c0) : (!cir.ptr<!rec_S>, !s32i) -> ()
+      cir.cleanup.scope {
+        %c1 = cir.const #cir.int<1> : !s32i
+        cir.call exception @_ZN1SC1Ei(%i, %c1) : (!cir.ptr<!rec_S>, !s32i) -> ()
+        cir.yield
+      } cleanup {
+        cir.call @inner_dtor() : () -> ()
+        cir.yield
+      }
+      cir.yield
+    } cleanup {
+      cir.call @_ZN1SD1Ev(%o) : (!cir.ptr<!rec_S>) -> ()
+      cir.yield
+    }
+    cir.return
+  }
+}
+
+// CHECK-LABEL: cir.func @test
+// CHECK-NOT: cir.cleanup.scope
+
+// The inner throwing call unwinds to the inner eh header; the inner cleanupBody
+// runs @inner_dtor then BRANCHES into the OUTER cleanupBody (forwarding the
+// token) — NOT a resume.flat. The outer cleanupBody runs ~S then resumes.
+// CHECK: cir.try_call @_ZN1SC1Ei(%arg1, %{{.*}}) ^bb{{[0-9]+}}, [[INLP:\^bb[0-9]+]]
+// CHECK: [[INLP]]:
+// CHECK-NEXT: %[[IEXC:.*]], %[[ISEL:.*]] = cir.eh.inflight_exception cleanup
+// CHECK-NEXT: cir.br [[IBODY:\^bb[0-9]+]](%[[IEXC]], %[[ISEL]] :
+// CHECK: [[IBODY]](%[[IP:.*]]: !cir.ptr<!void>, %[[II:.*]]: !u32i):
+// CHECK-NEXT: cir.call @inner_dtor
+// CHECK-NEXT: cir.br [[OBODY:\^bb[0-9]+]](%[[IP]], %[[II]] :
+// CHECK: [[OBODY]](%[[OP:.*]]: !cir.ptr<!void>, %[[OI:.*]]: !u32i):
+// CHECK-NEXT: cir.call @_ZN1SD1Ev
+// CHECK-NEXT: cir.resume.flat %[[OP]], %[[OI]]

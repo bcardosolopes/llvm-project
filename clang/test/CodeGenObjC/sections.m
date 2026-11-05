@@ -1,6 +1,9 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-windows -fobjc-dispatch-method=mixed -fobjc-runtime=ios -emit-llvm -o - %s | FileCheck %s -check-prefix CHECK-COFF
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fobjc-dispatch-method=mixed -fobjc-runtime=ios -emit-llvm -o - %s | FileCheck %s -check-prefix CHECK-ELF
 // RUN: %clang_cc1 -triple x86_64-apple-ios -fobjc-dispatch-method=mixed -fobjc-runtime=ios -emit-llvm -o - %s | FileCheck %s -check-prefix CHECK-MACHO
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-windows -fobjc-dispatch-method=mixed -fobjc-runtime=ios -fclangir -emit-llvm -o - %s | FileCheck %s -check-prefix CHECK-CIR-COFF %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -fobjc-dispatch-method=mixed -fobjc-runtime=ios -fclangir -emit-llvm -o - %s | FileCheck %s -check-prefix CHECK-CIR-ELF %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-ios -fobjc-dispatch-method=mixed -fobjc-runtime=ios -fclangir -emit-llvm -o - %s | FileCheck %s -check-prefix CHECK-CIR-MACHO %}
 
 __attribute__((__objc_root_class__))
 @interface NSObject
@@ -73,3 +76,38 @@ _Bool f(J *j) {
 // CHECK-MACHO: @"OBJC_LABEL_NONLAZY_CATEGORY_$" = private {{.*}}, section "__DATA,__objc_nlcatlist,regular,no_dead_strip"
 // CHECK-MACHO: !{{[0-9]+}} = !{i32 1, !"Objective-C Image Info Section", !"__DATA,__objc_imageinfo,regular,no_dead_strip"}
 
+// CHECK-CIR-COFF-DAG: @"OBJC_CLASSLIST_SUP_REFS_$_" = private {{.*}}, section ".objc_superrefs$B"
+// CHECK-CIR-COFF-DAG: @OBJC_SELECTOR_REFERENCES_ = private {{.*}}, section ".objc_selrefs$B"
+// CHECK-CIR-COFF-DAG: @"OBJC_CLASSLIST_REFERENCES_$_" = private {{.*}}, section ".objc_classrefs$B"
+// CHECK-CIR-COFF-DAG: @_objc_msgSend_fixup_class = {{.*}}, section ".objc_msgrefs$B"
+// CHECK-CIR-COFF-DAG: @"_OBJC_LABEL_PROTOCOL_$_P" = {{.*}}, section ".objc_protolist$B"
+// CHECK-CIR-COFF-DAG: @"_OBJC_PROTOCOL_REFERENCE_$_P" = {{.*}}, section ".objc_protorefs$B"
+// CHECK-CIR-COFF-DAG: @"OBJC_LABEL_CLASS_$" = private {{.*}}, section ".objc_classlist$B"
+// CHECK-CIR-COFF-DAG: @"OBJC_LABEL_NONLAZY_CLASS_$" = private {{.*}}, section ".objc_nlclslist$B"
+// CHECK-CIR-COFF-DAG: @"OBJC_LABEL_CATEGORY_$" = private {{.*}}, section ".objc_catlist$B"
+// CHECK-CIR-COFF-DAG: @"OBJC_LABEL_NONLAZY_CATEGORY_$" = private {{.*}}, section ".objc_nlcatlist$B"
+// CHECK-CIR-COFF-DAG: !{{[0-9]+}} = !{i32 1, !"Objective-C Image Info Section", !".objc_imageinfo$B"}
+
+// CHECK-CIR-ELF-DAG: @"OBJC_CLASSLIST_SUP_REFS_$_" = private {{.*}}, section "objc_superrefs"
+// CHECK-CIR-ELF-DAG: @OBJC_SELECTOR_REFERENCES_ = private {{.*}}, section "objc_selrefs"
+// CHECK-CIR-ELF-DAG: @"OBJC_CLASSLIST_REFERENCES_$_" = private {{.*}}, section "objc_classrefs"
+// CHECK-CIR-ELF-DAG: @_objc_msgSend_fixup_class = {{.*}}, section "objc_msgrefs"
+// CHECK-CIR-ELF-DAG: @"_OBJC_LABEL_PROTOCOL_$_P" = {{.*}}, section "objc_protolist"
+// CHECK-CIR-ELF-DAG: @"_OBJC_PROTOCOL_REFERENCE_$_P" = {{.*}}, section "objc_protorefs"
+// CHECK-CIR-ELF-DAG: @"OBJC_LABEL_CLASS_$" = private {{.*}}, section "objc_classlist"
+// CHECK-CIR-ELF-DAG: @"OBJC_LABEL_NONLAZY_CLASS_$" = private {{.*}}, section "objc_nlclslist"
+// CHECK-CIR-ELF-DAG: @"OBJC_LABEL_CATEGORY_$" = private {{.*}}, section "objc_catlist"
+// CHECK-CIR-ELF-DAG: @"OBJC_LABEL_NONLAZY_CATEGORY_$" = private {{.*}}, section "objc_nlcatlist"
+// CHECK-CIR-ELF-DAG: !{{[0-9]+}} = !{i32 1, !"Objective-C Image Info Section", !"objc_imageinfo"}
+
+// CHECK-CIR-MACHO-DAG: @"OBJC_CLASSLIST_SUP_REFS_$_" = private {{.*}}, section "__DATA,__objc_superrefs,regular,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @OBJC_SELECTOR_REFERENCES_ = internal {{.*}}, section "__DATA,__objc_selrefs,literal_pointers,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @"OBJC_CLASSLIST_REFERENCES_$_" = internal {{.*}}, section "__DATA,__objc_classrefs,regular,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @_objc_msgSend_fixup_class = {{.*}}, section "__DATA,__objc_msgrefs,coalesced"
+// CHECK-CIR-MACHO-DAG: @"_OBJC_LABEL_PROTOCOL_$_P" = {{.*}}, section "__DATA,__objc_protolist,coalesced,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @"_OBJC_PROTOCOL_REFERENCE_$_P" = {{.*}}, section "__DATA,__objc_protorefs,coalesced,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @"OBJC_LABEL_CLASS_$" = private {{.*}}, section "__DATA,__objc_classlist,regular,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @"OBJC_LABEL_NONLAZY_CLASS_$" = private {{.*}}, section "__DATA,__objc_nlclslist,regular,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @"OBJC_LABEL_CATEGORY_$" = private {{.*}}, section "__DATA,__objc_catlist,regular,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: @"OBJC_LABEL_NONLAZY_CATEGORY_$" = private {{.*}}, section "__DATA,__objc_nlcatlist,regular,no_dead_strip"
+// CHECK-CIR-MACHO-DAG: !{{[0-9]+}} = !{i32 1, !"Objective-C Image Info Section", !"__DATA,__objc_imageinfo,regular,no_dead_strip"}

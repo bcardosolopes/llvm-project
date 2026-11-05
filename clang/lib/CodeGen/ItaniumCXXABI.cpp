@@ -2137,7 +2137,7 @@ void ItaniumCXXABI::emitVTableDefinitions(CodeGenVTables &CGVT,
 
   if (VTContext.isRelativeLayout()) {
     CGVT.RemoveHwasanMetadata(VTable);
-    if (!VTable->isDSOLocal())
+    if (!VTable->isDSOLocal() || VTable->hasComdat())
       CGVT.GenerateRelativeVTableAlias(VTable, VTable->getName());
   }
 

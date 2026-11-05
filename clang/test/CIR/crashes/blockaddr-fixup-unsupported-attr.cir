@@ -1,0 +1,11 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: unsupported deferred block address initializer attribute: unit
+// CHECK-NOT: LLVM ERROR:
+// CHECK-NOT: Stack dump:
+
+module {
+  llvm.mlir.global internal @g() {addr_space = 0 : i32, cir.deferred_block_addr_init = unit} : i32 {
+    %0 = llvm.mlir.constant(0 : i32) : i32
+    llvm.return %0 : i32
+  }
+}

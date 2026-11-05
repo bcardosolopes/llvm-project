@@ -2,6 +2,10 @@
 // RUN: %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_COMPATIBLE %s
 // RUN: %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_STREAMING %s
 // RUN: %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_LOCALLY %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_NONE -fclangir %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_COMPATIBLE -fclangir %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_STREAMING -fclangir %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -S -o /dev/null -target-feature +sme -target-feature +sme2 -verify -DTEST_LOCALLY -fclangir %s %}
 
 // REQUIRES: aarch64-registered-target
 

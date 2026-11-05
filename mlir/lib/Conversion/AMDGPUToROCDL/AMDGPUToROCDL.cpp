@@ -1820,7 +1820,7 @@ struct GatherToLDSOpLowering : public ConvertOpToLLVMPattern<GatherToLDSOp> {
         op, srcPtr, dstPtr, rewriter.getI32IntegerAttr(loadWidth),
         /*offset=*/rewriter.getI32IntegerAttr(0),
         /*aux=*/rewriter.getI32IntegerAttr(0), ArrayAttr{}, ArrayAttr{},
-        ArrayAttr{});
+        ArrayAttr{}, ArrayAttr{});
 
     return success();
   }
@@ -3438,7 +3438,8 @@ struct AMDGPUTensorLoadStoreOpLowering
                                           desc[3], /*cachePolicy=*/0,
                                           /*alias_scopes=*/nullptr,
                                           /*noalias_scopes=*/nullptr,
-                                          /*tbaa=*/nullptr);
+                                          /*tbaa=*/nullptr,
+                                          /*annotations=*/nullptr);
     return success();
   }
 };

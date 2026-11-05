@@ -1,0 +1,18 @@
+// RUN: cir-opt %s -o /dev/null
+// RUN: cir-translate %s -cir-to-llvmir -o /dev/null
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+
+module {
+  cir.func private @agg_add(%arg0: !cir.ptr<!rec_S> {cir.sret = !rec_S, cir.writable},
+                            %arg1: !cir.ptr<!rec_S>,
+                            %arg2: !cir.ptr<!rec_S>) -> () {
+    cir.return
+  }
+
+  cir.func @call_agg_add(%arg0: !cir.ptr<!rec_S>, %arg1: !cir.ptr<!rec_S>) {
+    %0 = cir.call @agg_add(%arg0, %arg1) : (!cir.ptr<!rec_S>, !cir.ptr<!rec_S>) -> !rec_S
+    cir.return
+  }
+}

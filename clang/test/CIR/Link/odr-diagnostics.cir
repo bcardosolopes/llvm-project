@@ -1,0 +1,132 @@
+// RUN: rm -rf %t && split-file %s %t
+
+// By default nothing is reported, whatever the inputs disagree on.
+// RUN: cir-link %t/a.cir %t/b.cir -o %t/default.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=QUIET --allow-empty
+
+// --odr=warning: every disagreement, at the dropped definition, with a note at
+// the kept one where that is somewhere else. A record has no position of its
+// own, so it is reported at its input. Copies that agree stay silent.
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning -o %t/warn.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WARN
+
+// Per-kind overrides. An error fails the link after the record is written,
+// and the merged module is not.
+// RUN: not cir-link %t/a.cir %t/b.cir --odr=remark \
+// RUN:   --odr-severity=strong-strong=error,record-renamed=ignore \
+// RUN:   --odr-events=%t/err.json -o %t/err.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ERR
+// RUN: test ! -e %t/err.cir
+// RUN: FileCheck %s --check-prefix=ERRJSON --input-file=%t/err.json
+
+// --warn-odr-divergence is what it always was: two strong definitions and
+// renamed records, never the weak cases.
+// RUN: cir-link %t/a.cir %t/b.cir --warn-odr-divergence -o %t/alias.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ALIAS
+
+// RUN: not cir-link %t/a.cir %t/b.cir --odr=loud -o %t/bad.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=BADLEVEL
+// RUN: not cir-link %t/a.cir %t/b.cir --odr-severity=weak=error \
+// RUN:   -o %t/bad.cir 2>&1 | FileCheck %s --check-prefix=BADKIND
+// RUN: not cir-link %t/a.cir %t/b.cir --odr-severity=weak-weak=loud \
+// RUN:   -o %t/bad.cir 2>&1 | FileCheck %s --check-prefix=BADSEVERITY
+
+// QUIET-NOT: {{remark|warning|error}}:
+
+// WARN:      {{.*}}b.cir:0:0: warning: record 'S' has a different body than in an earlier input; renamed to 'S.m1'
+// WARN:      {{.*}}b.cir:[[#]]:3: warning: 'value()' (_Z5valuev) has different definitions in '{{.*}}a.cir' and '{{.*}}b.cir' (they differ in body); keeping the one from '{{.*}}a.cir'
+// WARN-NEXT:   cir.func linkonce_odr @_Z5valuev() -> !s32i {
+// WARN-NEXT:   ^
+// WARN-NEXT: {{.*}}a.cir:[[#]]:3: note: the definition kept is here
+// WARN:      {{.*}}a.cir:[[#]]:3: warning: 'weak_default': the strong definition from '{{.*}}b.cir' replaces a weak definition from '{{.*}}a.cir' that differs in body
+// WARN:      {{.*}}b.cir:[[#]]:3: note: the definition kept is here
+// WARN:      {{.*}}b.cir:[[#]]:3: warning: 'conflict' defined in more than one input; keeping the one from '{{.*}}a.cir', ignoring '{{.*}}b.cir'; they differ in body
+// WARN:      {{.*}}a.cir:[[#]]:3: note: the definition kept is here
+// WARN:      {{.*}}b.cir:[[#]]:3: warning: 'twice' defined in more than one input; keeping the one from '{{.*}}a.cir', ignoring '{{.*}}b.cir'; the definitions are identical
+// WARN:      {{.*}}a.cir:[[#]]:3: note: the definition kept is here
+// WARN:      {{.*}}b.cir:[[#]]:3: warning: 'uses_s' has different definitions in '{{.*}}a.cir' and '{{.*}}b.cir' (they differ in type, body); keeping the one from '{{.*}}a.cir'
+// WARN:      {{.*}}a.cir:[[#]]:3: note: the definition kept is here
+// WARN-NOT:  {{remark|warning|error}}:
+
+// ERR-NOT:   record 'S'
+// ERR:       remark: 'value()' (_Z5valuev) has different definitions
+// ERR:       remark: 'weak_default': the strong definition
+// ERR:       error: 'conflict' defined in more than one input
+// ERR:       error: 'twice' defined in more than one input
+// ERR:       remark: 'uses_s' has different definitions
+
+// ERRJSON:   "symbol": "_Z5valuev",
+// ERRJSON:     "severity": "remark"
+// ERRJSON:   "symbol": "conflict",
+// ERRJSON:     "severity": "error"
+// ERRJSON:   "renamed_to": "S.m1",
+// ERRJSON-NEXT: "severity": "ignore"
+
+// ALIAS-NOT: value()
+// ALIAS-NOT: weak_default
+// ALIAS:     b.cir:0:0: warning: record 'S' has a different body
+// ALIAS:     warning: 'conflict' defined in more than one input
+// ALIAS:     warning: 'twice' defined in more than one input
+// ALIAS-NOT: uses_s
+
+// BADLEVEL:    for the --odr option: Cannot find option named 'loud'!
+// BADKIND:     for the --odr-severity option: unknown kind 'weak'; expected weak-weak, strong-over-weak, rtti-over-nortti, strong-strong or record-renamed
+// BADSEVERITY: for the --odr-severity option: unknown level 'loud'; expected ignore, remark, warning or error
+
+//--- a.cir
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+module {
+  cir.func linkonce_odr @same_inline() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @_Z5valuev() -> !s32i {
+    %0 = cir.const #cir.int<0> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func weak @weak_default() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @conflict() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @twice() -> !s32i {
+    %0 = cir.const #cir.int<3> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @uses_s(%arg0: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}
+
+//--- b.cir
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!cir.float}>
+module {
+  cir.func linkonce_odr @same_inline() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @_Z5valuev() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @weak_default() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @conflict() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @twice() -> !s32i {
+    %0 = cir.const #cir.int<3> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @uses_s(%arg0: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}

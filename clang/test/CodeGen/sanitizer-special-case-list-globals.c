@@ -16,6 +16,10 @@
 // RUN: %clang_cc1 -fsanitize=hwaddress -triple=aarch64-linux-android31 -emit-llvm %s -o -\
 // RUN: -fsanitize-ignorelist=%S/Inputs/sanitizer-special-case-list-globals.txt \
 // RUN: | FileCheck %s --check-prefix=HWASAN
+// RUN: %if cir-support %{ %clang_cc1 -fsanitize=hwaddress -triple=aarch64-linux-android31 -emit-llvm %s -o -\
+// RUN: -fclangir \
+// RUN: -fsanitize-ignorelist=%S/Inputs/sanitizer-special-case-list-globals.txt \
+// RUN: | FileCheck %s --check-prefix=CIR-HWASAN %}
 
 // RUN: %clang_cc1 -fsanitize=memtag-globals -triple=aarch64-linux-android31 \
 // RUN: -fsanitize-ignorelist=%S/Inputs/sanitizer-special-case-list-globals.txt \
@@ -85,3 +89,11 @@ unsigned memtag_ignored;
 // HWASAN-NOT: no_sanitize_hwaddress
 // MEMTAG:     @never_ignored ={{.*}} global {{.*}} sanitize_memtag
 unsigned never_ignored;
+
+// CIR-HWASAN: @always_ignored ={{.*}} global {{.*}}, no_sanitize_hwaddress
+// CIR-HWASAN: @hwasan_ignored ={{.*}} global {{.*}}, no_sanitize_hwaddress
+// CIR-HWASAN-NOT: @always_ignored.hwasan
+// CIR-HWASAN-NOT: @hwasan_ignored.hwasan
+// CIR-HWASAN: @asan_ignored.hwasan = {{.*}} global
+// CIR-HWASAN: @memtag_ignored.hwasan = {{.*}} global
+// CIR-HWASAN: @never_ignored.hwasan ={{.*}} global

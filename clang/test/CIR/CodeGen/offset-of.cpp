@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s -check-prefix=CIR
 // RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=LLVM
@@ -91,3 +91,36 @@ void offset_of_builtin_from_array_element() {
 // OGCG: store i64 124, ptr %[[B_ADDR]], align 8
 // OGCG: store i64 248, ptr %[[C_ADDR]], align 8
 // OGCG: store i64 376, ptr %[[D_ADDR]], align 8
+
+struct StructWithManyFields {
+  int f0;
+  int f1;
+  int f2;
+  int f3;
+  int f4;
+  int f5;
+  int f6;
+  int f7;
+  int f8;
+  int f9;
+  int f10;
+  int f11;
+  int f12;
+  int f13;
+  int f14;
+  int f15;
+};
+
+unsigned long offset_of_builtin_many_fields() {
+  return __builtin_offsetof(StructWithManyFields, f15);
+}
+
+// CIR-LABEL: @{{.*}}offset_of_builtin_many_fields{{.*}}
+// CIR: %[[CONST_60:.*]] = cir.const #cir.int<60> : !u64i
+// CIR: cir.return %[[CONST_60]] : !u64i
+
+// LLVM-LABEL: @{{.*}}offset_of_builtin_many_fields{{.*}}
+// LLVM: ret i64 60
+
+// OGCG-LABEL: @{{.*}}offset_of_builtin_many_fields{{.*}}
+// OGCG: ret i64 60

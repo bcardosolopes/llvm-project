@@ -7,6 +7,7 @@
 // Note: This line below is for tvos for which the driver passes through to use the ios9.0 runtime.
 // RUN: %clang_cc1 -fobjc-runtime=ios-9.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=CALLS
 // RUN: %clang_cc1 -fobjc-runtime=watchos-2.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=CALLS
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-macosx10.10.0 -fobjc-runtime=macosx-10.10.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions -fclangir | FileCheck %s --check-prefix=CALLS-CIR %}
 
 #define nil (id)0
 
@@ -28,6 +29,8 @@ void test1(id x) {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_alloc}}
   // CALLS: {{call.*@objc_allocWithZone}}
+  // CALLS-CIR: {{call.*@objc_alloc}}
+  // CALLS-CIR: {{call.*@objc_allocWithZone}}
 
   // Note that calls to the intrinsics are not allowed for
   // retain/release/autorelease they're marked `thisreturn`, which isn't
@@ -36,6 +39,9 @@ void test1(id x) {
   // CALLS: {{call.*@objc_retain}}
   // CALLS: {{call.*@objc_release}}
   // CALLS: {{tail call.*@objc_autorelease}}
+  // CALLS-CIR: {{call.*@objc_retain}}
+  // CALLS-CIR: {{call.*@objc_release}}
+  // CALLS-CIR: {{tail call.*@objc_autorelease}}
   [NSObject alloc];
   [NSObject allocWithZone:nil];
   [x retain];
@@ -49,6 +55,8 @@ void check_invoke(void) {
   // MSGS: {{invoke.*@objc_msgSend}}
   // CALLS: {{invoke.*@objc_alloc}}
   // CALLS: {{invoke.*@objc_allocWithZone}}
+  // CALLS-CIR: {{invoke.*@objc_alloc}}
+  // CALLS-CIR: {{invoke.*@objc_allocWithZone}}
   @try {
     [NSObject alloc];
     [NSObject allocWithZone:nil];
@@ -82,6 +90,7 @@ void test2(void* x) {
 // CHECK-LABEL: define {{.*}}void @test_alloc_class_ptr
 A* test_alloc_class_ptr(void) {
   // CALLS: {{call.*@objc_alloc}}
+  // CALLS-CIR: {{call.*@objc_alloc}}
   // CALLS-NEXT: ret
   return [B alloc];
 }
@@ -89,6 +98,7 @@ A* test_alloc_class_ptr(void) {
 // CHECK-LABEL: define {{.*}}void @test_alloc_class_ptr
 A* test_allocWithZone_class_ptr(void) {
   // CALLS: {{call.*@objc_allocWithZone}}
+  // CALLS-CIR: {{call.*@objc_allocWithZone}}
   // CALLS-NEXT: ret
   return [B allocWithZone:nil];
 }
@@ -100,6 +110,10 @@ void test_alloc_instance(A *a) {
   // CALLS: {{call.*@objc_allocWithZone}}
   // CALLS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_alloc}}
+  // CALLS-CIR: {{call.*@objc_allocWithZone}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
   [A alloc];
   [A allocWithZone:nil];
   [a alloc];
@@ -111,6 +125,7 @@ void test_alloc_instance(A *a) {
 // CHECK-LABEL: define {{.*}}void @test_retain_class_ptr
 A* test_retain_class_ptr(B *b) {
   // CALLS: {{call.*@objc_retain}}
+  // CALLS-CIR: {{call.*@objc_retain}}
   // CALLS-NEXT: ret
   return [b retain];
 }
@@ -120,6 +135,7 @@ A* test_retain_class_ptr(B *b) {
 // CHECK-LABEL: define {{.*}}void @test_autorelease_class_ptr
 A* test_autorelease_class_ptr(B *b) {
   // CALLS: {{tail call.*@objc_autorelease}}
+  // CALLS-CIR: {{tail call.*@objc_autorelease}}
   // CALLS-NEXT: ret
   return [b autorelease];
 }
@@ -135,6 +151,7 @@ A* test_autorelease_class_ptr(B *b) {
 C* test_allocWithZone_int(void) {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
   return [C allocWithZone:3];
 }
 
@@ -144,6 +161,7 @@ C* test_allocWithZone_int(void) {
 float test_cannot_message_return_float(C *c) {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
   return [c retain];
 }
 
@@ -161,6 +179,8 @@ float test_cannot_message_return_float(C *c) {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_allocWithZone\(}}
   // CALLS: {{call.*@objc_alloc\(}}
+  // CALLS-CIR: {{call.*@objc_allocWithZone\(}}
+  // CALLS-CIR: {{call.*@objc_alloc\(}}
   [self allocWithZone:nil];
   return [self alloc];
 }
@@ -170,6 +190,8 @@ float test_cannot_message_return_float(C *c) {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
   [self allocWithZone:nil];
   return [self alloc];
 }
@@ -187,6 +209,7 @@ float test_cannot_message_return_float(C *c) {
 + (void)retain_self {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_retain}}
+  // CALLS-CIR: {{call.*@objc_retain}}
   [self retain];
 }
 
@@ -195,6 +218,7 @@ float test_cannot_message_return_float(C *c) {
 - (void)retain_super {
   // MSGS: {{call.*@objc_msgSend}}
   // CALLS: {{call.*@objc_msgSend}}
+  // CALLS-CIR: {{call.*@objc_msgSend}}
   [super retain];
 }
 
@@ -206,6 +230,7 @@ float test_cannot_message_return_float(C *c) {
 void testException_release(NSObject *a) {
   // MSGS: {{invoke.*@objc_msgSend}}
   // CALLS: invoke{{.*}}void @objc_release(ptr %
+  // CALLS-CIR: invoke{{.*}}void @objc_release(ptr %
   @try {
     [a release];
   } @catch (Ety *e) {
@@ -217,6 +242,7 @@ void testException_autorelease(NSObject *a) {
   @try {
     // MSGS: {{invoke.*@objc_msgSend}}
     // CALLS: invoke{{.*}}objc_autorelease(ptr %
+    // CALLS-CIR: invoke{{.*}}objc_autorelease(ptr %
     [a autorelease];
   } @catch (Ety *e) {
   }
@@ -227,6 +253,7 @@ void testException_retain(NSObject *a) {
   @try {
     // MSGS: {{invoke.*@objc_msgSend}}
     // CALLS: invoke{{.*}}@objc_retain(ptr %
+    // CALLS-CIR: invoke{{.*}}@objc_retain(ptr %
     [a retain];
   } @catch (Ety *e) {
   }
@@ -238,6 +265,7 @@ void testException_alloc(void) {
   @try {
     // MSGS: {{invoke.*@objc_msgSend}}
     // CALLS: invoke{{.*}}@objc_alloc(ptr %
+    // CALLS-CIR: invoke{{.*}}@objc_alloc(ptr %
     [A alloc];
   } @catch (Ety *e) {
   }
@@ -248,6 +276,7 @@ void testException_allocWithZone(void) {
   @try {
     // MSGS: {{invoke.*@objc_msgSend}}
     // CALLS: invoke{{.*}}@objc_allocWithZone(ptr %
+    // CALLS-CIR: invoke{{.*}}@objc_allocWithZone(ptr %
     [A allocWithZone:nil];
   } @catch (Ety *e) {
   }

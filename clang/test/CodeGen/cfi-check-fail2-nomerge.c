@@ -10,6 +10,15 @@
 // RUN:     -fsanitize-merge=cfi-vcall \
 // RUN:     -emit-llvm -o - %s | FileCheck %s --check-prefix=MERGE
 
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -O3 -fsanitize-cfi-cross-dso \
+// RUN:     -fsanitize=cfi-vcall \
+// RUN:     -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR-NO-MERGE %}
+
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -O3 -fsanitize-cfi-cross-dso \
+// RUN:     -fsanitize=cfi-vcall \
+// RUN:     -fsanitize-merge=cfi-vcall \
+// RUN:     -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR-MERGE %}
+
 void caller(void (*f)(void)) {
   f();
 }
@@ -204,3 +213,29 @@ void caller(void (*f)(void)) {
 
 // NO-MERGE: [[ATTR6]] = { noreturn nounwind }
 // NO-MERGE: [[ATTR7]] = { nomerge noreturn nounwind }
+
+// CIR-NO-MERGE-LABEL: define weak_odr hidden void @__cfi_check_fail(
+// CIR-NO-MERGE: ptrtoint ptr [[TMP1:%.*]] to i64, !nosanitize
+// CIR-NO-MERGE: ptrtoint ptr [[TMP0:%.*]] to i64, !nosanitize
+// CIR-NO-MERGE: tail call void @__ubsan_handle_cfi_check_fail_abort(i64 {{%.*}}, i64 {{%.*}}, i64 {{%.*}}) #[[ATTR6:[0-9]+]], !nosanitize
+// CIR-NO-MERGE-LABEL: define weak void @__cfi_check(
+// CIR-NO-MERGE: ptrtoint ptr [[TMP1:%.*]] to i64, !nosanitize
+// CIR-NO-MERGE: ptrtoint ptr [[TMP2:%.*]] to i64, !nosanitize
+// CIR-NO-MERGE: tail call void @__ubsan_handle_cfi_check_fail_abort(i64 {{%.*}}, i64 {{%.*}}, i64 {{%.*}}) #[[ATTR6]], !nosanitize
+// CIR-NO-MERGE: ; Function Attrs: noreturn nounwind uwtable
+// CIR-NO-MERGE-NEXT: declare void @__ubsan_handle_cfi_check_fail_abort(i64, i64, i64)
+// CIR-NO-MERGE-NOT: declare void @__ubsan_handle_cfi_check_fail_abort(ptr, i64, i64)
+
+// CIR-MERGE-LABEL: define weak_odr hidden void @__cfi_check_fail(
+// CIR-MERGE: ptrtoint ptr [[TMP1:%.*]] to i64, !nosanitize
+// CIR-MERGE: ptrtoint ptr [[TMP0:%.*]] to i64, !nosanitize
+// CIR-MERGE: tail call void @__ubsan_handle_cfi_check_fail_abort(i64 {{%.*}}, i64 {{%.*}}, i64 {{%.*}}) #[[ATTR6:[0-9]+]], !nosanitize
+// CIR-MERGE-LABEL: define weak void @__cfi_check(
+// CIR-MERGE: ptrtoint ptr [[TMP1:%.*]] to i64, !nosanitize
+// CIR-MERGE: ptrtoint ptr [[TMP2:%.*]] to i64, !nosanitize
+// CIR-MERGE: tail call void @__ubsan_handle_cfi_check_fail_abort(i64 {{%.*}}, i64 {{%.*}}, i64 {{%.*}}) #[[ATTR6]], !nosanitize
+// CIR-MERGE: ; Function Attrs: noreturn nounwind uwtable
+// CIR-MERGE-NEXT: declare void @__ubsan_handle_cfi_check_fail_abort(i64, i64, i64)
+// CIR-MERGE-NOT: declare void @__ubsan_handle_cfi_check_fail_abort(ptr, i64, i64)
+// CIR-MERGE: [[ATTR6]] = { noreturn nounwind }
+// CIR-NO-MERGE: [[ATTR6]] = { nomerge noreturn nounwind }

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -I%S %s -triple arm64e-apple-darwin10 -O1 -fptrauth-calls -fptrauth-vtable-pointer-address-discrimination  -fptrauth-vtable-pointer-type-discrimination -emit-llvm -std=c++11 -o - | FileCheck %s --check-prefixes=CHECK
+// RUN: %if cir-support %{ %clang_cc1 -I%S %s -triple arm64e-apple-darwin10 -O1 -fptrauth-calls -fptrauth-vtable-pointer-address-discrimination  -fptrauth-vtable-pointer-type-discrimination -fclangir -emit-llvm -std=c++11 -o - | FileCheck %s --check-prefixes=CHECK-CIR %}
 
 struct A {
   virtual ~A();
@@ -57,6 +58,14 @@ C *exact_to_C(A *a) {
   return dynamic_cast<C*>(a);
 }
 
+// CHECK-CIR-LABEL: @_Z10exact_to_CP1A
+// CHECK-CIR: [[UNAUTHED_VPTR:%.*]] = load ptr, ptr {{%.*}}, align 8
+// CHECK-CIR: [[VPTR_ADDRI:%.*]] = ptrtoint ptr {{%.*}} to i64
+// CHECK-CIR: [[VPTR_ADDR_DISC:%.*]] = tail call i64 @llvm.ptrauth.blend(i64 [[VPTR_ADDRI]], i64 62866)
+// CHECK-CIR: [[UNAUTHED_VPTRI:%.*]] = ptrtoint ptr [[UNAUTHED_VPTR]] to i64
+// CHECK-CIR: [[AUTHED_VPTRI:%.*]] = tail call i64 @llvm.ptrauth.auth(i64 [[UNAUTHED_VPTRI]], i32 2, i64 [[VPTR_ADDR_DISC]])
+// CHECK-CIR: [[IS_EXPECTED:%.*]] = icmp eq i64 [[AUTHED_VPTRI]], ptrtoint (ptr getelementptr inbounds nuw inrange(-16, 24) (i8, ptr @_ZTV1C, i64 16) to i64)
+
 // CHECK-LABEL: @_Z9exact_t_DP1A
 D *exact_t_D(A *a) {
   // CHECK: dynamic_cast.notnull:
@@ -86,6 +95,20 @@ D *exact_t_D(A *a) {
   // CHECK:   ret ptr [[RESULT]]
   return dynamic_cast<D*>(a);
 }
+
+// CHECK-CIR-LABEL: @_Z9exact_t_DP1A
+// CHECK-CIR: [[SRC_UNAUTHED_VPTR:%.*]] = load ptr, ptr {{%.*}}, align 8
+// CHECK-CIR: [[SRC_VPTR_ADDRI:%.*]] = ptrtoint ptr {{%.*}} to i64
+// CHECK-CIR: [[SRC_VPTR_DISC:%.*]] = tail call i64 @llvm.ptrauth.blend(i64 [[SRC_VPTR_ADDRI]], i64 62866)
+// CHECK-CIR: [[SRC_UNAUTHED_VPTRI:%.*]] = ptrtoint ptr [[SRC_UNAUTHED_VPTR]] to i64
+// CHECK-CIR: [[SRC_AUTHED_VPTRI:%.*]] = tail call i64 @llvm.ptrauth.auth(i64 [[SRC_UNAUTHED_VPTRI]], i32 2, i64 [[SRC_VPTR_DISC]])
+// CHECK-CIR: [[SUCCESS:%.*]] = icmp eq i64 [[SRC_AUTHED_VPTRI]], ptrtoint (ptr getelementptr inbounds nuw inrange(-16, 16) (i8, ptr @_ZTV1D, i64 56) to i64)
+// CHECK-CIR: [[ADJUSTED_THIS:%.*]] = getelementptr inbounds i8, ptr {{%.*}}, i64 -16
+// CHECK-CIR: [[ADJUSTED_UNAUTHED_VPTR:%.*]] = load ptr, ptr [[ADJUSTED_THIS]], align 8
+// CHECK-CIR: [[ADJUSTED_VPTR_ADDRI:%.*]] = ptrtoint ptr [[ADJUSTED_THIS]] to i64
+// CHECK-CIR: [[ADJUSTED_VPTR_DISC:%.*]] = tail call i64 @llvm.ptrauth.blend(i64 [[ADJUSTED_VPTR_ADDRI]], i64 28965)
+// CHECK-CIR: [[ADJUSTED_UNAUTHED_VPTRI:%.*]] = ptrtoint ptr [[ADJUSTED_UNAUTHED_VPTR]] to i64
+// CHECK-CIR: [[ADJUSTED_AUTHED_VPTRI:%.*]] = tail call i64 @llvm.ptrauth.auth(i64 [[ADJUSTED_UNAUTHED_VPTRI]], i32 2, i64 [[ADJUSTED_VPTR_DISC]])
 
 // CHECK-LABEL: @_Z11exact_multiP1E
 L *exact_multi(E *e) {
@@ -119,6 +142,24 @@ L *exact_multi(E *e) {
   // CHECK:   ret ptr [[RESULT]]
   return dynamic_cast<L*>(e);
 }
+
+// CHECK-CIR-LABEL: @_Z11exact_multiP1E
+// CHECK-CIR: [[VTABLE_ADDR:%.*]] = load ptr, ptr {{%.*}}, align 8
+// CHECK-CIR: [[THIS_ADDRI:%.*]] = ptrtoint ptr {{%.*}} to i64
+// CHECK-CIR: [[VTABLE_DISC:%.*]] = tail call i64 @llvm.ptrauth.blend(i64 [[THIS_ADDRI]], i64 12810)
+// CHECK-CIR: [[VTABLE_ADDRI:%.*]] = ptrtoint ptr [[VTABLE_ADDR]] to i64
+// CHECK-CIR: [[AUTHED_VTABLEI:%.*]] = tail call i64 @llvm.ptrauth.auth(i64 [[VTABLE_ADDRI]], i32 2, i64 [[VTABLE_DISC]])
+// CHECK-CIR: [[AUTHED_VTABLE:%.*]] = inttoptr i64 [[AUTHED_VTABLEI]] to ptr
+// CHECK-CIR: [[PRIMARY_BASE_OFFSET:%.*]] = getelementptr inbounds i8, ptr [[AUTHED_VTABLE]], i64 -16
+// CHECK-CIR: [[OFFSET_TO_TOP:%.*]] = load i64, ptr [[PRIMARY_BASE_OFFSET]], align 8
+// CHECK-CIR: [[ADJUSTED_THIS:%.*]] = getelementptr inbounds i8, ptr {{%.*}}, i64 [[OFFSET_TO_TOP]]
+// CHECK-CIR: [[ADJUSTED_THIS_VTABLE:%.*]] = load ptr, ptr [[ADJUSTED_THIS]], align 8
+// CHECK-CIR: [[ADJUSTED_THIS_VTABLEI:%.*]] = ptrtoint ptr [[ADJUSTED_THIS_VTABLE]] to i64
+// CHECK-CIR: [[ADJUSTED_THIS_STRIPPED_VTABLEI:%.*]] = tail call i64 @llvm.ptrauth.strip(i64 [[ADJUSTED_THIS_VTABLEI]], i32 0)
+// CHECK-CIR: [[SUCCESS:%.*]] = icmp eq i64 [[ADJUSTED_THIS_STRIPPED_VTABLEI]], ptrtoint (ptr getelementptr inbounds nuw inrange(-24, 16) (i8, ptr @_ZTV1L, i64 24) to i64)
+// CHECK-CIR: [[ADJUSTED_THISI:%.*]] = ptrtoint ptr [[ADJUSTED_THIS]] to i64
+// CHECK-CIR: [[DEST_DISC:%.*]] = tail call i64 @llvm.ptrauth.blend(i64 [[ADJUSTED_THISI]], i64 41434)
+// CHECK-CIR: tail call i64 @llvm.ptrauth.auth(i64 [[ADJUSTED_THIS_VTABLEI]], i32 2, i64 [[DEST_DISC]])
 
 // CHECK-LABEL: @_Z19exact_invalid_multiP1H
 M *exact_invalid_multi(H* d) {

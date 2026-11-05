@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fblocks -fobjc-arc -fobjc-runtime-has-weak -O2 -disable-llvm-passes -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fblocks -fobjc-arc -fobjc-runtime-has-weak -O2 -disable-llvm-passes -fclangir -o - %s | FileCheck --check-prefix=CIR %s %}
 
 #define PRECISE_LIFETIME __attribute__((objc_precise_lifetime))
 
@@ -54,6 +55,11 @@ void test1a_message(void) {
   // CHECK-NEXT: ret void
   Test1 *ptr = test1_helper();
   char *c = [(ptr) interior];
+  // CIR-LABEL: define void @test1a_message()
+  // CIR:      %{{.*}} = call ptr @test1_helper() [ "clang.arc.attachedcall"(ptr @llvm.objc.retainAutoreleasedReturnValue) ]
+  // CIR:      %[[RECV:.*]] = load ptr, ptr %{{.*}}, align 8
+  // CIR-NEXT: %{{.*}} = call ptr @llvm.objc.retainAutorelease(ptr %[[RECV]])
+  // CIR:      %{{.*}} = call ptr @objc_msgSend(ptr noundef %{{.*}}, ptr noundef %{{.*}})
 }
 
 
@@ -102,6 +108,11 @@ void test1b_message(void) {
   // CHECK-NEXT: ret void
   PRECISE_LIFETIME Test1 *ptr = test1_helper();
   char *c = [ptr interior];
+  // CIR-LABEL: define void @test1b_message()
+  // CIR:      %{{.*}} = call ptr @test1_helper() [ "clang.arc.attachedcall"(ptr @llvm.objc.retainAutoreleasedReturnValue) ]
+  // CIR:      %[[RECV:.*]] = load ptr, ptr %{{.*}}, align 8
+  // CIR-NEXT: %{{.*}} = load ptr, ptr @OBJC_SELECTOR_REFERENCES_, align 8
+  // CIR-NEXT: %{{.*}} = call ptr @objc_msgSend(ptr noundef %[[RECV]], ptr noundef %{{.*}})
 }
 
 // CHECK-LABEL: define{{.*}} void @test1b_property()

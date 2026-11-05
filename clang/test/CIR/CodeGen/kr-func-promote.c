@@ -12,7 +12,7 @@
 // expected-warning@+1 {{a function definition without a prototype is deprecated}}
 void foo(x) short x; {}
 
-// LLVM: define{{.*}} void @foo(i32 %0)
+// LLVM: define{{.*}} void @foo(i32 noundef %0)
 // LLVM:   %[[X_PTR:.*]] = alloca i16, i64 1, align 2
 // LLVM:   %[[X:.*]] = trunc i32 %0 to i16
 // LLVM:   store i16 %[[X]], ptr %[[X_PTR]], align 2
@@ -23,14 +23,14 @@ void foo(x) short x; {}
 // OGCG:   %[[X:.*]] = trunc i32 %0 to i16
 // OGCG:   store i16 %[[X]], ptr %[[X_PTR]], align 2
 
-// CIR: cir.func{{.*}}no_proto dso_local @bar(%arg0: !cir.double
+// CIR: cir.func{{.*}} no_proto {{.*}}@bar(%arg0: !cir.double
 // CIR:   %0 = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["f", init]
 // CIR:   %1 = cir.cast floating %arg0 : !cir.double -> !cir.float
 // CIR:   cir.store %1, %0 : !cir.float, !cir.ptr<!cir.float>
 // expected-warning@+1 {{a function definition without a prototype is deprecated}}
 void bar(f) float f; {}
 
-// LLVM: define{{.*}} void @bar(double %0)
+// LLVM: define{{.*}} void @bar(double noundef %0)
 // LLVM:   %[[F_PTR:.*]] = alloca float, i64 1, align 4
 // LLVM:   %[[F:.*]] = fptrunc double %0 to float
 // LLVM:   store float %[[F]], ptr %[[F_PTR]], align 4

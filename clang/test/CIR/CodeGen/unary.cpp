@@ -10,16 +10,13 @@ unsigned up0() {
   return +a;
 }
 
-// CHECK: cir.func{{.*}} @_Z3up0v() -> !u32i
+// CHECK: cir.func{{.*}} @_Z3up0v() -> {{.*}}!u32i
 // CHECK:   %[[A:.*]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["a", init]
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[OUTPUT:.*]] = cir.unary(plus, %[[INPUT]])
 
-// LLVM: define{{.*}} i32 @_Z3up0v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
-// LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
-// LLVM:   store i32 1, ptr %[[A]], align 4
-// LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
+// LLVM: define{{.*}} noundef i32 @_Z3up0v()
+// LLVM:   ret i32 1
 
 // OGCG: define{{.*}} i32 @_Z3up0v()
 // OGCG:   %[[A:.*]] = alloca i32, align 4
@@ -31,13 +28,12 @@ unsigned um0() {
   return -a;
 }
 
-// CHECK: cir.func{{.*}} @_Z3um0v() -> !u32i
+// CHECK: cir.func{{.*}} @_Z3um0v() -> {{.*}}!u32i
 // CHECK:   %[[A:.*]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["a", init]
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[OUTPUT:.*]] = cir.unary(minus, %[[INPUT]])
 
-// LLVM: define{{.*}} i32 @_Z3um0v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
+// LLVM: define{{.*}} noundef i32 @_Z3um0v()
 // LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store i32 1, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
@@ -54,13 +50,12 @@ unsigned un0() {
   return ~a; // a ^ -1 , not
 }
 
-// CHECK: cir.func{{.*}} @_Z3un0v() -> !u32i
+// CHECK: cir.func{{.*}} @_Z3un0v() -> {{.*}}!u32i
 // CHECK:   %[[A:.*]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["a", init]
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[OUTPUT:.*]] = cir.unary(not, %[[INPUT]])
 
-// LLVM: define{{.*}} i32 @_Z3un0v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
+// LLVM: define{{.*}} noundef i32 @_Z3un0v()
 // LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store i32 1, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
@@ -78,7 +73,7 @@ int inc0() {
   return a;
 }
 
-// CHECK: cir.func{{.*}} @_Z4inc0v() -> !s32i
+// CHECK: cir.func{{.*}} @_Z4inc0v() -> {{.*}}!s32i
 // CHECK:   %[[A:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.int<1> : !s32i
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !s32i
@@ -87,8 +82,7 @@ int inc0() {
 // CHECK:   cir.store{{.*}} %[[INCREMENTED]], %[[A]]
 // CHECK:   %[[A_TO_OUTPUT:.*]] = cir.load{{.*}} %[[A]]
 
-// LLVM: define{{.*}} i32 @_Z4inc0v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
+// LLVM: define{{.*}} noundef i32 @_Z4inc0v()
 // LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store i32 1, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
@@ -106,7 +100,7 @@ int dec0() {
   return a;
 }
 
-// CHECK: cir.func{{.*}} @_Z4dec0v() -> !s32i
+// CHECK: cir.func{{.*}} @_Z4dec0v() -> {{.*}}!s32i
 // CHECK:   %[[A:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.int<1> : !s32i
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !s32i
@@ -115,8 +109,7 @@ int dec0() {
 // CHECK:   cir.store{{.*}} %[[DECREMENTED]], %[[A]]
 // CHECK:   %[[A_TO_OUTPUT:.*]] = cir.load{{.*}} %[[A]]
 
-// LLVM: define{{.*}} i32 @_Z4dec0v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
+// LLVM: define{{.*}} noundef i32 @_Z4dec0v()
 // LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store i32 1, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
@@ -134,7 +127,7 @@ int inc1() {
   return a;
 }
 
-// CHECK: cir.func{{.*}} @_Z4inc1v() -> !s32i
+// CHECK: cir.func{{.*}} @_Z4inc1v() -> {{.*}}!s32i
 // CHECK:   %[[A:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.int<1> : !s32i
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !s32i
@@ -143,8 +136,7 @@ int inc1() {
 // CHECK:   cir.store{{.*}} %[[INCREMENTED]], %[[A]]
 // CHECK:   %[[A_TO_OUTPUT:.*]] = cir.load{{.*}} %[[A]]
 
-// LLVM: define{{.*}} i32 @_Z4inc1v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
+// LLVM: define{{.*}} noundef i32 @_Z4inc1v()
 // LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store i32 1, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
@@ -162,7 +154,7 @@ int dec1() {
   return a;
 }
 
-// CHECK: cir.func{{.*}} @_Z4dec1v() -> !s32i
+// CHECK: cir.func{{.*}} @_Z4dec1v() -> {{.*}}!s32i
 // CHECK:   %[[A:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.int<1> : !s32i
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !s32i
@@ -171,8 +163,7 @@ int dec1() {
 // CHECK:   cir.store{{.*}} %[[DECREMENTED]], %[[A]]
 // CHECK:   %[[A_TO_OUTPUT:.*]] = cir.load{{.*}} %[[A]]
 
-// LLVM: define{{.*}} i32 @_Z4dec1v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
+// LLVM: define{{.*}} noundef i32 @_Z4dec1v()
 // LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
 // LLVM:   store i32 1, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
@@ -191,7 +182,7 @@ int inc2() {
   return b;
 }
 
-// CHECK: cir.func{{.*}} @_Z4inc2v() -> !s32i
+// CHECK: cir.func{{.*}} @_Z4inc2v() -> {{.*}}!s32i
 // CHECK:   %[[A:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
 // CHECK:   %[[B:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.int<1> : !s32i
@@ -202,16 +193,13 @@ int inc2() {
 // CHECK:   cir.store{{.*}} %[[ATOB]], %[[B]]
 // CHECK:   %[[B_TO_OUTPUT:.*]] = cir.load{{.*}} %[[B]]
 
-// LLVM: define{{.*}} i32 @_Z4inc2v()
-// LLVM:   %[[RV:.*]] = alloca i32, i64 1, align 4
-// LLVM:   %[[A:.*]] = alloca i32, i64 1, align 4
-// LLVM:   %[[B:.*]] = alloca i32, i64 1, align 4
-// LLVM:   store i32 1, ptr %[[A]], align 4
-// LLVM:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
-// LLVM:   %[[A_INC:.*]] = add nsw i32 %[[A_LOAD]], 1
-// LLVM:   store i32 %[[A_INC]], ptr %[[A]], align 4
-// LLVM:   store i32 %[[A_LOAD]], ptr %[[B]], align 4
-// LLVM:   %[[B_TO_OUTPUT:.*]] = load i32, ptr %[[B]], align 4
+// LLVM-LABEL: define{{.*}} noundef i32 @_Z4inc2v()
+// LLVM-NEXT:   %[[A:.*]] = alloca i32, i64 1, align 4
+// LLVM-NEXT:   store i32 1, ptr %[[A]], align 4
+// LLVM-NEXT:   %[[A_LOAD:.*]] = load i32, ptr %[[A]], align 4
+// LLVM-NEXT:   %[[A_INC:.*]] = add nsw i32 %[[A_LOAD]], 1
+// LLVM-NEXT:   store i32 %[[A_INC]], ptr %[[A]], align 4
+// LLVM-NEXT:   ret i32 %[[A_LOAD]]
 
 // OGCG: define{{.*}} i32 @_Z4inc2v()
 // OGCG:   %[[A:.*]] = alloca i32, align 4
@@ -228,16 +216,13 @@ float fpPlus() {
   return +a;
 }
 
-// CHECK: cir.func{{.*}} @_Z6fpPlusv() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z6fpPlusv() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[OUTPUT:.*]] = cir.unary(plus, %[[INPUT]])
 
-// LLVM: define{{.*}} float @_Z6fpPlusv()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
-// LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
-// LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
-// LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
+// LLVM: define{{.*}} noundef float @_Z6fpPlusv()
+// LLVM:   ret float 1.000000e+00
 
 // OGCG: define{{.*}} float @_Z6fpPlusv()
 // OGCG:   %[[A:.*]] = alloca float, align 4
@@ -249,13 +234,12 @@ float fpMinus() {
   return -a;
 }
 
-// CHECK: cir.func{{.*}} @_Z7fpMinusv() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z7fpMinusv() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[OUTPUT:.*]] = cir.unary(minus, %[[INPUT]])
 
-// LLVM: define{{.*}} float @_Z7fpMinusv()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
+// LLVM: define{{.*}} noundef float @_Z7fpMinusv()
 // LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
 // LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
@@ -272,15 +256,14 @@ float fpPreInc() {
   return ++a;
 }
 
-// CHECK: cir.func{{.*}} @_Z8fpPreIncv() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z8fpPreIncv() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.fp<1.000000e+00> : !cir.float
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !cir.float
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[INCREMENTED:.*]] = cir.unary(inc, %[[INPUT]])
 
-// LLVM: define{{.*}} float @_Z8fpPreIncv()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
+// LLVM: define{{.*}} noundef float @_Z8fpPreIncv()
 // LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
 // LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
@@ -297,15 +280,14 @@ float fpPreDec() {
   return --a;
 }
 
-// CHECK: cir.func{{.*}} @_Z8fpPreDecv() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z8fpPreDecv() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.fp<1.000000e+00> : !cir.float
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !cir.float
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[DECREMENTED:.*]] = cir.unary(dec, %[[INPUT]])
 
-// LLVM: define{{.*}} float @_Z8fpPreDecv()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
+// LLVM: define{{.*}} noundef float @_Z8fpPreDecv()
 // LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
 // LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
@@ -322,15 +304,14 @@ float fpPostInc() {
   return a++;
 }
 
-// CHECK: cir.func{{.*}} @_Z9fpPostIncv() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z9fpPostIncv() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.fp<1.000000e+00> : !cir.float
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !cir.float
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[INCREMENTED:.*]] = cir.unary(inc, %[[INPUT]])
 
-// LLVM: define{{.*}} float @_Z9fpPostIncv()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
+// LLVM: define{{.*}} noundef float @_Z9fpPostIncv()
 // LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
 // LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
@@ -347,15 +328,14 @@ float fpPostDec() {
   return a--;
 }
 
-// CHECK: cir.func{{.*}} @_Z9fpPostDecv() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z9fpPostDecv() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.fp<1.000000e+00> : !cir.float
 // CHECK:   cir.store{{.*}} %[[ATMP]], %[[A]] : !cir.float
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[A]]
 // CHECK:   %[[DECREMENTED:.*]] = cir.unary(dec, %[[INPUT]])
 
-// LLVM: define{{.*}} float @_Z9fpPostDecv()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
+// LLVM: define{{.*}} noundef float @_Z9fpPostDecv()
 // LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
 // LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
 // LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
@@ -374,7 +354,7 @@ float fpPostInc2() {
   return b;
 }
 
-// CHECK: cir.func{{.*}} @_Z10fpPostInc2v() -> !cir.float
+// CHECK: cir.func{{.*}} @_Z10fpPostInc2v() -> {{.*}}!cir.float
 // CHECK:   %[[A:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["a", init]
 // CHECK:   %[[B:.*]] = cir.alloca !cir.float, !cir.ptr<!cir.float>, ["b", init]
 // CHECK:   %[[ATMP:.*]] = cir.const #cir.fp<1.000000e+00> : !cir.float
@@ -385,16 +365,13 @@ float fpPostInc2() {
 // CHECK:   cir.store{{.*}} %[[ATOB]], %[[B]]
 // CHECK:   %[[B_TO_OUTPUT:.*]] = cir.load{{.*}} %[[B]]
 
-// LLVM: define{{.*}} float @_Z10fpPostInc2v()
-// LLVM:   %[[RV:.*]] = alloca float, i64 1, align 4
-// LLVM:   %[[A:.*]] = alloca float, i64 1, align 4
-// LLVM:   %[[B:.*]] = alloca float, i64 1, align 4
-// LLVM:   store float 1.000000e+00, ptr %[[A]], align 4
-// LLVM:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
-// LLVM:   %[[A_INC:.*]] = fadd float 1.000000e+00, %[[A_LOAD]]
-// LLVM:   store float %[[A_INC]], ptr %[[A]], align 4
-// LLVM:   store float %[[A_LOAD]], ptr %[[B]], align 4
-// LLVM:   %[[B_TO_OUTPUT:.*]] = load float, ptr %[[B]], align 4
+// LLVM-LABEL: define{{.*}} noundef float @_Z10fpPostInc2v()
+// LLVM-NEXT:   %[[A:.*]] = alloca float, i64 1, align 4
+// LLVM-NEXT:   store float 1.000000e+00, ptr %[[A]], align 4
+// LLVM-NEXT:   %[[A_LOAD:.*]] = load float, ptr %[[A]], align 4
+// LLVM-NEXT:   %[[A_INC:.*]] = fadd float 1.000000e+00, %[[A_LOAD]]
+// LLVM-NEXT:   store float %[[A_INC]], ptr %[[A]], align 4
+// LLVM-NEXT:   ret float %[[A_LOAD]]
 
 // OGCG: define{{.*}} float @_Z10fpPostInc2v()
 // OGCG:   %[[A:.*]] = alloca float, align 4
@@ -429,13 +406,13 @@ _Float16 fp16UPlus(_Float16 f) {
   return +f;
 }
 
-// CHECK: cir.func{{.*}} @_Z9fp16UPlusDF16_({{.*}}) -> !cir.f16
+// CHECK: cir.func{{.*}} @_Z9fp16UPlusDF16_({{.*}}) -> {{.*}}!cir.f16
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[F:.*]]
 // CHECK:   %[[PROMOTED:.*]] = cir.cast floating %[[INPUT]] : !cir.f16 -> !cir.float
 // CHECK:   %[[RESULT:.*]] = cir.unary(plus, %[[PROMOTED]])
 // CHECK:   %[[UNPROMOTED:.*]] = cir.cast floating %[[RESULT]] : !cir.float -> !cir.f16
 
-// LLVM: define{{.*}} half @_Z9fp16UPlusDF16_({{.*}})
+// LLVM: define{{.*}} noundef half @_Z9fp16UPlusDF16_({{.*}})
 // LLVM:   %[[F_LOAD:.*]] = load half, ptr %{{.*}}, align 2
 // LLVM:   %[[PROMOTED:.*]] = fpext half %[[F_LOAD]] to float
 // LLVM:   %[[UNPROMOTED:.*]] = fptrunc float %[[PROMOTED]] to half
@@ -449,13 +426,13 @@ _Float16 fp16UMinus(_Float16 f) {
   return -f;
 }
 
-// CHECK: cir.func{{.*}} @_Z10fp16UMinusDF16_({{.*}}) -> !cir.f16
+// CHECK: cir.func{{.*}} @_Z10fp16UMinusDF16_({{.*}}) -> {{.*}}!cir.f16
 // CHECK:   %[[INPUT:.*]] = cir.load{{.*}} %[[F:.*]]
 // CHECK:   %[[PROMOTED:.*]] = cir.cast floating %[[INPUT]] : !cir.f16 -> !cir.float
 // CHECK:   %[[RESULT:.*]] = cir.unary(minus, %[[PROMOTED]])
 // CHECK:   %[[UNPROMOTED:.*]] = cir.cast floating %[[RESULT]] : !cir.float -> !cir.f16
 
-// LLVM: define{{.*}} half @_Z10fp16UMinusDF16_({{.*}})
+// LLVM: define{{.*}} noundef half @_Z10fp16UMinusDF16_({{.*}})
 // LLVM:   %[[F_LOAD:.*]] = load half, ptr %{{.*}}, align 2
 // LLVM:   %[[PROMOTED:.*]] = fpext half %[[F_LOAD]] to float
 // LLVM:   %[[RESULT:.*]] = fneg float %[[PROMOTED]]
@@ -466,6 +443,34 @@ _Float16 fp16UMinus(_Float16 f) {
 // OGCG:   %[[PROMOTED:.*]] = fpext half %[[F_LOAD]] to float
 // OGCG:   %[[RESULT:.*]] = fneg float %[[PROMOTED]]
 // OGCG:   %[[UNPROMOTED:.*]] = fptrunc float %[[RESULT]] to half
+
+_Float16 fp16Add(_Float16 a, _Float16 b) {
+  return a + b;
+}
+
+// CHECK: cir.func{{.*}} @_Z7fp16AddDF16_DF16_({{.*}}) -> {{.*}}!cir.f16
+// CHECK:   %[[A_VAL:.*]] = cir.load{{.*}} %[[A:.*]]
+// CHECK:   %[[A_F32:.*]] = cir.cast floating %[[A_VAL]] : !cir.f16 -> !cir.float
+// CHECK:   %[[B_VAL:.*]] = cir.load{{.*}} %[[B:.*]]
+// CHECK:   %[[B_F32:.*]] = cir.cast floating %[[B_VAL]] : !cir.f16 -> !cir.float
+// CHECK:   %[[ADD:.*]] = cir.binop(add, %[[A_F32]], %[[B_F32]]) : !cir.float
+// CHECK:   %[[TRUNC:.*]] = cir.cast floating %[[ADD]] : !cir.float -> !cir.f16
+
+// LLVM: define{{.*}} noundef half @_Z7fp16AddDF16_DF16_({{.*}})
+// LLVM:   %[[A_LOAD:.*]] = load half, ptr %{{.*}}, align 2
+// LLVM:   %[[A_F32:.*]] = fpext half %[[A_LOAD]] to float
+// LLVM:   %[[B_LOAD:.*]] = load half, ptr %{{.*}}, align 2
+// LLVM:   %[[B_F32:.*]] = fpext half %[[B_LOAD]] to float
+// LLVM:   %[[ADD:.*]] = fadd float %[[A_F32]], %[[B_F32]]
+// LLVM:   %[[TRUNC:.*]] = fptrunc float %[[ADD]] to half
+
+// OGCG: define{{.*}} half @_Z7fp16AddDF16_DF16_({{.*}})
+// OGCG:   %[[A_LOAD:.*]] = load half, ptr %{{.*}}, align 2
+// OGCG:   %[[A_F32:.*]] = fpext half %[[A_LOAD]] to float
+// OGCG:   %[[B_LOAD:.*]] = load half, ptr %{{.*}}, align 2
+// OGCG:   %[[B_F32:.*]] = fpext half %[[B_LOAD]] to float
+// OGCG:   %[[ADD:.*]] = fadd float %[[A_F32]], %[[B_F32]]
+// OGCG:   %[[TRUNC:.*]] = fptrunc float %[[ADD]] to half
 
 void test_logical_not() {
   int a = 5;

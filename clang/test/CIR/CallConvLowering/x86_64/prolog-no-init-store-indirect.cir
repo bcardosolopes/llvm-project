@@ -1,0 +1,64 @@
+// RUN: cir-opt %s --cir-call-conv-lowering -o /dev/null
+//
+// Regression test for buildFunctionProlog assertion when
+// findArgInitStoreChain returns null for Indirect (byval) arguments.
+//
+// Previously, buildFunctionProlog unconditionally asserted:
+//   Assertion `(initStore)' failed.
+// when an indirect arg had zero or multiple uses.
+// The fix adds a fallback path (replaceArgWithoutInitStoreChain) that
+// handles these cases gracefully.
+
+!s32i = !cir.int<s, 32>
+!s64i = !cir.int<s, 64>
+!rec_Big = !cir.record<struct "Big" {!s64i, !s64i, !s64i, !s64i, !s64i}>
+
+module @"test" attributes {
+  cir.ident = "test",
+  cir.lang = #cir.lang<c>,
+  cir.sob = #cir.signed_overflow_behavior<undefined>,
+  cir.triple = "x86_64-unknown-linux-gnu",
+  cir.type_size_info = #cir.type_size_info<char = 8, int = 32, size_t = 64>,
+  cir.llvm_datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+  dlti.dl_spec = #dlti.dl_spec<
+    !llvm.ptr<270> = dense<32> : vector<4xi64>,
+    !llvm.ptr<271> = dense<32> : vector<4xi64>,
+    !llvm.ptr<272> = dense<64> : vector<4xi64>,
+    i64 = dense<64> : vector<2xi64>,
+    i128 = dense<128> : vector<2xi64>,
+    f80 = dense<128> : vector<2xi64>,
+    !llvm.ptr = dense<64> : vector<4xi64>,
+    i1 = dense<8> : vector<2xi64>,
+    i8 = dense<8> : vector<2xi64>,
+    i16 = dense<16> : vector<2xi64>,
+    i32 = dense<32> : vector<2xi64>,
+    f16 = dense<16> : vector<2xi64>,
+    f64 = dense<64> : vector<2xi64>,
+    f128 = dense<128> : vector<2xi64>,
+    "dlti.endianness" = "little",
+    "dlti.mangling_mode" = "e",
+    "dlti.legal_int_widths" = array<i32: 8, 16, 32, 64>,
+    "dlti.stack_alignment" = 128 : i64
+  >
+} {
+  // --- Case 1: Unused indirect (byval) parameter (zero uses). ---
+  // On x86_64, a 40-byte struct is passed by memory (Indirect byval).
+  // The original arg has zero uses, so findArgInitStoreChain returns null.
+  cir.func @unused_indirect_param(%arg0: !rec_Big) -> !s32i {
+    %0 = cir.const #cir.int<42> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // --- Case 2: Indirect (byval) parameter stored to multiple allocas. ---
+  // The original arg has two uses (two stores), so findArgInitStoreChain
+  // returns null (requires exactly one use).
+  cir.func @multi_store_indirect_param(%arg0: !rec_Big) -> !s64i {
+    %0 = cir.alloca !rec_Big, !cir.ptr<!rec_Big>, ["a"] {alignment = 8 : i64}
+    %1 = cir.alloca !rec_Big, !cir.ptr<!rec_Big>, ["b"] {alignment = 8 : i64}
+    cir.store align(8) %arg0, %0 : !rec_Big, !cir.ptr<!rec_Big>
+    cir.store align(8) %arg0, %1 : !rec_Big, !cir.ptr<!rec_Big>
+    %2 = cir.get_member %0[0] {name = "a"} : !cir.ptr<!rec_Big> -> !cir.ptr<!s64i>
+    %3 = cir.load align(8) %2 : !cir.ptr<!s64i>, !s64i
+    cir.return %3 : !s64i
+  }
+}

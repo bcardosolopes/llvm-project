@@ -11,9 +11,14 @@
 #include "clang/AST/Decl.h"
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "llvm/TargetParser/AArch64TargetParser.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace clang;
 using namespace clang::CodeGen;
+
+static llvm::cl::opt<bool> ExpandHFAReturnType(
+    "expand-hfa-return-type", llvm::cl::Hidden,
+    llvm::cl::desc("Expand HFAs in return types into arrays"));
 
 //===----------------------------------------------------------------------===//
 // AArch64 ABI Implementation
@@ -584,9 +589,13 @@ ABIArgInfo AArch64ABIInfo::classifyReturnType(QualType RetTy,
   uint64_t Members = 0;
   if (isHomogeneousAggregate(RetTy, Base, Members) &&
       !(getTarget().getTriple().getArch() == llvm::Triple::aarch64_32 &&
-        IsVariadicFn))
+        IsVariadicFn)) {
     // Homogeneous Floating-point Aggregates (HFAs) are returned directly.
+    if (ExpandHFAReturnType)
+      return ABIArgInfo::getDirect(
+          llvm::ArrayType::get(CGT.ConvertType(QualType(Base, 0)), Members));
     return ABIArgInfo::getDirect();
+  }
 
   // In AAPCS return values of a Pure Scalable type are treated as a single
   // named argument and passed expanded in registers, or indirectly if there are

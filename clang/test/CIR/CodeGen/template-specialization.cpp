@@ -38,17 +38,17 @@ void test_double() {
   d.f();
 }
 
-// CIR: cir.func{{.*}} @_ZN1XIdE1fEv
-// CIR:   cir.const #cir.int<0>
-//
 // CIR: cir.func{{.*}} @_Z11test_doublev()
 // CIR:   cir.call @_ZN1XIdE1fEv
-
-// LLVM: define{{.*}} i32 @_ZN1XIdE1fEv
-// LLVM:   store i32 0
 //
+// CIR: cir.func{{.*}} @_ZN1XIdE1fEv
+// CIR:   cir.const #cir.int<0>
+
 // LLVM: define{{.*}} void @_Z11test_doublev()
-// LLVM:   call i32 @_ZN1XIdE1fEv
+// LLVM:   call noundef i32 @_ZN1XIdE1fEv
+//
+// LLVM: define{{.*}} i32 @_ZN1XIdE1fEv
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} void @_Z11test_doublev()
 // OGCG:   call{{.*}} i32 @_ZN1XIdE1fEv
@@ -66,12 +66,15 @@ void test_int() {
 //
 // CIR: cir.func{{.*}} @_Z8test_intv()
 // CIR:   cir.call @_ZN1XIiE1fEv
+//
+// CIR: cir.func{{.*}} @_Z10test_shortv()
+// CIR:   cir.call @_ZN1XIsE1fEv
 
 // LLVM: define{{.*}} i32 @_ZN1XIiE1fEv
-// LLVM:   store i32 1
+// LLVM:   ret i32 1
 //
 // LLVM: define{{.*}} void @_Z8test_intv()
-// LLVM:   call i32 @_ZN1XIiE1fEv
+// LLVM:   call noundef i32 @_ZN1XIiE1fEv
 
 // OGCG: define{{.*}} void @_Z8test_intv()
 // OGCG:   call{{.*}} i32 @_ZN1XIiE1fEv
@@ -86,15 +89,12 @@ void test_short() {
 
 // CIR: cir.func{{.*}} @_ZN1XIsE1fEv
 // CIR:   cir.const #cir.int<0>
-//
-// CIR: cir.func{{.*}} @_Z10test_shortv()
-// CIR:   cir.call @_ZN1XIsE1fEv
 
-// LLVM: define{{.*}} i32 @_ZN1XIsE1fEv
-// LLVM: store i32 0
-//
 // LLVM: define{{.*}} void @_Z10test_shortv()
-// LLVM:   call i32 @_ZN1XIsE1fEv
+// LLVM:   call noundef i32 @_ZN1XIsE1fEv
+//
+// LLVM: define{{.*}} i32 @_ZN1XIsE1fEv
+// LLVM:   ret i32 0
 
 // OGCG: define{{.*}} void @_Z10test_shortv()
 // OGCG:   call{{.*}} i32 @_ZN1XIsE1fEv

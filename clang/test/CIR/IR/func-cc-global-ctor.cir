@@ -1,0 +1,39 @@
+// RUN: cir-opt %s | cir-opt | FileCheck %s
+
+// cir.func prints cc(...) ahead of global_ctor/global_dtor but parsed it only
+// after them, so what clang emits for
+//
+//   __attribute__((constructor(101))) __attribute__((preserve_most))
+//   void init(void) {}
+//
+// did not read back: `custom op 'global_ctor' is unknown`. The second cir-opt
+// is what proves it; --verify-roundtrip does not reparse this spelling.
+
+// CHECK-NOT: custom op 'global_ctor' is unknown
+// CHECK-NOT: custom op 'global_dtor' is unknown
+
+#fn_attr = #cir<extra({minsize, nothrow = #cir.nothrow, optsize})>
+
+module {
+  // CHECK: cir.func private @ctor_cc() cc(preserve_most) global_ctor(101)
+  cir.func private @ctor_cc() cc(preserve_most) global_ctor(101)
+
+  // CHECK: cir.func private @dtor_cc() cc(preserve_most) global_dtor(102)
+  cir.func private @dtor_cc() cc(preserve_most) global_dtor(102)
+
+  // The shape clang emits: cc, then global_ctor, then extra.
+  // CHECK: cir.func private @clang_shape() cc(preserve_most) global_ctor(101) extra(#fn_attr)
+  cir.func private @clang_shape() cc(preserve_most) global_ctor(101) extra(#fn_attr)
+
+  // The default priority, which prints without the parentheses.
+  // CHECK: cir.func private @default_prio_cc() cc(spir_kernel) global_ctor
+  cir.func private @default_prio_cc() cc(spir_kernel) global_ctor
+
+  // The order this parse accepted before, which keeps working, for both
+  // keywords.
+  // CHECK: cir.func private @legacy_ctor_order() cc(preserve_most) global_ctor(103)
+  cir.func private @legacy_ctor_order() global_ctor(103) cc(preserve_most)
+
+  // CHECK: cir.func private @legacy_dtor_order() cc(preserve_most) global_dtor(104)
+  cir.func private @legacy_dtor_order() global_dtor(104) cc(preserve_most)
+}

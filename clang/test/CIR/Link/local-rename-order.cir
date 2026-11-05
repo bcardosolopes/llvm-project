@@ -1,0 +1,52 @@
+// RUN: cir-link %s %S/Inputs/local-rename-order-b.cir --warn-odr-divergence \
+// RUN:   -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Renaming a colliding local must happen before *any* of the input's ops move.
+//
+// Renaming rewrites uses within the input module. Moving ops one at a time and
+// renaming as they go means a caller that was already moved into the output no
+// longer sees the rewrite, so its call silently keeps pointing at the symbol an
+// earlier input supplied. Whether that happens depends purely on declaration
+// order, which is why it stayed hidden: in the input below @caller_b sits
+// between @early and @late, so @early's rename lands and @late's does not.
+//
+// Found in real code -- two TUs with anonymous-namespace helpers of the same
+// name. It linked, lowered, built and ran, and called the other TU's
+// constructor: 1121 where a normal build gives 1122.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func internal private @early() -> !s32i {
+    %0 = cir.const #cir.int<10> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func internal private @late() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @caller_a() -> !s32i {
+    %0 = cir.call @early() : () -> !s32i
+    %1 = cir.call @late() : () -> !s32i
+    %2 = cir.binop(add, %0, %1) : !s32i
+    cir.return %2 : !s32i
+  }
+}
+
+// Two collisions, both renamed. Neither is an ODR question.
+// STATS: 2 locals renamed
+// STATS-SAME: 0 ODR divergences
+
+// A's caller keeps the originals.
+// CHECK: cir.func @caller_a
+// CHECK:   cir.call @early()
+// CHECK:   cir.call @late()
+
+// B's caller must reach B's copies -- *both* of them. Before the fix the
+// second call here read `@late`, silently binding to A's.
+// CHECK: cir.func @caller_b
+// CHECK:   cir.call @early.cirlink.
+// CHECK:   cir.call @late.cirlink.

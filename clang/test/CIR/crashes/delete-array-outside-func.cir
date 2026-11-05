@@ -1,0 +1,9 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: delete.array must be lowered inside an LLVM function
+// CHECK-NOT: Stack dump:
+
+!void = !cir.void
+module {
+  %0 = cir.const #cir.ptr<null> : !cir.ptr<!void>
+  cir.delete.array %0 : !cir.ptr<!void>
+}

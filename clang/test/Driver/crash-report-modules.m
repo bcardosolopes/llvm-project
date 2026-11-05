@@ -28,7 +28,8 @@ const int x = MODULE_MACRO;
 // CHECKSH-NEXT: # Driver args: "-fsyntax-only"
 // CHECKSH-SAME: "-D" "FOO=BAR"
 // CHECKSH-NEXT: # Original command: {{.*$}}
-// CHECKSH-NEXT: "-cc1"
+// CHECKSH-NEXT: cd "$(dirname "$0")" || exit 1
+// CHECKSH: "-cc1"
 // CHECKSH: "-isysroot" "{{[^"]*}}/i/"
 // CHECKSH: "-D" "FOO=BAR"
 // CHECKSH-NOT: "-fmodules-cache-path="

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple -emit-llvm -fobjc-arc -o - %s -std=c++11 | FileCheck %s --check-prefix=ITANIUM
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple -emit-llvm -fobjc-arc -fclangir -o - %s -std=c++11 | FileCheck %s --check-prefix=CIR-ITANIUM %}
 // RUN: %clang_cc1 -triple x86_64-windows -emit-llvm -fobjc-arc -o - %s -std=c++11
 //
 // Test cases where we weren't properly adding extended parameter info, which
@@ -27,11 +28,14 @@ struct VirtualBase2 {
 struct WithVirtualBaseMid : virtual VirtualBase2 {
   // Ensure we only pass in `this` and a vtable. Otherwise this test is useless.
   // ITANIUM: define {{.*}} void @_ZN18WithVirtualBaseMidCI212VirtualBase2EP11objc_objectPv({{[^,]*}}, {{[^,]*}})
+  // CIR-ITANIUM: define {{.*}} void @_ZN18WithVirtualBaseMidCI212VirtualBase2EP11objc_objectPv({{[^,]*}}, {{[^,]*}})
   using VirtualBase2::VirtualBase2;
 };
 struct WithVirtualBaseLast : WithVirtualBaseMid {
   using WithVirtualBaseMid::WithVirtualBaseMid;
 };
+
+// CIR-ITANIUM: call void @_ZN18WithVirtualBaseMidCI212VirtualBase2EP11objc_objectPv({{[^,]*}}, {{.*}})
 
 void callLast(__attribute__((ns_consumed)) id x) {
   WithVirtualBaseLast{x, (void*)0};

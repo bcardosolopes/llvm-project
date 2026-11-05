@@ -1,0 +1,11 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+module {
+  cir.func @f() extra(#cir<extra({thunk})>) {
+    cir.return
+  }
+}
+
+// CHECK: llvm.func @f() attributes
+// CHECK-SAME: passthrough = ["thunk"]
+

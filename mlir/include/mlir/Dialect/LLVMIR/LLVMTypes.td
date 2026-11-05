@@ -143,21 +143,30 @@ def LLVMStructType : LLVMType<"LLVMStruct", "struct", [
     are uniquely represented by the list of types they contain and packedness.
     Literal structure types are immutable after construction.
 
-    Identified structures are uniquely represented by their name, a string. They
-    have a mutable component, consisting of the list of types they contain,
-    the packedness and the opacity bits. Identified structs can be created
-    without providing the lists of element types, making them suitable to
-    represent recursive, i.e. self-referring, structures. Identified structs
-    without body are considered opaque. For such structs, one can set the body.
-    Identified structs can be created as intentionally-opaque, implying that the
-    caller does not intend to ever set the body (e.g. forward-declarations of
-    structs from another module) and wants to disallow further modification of
-    the body. For intentionally-opaque structs or non-opaque structs with the
-    body, one is not allowed to set another body (however, one can set exactly
-    the same body).
+    Identified structures created through the C++ API are uniquely represented
+    by their name, a string. They have a mutable component, consisting of the
+    list of types they contain, the packedness and the opacity bits. Identified
+    structs can be created without providing the lists of element types, making
+    them suitable to represent recursive, i.e. self-referring, structures.
+    Identified structs without body are considered opaque. For such structs, one
+    can set the body. Identified structs can be created as intentionally-opaque,
+    implying that the caller does not intend to ever set the body (e.g.
+    forward-declarations of structs from another module) and wants to disallow
+    further modification of the body. For intentionally-opaque structs or
+    non-opaque structs with the body, one is not allowed to set another body
+    (however, one can set exactly the same body).
+
+    Identified structs that are not part of a recursive cycle are parsed as
+    frozen structs. A frozen struct is uniquely represented by its name, its
+    body, its packedness and its opacity, and it is immutable. Parsing two
+    identified structs with the same name and different bodies gives two
+    different types with the same name. An opaque frozen struct and a frozen
+    struct with a body are also different types. This makes parsing
+    independent of the order in which several inputs are parsed into one
+    context. Structs in a recursive cycle use the mutable form.
 
     Note that the packedness of the struct takes place in uniquing of literal
-    structs, but does not in uniquing of identified structs.
+    and frozen structs, but does not in uniquing of other identified structs.
   }];
 
   // Specify parameters for which TableGen can generate convenient getters for
@@ -198,6 +207,22 @@ def LLVMStructType : LLVMType<"LLVMStruct", "struct", [
     static LLVMStructType getNewIdentified(MLIRContext *context, StringRef name,
                                            ArrayRef<Type> elements,
                                            bool isPacked = false);
+
+    /// Gets or creates a frozen identified struct uniqued by its name, body
+    /// and packedness. Its body cannot be changed. It is never renamed: two
+    /// frozen structs with the same name and different bodies are different
+    /// types. A frozen struct is never equal to a struct returned by
+    /// getIdentified, getNewIdentified or getOpaque.
+    static LLVMStructType getFrozenIdentified(MLIRContext *context,
+                                              StringRef name,
+                                              ArrayRef<Type> elements,
+                                              bool isPacked = false);
+
+    /// Gets or creates a frozen intentionally-opaque identified struct. It is
+    /// a different type from getOpaque(name) and from any frozen struct with
+    /// a body.
+    static LLVMStructType getFrozenOpaque(MLIRContext *context,
+                                          StringRef name);
 
     /// Gets or creates a literal struct with the given body in the provided
     /// context.
@@ -240,6 +265,9 @@ def LLVMStructType : LLVMType<"LLVMStruct", "struct", [
 
     /// Checks if a struct is initialized.
     bool isInitialized();
+
+    /// Checks if a struct is a frozen identified struct.
+    bool isFrozen() const;
 
     /// Verifies that the type about to be constructed is well-formed.
     static LogicalResult
@@ -293,7 +321,10 @@ def LLVMPointerType : LLVMType<"LLVMPointer", "ptr", [
 // LLVMTargetExtType
 //===----------------------------------------------------------------------===//
 
-def LLVMTargetExtType : LLVMType<"LLVMTargetExt", "target"> {
+def LLVMTargetExtType : LLVMType<"LLVMTargetExt", "target", [
+    DeclareTypeInterfaceMethods<DataLayoutTypeInterface,
+                                ["getTypeSize", "getPreferredAlignment"]>
+]> {
   let summary = "LLVM target-specific extension type";
   let description = [{
     LLVM dialect target extension type, which are generally unintrospectable

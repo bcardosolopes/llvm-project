@@ -1820,10 +1820,12 @@ void tools::linkXRayRuntimeDeps(const ToolChain &TC,
                                 const llvm::opt::ArgList &Args,
                                 ArgStringList &CmdArgs) {
   addAsNeededOption(TC, Args, CmdArgs, false);
-  CmdArgs.push_back("-lpthread");
-  if (!TC.getTriple().isOSOpenBSD())
+  if (!TC.getTriple().isAndroid())
+    CmdArgs.push_back("-lpthread");
+  if (!TC.getTriple().isOSOpenBSD() && !TC.getTriple().isAndroid())
     CmdArgs.push_back("-lrt");
-  CmdArgs.push_back("-lm");
+  if (!TC.getTriple().isAndroid())
+    CmdArgs.push_back("-lm");
 
   if (!TC.getTriple().isOSFreeBSD() &&
       !TC.getTriple().isOSNetBSD() &&

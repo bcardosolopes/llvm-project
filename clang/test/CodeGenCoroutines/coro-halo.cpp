@@ -1,7 +1,10 @@
 // This tests that the coroutine heap allocation elision optimization could happen succesfully.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O2 -emit-llvm %s -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O2 -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=CIR %}
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O2 -emit-llvm %s \
 // RUN:   -fcxx-exceptions -fexceptions -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -O2 -fclangir -emit-llvm %s \
+// RUN:   -fcxx-exceptions -fexceptions -o - | FileCheck %s --check-prefix=CIR %}
 
 #include "Inputs/coroutine.h"
 #include "Inputs/numeric.h"
@@ -102,3 +105,7 @@ int main() {
 // CHECK-LABEL: define{{.*}} i32 @main(
 //   CHECK: ret i32 1190
 //   CHECK-NOT: call{{.*}}_Znwm
+
+// CIR-LABEL: define{{.*}} i32 @main(
+// CIR: ret i32 1190
+// CIR-NOT: call{{.*}}_Znwm

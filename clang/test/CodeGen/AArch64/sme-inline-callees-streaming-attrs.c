@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple aarch64-none-linux-gnu -emit-llvm -target-feature +sme -target-feature +sme2 %s -DUSE_FLATTEN -o - | FileCheck %s
 // RUN: %clang_cc1 -triple aarch64-none-linux-gnu -emit-llvm -target-feature +sme -target-feature +sme2 %s -DUSE_ALWAYS_INLINE_STMT -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -emit-llvm -target-feature +sme -target-feature +sme2 -fclangir %s -DUSE_FLATTEN -o - | FileCheck %s --check-prefix=CIR-CHECK %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -emit-llvm -target-feature +sme -target-feature +sme2 -fclangir %s -DUSE_ALWAYS_INLINE_STMT -o - | FileCheck %s --check-prefix=CIR-CHECK %}
 
 // REQUIRES: aarch64-registered-target
 
@@ -39,6 +41,13 @@ void caller(void) {
 //  CHECK-NEXT:   call void @fn_locally_streaming
 //  CHECK-NEXT:   call void @fn_streaming_new_za
 //  CHECK-NEXT:   call void @fn_streaming_new_zt0
+// CIR-CHECK-LABEL: define dso_local void @caller()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @fn_streaming()
+// CIR-CHECK:       call void @fn_locally_streaming()
+// CIR-CHECK:       call void @fn_streaming_new_za()
+// CIR-CHECK:       call void @fn_streaming_new_zt0()
 
 FN_ATTR void caller_streaming_compatible(void) __arm_streaming_compatible {
     STMT_ATTR fn();
@@ -56,6 +65,13 @@ FN_ATTR void caller_streaming_compatible(void) __arm_streaming_compatible {
 //  CHECK-NEXT:   call void @fn_locally_streaming
 //  CHECK-NEXT:   call void @fn_streaming_new_za
 //  CHECK-NEXT:   call void @fn_streaming_new_zt0
+// CIR-CHECK-LABEL: define dso_local void @caller_streaming_compatible()
+// CIR-CHECK:       call void @fn()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @fn_streaming()
+// CIR-CHECK:       call void @fn_locally_streaming()
+// CIR-CHECK:       call void @fn_streaming_new_za()
+// CIR-CHECK:       call void @fn_streaming_new_zt0()
 
 FN_ATTR void caller_streaming(void) __arm_streaming {
     STMT_ATTR fn();
@@ -73,6 +89,13 @@ FN_ATTR void caller_streaming(void) __arm_streaming {
 //  CHECK-NEXT:   call void @was_inlined
 //  CHECK-NEXT:   call void @fn_streaming_new_za
 //  CHECK-NEXT:   call void @fn_streaming_new_zt0
+// CIR-CHECK-LABEL: define dso_local void @caller_streaming()
+// CIR-CHECK:       call void @fn()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @fn_streaming_new_za()
+// CIR-CHECK:       call void @fn_streaming_new_zt0()
 
 FN_ATTR __arm_locally_streaming
 void caller_locally_streaming(void) {
@@ -91,3 +114,10 @@ void caller_locally_streaming(void) {
 //  CHECK-NEXT:   call void @was_inlined
 //  CHECK-NEXT:   call void @fn_streaming_new_za
 //  CHECK-NEXT:   call void @fn_streaming_new_zt0
+// CIR-CHECK-LABEL: define dso_local void @caller_locally_streaming()
+// CIR-CHECK:       call void @fn()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @was_inlined()
+// CIR-CHECK:       call void @fn_streaming_new_za()
+// CIR-CHECK:       call void @fn_streaming_new_zt0()

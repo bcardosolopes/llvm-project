@@ -21,10 +21,8 @@ void foo() {
 
 // LLVM: define{{.*}} @_Z3foov()
 // LLVM:   %[[TMP0:.*]] = alloca i32
-// LLVM:   br label %[[SCOPE_LABEL:.*]]
-// LLVM: [[SCOPE_LABEL]]:
 // LLVM:   store i32 42, ptr %[[TMP0]]
-// LLVM:   call void @_Z3barRKi(ptr %[[TMP0]])
+// LLVM:   call void @_Z3barRKi(ptr {{[^%]*}}%[[TMP0]])
 
 // OGCG: define{{.*}} @_Z3foov()
 // OGCG:   %[[TMP0:.*]] = alloca i32
@@ -47,7 +45,7 @@ void test_ctor_defaultarg() {
 
 // LLVM: define{{.*}} @_Z20test_ctor_defaultargv()
 // LLVM:   %[[S:.*]] = alloca %struct.S
-// LLVM:   call void @_ZN1SC1Ei(ptr %[[S]], i32 2)
+// LLVM:   call void @_ZN1SC1Ei(ptr {{[^%]*}}%[[S]], i32 noundef 2)
 
 // OGCG: define{{.*}} @_Z20test_ctor_defaultargv()
 // OGCG:   %[[S:.*]] = alloca %struct.S

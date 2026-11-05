@@ -23,8 +23,6 @@ module {
 // CHECK-NEXT: ^bb2:  // pred: ^bb0
 // CHECK-NEXT:   %2 = cir.const #cir.int<0> : !s32i
 // CHECK-NEXT:   cir.return %2 : !s32i
-// CHECK-NEXT: ^bb3:  // no predecessors
-// CHECK-NEXT:   cir.return %arg0 : !s32i
 // CHECK-NEXT: }
 
   cir.func @onlyIf(%arg0: !s32i) -> !s32i {

@@ -13,6 +13,10 @@
 // RUN: %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu  -fptrauth-calls -fptrauth-intrinsics -emit-pch %s -o %t.ast
 // RUN: %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu  -fptrauth-calls -fptrauth-intrinsics \
 // RUN:   -emit-llvm -x ast -o - %t.ast | FileCheck --check-prefixes=CHECK,CHECKC %s
+// RUN: %if cir-support %{ %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple arm64e-apple-ios13 -fptrauth-calls -fptrauth-intrinsics \
+// RUN:   -disable-llvm-passes -fclangir -emit-llvm %s -o- | FileCheck --check-prefix=CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu  -fptrauth-calls -fptrauth-intrinsics \
+// RUN:   -disable-llvm-passes -fclangir -emit-llvm %s -o- | FileCheck --check-prefix=CIR %s %}
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +32,7 @@ unsigned long uintptr;
 void (*test_constant_null)(int) = 0;
 
 // CHECK: @test_constant_cast = global ptr ptrauth (ptr @f, i32 0, i64 2712)
+// CIR: @test_constant_cast = {{.*}}global ptr ptrauth (ptr @f, i32 0, i64 2712)
 void (*test_constant_cast)(int) = (void (*)(int))f;
 
 #ifndef __cplusplus
@@ -38,6 +43,7 @@ void (*enum_func_ptr)(enum Enum0) = enum_func;
 #endif
 
 // CHECK: @test_opaque = global ptr ptrauth (ptr @f, i32 0)
+// CIR: @test_opaque = {{.*}}global ptr ptrauth (ptr @f, i32 0)
 void *test_opaque =
 #ifdef __cplusplus
     (void *)
@@ -45,24 +51,31 @@ void *test_opaque =
     (void (*)(int))(double (*)(double))f;
 
 // CHECK: @test_intptr_t = global i64 ptrtoint (ptr ptrauth (ptr @f, i32 0) to i64)
+// CIR: @test_intptr_t = {{.*}}global i64 ptrtoint (ptr ptrauth (ptr @f, i32 0) to i64)
 unsigned long test_intptr_t = (unsigned long)f;
 
 // CHECK: @test_through_long = global ptr ptrauth (ptr @f, i32 0, i64 2712)
+// CIR: @test_through_long = {{.*}}global ptr ptrauth (ptr @f, i32 0, i64 2712)
 void (*test_through_long)(int) = (void (*)(int))(long)f;
 
 // CHECK: @test_to_long = global i64 ptrtoint (ptr ptrauth (ptr @f, i32 0) to i64)
+// CIR: @test_to_long = {{.*}}global i64 ptrtoint (ptr ptrauth (ptr @f, i32 0) to i64)
 long test_to_long = (long)(double (*)())f;
 
 extern void external_function(void);
 // CHECK: @fptr1 = global ptr ptrauth (ptr @external_function, i32 0, i64 18983)
+// CIR: @fptr1 = {{.*}}global ptr ptrauth (ptr @external_function, i32 0, i64 18983)
 void (*fptr1)(void) = external_function;
 // CHECK: @fptr2 = global ptr ptrauth (ptr @external_function, i32 0, i64 18983)
+// CIR: @fptr2 = {{.*}}global ptr ptrauth (ptr @external_function, i32 0, i64 18983)
 void (*fptr2)(void) = &external_function;
 
 // CHECK: @fptr3 = global ptr ptrauth (ptr @external_function, i32 2, i64 26)
+// CIR: @fptr3 = {{.*}}global ptr ptrauth (ptr @external_function, i32 2, i64 26)
 void (*fptr3)(void) = __builtin_ptrauth_sign_constant(&external_function, 2, 26);
 
 // CHECK: @fptr4 = global ptr ptrauth (ptr @external_function, i32 2, i64 26, ptr @fptr4)
+// CIR: @fptr4 = {{.*}}global ptr ptrauth (ptr @external_function, i32 2, i64 26, ptr @fptr4)
 void (*fptr4)(void) = __builtin_ptrauth_sign_constant(&external_function, 2, __builtin_ptrauth_blend_discriminator(&fptr4, 26));
 
 // CHECK-LABEL: define{{.*}} void @test_call()

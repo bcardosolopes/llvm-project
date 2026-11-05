@@ -1,0 +1,20 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+//
+// Ensure unlowered CIR std ops fail with a regular diagnostic instead of
+// aborting with LLVM ERROR.
+
+!s32i = !cir.int<s, 32>
+
+module attributes {cir.triple = "x86_64-unknown-linux-gnu"} {
+  cir.func private @fake_begin(!s32i) -> !s32i
+
+  cir.func @f(%arg0: !s32i) -> !s32i {
+    %0 = cir.std.begin(%arg0 : !s32i, @fake_begin) -> !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// CHECK: error: cir.std.begin should have been lowered in LoweringPrepare
+// CHECK-NOT: LLVM ERROR:
+// CHECK-NOT: Stack dump:
+

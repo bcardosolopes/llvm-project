@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+
+// Back to back, with no global_ctor between them. This takes the other path
+// through the two cc(...) attempts: the first consumes one, and the second
+// sees the keyword again rather than being skipped. Before the either-order
+// parse this input got the module parser's message instead.
+
+// CHECK-NOT: custom op 'cc' is unknown
+
+module {
+  // CHECK: error: {{.*}}cc already specified for this function
+  cir.func private @adjacent_cc() cc(preserve_most) cc(spir_kernel)
+}

@@ -1,0 +1,21 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify ShiftOp: mixed scalar and vector operands
+!s32i = !cir.int<s, 32>
+
+cir.func @shift_mixed_scalar_vector(%arg0: !s32i, %arg1: !cir.vector<4 x !s32i>) {
+  // expected-error@+1 {{input types cannot be one vector and one scalar}}
+  %0 = cir.shift(left, %arg0 : !s32i, %arg1 : !cir.vector<4 x !s32i>) -> !s32i
+  cir.return
+}
+
+// -----
+
+// Verify ShiftOp: vector size mismatch
+!s32i = !cir.int<s, 32>
+
+cir.func @shift_vec_size_mismatch(%arg0: !cir.vector<4 x !s32i>, %arg1: !cir.vector<2 x !s32i>) {
+  // expected-error@+1 {{input vector types must have the same size}}
+  %0 = cir.shift(left, %arg0 : !cir.vector<4 x !s32i>, %arg1 : !cir.vector<2 x !s32i>) -> !cir.vector<4 x !s32i>
+  cir.return
+}

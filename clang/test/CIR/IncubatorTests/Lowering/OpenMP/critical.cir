@@ -1,0 +1,34 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  omp.critical.declare @mutex hint(contended)
+
+  cir.func @omp_critical_unnamed() {
+    omp.critical {
+      cir.call @work() : () -> ()
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func @omp_critical_named() {
+    omp.critical(@mutex) {
+      cir.call @work() : () -> ()
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @work() loc(#loc1)
+}
+
+#loc1 = loc("critical.cir":1:1)
+
+// CHECK-LABEL: define void @omp_critical_unnamed()
+// CHECK: call void @__kmpc_critical(
+// CHECK: call void @work()
+// CHECK: call void @__kmpc_end_critical(
+// CHECK-LABEL: define void @omp_critical_named()
+// CHECK: call void @__kmpc_critical_with_hint(
+// CHECK: call void @work()
+// CHECK: call void @__kmpc_end_critical(

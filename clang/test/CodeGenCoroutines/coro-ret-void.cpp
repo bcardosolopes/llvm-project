@@ -1,4 +1,7 @@
 // RUN: %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -emit-llvm %s -o - -disable-llvm-passes | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -fclangir \
+// RUN:   -fexceptions -fcxx-exceptions -emit-llvm %s -o - -disable-llvm-passes \
+// RUN:   | FileCheck %s --check-prefix=CIR-LLVM %}
 
 #include "Inputs/coroutine.h"
 
@@ -19,6 +22,12 @@ coro1 f() {
 // CHECK-LABEL: define{{.*}} void @_Z1fv(
 // CHECK: call void @_ZNSt13suspend_never12await_resumeEv(ptr
 // CHECK: call void @_ZN5coro112promise_type11return_voidEv(ptr {{[^,]*}} %__promise)
+// CIR-LLVM-LABEL: define dso_local void @_Z1fv() {{.*}} personality ptr @__gxx_personality_v0 {
+// CIR-LLVM: invoke void @_ZN5coro112promise_type11return_voidEv(ptr noundef nonnull align 1 dereferenceable(1) %1)
+// CIR-LLVM-NEXT: to label %{{.+}} unwind label %[[RETVOIDLPAD:[a-zA-Z0-9_.]+]]
+// CIR-LLVM: [[RETVOIDLPAD]]:
+// CIR-LLVM-NEXT: %{{.+}} = landingpad { ptr, i32 }
+// CIR-LLVM: call void @_ZN5coro112promise_type19unhandled_exceptionEv(ptr noundef nonnull align 1 dereferenceable(1) %1)
 
 struct A {
   A();

@@ -24,6 +24,13 @@
 // RUN:   -fptrauth-type-info-vtable-pointer-discrimination \
 // RUN:   %s -emit-llvm -o - | FileCheck %s --check-prefixes=CHECK,DISC
 
+// RUN: %if cir-support %{ %clang_cc1 -DENABLE_TID=1 -I%S -std=c++11 -triple=arm64e-apple-darwin \
+// RUN:   -fptrauth-calls -fptrauth-intrinsics \
+// RUN:   -fptrauth-vtable-pointer-type-discrimination \
+// RUN:   -fptrauth-vtable-pointer-address-discrimination \
+// RUN:   -fptrauth-type-info-vtable-pointer-discrimination \
+// RUN:   -fclangir %s -emit-llvm -o - | FileCheck %s --check-prefixes=CHECK,CIRDISC %}
+
 // copied from typeinfo
 namespace std {
 
@@ -61,12 +68,13 @@ extern "C" int disc_std_type_info = __builtin_ptrauth_string_discriminator("_ZTV
 
 // CHECK: @_ZTV10TestStruct = unnamed_addr constant { [4 x ptr] } { [4 x ptr] [ptr null, ptr @_ZTI10TestStruct, ptr ptrauth (ptr @_ZN10TestStructD1Ev, i32 0, i64 52216, ptr getelementptr inbounds ({ [4 x ptr] }, ptr @_ZTV10TestStruct, i32 0, i32 0, i32 2)), ptr ptrauth (ptr @_ZN10TestStructD0Ev, i32 0, i64 39671, ptr getelementptr inbounds ({ [4 x ptr] }, ptr @_ZTV10TestStruct, i32 0, i32 0, i32 3))] }, align 8
 
-// NODISC: @_ZTI10TestStruct = constant { ptr, ptr } { ptr ptrauth (ptr getelementptr inbounds (ptr, ptr @_ZTVN10__cxxabiv117__class_type_infoE, i64 2), i32 2), ptr @_ZTS10TestStruct }, align 8
+// NODISC-DAG: @_ZTI10TestStruct = constant { ptr, ptr } { ptr ptrauth (ptr getelementptr inbounds (ptr, ptr @_ZTVN10__cxxabiv117__class_type_infoE, i64 2), i32 2), ptr @_ZTS10TestStruct }, align 8
 
-// DISC: @_ZTI10TestStruct = constant { ptr, ptr } { ptr ptrauth (ptr getelementptr inbounds (ptr, ptr @_ZTVN10__cxxabiv117__class_type_infoE, i64 2), i32 2, i64 [[STDTYPEINFO_DISC]], ptr @_ZTI10TestStruct), ptr @_ZTS10TestStruct }, align 8
+// DISC-DAG: @_ZTI10TestStruct = constant { ptr, ptr } { ptr ptrauth (ptr getelementptr inbounds (ptr, ptr @_ZTVN10__cxxabiv117__class_type_infoE, i64 2), i32 2, i64 [[STDTYPEINFO_DISC]], ptr @_ZTI10TestStruct), ptr @_ZTS10TestStruct }, align 8
+// CIRDISC-DAG: @_ZTI10TestStruct = constant { ptr, ptr } { ptr ptrauth (ptr getelementptr inbounds (i8, ptr @_ZTVN10__cxxabiv117__class_type_infoE, i64 16), i32 2, i64 [[STDTYPEINFO_DISC]], ptr @_ZTI10TestStruct), ptr @_ZTS10TestStruct }, align 8
 
-// CHECK: @_ZTVN10__cxxabiv117__class_type_infoE = external global [0 x ptr]
-// CHECK: @_ZTS10TestStruct = constant [13 x i8] c"10TestStruct\00", align 1
+// CHECK-DAG: @_ZTVN10__cxxabiv117__class_type_infoE = external global [0 x ptr]
+// CHECK-DAG: @_ZTS10TestStruct = constant [13 x i8] c"10TestStruct\00", align 1
 
 struct TestStruct {
   virtual ~TestStruct();

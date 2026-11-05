@@ -220,13 +220,13 @@ namespace {
 
   class Argument {
     std::string lowerName, upperName;
-    StringRef attrName;
+    std::string attrName;
     bool isOpt;
     bool Fake;
 
   public:
     Argument(StringRef Arg, StringRef Attr)
-        : lowerName(Arg.str()), upperName(lowerName), attrName(Attr),
+        : lowerName(Arg.str()), upperName(lowerName), attrName(Attr.str()),
           isOpt(false), Fake(false) {
       if (!lowerName.empty()) {
         lowerName[0] = std::tolower(lowerName[0]);
@@ -915,7 +915,7 @@ namespace {
 
   class EnumArgument : public Argument {
     std::string fullType;
-    StringRef shortType;
+    std::string shortType;
     std::vector<StringRef> values, enums, uniques;
     bool isExternal;
     bool isCovered;
@@ -927,13 +927,14 @@ namespace {
           uniques(uniqueEnumsInOrder(enums)),
           isExternal(Arg.getValueAsBit("IsExternalType")),
           isCovered(Arg.getValueAsBit("IsCovered")) {
-      StringRef Type = Arg.getValueAsString("Type");
-      shortType = isExternal ? Type.rsplit("::").second : Type;
+      std::string type = Arg.getValueAsString("Type").str();
+      StringRef typeRef(type);
+      shortType = isExternal ? typeRef.rsplit("::").second.str() : type;
       // If shortType didn't contain :: at all rsplit will give us an empty
       // string.
       if (shortType.empty())
-        shortType = Type;
-      fullType = isExternal ? Type : (getAttrName() + "Attr::" + Type).str();
+        shortType = type;
+      fullType = isExternal ? type : (getAttrName().str() + "Attr::" + type);
 
       // FIXME: Emit a proper error
       assert(!uniques.empty());
@@ -1064,7 +1065,7 @@ namespace {
 
   class VariadicEnumArgument: public VariadicArgument {
     std::string fullType;
-    StringRef shortType;
+    std::string shortType;
     std::vector<StringRef> values, enums, uniques;
     bool isExternal;
     bool isCovered;
@@ -1087,13 +1088,14 @@ namespace {
           uniques(uniqueEnumsInOrder(enums)),
           isExternal(Arg.getValueAsBit("IsExternalType")),
           isCovered(Arg.getValueAsBit("IsCovered")) {
-      StringRef Type = Arg.getValueAsString("Type");
-      shortType = isExternal ? Type.rsplit("::").second : Type;
+      std::string type = Arg.getValueAsString("Type").str();
+      StringRef typeRef(type);
+      shortType = isExternal ? typeRef.rsplit("::").second.str() : type;
       // If shortType didn't contain :: at all rsplit will give us an empty
       // string.
       if (shortType.empty())
-        shortType = Type;
-      fullType = isExternal ? Type : (getAttrName() + "Attr::" + Type).str();
+        shortType = type;
+      fullType = isExternal ? type : (getAttrName().str() + "Attr::" + type);
 
       // FIXME: Emit a proper error
       assert(!uniques.empty());
@@ -1681,13 +1683,14 @@ writePrettyPrintFunction(const Record &R,
           continue;
         if (FoundNonOptArg)
           continue;
+        const std::string IsOmitted = arg->getIsOmitted();
         // FIXME: arg->getIsOmitted() == "false" means we haven't implemented
         // any way to detect whether the argument was omitted.
-        if (!arg->isOptional() || arg->getIsOmitted() == "false") {
+        if (!arg->isOptional() || IsOmitted == "false") {
           FoundNonOptArg = true;
           continue;
         }
-        OS << "    if (" << arg->getIsOmitted() << ")\n"
+        OS << "    if (" << IsOmitted << ")\n"
            << "      ++TrailingOmittedArgs;\n";
       }
       unsigned ArgIndex = 0;

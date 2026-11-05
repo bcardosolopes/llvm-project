@@ -169,12 +169,14 @@ def ClauseTaskDependInOut : I32EnumAttrCase<"taskdependinout", 2>;
 def ClauseTaskDependMutexInOutSet
     : I32EnumAttrCase<"taskdependmutexinoutset", 3>;
 def ClauseTaskDependInOutSet : I32EnumAttrCase<"taskdependinoutset", 4>;
+def ClauseTaskDependList : I32EnumAttrCase<"taskdependlist", 5>;
 
 def ClauseTaskDepend
     : OpenMP_I32EnumAttr<
           "ClauseTaskDepend", "depend clause in a target or task construct",
           [ClauseTaskDependIn, ClauseTaskDependOut, ClauseTaskDependInOut,
-           ClauseTaskDependMutexInOutSet, ClauseTaskDependInOutSet]>;
+           ClauseTaskDependMutexInOutSet, ClauseTaskDependInOutSet,
+           ClauseTaskDependList]>;
 
 def ClauseTaskDependAttr : OpenMP_EnumAttr<ClauseTaskDepend,
                                            "clause_task_depend"> {
@@ -221,6 +223,37 @@ def DeclareTargetDeviceTypeAttr : OpenMP_EnumAttr<DeclareTargetDeviceType,
                                                   "device_type"> {
   let assemblyFormat = "`(` $value `)`";
 }
+
+//===----------------------------------------------------------------------===//
+// num_threads_modifier enum.
+//===----------------------------------------------------------------------===//
+
+def NumThreadsModifierStrict : I32EnumAttrCase<"strict", 0>;
+
+def NumThreadsModifier : OpenMP_I32EnumAttr<
+    "NumThreadsModifier",
+    "OpenMP num_threads modifier", [
+      NumThreadsModifierStrict
+    ]>;
+
+def NumThreadsModifierAttr : OpenMP_EnumAttr<NumThreadsModifier,
+                                             "num_threads_modifier">;
+
+//===----------------------------------------------------------------------===//
+// severity_kind enum.
+//===----------------------------------------------------------------------===//
+
+def SeverityKindFatal : I32EnumAttrCase<"fatal", 0>;
+def SeverityKindWarning : I32EnumAttrCase<"warning", 1>;
+
+def SeverityKind : OpenMP_I32EnumAttr<
+    "SeverityKind",
+    "OpenMP severity kind", [
+      SeverityKindFatal,
+      SeverityKindWarning
+    ]>;
+
+def SeverityKindAttr : OpenMP_EnumAttr<SeverityKind, "severity_kind">;
 
 //===----------------------------------------------------------------------===//
 // order_modifer enum.

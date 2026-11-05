@@ -91,8 +91,7 @@ __m128i test_mm_roti_epi64(__m128i a) {
 __m128i test_mm_com_epu8(__m128i a, __m128i b) {
   // CIR-LABEL: test_mm_com_epu8
   // CIR: %[[CMP:.*]] = cir.vec.cmp(lt, %{{.*}}, %{{.*}}) : !cir.vector<16 x !u8i>, !cir.vector<16 x !s8i>
-  // CIR: %[[RES:.*]] = cir.cast bitcast %[[CMP]] : !cir.vector<16 x !s8i> -> !cir.vector<2 x !s64i>
-
+  // CIR: cir.cast bitcast %{{.*}} : !cir.vector<16 x !{{[su]}}8i> -> !cir.vector<2 x !s64i>
   // LLVM-LABEL: test_mm_com_epu8
   // LLVM: %[[CMP:.*]] = icmp ult <16 x i8> %{{.*}}, %{{.*}}
   // LLVM: %[[RES:.*]] = sext <16 x i1> %[[CMP]] to <16 x i8>
@@ -217,8 +216,7 @@ __m128i test_mm_com_epu64(__m128i a, __m128i b) {
 __m128i test_mm_com_epi8(__m128i a, __m128i b) {
   // CIR-LABEL: test_mm_com_epi8
   // CIR: %[[CMP:.*]] = cir.vec.cmp(lt, %{{.*}}, %{{.*}}) : !cir.vector<16 x !s8i>, !cir.vector<16 x !s8i>
-  // CIR: %[[RES:.*]] = cir.cast bitcast %[[CMP]] : !cir.vector<16 x !s8i> -> !cir.vector<2 x !s64i>
-
+  // CIR: cir.cast bitcast %{{.*}} : !cir.vector<16 x !{{[su]}}8i> -> !cir.vector<2 x !s64i>
   // LLVM-LABEL: test_mm_com_epi8
   // LLVM: %[[CMP:.*]] = icmp slt <16 x i8> %{{.*}}, %{{.*}}
   // LLVM: %[[RES:.*]] = sext <16 x i1> %[[CMP]] to <16 x i8>
@@ -330,9 +328,7 @@ __m128i test_mm_com_epi32_false(__m128i a, __m128i b) {
   // CIR: %{{.*}} = cir.cast bitcast %[[ZERO]] : !cir.vector<4 x !s32i> -> !cir.vector<2 x !s64i>
 
   // LLVM-LABEL: test_mm_com_epi32_false
-  // LLVM: store <2 x i64> zeroinitializer, ptr %[[A:.*]], align 16
-  // LLVM: %[[ZERO:.*]] = load <2 x i64>, ptr %[[A]], align 16
-  // LLVM: ret <2 x i64> %[[ZERO]]
+  // LLVM: ret <2 x i64> zeroinitializer
 
   // OGCG-LABEL: test_mm_com_epi32_false
   // OGCG: ret <2 x i64> zeroinitializer
@@ -345,9 +341,7 @@ __m128i test_mm_com_epu32_false(__m128i a, __m128i b) {
   // CIR: %{{.*}} = cir.cast bitcast %[[ZERO]] : !cir.vector<4 x !s32i> -> !cir.vector<2 x !s64i>
 
   // LLVM-LABEL: test_mm_com_epu32_false
-  // LLVM: store <2 x i64> zeroinitializer, ptr %[[A:.*]], align 16
-  // LLVM: %[[ZERO:.*]] = load <2 x i64>, ptr %[[A]], align 16
-  // LLVM: ret <2 x i64> %[[ZERO]]
+  // LLVM: ret <2 x i64> zeroinitializer
 
   // OGCG-LABEL: test_mm_com_epu32_false
   // OGCG: ret <2 x i64> zeroinitializer
@@ -361,9 +355,7 @@ __m128i test_mm_com_epi32_true(__m128i a, __m128i b) {
   // CIR: %{{.*}} = cir.cast bitcast %[[SPLAT]] : !cir.vector<4 x !s32i> -> !cir.vector<2 x !s64i>
 
   // LLVM-LABEL: test_mm_com_epi32_true
-  // LLVM: store <2 x i64> splat (i64 -1), ptr %[[VAL:.*]], align 16
-  // LLVM: %[[SPLAT:.*]] = load <2 x i64>, ptr %[[VAL]], align 16
-  // LLVM: ret <2 x i64> %[[SPLAT]]
+  // LLVM: ret <2 x i64> splat (i64 -1)
 
   // OGCG-LABEL: test_mm_com_epi32_true
   // OGCG: ret <2 x i64> splat (i64 -1)
@@ -377,9 +369,7 @@ __m128i test_mm_com_epu32_true(__m128i a, __m128i b) {
   // CIR: %{{.*}} = cir.cast bitcast %[[SPLAT]] : !cir.vector<4 x !s32i> -> !cir.vector<2 x !s64i>
 
   // LLVM-LABEL: test_mm_com_epu32_true
-  // LLVM: store <2 x i64> splat (i64 -1), ptr %[[VAL:.*]], align 16
-  // LLVM: %[[SPLAT:.*]] = load <2 x i64>, ptr %[[VAL]], align 16
-  // LLVM: ret <2 x i64> %[[SPLAT]]
+  // LLVM: ret <2 x i64> splat (i64 -1)
 
   // OGCG-LABEL: test_mm_com_epu32_true
   // OGCG: ret <2 x i64> splat (i64 -1)

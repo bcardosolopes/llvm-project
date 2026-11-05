@@ -1,6 +1,8 @@
 // Verifies lifetime of __gro local variable
 // Verify that coroutine promise and allocated memory are freed up on exception.
 // RUN: %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -emit-llvm -o - %s -disable-llvm-passes | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -fcxx-exceptions -fexceptions -fclangir -emit-cir -o - %s | FileCheck %s --check-prefix=CIR %}
+// RUN: %if cir-support %{ %clang_cc1 -std=c++20 -triple=x86_64-unknown-linux-gnu -fcxx-exceptions -fexceptions -fclangir -emit-llvm -o - %s -disable-llvm-passes | FileCheck %s --check-prefix=CIR-LLVM %}
 
 #include "Inputs/coroutine.h"
 
@@ -27,6 +29,19 @@ struct Cleanup { ~Cleanup(); };
 void doSomething() noexcept;
 
 // CHECK: define{{.*}} i32 @_Z1fv(
+// CIR-LABEL: cir.func coroutine no_inline optnone dso_local @_Z1fv()
+// CIR: %[[CIRPromise:.+]] = cir.alloca !rec_std3A3Acoroutine_traits3Cint3E3A3Apromise_type, !cir.ptr<!rec_std3A3Acoroutine_traits3Cint3E3A3Apromise_type>, ["__promise", init]
+// CIR: cir.call exception @_ZNSt16coroutine_traitsIiJEE12promise_typeC1Ev(
+// CIR: cir.call @__builtin_coro_free(
+// CIR: cir.call @_ZdlPvm(
+// CIR-LLVM-LABEL: define dso_local noundef i32 @_Z1fv() {{.*}} personality ptr @__gxx_personality_v0 {
+// CIR-LLVM: %[[LLPromise:[0-9]+]] = alloca %"struct.std::coroutine_traits<int>::promise_type", i64 1, align 1
+// CIR-LLVM: %[[LLCoroId:[0-9]+]] = call token @llvm.coro.id(i32 16, ptr %[[LLPromise]], ptr null, ptr null)
+// CIR-LLVM: %[[LLCoroFrame:[0-9]+]] = call ptr @llvm.coro.begin(token %[[LLCoroId]], ptr %{{[0-9]+}})
+// CIR-LLVM: invoke void @_ZNSt16coroutine_traitsIiJEE12promise_typeC1Ev(
+// CIR-LLVM: landingpad { ptr, i32 }
+// CIR-LLVM: cleanup
+// CIR-LLVM: call void @_ZdlPvm(ptr noundef %{{.*}}, i64 noundef %{{.*}})
 int f() {
   // CHECK: %[[RetVal:.+]] = alloca i32
   // CHECK-NEXT: %[[GroActive:.+]] = alloca i1
@@ -88,6 +103,72 @@ int f() {
   // CHECK-NEXT: call void @llvm.lifetime.end.p0(ptr %[[Promise]])
   // CHECK-NEXT: %[[Mem:.+]] = call ptr @llvm.coro.free(
 
+  // On the fallthrough-completion path the is_in_ramp-guarded delayed
+  // get-return-object conversion runs before the GRO temporary and the promise
+  // are destroyed, and between final suspend and the frame free each of them is
+  // destroyed exactly once. The -NOT directives pin both halves: the bug this
+  // pins double-destroyed the GRO temporary as well as the promise.
+  // CIR: cir.call @_ZNSt16coroutine_traitsIiJEE12promise_type13final_suspendEv(%[[CIRPromise]])
+  // CIR-NOT: cir.call @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-NOT: cir.call @_ZN7GroTypeD1Ev(
+  // CIR: cir.lifetime.end %{{.+}} : !cir.ptr<!rec_std3A3Asuspend_always>
+  // CIR-NOT: cir.call @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-NOT: cir.call @_ZN7GroTypeD1Ev(
+  // CIR: cir.label "_Z1fv.__coro_destroy"
+  // CIR-NEXT: %[[CIRInRamp:.+]] = cir.call @__builtin_coro_is_in_ramp() : () -> !cir.bool
+  // CIR-NEXT: cir.if %[[CIRInRamp]] {
+  // CIR-NEXT: %[[CIRConv:.+]] = cir.call @_ZN7GroTypecviEv(%[[CIRGro:[0-9]+]]) nothrow
+  // CIR-NEXT: cir.store align(4) %[[CIRConv]], %[[CIRRet:[0-9]+]] : !s32i, !cir.ptr<!s32i>
+  // CIR-NEXT: } {cir.coro_gro_conv}
+  // CIR-NEXT: cir.call @_ZN7GroTypeD1Ev(%[[CIRGro]]) nothrow
+  // CIR-NEXT: cir.lifetime.end %[[CIRGro]] : !cir.ptr<!rec_GroType>
+  // CIR-NEXT: cir.call @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(%[[CIRPromise]])
+  // CIR-NEXT: cir.lifetime.end %[[CIRPromise]] : !cir.ptr<!rec_std3A3Acoroutine_traits3Cint3E3A3Apromise_type>
+  // CIR-NOT: cir.call @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-NOT: cir.call @_ZN7GroTypeD1Ev(
+  // CIR-NOT: cir.store {{.*}}, %[[CIRRet]] :
+  // CIR: %[[CIRMem:.+]] = cir.call @__builtin_coro_free(
+  // CIR-NOT: cir.call @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-NOT: cir.call @_ZN7GroTypeD1Ev(
+  // CIR-NOT: cir.store {{.*}}, %[[CIRRet]] :
+  // The slot the conversion wrote is the one `f()` returns, unwritten since.
+  // CIR: %[[CIRRetVal:.+]] = cir.load %[[CIRRet]] : !cir.ptr<!s32i>, !s32i
+  // CIR-NEXT: cir.return %[[CIRRetVal]]
+
+  // FlattenCFG also clones the guarded conversion onto every suspend-return
+  // edge, so walk in from the final suspend to pin the fallthrough copy rather
+  // than one of the clones.
+  // CIR-LLVM: call void @_ZNSt16coroutine_traitsIiJEE12promise_type13final_suspendEv(ptr{{.*}} %[[LLPromise]])
+  // CIR-LLVM-NEXT: call noundef zeroext i1 @_ZNSt14suspend_always11await_readyEv(ptr{{.*}} %[[LLAwaiter:[0-9]+]])
+  // CIR-LLVM-NOT: call void @_ZN7GroTypeD1Ev(
+  // CIR-LLVM-NOT: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-LLVM: call void @_ZNSt14suspend_always12await_resumeEv(ptr{{.*}} %[[LLAwaiter]])
+  // CIR-LLVM-NEXT: br label %[[LLAwaitEndBB:[0-9]+]]
+  // CIR-LLVM: {{^}}[[LLAwaitEndBB]]:
+  // CIR-LLVM-NEXT: call void @llvm.lifetime.end.p0(ptr %[[LLAwaiter]])
+  // CIR-LLVM-NEXT: br label %[[LLRampBB:[0-9]+]]
+  // CIR-LLVM: {{^}}[[LLRampBB]]:
+  // CIR-LLVM-NEXT: %[[LLInRamp:[0-9]+]] = call i1 @llvm.coro.is_in_ramp()
+  // CIR-LLVM-NEXT: br i1 %[[LLInRamp]], label %[[LLConvBB:[0-9]+]], label %[[LLCleanupBB:[0-9]+]]
+  // CIR-LLVM: {{^}}[[LLConvBB]]:
+  // CIR-LLVM-NEXT: %[[LLConv:[0-9]+]] = call noundef i32 @_ZN7GroTypecviEv(ptr{{.*}} %[[LLGro:[0-9]+]])
+  // CIR-LLVM-NEXT: store i32 %[[LLConv]], ptr %[[LLRet:[0-9]+]], align 4
+  // CIR-LLVM-NEXT: br label %[[LLCleanupBB]]
+  // CIR-LLVM: {{^}}[[LLCleanupBB]]:
+  // CIR-LLVM-NEXT: call void @_ZN7GroTypeD1Ev(ptr{{.*}} %[[LLGro]])
+  // CIR-LLVM-NEXT: call void @llvm.lifetime.end.p0(ptr %[[LLGro]])
+  // CIR-LLVM-NEXT: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(ptr{{.*}} %[[LLPromise]])
+  // CIR-LLVM-NEXT: call void @llvm.lifetime.end.p0(ptr %[[LLPromise]])
+  // CIR-LLVM-NOT: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-LLVM-NOT: call void @_ZN7GroTypeD1Ev(
+  // CIR-LLVM-NOT: store i32 {{.*}}, ptr %[[LLRet]],
+  // CIR-LLVM: %[[LLMem:[0-9]+]] = call ptr @llvm.coro.free(token %[[LLCoroId]], ptr %[[LLCoroFrame]])
+  // CIR-LLVM-NOT: call void @_ZNSt16coroutine_traitsIiJEE12promise_typeD1Ev(
+  // CIR-LLVM-NOT: call void @_ZN7GroTypeD1Ev(
+  // CIR-LLVM-NOT: store i32 {{.*}}, ptr %[[LLRet]],
+  // CIR-LLVM: %[[LLRetVal:[0-9]+]] = load i32, ptr %[[LLRet]], align 4
+  // CIR-LLVM-NEXT: ret i32 %[[LLRetVal]]
+
   // CHECK: %[[SIZE:.+]] = call i64 @llvm.coro.size.i64()
   // CHECK-NEXT: call void @_ZdlPvm(ptr noundef %[[Mem]], i64 noundef %[[SIZE]])
 
@@ -118,6 +199,15 @@ public:
 // According to cwg2563, matching GRO and function return type must allow
 // for eager initialization and RVO.
 // CHECK: define{{.*}} void @_Z1gv({{.*}} %[[AggRes:.+]])
+// CIR-LABEL: cir.func coroutine no_inline optnone dso_local @_Z1gv(
+// CIR: cir.call exception @_ZN7invoker15invoker_promise17get_return_objectEv(
+// CIR: cir.call @__builtin_coro_free(
+// CIR: cir.call @_ZdlPvm(
+// CIR-LLVM-LABEL: define dso_local void @_Z1gv({{.*}} personality ptr @__gxx_personality_v0 {
+// CIR-LLVM: invoke void @_ZN7invoker15invoker_promise17get_return_objectEv(
+// CIR-LLVM: landingpad { ptr, i32 }
+// CIR-LLVM: cleanup
+// CIR-LLVM: call void @_ZdlPvm(ptr noundef %{{.*}}, i64 noundef %{{.*}})
 invoker g() {
   // CHECK: %[[ResultPtr:.+]] = alloca ptr
   // CHECK-NEXT: %[[Promise:.+]] = alloca %"class.invoker::invoker_promise"

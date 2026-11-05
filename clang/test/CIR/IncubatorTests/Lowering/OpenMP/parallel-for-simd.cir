@@ -1,0 +1,32 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @omp_parallel_for_simd_1() {
+    %c0_i32 = llvm.mlir.constant(0 : i32) : i32
+    %c8_i32 = llvm.mlir.constant(8 : i32) : i32
+    %c1_i32 = llvm.mlir.constant(1 : i32) : i32
+    omp.parallel {
+      omp.wsloop nowait {
+        omp.simd {
+          omp.loop_nest (%i) : i32 = (%c0_i32) to (%c8_i32) step (%c1_i32) {
+            cir.call @work() : () -> ()
+            omp.yield
+          }
+        } {omp.composite}
+      } {omp.composite}
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @work() loc(#loc1)
+}
+
+#loc1 = loc("parallel-for-simd.cir":1:1)
+
+// CHECK-LABEL: define void @omp_parallel_for_simd_1()
+// CHECK: call void (ptr, i32, ptr, ...) @__kmpc_fork_call(
+// CHECK-LABEL: define internal void @omp_parallel_for_simd_1..omp_par
+// CHECK: call void @__kmpc_for_static_init_4{{u?}}(
+// CHECK-NOT: call void @__kmpc_barrier(
+// CHECK: ret void

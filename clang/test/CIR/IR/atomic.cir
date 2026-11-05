@@ -2,6 +2,8 @@
 
 !s32i = !cir.int<s, 32>
 !u32i = !cir.int<u, 32>
+!s8i = !cir.int<s, 8>
+!u8i = !cir.int<u, 8>
 
 cir.func @atomic_xchg(%ptr: !cir.ptr<!s32i>, %val: !s32i) {
   // CHECK-LABEL: @atomic_xchg
@@ -30,5 +32,52 @@ cir.func @atomic_cmpxchg(%ptr: !cir.ptr<!s32i>, %expected: !s32i, %desired: !s32
   // CHECK: cir.atomic.cmpxchg success(seq_cst) failure(acquire) %{{.+}}, %{{.+}}, %{{.+}} : (!cir.ptr<!s32i>, !s32i, !s32i) -> (!s32i, !cir.bool)
   %6, %7 = cir.atomic.cmpxchg weak success(seq_cst) failure(acquire) %ptr, %expected, %desired : (!cir.ptr<!s32i>, !s32i, !s32i) -> (!s32i, !cir.bool)
   // CHECK: cir.atomic.cmpxchg weak success(seq_cst) failure(acquire) %{{.+}}, %{{.+}}, %{{.+}} : (!cir.ptr<!s32i>, !s32i, !s32i) -> (!s32i, !cir.bool)
+  cir.return
+}
+
+cir.func @atomic_xchg_syncscope(%ptr: !cir.ptr<!s32i>, %val: !s32i) {
+  // CHECK-LABEL: @atomic_xchg_syncscope
+  %0 = cir.atomic.xchg seq_cst %ptr, %val syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  // CHECK: cir.atomic.xchg seq_cst %{{.+}}, %{{.+}} syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  %1 = cir.atomic.xchg seq_cst %ptr, %val syncscope(system) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  // CHECK: cir.atomic.xchg seq_cst %{{.+}}, %{{.+}} syncscope(system) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  cir.return
+}
+
+cir.func @atomic_fetch_syncscope(%ptr: !cir.ptr<!s32i>, %val: !s32i) {
+  // CHECK-LABEL: @atomic_fetch_syncscope
+  %0 = cir.atomic.fetch add seq_cst fetch_first %ptr, %val syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  // CHECK: cir.atomic.fetch add seq_cst fetch_first %{{.+}}, %{{.+}} syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  %1 = cir.atomic.fetch sub seq_cst %ptr, %val syncscope(system) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  // CHECK: cir.atomic.fetch sub seq_cst %{{.+}}, %{{.+}} syncscope(system) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+  cir.return
+}
+
+cir.func @atomic_test_and_set_syncscope(%ptr: !cir.ptr<!s8i>) {
+  // CHECK-LABEL: @atomic_test_and_set_syncscope
+  %0 = cir.atomic.test_and_set seq_cst %ptr syncscope(single_thread) : !cir.ptr<!s8i> -> !cir.bool {alignment = 1 : i64}
+  // CHECK: cir.atomic.test_and_set seq_cst %{{.+}} syncscope(single_thread) : !cir.ptr<!s8i> -> !cir.bool
+  cir.return
+}
+
+cir.func @atomic_clear_syncscope(%ptr: !cir.ptr<!s8i>) {
+  // CHECK-LABEL: @atomic_clear_syncscope
+  cir.atomic.clear seq_cst %ptr syncscope(single_thread) : !cir.ptr<!s8i> {alignment = 1 : i64}
+  // CHECK: cir.atomic.clear seq_cst %{{.+}} syncscope(single_thread) : !cir.ptr<!s8i>
+  cir.return
+}
+
+// Verify that unsigned i8 pointers are accepted (AArch64 char is unsigned).
+cir.func @atomic_test_and_set_unsigned(%ptr: !cir.ptr<!u8i>) {
+  // CHECK-LABEL: @atomic_test_and_set_unsigned
+  %0 = cir.atomic.test_and_set seq_cst %ptr : !cir.ptr<!u8i> -> !cir.bool {alignment = 1 : i64}
+  // CHECK: cir.atomic.test_and_set seq_cst %{{.+}} : !cir.ptr<!u8i> -> !cir.bool
+  cir.return
+}
+
+cir.func @atomic_clear_unsigned(%ptr: !cir.ptr<!u8i>) {
+  // CHECK-LABEL: @atomic_clear_unsigned
+  cir.atomic.clear seq_cst %ptr : !cir.ptr<!u8i> {alignment = 1 : i64}
+  // CHECK: cir.atomic.clear seq_cst %{{.+}} : !cir.ptr<!u8i>
   cir.return
 }

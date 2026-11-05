@@ -1,0 +1,15 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+#call_attrs = #cir<extra({"no-builtins", "no-builtin-sin"})>
+
+module {
+  cir.func private @callee() -> ()
+
+  cir.func @caller() {
+    cir.call @callee() : () -> () extra(#call_attrs)
+    cir.return
+  }
+}
+
+// CHECK: llvm.call @callee() {{.*}}"cir.call_no-builtin-sin"
+// CHECK-SAME: "cir.call_no-builtins"

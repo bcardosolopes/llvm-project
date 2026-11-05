@@ -1,0 +1,173 @@
+// RUN: cir-opt -cir-tail-merge %s -o - | FileCheck %s
+
+// cir-tail-merge folds the cleanup copies CIRGen emits per exit edge back into
+// one block, restoring the shape classic codegen produces. It runs on a flat
+// CFG, so the blocks it pairs up either return or branch unconditionally to the
+// same successor.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func private @release(!cir.ptr<!s32i>)
+  cir.func private @use(!s32i) -> !s32i
+
+  // Both exits run the same cleanup on the same object, so it moves into a
+  // block they share -- and each of them is left as a bare branch, which gets
+  // folded away rather than left as an extra hop.
+  cir.func @two_returns(%arg0: !cir.bool) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["v"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  ^bb2:
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @two_returns
+  // CHECK:         cir.brcond %arg0 ^bb1, ^bb1
+  // CHECK:       ^bb1:
+  // CHECK-NEXT:    cir.call @release
+  // CHECK-NEXT:    cir.return
+  // CHECK-NOT:     cir.call @release
+
+  // Same for exits that share a successor instead of returning: the tail lands
+  // in a new block that branches on to it.
+  cir.func @shared_successor(%arg0: !cir.bool) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["v"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.br ^bb3
+  ^bb2:
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.br ^bb3
+  ^bb3:
+    %1 = cir.const #cir.int<0> : !s32i
+    cir.store %1, %0 : !s32i, !cir.ptr<!s32i>
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @shared_successor
+  // CHECK:         cir.brcond %arg0 ^bb1, ^bb1
+  // CHECK:       ^bb1:
+  // CHECK-NEXT:    cir.call @release
+  // CHECK-NEXT:    cir.br ^bb2
+  // CHECK-NOT:     cir.call @release
+
+  // The two tails are only the same shape, not the same computation: each
+  // releases its own object, so there is nothing to share.
+  cir.func @distinct_objects(%arg0: !cir.bool) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a"] {alignment = 4 : i64}
+    %1 = cir.alloca !s32i, !cir.ptr<!s32i>, ["b"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  ^bb2:
+    cir.call @release(%1) : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @distinct_objects
+  // CHECK-COUNT-2: cir.call @release
+  // CHECK-NOT:     cir.call @release
+
+  // Only the part of the tail that agrees moves. Here the inner release is
+  // common but the call in front of it is not, so the merge stops there.
+  cir.func @partial_tail(%arg0: !cir.bool, %arg1: !s32i) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["v"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    %1 = cir.call @use(%arg1) : (!s32i) -> !s32i
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  ^bb2:
+    cir.call @release(%0) : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @partial_tail
+  // CHECK:         cir.call @use
+  // CHECK:         cir.call @release
+  // CHECK-NOT:     cir.call @release
+
+  // A tail with no call in it is not worth moving: the duplicated instructions
+  // are free, and the payoff of this pass is getting a handler back down to one
+  // call site so the -Oz inliner takes it.
+  cir.func @no_call(%arg0: !cir.bool) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["v"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    %1 = cir.const #cir.int<7> : !s32i
+    cir.store %1, %0 : !s32i, !cir.ptr<!s32i>
+    cir.return
+  ^bb2:
+    %2 = cir.const #cir.int<7> : !s32i
+    cir.store %2, %0 : !s32i, !cir.ptr<!s32i>
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @no_call
+  // CHECK-COUNT-2: cir.store
+  // CHECK-NOT:     cir.store
+
+  // Lifetime markers are the exception to that. They cost nothing themselves,
+  // but one sitting on each exit edge is enough to stop SimplifyCFG from
+  // folding two branches to a common destination, so getting them down to one
+  // copy is worth a merge even though no call is involved.
+  cir.func @markers_only(%arg0: !cir.bool, %arg1: !cir.bool) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["v"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.return
+  ^bb2:
+    cir.brcond %arg1 ^bb3, ^bb4
+  ^bb3:
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.return
+  ^bb4:
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @markers_only
+  // CHECK:         cir.lifetime.end
+  // CHECK-NOT:     cir.lifetime.end
+
+  // A marker-only tail still has to be the same marker on the same object.
+  cir.func @markers_distinct_objects(%arg0: !cir.bool) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a"] {alignment = 4 : i64}
+    %1 = cir.alloca !s32i, !cir.ptr<!s32i>, ["b"] {alignment = 4 : i64}
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.return
+  ^bb2:
+    cir.lifetime.end %1 : !cir.ptr<!s32i>
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @markers_distinct_objects
+  // CHECK-COUNT-2: cir.lifetime.end
+  // CHECK-NOT:     cir.lifetime.end
+
+  // The merged block's terminator reads its own block arguments, which the
+  // predecessors forward, so anything the terminator names has to stay behind
+  // in them -- including a value the tail itself computed.
+  cir.func @result_is_returned(%arg0: !cir.bool, %arg1: !s32i) -> !s32i {
+    cir.brcond %arg0 ^bb1, ^bb2
+  ^bb1:
+    %0 = cir.call @use(%arg1) : (!s32i) -> !s32i
+    cir.return %0 : !s32i
+  ^bb2:
+    %1 = cir.call @use(%arg1) : (!s32i) -> !s32i
+    cir.return %1 : !s32i
+  }
+
+  // CHECK-LABEL: cir.func @result_is_returned
+  // CHECK-COUNT-2: cir.call @use
+  // CHECK-NOT:     cir.call @use
+}

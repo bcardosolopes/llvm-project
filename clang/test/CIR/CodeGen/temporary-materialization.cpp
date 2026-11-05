@@ -20,10 +20,9 @@ int test() {
 // CIR-NEXT:   cir.store{{.*}} %[[TEMP_SLOT]], %[[X]]
 
 // LLVM: define {{.*}} i32 @_Z4testv()
-// LLVM:   %[[RETVAL:.*]] = alloca i32
 // LLVM:   %[[TEMP_SLOT:.*]] = alloca i32
 // LLVM:   %[[X:.*]] = alloca ptr
-// LLVM:   %[[TEMP_VALUE:.*]] = call i32 @_Z8make_intv()
+// LLVM:   %[[TEMP_VALUE:.*]] = call noundef i32 @_Z8make_intv()
 // LLVM:   store i32 %[[TEMP_VALUE]], ptr %[[TEMP_SLOT]]
 // LLVM:   store ptr %[[TEMP_SLOT]], ptr %[[X]]
 
@@ -59,18 +58,17 @@ int test_scoped() {
 // LLVM: define {{.*}} i32 @_Z11test_scopedv()
 // LLVM:   %[[TEMP_SLOT:.*]] = alloca i32
 // LLVM:   %[[Y_ADDR:.*]] = alloca ptr
-// LLVM:   %[[RETVAL:.*]] = alloca i32
 // LLVM:   %[[X:.*]] = alloca i32
-// LLVM:   %[[TEMP_VALUE1:.*]] = call i32 @_Z8make_intv()
+// LLVM:   %[[TEMP_VALUE1:.*]] = call noundef i32 @_Z8make_intv()
 // LLVM:   store i32 %[[TEMP_VALUE1]], ptr %[[X]]
-// LLVM:   br label %[[SCOPE_LABEL:.*]]
-// LLVM: [[SCOPE_LABEL]]:
-// LLVM:   %[[TEMP_VALUE2:.*]] = call i32 @_Z8make_intv()
+// LLVM:   %[[TEMP_VALUE2:.*]] = call noundef i32 @_Z8make_intv()
 // LLVM:   store i32 %[[TEMP_VALUE2]], ptr %[[TEMP_SLOT]]
 // LLVM:   store ptr %[[TEMP_SLOT]], ptr %[[Y_ADDR]]
 // LLVM:   %[[Y_REF:.*]] = load ptr, ptr %[[Y_ADDR]]
 // LLVM:   %[[Y_VALUE:.*]] = load i32, ptr %[[Y_REF]]
 // LLVM:   store i32 %[[Y_VALUE]], ptr %[[X]]
+// LLVM:   %[[RESULT:.*]] = load i32, ptr %[[X]]
+// LLVM:   ret i32 %[[RESULT]]
 
 // OGCG: define {{.*}} i32 @_Z11test_scopedv()
 // OGCG:   %[[X:.*]] = alloca i32

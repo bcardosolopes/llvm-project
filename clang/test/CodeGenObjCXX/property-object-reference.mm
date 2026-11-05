@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 %s -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -disable-llvm-passes -fclangir -o - | FileCheck %s %}
 
 struct Foo {int i;};
 static Foo gFoo;
@@ -29,4 +30,3 @@ static Foo gFoo;
 // CHECK: [[R0:%.*]] = load {{.*}} [[U0:%.*]]
 // CHECK: load ptr, ptr @OBJC_SELECTOR_REFERENCES_
 // CHECK:  @objc_msgSend
-

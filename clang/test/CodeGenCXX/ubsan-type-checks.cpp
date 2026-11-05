@@ -3,6 +3,7 @@
 // RUN: %clang_cc1 -std=c++11 -triple x86_64-apple-darwin10 -emit-llvm -o - %s -fsanitize=object-size | FileCheck %s -check-prefixes=OBJSIZE,COMMON
 // RUN: %clang_cc1 -std=c++11 -triple x86_64-apple-darwin10 -emit-llvm -o - %s -fsanitize=null,vptr | FileCheck %s -check-prefixes=VPTR
 // RUN: %clang_cc1 -std=c++11 -triple x86_64-apple-darwin10 -emit-llvm -o - %s -fsanitize=vptr | FileCheck %s -check-prefixes=VPTR_NO_NULL
+// RUN: %if cir-support %{ %clang_cc1 -std=c++11 -triple x86_64-apple-darwin10 -emit-llvm -o - %s -fsanitize=vptr -fclangir | FileCheck %s -check-prefix=VPTR_NO_NULL_CIR %}
 
 struct A {
   // COMMON-LABEL: define linkonce_odr void @_ZN1A10do_nothingEv
@@ -42,6 +43,7 @@ struct Dog : Animal {
   const char *speak() override { return "woof"; }
 };
 
+// VPTR_NO_NULL_CIR: [[DOG_DESC:@[0-9]+]] = private unnamed_addr global {{.*}} ptr @_ZTI3Dog, i8 4
 // VPTR-LABEL: define{{.*}} void @_Z12invalid_castP3Cat
 void invalid_cast(Cat *cat = nullptr) {
   // If -fsanitize=null is available, we'll reuse its check:
@@ -60,6 +62,7 @@ void invalid_cast(Cat *cat = nullptr) {
   // VPTR_NO_NULL: [[ICMP:%.*]] = icmp ne ptr {{.*}}, null
   // VPTR_NO_NULL-NEXT: br i1 [[ICMP]]
   // VPTR_NO_NULL: call void @__ubsan_handle_dynamic_type_cache_miss
+  // VPTR_NO_NULL_CIR: call void @__ubsan_handle_dynamic_type_cache_miss{{[_a-z]*}}(ptr [[DOG_DESC]],
   auto *badDog = reinterpret_cast<Dog *>(cat);
   badDog->speak();
 }

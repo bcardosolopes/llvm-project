@@ -19,7 +19,9 @@
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/Debug.h"
 
 #include "llvm/Support/DebugLog.h"
@@ -116,8 +118,9 @@ handleInlinedAllocas(Operation *call,
     // invalid IR, but LLVM cleans these up in InstCombineCalls.cpp, along with
     // other cases where the stacksave/stackrestore is redundant.
     stackPtr = LLVM::StackSaveOp::create(
-        builder, call->getLoc(),
-        LLVM::LLVMPointerType::get(call->getContext()));
+        builder, call->getLoc(), LLVM::LLVMPointerType::get(call->getContext()),
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
   }
   builder.setInsertionPointToStart(callerEntryBlock);
   for (auto &[allocaOp, arraySize, shouldInsertLifetime] : allocasToMove) {
@@ -142,7 +145,10 @@ handleInlinedAllocas(Operation *call,
       continue;
     builder.setInsertionPoint(block.getTerminator());
     if (hasDynamicAlloca)
-      LLVM::StackRestoreOp::create(builder, call->getLoc(), stackPtr);
+      LLVM::StackRestoreOp::create(builder, call->getLoc(), stackPtr,
+                                   /*alias_scopes=*/nullptr,
+                                   /*noalias_scopes=*/nullptr,
+                                   /*tbaa=*/nullptr, /*annotations=*/nullptr);
     for (auto &[allocaOp, arraySize, shouldInsertLifetime] : allocasToMove) {
       if (shouldInsertLifetime)
         LLVM::LifetimeEndOp::create(builder, allocaOp.getLoc(),
@@ -316,7 +322,11 @@ static void createNewAliasScopesFromNoAliasParameter(
     pointerScopes[copyOp] = scope;
 
     auto builder = OpBuilder(call);
-    LLVM::NoAliasScopeDeclOp::create(builder, call->getLoc(), scope);
+    LLVM::NoAliasScopeDeclOp::create(builder, call->getLoc(), scope,
+                                     /*alias_scopes=*/nullptr,
+                                     /*noalias_scopes=*/nullptr,
+                                     /*tbaa=*/nullptr,
+                                     /*annotations=*/nullptr);
   }
 
   // Go through every instruction and attempt to find which noalias parameters
@@ -483,6 +493,133 @@ static void handleAccessGroups(Operation *call,
           accessGroupOpInterface.getAccessGroupsOrNull(), accessGroups));
 }
 
+/// Returns true if `funcOp` lists `attrName` among its passthrough attributes.
+static bool hasPassthroughAttr(LLVM::LLVMFuncOp funcOp, StringRef attrName) {
+  std::optional<ArrayAttr> passthrough = funcOp.getPassthrough();
+  if (!passthrough)
+    return false;
+  return llvm::any_of(*passthrough, [&](Attribute attr) {
+    auto stringAttr = dyn_cast<StringAttr>(attr);
+    return stringAttr && stringAttr.getValue() == attrName;
+  });
+}
+
+/// Returns true if the body of `funcOp` contains a direct `llvm.call` to a
+/// function whose passthrough attributes include `attrName`. Mirrors the way
+/// `llvm::isInlineViable` and `CallAnalyzer::visitCallBase` inspect the callee
+/// body: only `llvm.call` is considered, since LLVM guards on
+/// `isa<CallInst>(Call)` and thereby exempts `invoke`, and the scan is not
+/// transitive into the callee's own callees.
+static bool callsFunctionWithPassthroughAttr(LLVM::LLVMFuncOp funcOp,
+                                             StringRef attrName) {
+  return funcOp
+      .walk([&](LLVM::CallOp callOp) {
+        // An indirect call carries the target in its operands; LLVM reads no
+        // attribute off it either, so skip rather than refuse.
+        FlatSymbolRefAttr callee = callOp.getCalleeAttr();
+        if (!callee)
+          return WalkResult::advance();
+        // The symbol may resolve to an alias, a global, or nothing at all.
+        auto target = SymbolTable::lookupNearestSymbolFrom<LLVM::LLVMFuncOp>(
+            callOp, callee);
+        if (target && hasPassthroughAttr(target, attrName))
+          return WalkResult::interrupt();
+        return WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
+/// Returns the type of the exception values of `funcOp` -- the result type of
+/// its `llvm.landingpad` ops and the operand type of its `llvm.resume` ops --
+/// or a null type if it has neither. `LLVMFuncOp::verify` requires all of them
+/// within one function to agree, so the first one found is representative.
+/// Deliberately recomputed at every query rather than cached: a caller that
+/// starts out free of exception handling acquires a type from the first callee
+/// inlined into it, and the next call site has to observe that.
+static Type getExceptionValueType(LLVM::LLVMFuncOp funcOp) {
+  Type type;
+  funcOp.walk([&](Operation *op) {
+    if (auto landingpadOp = dyn_cast<LLVM::LandingpadOp>(op))
+      type = landingpadOp.getType();
+    else if (auto resumeOp = dyn_cast<LLVM::ResumeOp>(op))
+      type = resumeOp.getValue().getType();
+    else
+      return WalkResult::advance();
+    return WalkResult::interrupt();
+  });
+  return type;
+}
+
+/// Adopts the callee's exception personality for a caller that does not have
+/// one. `isLegalToInline` has already established that the two do not conflict.
+/// This is not merely cosmetic: `LandingpadOp::verify` rejects an
+/// `llvm.landingpad` in a function without a personality, so a callee that
+/// carries landing pads would produce invalid IR once inlined.
+/// `callable` is the operation the inlined blocks came from. Use it rather than
+/// re-resolving the callee name: the inliner forwards a call through a private
+/// alias by inlining the aliasee, and in that case the name on the call is the
+/// `llvm.mlir.alias`, so a lookup for an `llvm.func` finds nothing and the
+/// personality would be silently dropped while the landing pads still move in.
+static void handlePersonality(Operation *call, Operation *callable) {
+  auto callerFuncOp = call->getParentOfType<LLVM::LLVMFuncOp>();
+  if (!callerFuncOp || callerFuncOp.getPersonalityAttr())
+    return;
+  auto calleeFuncOp = dyn_cast_if_present<LLVM::LLVMFuncOp>(callable);
+  if (!calleeFuncOp)
+    return;
+  if (FlatSymbolRefAttr personality = calleeFuncOp.getPersonalityAttr())
+    callerFuncOp.setPersonalityAttr(personality);
+}
+
+/// Returns true if the body of `funcOp` contains a `musttail` call.
+static bool containsMustTailCall(LLVM::LLVMFuncOp funcOp) {
+  return funcOp
+      .walk([](LLVM::CallOp callOp) {
+        return callOp.getTailCallKind() ==
+                       LLVM::tailcallkind::TailCallKind::MustTail
+                   ? WalkResult::interrupt()
+                   : WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
+/// Reduces the strength of tail calls in the inlined body, mirroring
+/// `llvm::InlineFunction`:
+///
+///   CallInst::TailCallKind ChildTCK = CI->getTailCallKind();
+///   if (ChildTCK != CallInst::TCK_NoTail)
+///     ChildTCK = std::min(CallSiteTailKind, ChildTCK);
+///   CI->setTailCallKind(ChildTCK);
+///
+/// `musttail` may only survive when the call site was musttail too; otherwise
+/// the program already has a frame of stack growth and the marker is
+/// unnecessary. Keeping it produces IR that LLVM's verifier rejects, because a
+/// musttail call has to immediately precede a return of its own value
+/// ("musttail call must precede a ret with an optional bitcast",
+/// llvm/lib/IR/Verifier.cpp). `notail` is left alone, as in LLVM.
+static void
+handleTailCallKinds(Operation *call,
+                    iterator_range<Region::iterator> inlinedBlocks) {
+  LLVM::tailcallkind::TailCallKind callSiteKind =
+      cast<LLVM::CallOp>(call).getTailCallKind();
+  // "For inlining purposes, the `notail` marker is the same as no marker."
+  // Without this, `notail` (3) compares as *stronger* than `musttail` (2) and
+  // the child marker would survive.
+  if (callSiteKind == LLVM::tailcallkind::TailCallKind::NoTail)
+    callSiteKind = LLVM::tailcallkind::TailCallKind::None;
+  for (Block &block : inlinedBlocks) {
+    block.walk([&](LLVM::CallOp inlinedCall) {
+      LLVM::tailcallkind::TailCallKind kind = inlinedCall.getTailCallKind();
+      if (kind == LLVM::tailcallkind::TailCallKind::NoTail)
+        return;
+      // The enumerators are ordered none < tail < musttail, matching
+      // llvm::CallInst::TailCallKind, so the weaker of the two wins.
+      if (callSiteKind < kind)
+        inlinedCall.setTailCallKind(callSiteKind);
+    });
+  }
+}
+
 /// Updates locations inside loop annotations to reflect that they were inlined.
 static void
 handleLoopAnnotations(Operation *call,
@@ -502,7 +639,7 @@ handleLoopAnnotations(Operation *call,
 
   // Helper to build a new fused location that reflects the inlining of the loop
   // annotation.
-  auto updateLoc = [&](FusedLoc loc) -> FusedLoc {
+  auto updateLoc = [&](LocationAttr loc) -> FusedLoc {
     if (!loc)
       return {};
     Location callSiteLoc = CallSiteLoc::get(loc, call->getLoc());
@@ -512,10 +649,14 @@ handleLoopAnnotations(Operation *call,
   AttrTypeReplacer replacer;
   replacer.addReplacement([&](LLVM::LoopAnnotationAttr loopAnnotation)
                               -> std::pair<Attribute, WalkResult> {
-    FusedLoc newStartLoc = updateLoc(loopAnnotation.getStartLoc());
-    FusedLoc newEndLoc = updateLoc(loopAnnotation.getEndLoc());
+    LocationAttr newStartLoc = updateLoc(loopAnnotation.getStartLoc());
+    LocationAttr newEndLoc = updateLoc(loopAnnotation.getEndLoc());
     if (!newStartLoc && !newEndLoc)
       return {loopAnnotation, WalkResult::advance()};
+    // The identity carries over: this is the same annotation with its
+    // locations fixed up, not a new loop. Minting a fresh id here would also
+    // hand a different one to each latch of a multi-latch loop, splitting one
+    // loop into several.
     auto newLoopAnnotation = LLVM::LoopAnnotationAttr::get(
         loopAnnotation.getContext(), loopAnnotation.getDisableNonforced(),
         loopAnnotation.getVectorize(), loopAnnotation.getInterleave(),
@@ -523,8 +664,9 @@ handleLoopAnnotations(Operation *call,
         loopAnnotation.getLicm(), loopAnnotation.getDistribute(),
         loopAnnotation.getPipeline(), loopAnnotation.getPeeled(),
         loopAnnotation.getUnswitch(), loopAnnotation.getMustProgress(),
-        loopAnnotation.getIsVectorized(), newStartLoc, newEndLoc,
-        loopAnnotation.getParallelAccesses());
+        loopAnnotation.getIsVectorized(), loopAnnotation.getCodeAlign(),
+        newStartLoc, newEndLoc, loopAnnotation.getParallelAccesses(),
+        loopAnnotation.getId());
     // Needs to advance, as loop annotations can be nested.
     return {newLoopAnnotation, WalkResult::advance()};
   });
@@ -603,10 +745,16 @@ static Value handleByValArgumentInit(OpBuilder &builder, Location loc,
   // Allocate the new value on the stack.
   Value allocaOp;
   {
-    // Since this is a static alloca, we can put it directly in the entry block,
-    // so they can be absorbed into the prologue/epilogue at code generation.
+    // Walk up from the call site to find the innermost AutomaticAllocationScope
+    // (e.g. an llvm.func or scf.forall). Placing the alloca at the entry block
+    // of that scope keeps it inside parallel regions rather than hoisting it
+    // out, while still landing at the function entry block for the common
+    // non-parallel case.
     OpBuilder::InsertionGuard insertionGuard(builder);
-    Block *entryBlock = &(*argument.getParentRegion()->begin());
+    Operation *scope = builder.getInsertionBlock()->getParentOp();
+    if (!scope->mightHaveTrait<OpTrait::AutomaticAllocationScope>())
+      scope = scope->getParentWithTrait<OpTrait::AutomaticAllocationScope>();
+    Block *entryBlock = &scope->getRegion(0).front();
     builder.setInsertionPointToStart(entryBlock);
     Value one = LLVM::ConstantOp::create(builder, loc, builder.getI64Type(),
                                          builder.getI64IntegerAttr(1));
@@ -617,8 +765,19 @@ static Value handleByValArgumentInit(OpBuilder &builder, Location loc,
   Value copySize =
       LLVM::ConstantOp::create(builder, loc, builder.getI64Type(),
                                builder.getI64IntegerAttr(elementTypeSize));
+  // Preserve the alignment of the destination (alloca) in the memcpy's
+  // arg_attrs.
+  NamedAttribute dstAlignAttr =
+      builder.getNamedAttr(LLVM::LLVMDialect::getAlignAttrName(),
+                           builder.getI64IntegerAttr(targetAlignment));
+  ArrayAttr argAttrs =
+      builder.getArrayAttr({builder.getDictionaryAttr({dstAlignAttr})});
   LLVM::MemcpyOp::create(builder, loc, allocaOp, argument, copySize,
-                         /*isVolatile=*/false);
+                         /*isVolatile=*/false, /*tbaa_struct=*/nullptr,
+                         /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
+                         /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+                         /*annotations=*/nullptr, argAttrs,
+                         /*res_attrs=*/nullptr);
   return allocaOp;
 }
 
@@ -662,10 +821,7 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
       : DialectInlinerInterface(dialect),
         // Cache set of StringAttrs for fast lookup in `isLegalToInline`.
         disallowedFunctionAttrs({
-            StringAttr::get(dialect->getContext(), "noduplicate"),
             StringAttr::get(dialect->getContext(), "presplitcoroutine"),
-            StringAttr::get(dialect->getContext(), "returns_twice"),
-            StringAttr::get(dialect->getContext(), "strictfp"),
         }) {}
 
   bool isLegalToInline(Operation *call, Operation *callable,
@@ -690,10 +846,12 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
       LDBG() << "Cannot inline: function is marked no_inline";
       return false;
     }
-    if (funcOp.isVarArg()) {
-      LDBG() << "Cannot inline: callable is variadic";
-      return false;
-    }
+    // A variadic callee is only unsafe to inline once it actually reads its
+    // variadic arguments, which requires an `llvm.intr.vastart`. That case is
+    // rejected by the op-level `isLegalToInline` overload below, matching
+    // `llvm::isInlineViable`, which likewise keys off va_start rather than the
+    // signature. A call that passes more operands than the callee has fixed
+    // parameters is still rejected, by the arity check in `mlir::inlineCall`.
     // TODO: Generate aliasing metadata from noalias result attributes.
     if (auto attrs = funcOp.getArgAttrs()) {
       for (DictionaryAttr attrDict : attrs->getAsRange<DictionaryAttr>()) {
@@ -704,11 +862,113 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
         }
       }
     }
-    // TODO: Handle exceptions.
-    if (funcOp.getPersonality()) {
+    // Mirror the personality merge in `llvm::InlineFunction`: a callee
+    // personality may be adopted by a caller that has none, and otherwise has
+    // to match the caller's. Only a genuine mismatch blocks inlining.
+    if (FlatSymbolRefAttr calleePersonality = funcOp.getPersonalityAttr()) {
+      auto callerFuncOp = call->getParentOfType<LLVM::LLVMFuncOp>();
+      if (!callerFuncOp) {
+        // Without an enclosing LLVM function there is nowhere to record the
+        // personality, which `llvm.landingpad` in the callee would require.
+        LDBG() << "Cannot inline " << funcOp.getSymName()
+               << ": callee has a personality but the call site is not "
+                  "inside an LLVM function";
+        return false;
+      }
+      FlatSymbolRefAttr callerPersonality = callerFuncOp.getPersonalityAttr();
+      if (callerPersonality && callerPersonality != calleePersonality) {
+        LDBG() << "Cannot inline " << funcOp.getSymName()
+               << ": incompatible personality";
+        return false;
+      }
+    }
+    // `LLVMFuncOp::verify` requires every `llvm.landingpad` result and
+    // `llvm.resume` operand inside one function to share a type, so inlining a
+    // callee whose exception value type disagrees with the caller's would
+    // produce IR the verifier immediately rejects. This is not gated on the
+    // personality attribute: `ResumeOp` has no verifier requiring one, so a
+    // callee that only rethrows can carry an exception type without a
+    // personality. LLVM has the same consistency rule in its verifier; its
+    // inliner simply omits the check and asserts later, in
+    // `PHINode::addIncoming`, on the invoke path.
+    if (Type calleeExceptionType = getExceptionValueType(funcOp)) {
+      // A call site outside an LLVM function has no such constraint to
+      // violate, since `LLVMFuncOp::verify` never runs on that destination.
+      if (auto callerFuncOp = call->getParentOfType<LLVM::LLVMFuncOp>()) {
+        Type callerExceptionType = getExceptionValueType(callerFuncOp);
+        if (callerExceptionType && callerExceptionType != calleeExceptionType) {
+          LDBG() << "Cannot inline " << funcOp.getSymName()
+                 << ": inconsistent landingpad/resume type";
+          return false;
+        }
+      }
+    }
+    // A `musttail` call site is the only case where a `musttail` marker in the
+    // callee survives inlining, and keeping it valid requires the call to stay
+    // immediately before the caller's return. Nothing here guarantees that:
+    // `handleInlinedAllocas` inserts `llvm.intr.lifetime.end` and
+    // `llvm.intr.stackrestore` before the return, and the multi-block path in
+    // `mlir::inlineRegion` rewrites the return into a branch. LLVM
+    // special-cases all three; until that is ported, refuse rather than emit
+    // IR its verifier rejects with "musttail call must precede a ret with an
+    // optional bitcast". Non-musttail call sites are unaffected: their markers
+    // are weakened by `handleTailCallKinds`, which needs no such guarantee.
+    if (callOp.getTailCallKind() ==
+            LLVM::tailcallkind::TailCallKind::MustTail &&
+        containsMustTailCall(funcOp)) {
       LDBG() << "Cannot inline " << funcOp.getSymName()
-             << ": unhandled function personality";
+             << ": musttail call site with musttail call in callee";
       return false;
+    }
+    // `noduplicate` on the callee is likewise not a barrier. LangRef is
+    // explicit that "A function containing a noduplicate call may still be an
+    // inlining candidate, provided that the call is not duplicated by
+    // inlining." LLVM's only gate is about duplicating a noduplicate call out
+    // of the callee's body:
+    //
+    //   if (!isSoleCallToLocalFunction(CandidateCall, F) &&
+    //       ContainsNoDuplicateCall)
+    //     return InlineResult::failure("noduplicate");
+    //
+    // `wouldBeCloned` is the MLIR analogue of `!isSoleCallToLocalFunction`:
+    // the inliner passes `!hasOneUseAndDiscardable(...)`, so a false value
+    // means the callee region is moved rather than copied and nothing is
+    // duplicated.
+    if (wouldBeCloned &&
+        callsFunctionWithPassthroughAttr(funcOp, "noduplicate")) {
+      LDBG() << "Cannot inline " << funcOp.getSymName()
+             << ": would duplicate a noduplicate call";
+      return false;
+    }
+    // `returns_twice` on the callee is a licence, not a prohibition. LLVM asks
+    // what the callee would EXPOSE: `isInlineViable` refuses a callee that
+    // contains a returns-twice call, *unless* the callee is itself marked
+    // returns_twice, in which case calling it had already made the caller call
+    // a returns-twice function and relocating the body changes nothing:
+    //
+    //   bool ReturnsTwice = F.hasFnAttribute(Attribute::ReturnsTwice);
+    //   ...
+    //   if (!ReturnsTwice && isa<CallInst>(Call) &&
+    //       cast<CallInst>(Call)->canReturnTwice())
+    //     return InlineResult::failure("exposes returns-twice attribute");
+    if (!hasPassthroughAttr(funcOp, "returns_twice") &&
+        callsFunctionWithPassthroughAttr(funcOp, "returns_twice")) {
+      LDBG() << "Cannot inline " << funcOp.getSymName()
+             << ": exposes returns-twice attribute";
+      return false;
+    }
+    // `strictfp` is not a blanket barrier. LLVM refuses only to inline a
+    // strictfp callee into a caller that is not itself strictfp, since that
+    // would require converting the caller's FP operations to constrained
+    // intrinsics; strictfp into strictfp is fine. See `checkStrictFP` in
+    // llvm/lib/IR/Attributes.cpp.
+    if (hasPassthroughAttr(funcOp, "strictfp")) {
+      auto callerFuncOp = call->getParentOfType<LLVM::LLVMFuncOp>();
+      if (!callerFuncOp || !hasPassthroughAttr(callerFuncOp, "strictfp")) {
+        LDBG() << "Cannot inline " << funcOp.getSymName()
+               << ": strictfp callee in a non-strictfp caller";
+        return false;
+      }
     }
     if (funcOp.getPassthrough()) {
       // TODO: Used attributes should not be passthrough.
@@ -725,6 +985,20 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
           }))
         return false;
     }
+    // Refuse to inline if any block in the callee ends with an op that does
+    // not have the terminator trait. The MLIR verifier conservatively accepts
+    // unregistered ops as potential terminators (via mightHaveTrait), but
+    // handleTerminator uses cast<LLVM::ReturnOp> in the single-block path and
+    // would crash on such ops. Registered terminators from other dialects
+    // (e.g. cf.br) are safe: the multi-block path uses dyn_cast and skips
+    // non-llvm.return ops gracefully.
+    for (Block &block : funcOp.getBody()) {
+      if (!block.empty() && !block.back().hasTrait<OpTrait::IsTerminator>()) {
+        LDBG() << "Cannot inline " << funcOp.getSymName()
+               << ": block ends with non-terminator op";
+        return false;
+      }
+    }
     return true;
   }
 
@@ -733,10 +1007,28 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
   }
 
   bool isLegalToInline(Operation *op, Region *, bool, IRMapping &) const final {
-    // The inliner cannot handle variadic function arguments and blocktag
-    // operations prevent inlining since they the blockaddress operations
-    // reference them via the callee symbol.
-    return !(isa<LLVM::VaStartOp>(op) || isa<LLVM::BlockTagOp>(op));
+    // - `llvm.intr.vastart`: the inliner cannot rebind the variadic arguments.
+    // - `llvm.blocktag`: `llvm.blockaddress` operations reference it via the
+    //   callee symbol, which no longer names the block's function.
+    // - `llvm.indirectbr`: its targets are `llvm.blockaddress` values that
+    //   name blocks of the callee. Cloning the body leaves those addresses
+    //   pointing at the original blocks, so the copy would branch into another
+    //   function. `llvm::isInlineViable` refuses these for the same reason
+    //   ("contains indirect branches"), and unlike the `llvm.blocktag` case
+    //   the addresses need not be taken inside the callee, so that check does
+    //   not already cover this.
+    if (isa<LLVM::VaStartOp, LLVM::BlockTagOp, LLVM::IndirectBrOp>(op))
+      return false;
+    // `va_start` also reaches the IR as a generic intrinsic call rather than
+    // the dedicated operation, which is what the unregistered-intrinsic import
+    // path produces. Both spellings have to be rejected: now that a variadic
+    // signature alone no longer blocks inlining, letting this one through drops
+    // a `va_start` into a caller that may not be variadic, which LLVM rejects
+    // with "va_start called in a non-varargs function". The name carries an
+    // overload suffix, e.g. `llvm.va_start.p0`.
+    if (auto intrinsicOp = dyn_cast<LLVM::CallIntrinsicOp>(op))
+      return !intrinsicOp.getIntrin().starts_with("llvm.va_start");
+    return true;
   }
 
   /// Handle the given inlined return by replacing it with a branch. This
@@ -755,15 +1047,23 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
 
   bool allowSingleBlockOptimization(
       iterator_range<Region::iterator> inlinedBlocks) const final {
-    return !(!inlinedBlocks.empty() &&
-             isa<LLVM::UnreachableOp>(inlinedBlocks.begin()->getTerminator()));
+    if (inlinedBlocks.empty())
+      return true;
+    // The single-block fast path routes the terminator to the `ValueRange`
+    // overload of `handleTerminator`, which can only rewrite an
+    // `llvm.return`. Every other terminator has to take the multi-block path,
+    // whose `dyn_cast` leaves terminators it does not understand alone. This
+    // subsumes the previous `llvm.unreachable` special case and additionally
+    // covers a lone `llvm.resume`, as found in a rethrow helper.
+    return isa<LLVM::ReturnOp>(inlinedBlocks.begin()->getTerminator());
   }
 
   /// Handle the given inlined return by replacing the uses of the call with the
   /// operands of the return. This overload is called when the inlined region
   /// only contains one block.
   void handleTerminator(Operation *op, ValueRange valuesToRepl) const final {
-    // Return will be the only terminator present.
+    // `allowSingleBlockOptimization` only lets this path run for an
+    // `llvm.return`, so the cast cannot fail.
     auto returnOp = cast<LLVM::ReturnOp>(op);
 
     // Replace the values directly with the return operands.
@@ -809,9 +1109,38 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
     return copyOp;
   }
 
+  Attribute mergeFeatureAttributes(OpBuilder &builder, Operation *call,
+                                   Operation *callable) const final {
+    auto callerTargetFeatures =
+        call->getParentOp()->getAttrOfType<LLVM::TargetFeaturesAttr>(
+            LLVM::TargetFeaturesAttr::getAttributeName());
+    auto calleeTargetFeatures =
+        callable->getAttrOfType<LLVM::TargetFeaturesAttr>(
+            LLVM::TargetFeaturesAttr::getAttributeName());
+
+    llvm::SmallSet<StringRef, 8> featureSet;
+    if (callerTargetFeatures)
+      for (auto f : callerTargetFeatures.getFeatures())
+        featureSet.insert(f.getValue());
+    if (calleeTargetFeatures)
+      for (auto f : calleeTargetFeatures.getFeatures())
+        featureSet.insert(f.getValue());
+
+    SmallVector<StringRef> mergedFeatures;
+    for (auto f : featureSet)
+      mergedFeatures.push_back(f);
+
+    // Sort for deterministic output
+    llvm::sort(mergedFeatures);
+
+    return LLVM::TargetFeaturesAttr::get(builder.getContext(), mergedFeatures);
+  }
+
   void processInlinedCallBlocks(
-      Operation *call,
+      Operation *call, Operation *callable,
       iterator_range<Region::iterator> inlinedBlocks) const override {
+    handlePersonality(call, callable);
+    handleTailCallKinds(call, inlinedBlocks);
     handleInlinedAllocas(call, inlinedBlocks);
     handleAliasScopes(call, inlinedBlocks);
     handleAccessGroups(call, inlinedBlocks);

@@ -40,13 +40,29 @@ bool isValidFundamentalIntWidth(unsigned width);
 /// void, or abstract types.
 bool isSized(mlir::Type ty);
 
+/// Returns true if lowering the C++ ABI changes this type as a record member:
+/// it is a member pointer, or holds one through pointers, arrays, vectors,
+/// function types or unnamed records. Named records are not looked into; they
+/// are identified, and lowered in place on their own.
+bool containsMemberPointer(mlir::Type ty);
+
 //===----------------------------------------------------------------------===//
 // AddressSpace helpers
 //===----------------------------------------------------------------------===//
 cir::TargetAddressSpaceAttr toCIRTargetAddressSpace(mlir::MLIRContext &context,
                                                     clang::LangAS langAS);
 
-bool isMatchingAddressSpace(cir::TargetAddressSpaceAttr cirAS,
+cir::LangAddressSpace toCIRLangAddressSpace(clang::LangAS langAS);
+
+/// Convert a LangAS to the appropriate address space attribute interface.
+/// Returns a MemorySpaceAttrInterface.
+mlir::ptr::MemorySpaceAttrInterface
+toCIRLangAddressSpaceAttr(mlir::MLIRContext *ctx, clang::LangAS langAS);
+
+bool isSupportedCIRMemorySpaceAttr(
+    mlir::ptr::MemorySpaceAttrInterface memorySpace);
+
+bool isMatchingAddressSpace(mlir::ptr::MemorySpaceAttrInterface cirAS,
                             clang::LangAS as);
 
 } // namespace cir

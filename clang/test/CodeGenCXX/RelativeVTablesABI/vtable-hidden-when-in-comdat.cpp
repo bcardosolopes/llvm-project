@@ -3,6 +3,7 @@
 // be used as acomdat key signature.
 
 // RUN: %clang_cc1 %s -triple=aarch64-unknown-fuchsia -o - -emit-llvm | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=aarch64-unknown-fuchsia -o - -emit-llvm -fclangir | FileCheck %s %}
 
 // CHECK: @_ZTV1B.local = linkonce_odr hidden unnamed_addr constant
 // CHECK: @_ZTV1B = linkonce_odr unnamed_addr alias { [3 x i32] }, ptr @_ZTV1B.local

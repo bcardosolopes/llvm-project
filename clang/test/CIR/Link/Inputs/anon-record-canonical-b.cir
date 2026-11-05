@@ -1,0 +1,19 @@
+// The second input for anon-record-canonical.cir: the same Holder and Boxed,
+// whose anonymous union this translation unit's counter happened to number 0.
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!rec_anon = !cir.record<union "anon.0" {!u8i, !s32i}>
+!rec_Holder = !cir.record<struct "Holder" {!rec_anon}>
+!rec_Boxed = !cir.record<struct "Boxed" {!cir.array<!rec_anon x 2>}>
+
+module {
+  cir.func @from_b(%arg0: !cir.ptr<!rec_Holder>) -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @boxed_b(%arg0: !cir.ptr<!rec_Boxed>) -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+}

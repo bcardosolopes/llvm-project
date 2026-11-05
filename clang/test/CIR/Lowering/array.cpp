@@ -1,6 +1,12 @@
 // RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s
 
+// CHECK-NOT: @__const._Z5func7v.arr
+// CHECK: @__const._Z5func5v.arr = private unnamed_addr constant [2 x [1 x i32]] {{.*}}[1 x i32] [i32 5], [1 x i32] zeroinitializer{{.*}}
+// CHECK: @__const._Z5func4v.arr = private unnamed_addr constant [2 x [1 x i32]] {{.*}}[1 x i32] [i32 5], [1 x i32] [i32 6]{{.*}}
+// CHECK: @__const._Z5func3v.arr3 = private unnamed_addr constant [2 x i32] [i32 5, i32 6]
+// CHECK: @__const._Z5func2v.arr = private unnamed_addr constant [2 x i32] [i32 5, i32 0]
+
 int a[10];
 // CHECK: @a = global [10 x i32] zeroinitializer
 
@@ -45,10 +51,10 @@ void func() {
 // CHECK-NEXT: %[[ARR_ALLOCA:.*]] = alloca [10 x i32], i64 1, align 16
 // CHECK-NEXT: %[[INIT:.*]] = alloca i32, i64 1, align 4
 // CHECK-NEXT: %[[INIT_2:.*]] = alloca i32, i64 1, align 4
-// CHECK-NEXT: %[[ELE_PTR:.*]] = getelementptr [10 x i32], ptr %[[ARR_ALLOCA]], i32 0, i64 0
+// CHECK-NEXT: %[[ELE_PTR:.*]] = getelementptr inbounds [10 x i32], ptr %[[ARR_ALLOCA]], i32 0, i64 0
 // CHECK-NEXT: %[[TMP:.*]] = load i32, ptr %[[ELE_PTR]], align 16
 // CHECK-NEXT: store i32 %[[TMP]], ptr %[[INIT]], align 4
-// CHECK-NEXT: %[[ELE_PTR:.*]] = getelementptr [10 x i32], ptr %[[ARR_ALLOCA]], i32 0, i64 1
+// CHECK-NEXT: %[[ELE_PTR:.*]] = getelementptr inbounds [10 x i32], ptr %[[ARR_ALLOCA]], i32 0, i64 1
 // CHECK-NEXT: %[[TMP:.*]] = load i32, ptr %[[ELE_PTR]], align 4
 // CHECK-NEXT: store i32 %[[TMP]], ptr %[[INIT_2]], align 4
 
@@ -58,7 +64,7 @@ void func2() {
 
 // CHECK: define{{.*}} void @_Z5func2v()
 // CHECK:   %[[ARR:.*]] = alloca [2 x i32], i64 1, align 4
-// CHECK:   store [2 x i32] [i32 5, i32 0], ptr %[[ARR]], align 4
+// CHECK:   call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %[[ARR]], ptr{{.*}} @__const._Z5func2v.arr, i64 8, i1 false)
 // CHECK:   ret void
 
 void func3() {
@@ -66,7 +72,7 @@ void func3() {
 }
 // CHECK: define{{.*}} void @_Z5func3v()
 // CHECK:  %[[ARR_ALLOCA:.*]] = alloca [2 x i32], i64 1, align 4
-// CHECK:  store [2 x i32] [i32 5, i32 6], ptr %[[ARR_ALLOCA]], align 4
+// CHECK:  call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %[[ARR_ALLOCA]], ptr{{.*}} @__const._Z5func3v.arr3, i64 8, i1 false)
 
 void func4() {
   int arr[2][1] = {{5}, {6}};
@@ -75,9 +81,9 @@ void func4() {
 // CHECK: define{{.*}} void @_Z5func4v()
 // CHECK:  %[[ARR_ALLOCA:.*]] = alloca [2 x [1 x i32]], i64 1, align 4
 // CHECK:  %[[INIT:.*]] = alloca i32, i64 1, align 4
-// CHECK:  store [2 x [1 x i32]] {{\[}}[1 x i32] [i32 5], [1 x i32] [i32 6]], ptr %[[ARR_ALLOCA]], align 4
-// CHECK:  %[[ARR_1:.*]] = getelementptr [2 x [1 x i32]], ptr %[[ARR_ALLOCA]], i32 0, i64 1
-// CHECK:  %[[ELE_PTR:.*]] = getelementptr [1 x i32], ptr %[[ARR_1]], i32 0, i64 0
+// CHECK:  call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %[[ARR_ALLOCA]], ptr{{.*}} @__const._Z5func4v.arr, i64 8, i1 false)
+// CHECK:  %[[ARR_1:.*]] = getelementptr inbounds [2 x [1 x i32]], ptr %[[ARR_ALLOCA]], i32 0, i64 1
+// CHECK:  %[[ELE_PTR:.*]] = getelementptr inbounds [1 x i32], ptr %[[ARR_1]], i32 0, i64 0
 // CHECK:  %[[TMP:.*]] = load i32, ptr %[[ELE_PTR]], align 4
 // CHECK:  store i32 %[[TMP]], ptr %[[INIT]], align 4
 
@@ -86,7 +92,7 @@ void func5() {
 }
 // CHECK: define{{.*}} void @_Z5func5v()
 // CHECK:   %[[ARR:.*]] = alloca [2 x [1 x i32]], i64 1, align 4
-// CHECK:   store [2 x [1 x i32]] {{\[}}[1 x i32] [i32 5], [1 x i32] zeroinitializer], ptr %[[ARR]], align 4
+// CHECK:   call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %[[ARR]], ptr{{.*}} @__const._Z5func5v.arr, i64 8, i1 false)
 // CHECK:   ret void
 
 void func6() {
@@ -97,10 +103,10 @@ void func6() {
 // CHECK:  %[[VAR:.*]] = alloca i32, i64 1, align 4
 // CHECK:  %[[ARR:.*]] = alloca [2 x i32], i64 1, align 4
 // CHECK:  store i32 4, ptr %[[VAR]], align 4
-// CHECK:  %[[ELE_0:.*]] = getelementptr i32, ptr %[[ARR]], i32 0
+// CHECK:  %[[ELE_0:.*]] = getelementptr inbounds nuw i32, ptr %[[ARR]], i32 0
 // CHECK:  %[[TMP:.*]] = load i32, ptr %[[VAR]], align 4
 // CHECK:  store i32 %[[TMP]], ptr %[[ELE_0]], align 4
-// CHECK:  %[[ELE_1:.*]] = getelementptr i32, ptr %[[ELE_0]], i64 1
+// CHECK:  %[[ELE_1:.*]] = getelementptr inbounds i32, ptr %[[ELE_0]], i64 1
 // CHECK:  store i32 5, ptr %[[ELE_1]], align 4
 
 void func7() {
@@ -108,13 +114,13 @@ void func7() {
 }
 // CHECK: define{{.*}} void @_Z5func7v()
 // CHECK:   %[[ARR:.*]] = alloca [1 x ptr], i64 1, align 8
-// CHECK:   store [1 x ptr] zeroinitializer, ptr %[[ARR]], align 8
+// CHECK:   call void @llvm.memset.p0.i64(ptr{{.*}} %[[ARR]], i8 0, i64 8, i1 false)
 // CHECK:   ret void
 
 void func8(int p[10]) {}
-// CHECK: define{{.*}} void @_Z5func8Pi(ptr {{%.*}})
+// CHECK: define{{.*}} void @_Z5func8Pi(ptr noundef {{%.*}})
 // CHECK-NEXT: alloca ptr, i64 1, align 8
 
 void func9(int pp[10][5]) {}
-// CHECK: define{{.*}} void @_Z5func9PA5_i(ptr {{%.*}})
+// CHECK: define{{.*}} void @_Z5func9PA5_i(ptr noundef {{%.*}})
 // CHECK-NEXT: alloca ptr, i64 1, align 8

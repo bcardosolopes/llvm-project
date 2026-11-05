@@ -1,0 +1,51 @@
+// The CIR inliner inlines a callee only if every target feature it enables is
+// enabled in the caller too, and its target-cpu (if any) is the caller's:
+// otherwise the inlined code needs instructions its new function cannot
+// select (fp16 reciprocal steps inlined into a plain NEON function in
+// exoplayer2's dav1d tone mapper stopped instruction selection).
+//
+// RUN: cir-opt %s --cir-inline | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+#neon = #cir<extra({"target-features" = "+neon"})>
+#fp16 = #cir<extra({"target-features" = "+fullfp16,+neon"})>
+#neon_off = #cir<extra({"target-features" = "+neon,-fullfp16"})>
+#a55 = #cir<extra({"target-cpu" = "cortex-a55", "target-features" = "+neon"})>
+module {
+  cir.func @needs_fp16(%arg0: !s32i) -> !s32i extra(#fp16) {
+    cir.return %arg0 : !s32i
+  }
+  cir.func @plain(%arg0: !s32i) -> !s32i extra(#neon) {
+    cir.return %arg0 : !s32i
+  }
+  cir.func @disables(%arg0: !s32i) -> !s32i extra(#neon_off) {
+    cir.return %arg0 : !s32i
+  }
+  cir.func @for_a55(%arg0: !s32i) -> !s32i extra(#a55) {
+    cir.return %arg0 : !s32i
+  }
+
+  // A NEON caller takes the NEON callee and the one that only disables a
+  // feature; not the one that needs fp16, nor the one tuned for another CPU.
+  // CHECK-LABEL: cir.func @neon_caller(
+  // CHECK-NEXT:    cir.call @needs_fp16(
+  // CHECK-NEXT:    cir.call @for_a55(
+  // CHECK-NEXT:    cir.return
+  cir.func @neon_caller(%arg0: !s32i) -> !s32i extra(#neon) {
+    %0 = cir.call @needs_fp16(%arg0) : (!s32i) -> !s32i
+    %1 = cir.call @plain(%0) : (!s32i) -> !s32i
+    %2 = cir.call @disables(%1) : (!s32i) -> !s32i
+    %3 = cir.call @for_a55(%2) : (!s32i) -> !s32i
+    cir.return %3 : !s32i
+  }
+
+  // An fp16 caller has everything @needs_fp16 needs.
+  // CHECK-LABEL: cir.func @fp16_caller(
+  // CHECK-NOT:     cir.call
+  // CHECK:         cir.return
+  cir.func @fp16_caller(%arg0: !s32i) -> !s32i extra(#fp16) {
+    %0 = cir.call @needs_fp16(%arg0) : (!s32i) -> !s32i
+    %1 = cir.call @plain(%0) : (!s32i) -> !s32i
+    cir.return %1 : !s32i
+  }
+}

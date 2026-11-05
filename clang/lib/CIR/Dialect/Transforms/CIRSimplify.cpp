@@ -72,12 +72,19 @@ struct SimplifyTernary final : public OpRewritePattern<TernaryOp> {
     mlir::Value trueValue = trueBranchYieldOp.getArgs()[0];
     mlir::Value falseValue = falseBranchYieldOp.getArgs()[0];
 
+    // Read the fast-math flags before op is erased by replaceOpWithNewOp.
+    cir::FastMathFlags fmf = op.getFastMathFlags();
+
     rewriter.inlineBlockBefore(&op.getTrueRegion().front(), op);
     rewriter.inlineBlockBefore(&op.getFalseRegion().front(), op);
     rewriter.eraseOp(trueBranchYieldOp);
     rewriter.eraseOp(falseBranchYieldOp);
-    rewriter.replaceOpWithNewOp<cir::SelectOp>(op, op.getCond(), trueValue,
-                                               falseValue);
+    auto select = rewriter.replaceOpWithNewOp<cir::SelectOp>(
+        op, op.getCond(), trueValue, falseValue);
+    // Carry the ternary's fast-math flags onto the folded select so that, e.g.
+    // under -ffast-math the lowered fcmp+select can still fold to
+    // llvm.maxnum/minnum.
+    select.setFastMathFlags(fmf);
 
     return mlir::success();
   }
@@ -220,13 +227,45 @@ struct SimplifySwitch : public OpRewritePattern<SwitchOp> {
       changed = mlir::success();
     };
 
-    for (CaseOp c : cases) {
+    for (size_t i = 0; i < cases.size(); ++i) {
+      CaseOp c = cases[i];
       cir::CaseOpKind kind = c.getKind();
       if (kind == cir::CaseOpKind::Equal &&
           isa<YieldOp>(c.getCaseRegion().front().front())) {
-        // If the case contains only a YieldOp, collect it for cascading merge
-        cascadingCases.push_back(c);
-        cascadingCaseValues.push_back(c.getValue()[0]);
+        // A case containing only a YieldOp is a candidate for cascading merge,
+        // but only if it is immediately followed by the next case in the IR
+        // with no intervening operations. If there are operations between this
+        // case and the next case (e.g., fallthrough code placed outside the
+        // case region), merging would incorrectly skip that code.
+        bool canCascade = false;
+        if (i + 1 < cases.size()) {
+          mlir::Operation *nextOp = c->getNextNode();
+          canCascade = (nextOp == cases[i + 1].getOperation());
+        }
+
+        if (canCascade) {
+          cascadingCases.push_back(c);
+          cascadingCaseValues.push_back(c.getValue()[0]);
+        } else {
+          // Not directly adjacent to the next case (or is the last case);
+          // cannot cascade. But if this is the last yield-only case in a
+          // chain, it should still be mergeable with prior cascading cases.
+          if (!cascadingCases.empty()) {
+            // Add this case as the end of the chain, then merge all.
+            cascadingCases.push_back(c);
+            cascadingCaseValues.push_back(c.getValue()[0]);
+            if (cascadingCases.size() > 1) {
+              CaseOp lastCascadingCase = cascadingCases.back();
+              mergeCascadingInto(lastCascadingCase);
+              cascadingCases.pop_back();
+              flushMergedOps();
+            } else {
+              cascadingCases.clear();
+              cascadingCaseValues.clear();
+            }
+          }
+          // else: isolated yield-only case with no prior chain, skip it
+        }
       } else if (kind == cir::CaseOpKind::Equal && !cascadingCases.empty()) {
         // merge previously collected cascading cases
         cascadingCaseValues.push_back(c.getValue()[0]);
@@ -237,7 +276,6 @@ struct SimplifySwitch : public OpRewritePattern<SwitchOp> {
         // cascading cases, merge all of them into the last cascading case.
         // We don't currently fold case range statements with other case
         // statements.
-        assert(!cir::MissingFeatures::foldRangeCase());
         CaseOp lastCascadingCase = cascadingCases.back();
         mergeCascadingInto(lastCascadingCase);
         cascadingCases.pop_back();

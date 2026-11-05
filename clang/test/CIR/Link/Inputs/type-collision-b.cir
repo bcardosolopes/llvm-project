@@ -1,0 +1,14 @@
+// Second input for ../type-collision.cir. Not a test on its own.
+//
+// Defines a *different* record under the same name. Both inputs are valid CIR
+// in isolation; only merging them collides.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "(anonymous namespace)::S" {!cir.float}>
+
+module {
+  cir.func @from_b(%arg0: !cir.ptr<!rec_S>) -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+}

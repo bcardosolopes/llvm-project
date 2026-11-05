@@ -8,7 +8,7 @@
 #include <immintrin.h>
 
 __m128 test_vcvtph2ps_mask(__m128i a, __m128 src, __mmask8 k) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_vcvtph2ps_mask
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_vcvtph2ps_mask
   // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !s16i>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !s16i>
   // CIR: %{{.*}} = cir.cast floating %{{.*}} : !cir.vector<4 x !cir.f16> -> !cir.vector<4 x !cir.float>
   // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.int<s, 1>>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.int<s, 1>>
@@ -26,7 +26,7 @@ __m128 test_vcvtph2ps_mask(__m128i a, __m128 src, __mmask8 k) {
 }
 
 __m256 test_vcvtph2ps256_mask(__m128i a, __m256 src, __mmask8 k) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_vcvtph2ps256_mask
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_vcvtph2ps256_mask
   // CIR: %{{.*}} = cir.cast floating %{{.*}} : !cir.vector<8 x !cir.f16> -> !cir.vector<8 x !cir.float>
   // CIR: %{{.*}} = cir.vec.ternary(%{{.*}}, %{{.*}}, %{{.*}}) : !cir.vector<8 x !cir.int<s, 1>>, !cir.vector<8 x !cir.float>
 
@@ -42,7 +42,7 @@ __m256 test_vcvtph2ps256_mask(__m128i a, __m256 src, __mmask8 k) {
 }
 
 __m512 test_vcvtph2ps512_mask(__m256i a, __m512 src, __mmask16 k) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_vcvtph2ps512_mask
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_vcvtph2ps512_mask
   // CIR: %{{.*}} = cir.cast floating %{{.*}} : !cir.vector<16 x !cir.f16> -> !cir.vector<16 x !cir.float>
   // CIR: %{{.*}} = cir.vec.ternary(%{{.*}}, %{{.*}}, %{{.*}}) : !cir.vector<16 x !cir.int<s, 1>>, !cir.vector<16 x !cir.float>
 
@@ -58,7 +58,7 @@ __m512 test_vcvtph2ps512_mask(__m256i a, __m512 src, __mmask16 k) {
 }
 
 __m128 test_vcvtph2ps_maskz(__m128i a, __mmask8 k) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_vcvtph2ps_maskz
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_vcvtph2ps_maskz
   // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !s16i>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !s16i>
   // CIR: %{{.*}} = cir.cast floating %{{.*}} : !cir.vector<4 x !cir.f16> -> !cir.vector<4 x !cir.float>
   // CIR: %{{.*}} = cir.vec.shuffle(%{{.*}}, %{{.*}} : !cir.vector<8 x !cir.int<s, 1>>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.int<s, 1>>
@@ -66,7 +66,7 @@ __m128 test_vcvtph2ps_maskz(__m128i a, __mmask8 k) {
 
   // LLVM-LABEL: @test_vcvtph2ps_maskz
   // LLVM: %{{.*}} = fpext <4 x half> %{{.*}} to <4 x float>
-  // LLVM: %{{.*}} = select <4 x i1> {{.*}}, <4 x float> %{{.*}}, <4 x float> %{{.*}}
+  // LLVM: %{{.*}} = select <4 x i1> {{.*}}, <4 x float> %{{.*}}, <4 x float> zeroinitializer
 
   // OGCG-LABEL: @test_vcvtph2ps_maskz
   // OGCG: %{{.*}} = fpext <4 x half> %{{.*}} to <4 x float>
@@ -76,13 +76,13 @@ __m128 test_vcvtph2ps_maskz(__m128i a, __mmask8 k) {
 }
 
 __m256 test_vcvtph2ps256_maskz(__m128i a, __mmask8 k) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_vcvtph2ps256_maskz
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_vcvtph2ps256_maskz
   // CIR: %{{.*}} = cir.cast floating %{{.*}} : !cir.vector<8 x !cir.f16> -> !cir.vector<8 x !cir.float>
   // CIR: %{{.*}} = cir.vec.ternary(%{{.*}}, %{{.*}}, %{{.*}}) : !cir.vector<8 x !cir.int<s, 1>>, !cir.vector<8 x !cir.float>
 
   // LLVM-LABEL: @test_vcvtph2ps256_maskz
   // LLVM: %{{.*}} = fpext <8 x half> %{{.*}} to <8 x float>
-  // LLVM: %{{.*}} = select <8 x i1> {{.*}}, <8 x float> %{{.*}}, <8 x float> %{{.*}}
+  // LLVM: %{{.*}} = select <8 x i1> {{.*}}, <8 x float> %{{.*}}, <8 x float> zeroinitializer
 
   // OGCG-LABEL: @test_vcvtph2ps256_maskz
   // OGCG: %{{.*}} = fpext <8 x half> %{{.*}} to <8 x float>
@@ -92,13 +92,13 @@ __m256 test_vcvtph2ps256_maskz(__m128i a, __mmask8 k) {
 }
 
 __m512 test_vcvtph2ps512_maskz(__m256i a, __mmask16 k) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_vcvtph2ps512_maskz
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_vcvtph2ps512_maskz
   // CIR: %{{.*}} = cir.cast floating %{{.*}} : !cir.vector<16 x !cir.f16> -> !cir.vector<16 x !cir.float>
   // CIR: %{{.*}} = cir.vec.ternary(%{{.*}}, %{{.*}}, %{{.*}}) : !cir.vector<16 x !cir.int<s, 1>>, !cir.vector<16 x !cir.float>
 
   // LLVM-LABEL: @test_vcvtph2ps512_maskz
   // LLVM: %{{.*}} = fpext <16 x half> %{{.*}} to <16 x float>
-  // LLVM: %{{.*}} = select <16 x i1> {{.*}}, <16 x float> %{{.*}}, <16 x float> %{{.*}}
+  // LLVM: %{{.*}} = select <16 x i1> {{.*}}, <16 x float> %{{.*}}, <16 x float> zeroinitializer
 
   // OGCG-LABEL: @test_vcvtph2ps512_maskz
   // OGCG: %{{.*}} = fpext <16 x half> %{{.*}} to <16 x float>
@@ -108,11 +108,11 @@ __m512 test_vcvtph2ps512_maskz(__m256i a, __mmask16 k) {
 }
 
 __m512 test_mm512_cvt_roundph_ps(__m256i a) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_mm512_cvt_roundph_ps
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_mm512_cvt_roundph_ps
   // CIR: %{{.*}} = cir.call_llvm_intrinsic "x86.avx512.mask.vcvtph2ps.512" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<16 x !s16i>, !cir.vector<16 x !cir.float>, !u16i, !s32i) -> !cir.vector<16 x !cir.float>
 
   // LLVM-LABEL: @test_mm512_cvt_roundph_ps
-  // LLVM: call <16 x float> @llvm.x86.avx512.mask.vcvtph2ps.512(<16 x i16> %{{.*}}, <16 x float> %{{.*}}, i16 -1, i32 8)
+  // LLVM: call <16 x float> @llvm.x86.avx512.mask.vcvtph2ps.512(<16 x i16> %{{.*}}, <16 x float> zeroinitializer, i16 -1, i32 8)
 
   // OGCG-LABEL: @test_mm512_cvt_roundph_ps
   // OGCG: call <16 x float> @llvm.x86.avx512.mask.vcvtph2ps.512(<16 x i16> %{{.*}}, <16 x float> zeroinitializer, i16 -1, i32 8)
@@ -121,7 +121,7 @@ __m512 test_mm512_cvt_roundph_ps(__m256i a) {
 }
 
 __m512 test_mm512_mask_cvt_roundph_ps(__m512 w, __mmask16 u, __m256i a) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_mm512_mask_cvt_roundph_ps
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_mm512_mask_cvt_roundph_ps
   // CIR: %{{.*}} = cir.call_llvm_intrinsic "x86.avx512.mask.vcvtph2ps.512" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<16 x !s16i>, !cir.vector<16 x !cir.float>, !u16i, !s32i) -> !cir.vector<16 x !cir.float>
 
   // LLVM-LABEL: @test_mm512_mask_cvt_roundph_ps
@@ -134,11 +134,11 @@ __m512 test_mm512_mask_cvt_roundph_ps(__m512 w, __mmask16 u, __m256i a) {
 }
 
 __m512 test_mm512_maskz_cvt_roundph_ps(__mmask16 u, __m256i a) {
-  // CIR-LABEL: cir.func no_inline dso_local @test_mm512_maskz_cvt_roundph_ps
+  // CIR-LABEL: cir.func no_inline optnone dso_local @test_mm512_maskz_cvt_roundph_ps
   // CIR: %{{.*}} = cir.call_llvm_intrinsic "x86.avx512.mask.vcvtph2ps.512" %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : (!cir.vector<16 x !s16i>, !cir.vector<16 x !cir.float>, !u16i, !s32i) -> !cir.vector<16 x !cir.float>
 
   // LLVM-LABEL: @test_mm512_maskz_cvt_roundph_ps
-  // LLVM: call <16 x float> @llvm.x86.avx512.mask.vcvtph2ps.512(<16 x i16> %{{.*}}, <16 x float> %{{.*}}, i16 %{{.*}}, i32 8)
+  // LLVM: call <16 x float> @llvm.x86.avx512.mask.vcvtph2ps.512(<16 x i16> %{{.*}}, <16 x float> zeroinitializer, i16 %{{.*}}, i32 8)
 
   // OGCG-LABEL: @test_mm512_maskz_cvt_roundph_ps
   // OGCG: call <16 x float> @llvm.x86.avx512.mask.vcvtph2ps.512(<16 x i16> %{{.*}}, <16 x float> %{{.*}}, i16 %{{.*}}, i32 8)

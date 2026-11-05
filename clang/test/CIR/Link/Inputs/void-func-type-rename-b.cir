@@ -1,0 +1,13 @@
+// Second input for ../void-func-type-rename.cir. Not a test on its own.
+//
+// @take_s returns void and takes a pointer to the colliding record, so
+// renaming that record has to rebuild a function type whose return type is
+// null.
+
+!rec_S = !cir.record<struct "(anonymous namespace)::S" {!cir.float}>
+
+module {
+  cir.func @take_s(%arg0: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}

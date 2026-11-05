@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
@@ -32,6 +33,15 @@ namespace mlir {
 } // namespace mlir
 
 namespace {
+
+static bool containsNestedOpenMPOps(cir::ScopeOp scopeOp) {
+  return scopeOp->walk([&](Operation *nestedOp) {
+           if (nestedOp != scopeOp.getOperation() && nestedOp->getDialect() &&
+               isa<omp::OpenMPDialect>(nestedOp->getDialect()))
+             return WalkResult::interrupt();
+           return WalkResult::advance();
+         }).wasInterrupted();
+}
 
 /// Removes branches between two blocks if it is the only branch.
 ///
@@ -54,11 +64,13 @@ struct RemoveRedundantBranches : public OpRewritePattern<BrOp> {
 
     if (isa<cir::LabelOp, cir::IndirectBrOp>(dest->front()))
       return failure();
-    // Single edge between blocks: merge it.
-    if (block->getNumSuccessors() == 1 &&
+    // Single edge between blocks: merge it. The branch's operands take the
+    // place of the destination's arguments, which flat CIR after mem2reg has.
+    if (block->getNumSuccessors() == 1 && dest != block &&
         dest->getSinglePredecessor() == block) {
+      llvm::SmallVector<mlir::Value> destArgs(op.getDestOperands());
       rewriter.eraseOp(op);
-      rewriter.mergeBlocks(dest, block);
+      rewriter.mergeBlocks(dest, block, destArgs);
       return success();
     }
 
@@ -101,16 +113,54 @@ void CIRCanonicalizePass::runOnOperation() {
   // Collect operations to apply patterns.
   llvm::SmallVector<Operation *, 16> ops;
   getOperation()->walk([&](Operation *op) {
-    assert(!cir::MissingFeatures::tryOp());
     assert(!cir::MissingFeatures::callOp());
 
     // Many operations are here to perform a manual `fold` in
     // applyOpPatternsGreedily.
-    if (isa<BrOp, BrCondOp, CastOp, ScopeOp, SwitchOp, SelectOp, UnaryOp,
-            ComplexCreateOp, ComplexImagOp, ComplexRealOp, VecCmpOp,
-            VecCreateOp, VecExtractOp, VecShuffleOp, VecShuffleDynamicOp,
-            VecTernaryOp, BitClrsbOp, BitClzOp, BitCtzOp, BitFfsOp, BitParityOp,
-            BitPopcountOp, BitReverseOp, ByteSwapOp, RotateOp>(op))
+    if (auto castOp = dyn_cast<CastOp>(op)) {
+      // Keep discarded floating-point classification/comparison builtins alive
+      // in O0 codegen parity paths: these lower to cir.cmp/cir.is_fp_class
+      // followed by bool_to_int whose result is intentionally unused.
+      // Running canonicalization roots from such bool_to_int casts lets the
+      // greedy driver erase the entire chain as trivially dead.
+      if (castOp.getKind() == CastKind::bool_to_int &&
+          castOp.getResult().use_empty() &&
+          isa_and_present<CmpOp, IsFPClassOp, SignBitOp>(
+              castOp.getSrc().getDefiningOp()))
+        return;
+      ops.push_back(op);
+      return;
+    }
+
+    if (auto selectOp = dyn_cast<SelectOp>(op)) {
+      // Keep discarded select chains alive for builtin lowering patterns that
+      // intentionally materialize integer results from FP classification/sign
+      // predicates (e.g. __builtin_isinf_sign). Canonicalization roots from
+      // the dead select result would otherwise erase the full chain.
+      if (selectOp->getNumResults() == 1 && selectOp.getResult().use_empty() &&
+          isa_and_present<IsFPClassOp, SignBitOp>(
+              selectOp.getCondition().getDefiningOp()))
+        return;
+      ops.push_back(op);
+      return;
+    }
+
+    if (auto scopeOp = dyn_cast<ScopeOp>(op)) {
+      // Preserve empty OpenMP constructs that carry launch semantics, such as
+      // omp.parallel if/num_threads nested under omp.target host_eval(...).
+      // Rooting greedy canonicalization on the surrounding cir.scope lets MLIR
+      // erase the empty OpenMP op as trivially dead, which changes target
+      // launch width and host fallback behavior.
+      if (!containsNestedOpenMPOps(scopeOp))
+        ops.push_back(op);
+      return;
+    }
+
+    if (isa<BrOp, BrCondOp, SwitchOp, UnaryOp, ComplexCreateOp,
+            ComplexImagOp, ComplexRealOp, VecCmpOp, VecCreateOp, VecExtractOp,
+            VecShuffleOp, VecShuffleDynamicOp, VecTernaryOp, BitClrsbOp,
+            BitClzOp, BitCtzOp, BitFfsOp, BitParityOp, BitPopcountOp,
+            BitReverseOp, ByteSwapOp, RotateOp, ConstantOp>(op))
       ops.push_back(op);
   });
 

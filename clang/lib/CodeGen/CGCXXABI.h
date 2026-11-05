@@ -626,6 +626,25 @@ public:
                                llvm::GlobalVariable *DeclPtr,
                                bool PerformInit) = 0;
 
+  /// Get or create the guard variable for a guarded initializer. If
+  /// \p CreateDefinition is true, creates a definition with a zero initializer;
+  /// otherwise creates an external declaration.
+  virtual llvm::GlobalVariable *
+  getOrCreateGuardVariable(const VarDecl &D, llvm::GlobalVariable *DeclPtr,
+                           bool CreateDefinition) {
+    return nullptr;
+  }
+
+  /// Emit the fast-path guard variable check for a guarded initializer.
+  /// Returns an i1 value that is true when the variable needs initialization,
+  /// or nullptr if the target does not support inline atomics.
+  virtual llvm::Value *EmitGuardFastPathCheck(llvm::IRBuilderBase &Builder,
+                                              llvm::GlobalVariable *Guard,
+                                              bool Threadsafe,
+                                              bool UseInt8GuardVariable) {
+    return nullptr;
+  }
+
   /// Emit code to force the execution of a destructor during global
   /// teardown.  The default implementation of this uses atexit.
   ///

@@ -39,7 +39,7 @@ void Child::MotherKey() {}
 
 // Child vtable
 
-// CIR:      cir.global "private" external @_ZTV5Child = #cir.vtable<{
+// CIR:      cir.global  constant external  @_ZTV5Child = #cir.vtable<{
 // CIR-SAME:     #cir.const_array<[
 // CIR-SAME:         #cir.ptr<null> : !cir.ptr<!u8i>,
 // CIR-SAME:         #cir.ptr<null> : !cir.ptr<!u8i>,
@@ -53,7 +53,7 @@ void Child::MotherKey() {}
 // CIR-SAME:     ]> : !cir.array<!cir.ptr<!u8i> x 3>
 // CIR-SAME: }> : [[CHILD_VTABLE_TYPE]]
 
-// LLVM:      @_ZTV5Child = global { [4 x ptr], [3 x ptr] } {
+// LLVM:      @_ZTV5Child = unnamed_addr constant { [4 x ptr], [3 x ptr] } {
 // LLVM-SAME:     [4 x ptr] [
 // LLVM-SAME:         ptr null,
 // LLVM-SAME:         ptr null,
@@ -83,7 +83,7 @@ void Child::MotherKey() {}
 
 // Mother vtable
 
-// CIR:      cir.global "private" external @_ZTV6Mother = #cir.vtable<{
+// CIR:      cir.global  constant external  @_ZTV6Mother = #cir.vtable<{
 // CIR-SAME:      #cir.const_array<[
 // CIR-SAME:          #cir.ptr<null> : !cir.ptr<!u8i>,
 // CIR-SAME:          #cir.ptr<null> : !cir.ptr<!u8i>,
@@ -92,7 +92,7 @@ void Child::MotherKey() {}
 // CIR-SAME:      ]> : !cir.array<!cir.ptr<!u8i> x 4>
 // CIR-SAME: }> : [[MOTHER_VTABLE_TYPE]]
 
-// LLVM:      @_ZTV6Mother = global { [4 x ptr] } {
+// LLVM:      @_ZTV6Mother = unnamed_addr constant { [4 x ptr] } {
 // LLVM-SAME:     [4 x ptr] [
 // LLVM-SAME:         ptr null,
 // LLVM-SAME:         ptr null,
@@ -112,7 +112,7 @@ void Child::MotherKey() {}
 
 // Father vtable
 
-// CIR:      cir.global "private" external @_ZTV6Father = #cir.vtable<{
+// CIR:      cir.global  constant external  @_ZTV6Father = #cir.vtable<{
 // CIR-SAME:     #cir.const_array<[
 // CIR-SAME:         #cir.ptr<null> : !cir.ptr<!u8i>,
 // CIR-SAME:         #cir.ptr<null> : !cir.ptr<!u8i>,
@@ -120,7 +120,7 @@ void Child::MotherKey() {}
 // CIR-SAME:     ]> : !cir.array<!cir.ptr<!u8i> x 3>
 // CIR-SAME: }> : [[FATHER_VTABLE_TYPE]]
 
-// LLVM:      @_ZTV6Father = global { [3 x ptr] } {
+// LLVM:      @_ZTV6Father = unnamed_addr constant { [3 x ptr] } {
 // LLVM-SAME:     [3 x ptr] [
 // LLVM-SAME:         ptr null,
 // LLVM-SAME:         ptr null,
@@ -163,11 +163,11 @@ Child::Child() {}
 // LLVM:   store ptr %[[THIS_ARG]], ptr %[[THIS_ADDR]]
 // LLVM:   %[[THIS:.*]] = load ptr, ptr %[[THIS_ADDR]]
 // LLVM:   call void @_ZN6MotherC2Ev(ptr{{.*}} %[[THIS]])
-// LLVM:   %[[FATHER_BASE:.*]] = getelementptr{{.*}} i8, ptr %[[THIS]], i32 8
+// LLVM:   %[[FATHER_BASE:.*]] = getelementptr{{.*}} i8, ptr %[[THIS]], i64 8
 // LLVM:   call void @_ZN6FatherC2Ev(ptr{{.*}} %[[FATHER_BASE]])
-// LLVM:   store ptr getelementptr inbounds nuw (i8, ptr @_ZTV5Child, i64 16), ptr %[[THIS]]
-// LLVM:   %[[FATHER_BASE:.*]] = getelementptr{{.*}} i8, ptr %[[THIS]], i32 8
-// LLVM:   store ptr getelementptr inbounds nuw (i8, ptr @_ZTV5Child, i64 48), ptr %[[FATHER_BASE]]
+// LLVM:   store ptr getelementptr inbounds inrange({{.*}}) ({{.*}}, ptr @_ZTV5Child, i32 0, i32 0, i32 {{.*}}), ptr %[[THIS]]
+// LLVM:   %[[FATHER_BASE:.*]] = getelementptr{{.*}} i8, ptr %[[THIS]], i64 8
+// LLVM:   store ptr getelementptr inbounds inrange({{.*}}) ({{.*}}, ptr @_ZTV5Child, i32 0, i32 1, i32 {{.*}}), ptr %[[FATHER_BASE]]
 // LLVM:   ret void
 
 // OGCG: define{{.*}} void @_ZN5ChildC2Ev(ptr{{.*}} %[[THIS_ARG:.*]])

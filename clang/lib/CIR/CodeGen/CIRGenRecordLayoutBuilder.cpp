@@ -72,7 +72,7 @@ struct CIRRecordLowering final {
                        mlir::Type storageType);
 
   void lower(bool NonVirtualBaseType);
-  void lowerUnion();
+  void lowerUnion(bool isNonVirtualBaseType);
 
   /// Determines if we need a packed llvm struct.
   void determinePacked(bool nvBaseType);
@@ -83,10 +83,13 @@ struct CIRRecordLowering final {
   void accumulateBases();
   void accumulateVPtrs();
   void accumulateVBases();
-  void accumulateFields();
+  void accumulateFields(bool isNonVirtualBaseType);
   RecordDecl::field_iterator
-  accumulateBitFields(RecordDecl::field_iterator field,
+  accumulateBitFields(bool isNonVirtualBaseType,
+                      RecordDecl::field_iterator field,
                       RecordDecl::field_iterator fieldEnd);
+  CharUnits calculateTailClippingOffset(bool isNonVirtualBaseType) const;
+  void checkBitfieldClipping(bool isNonVirtualBaseType) const;
 
   mlir::Type getVFPtrType();
 
@@ -101,12 +104,13 @@ struct CIRRecordLowering final {
   // other bases, which complicates layout in specific ways.
   //
   // Note specifically that the ms_struct attribute doesn't change this.
-  bool isOverlappingVBaseABI() {
+  bool isOverlappingVBaseABI() const {
     return !astContext.getTargetInfo().getCXXABI().isMicrosoft();
   }
   // Recursively searches all of the bases to find out if a vbase is
   // not the primary vbase of some base class.
-  bool hasOwnStorage(const CXXRecordDecl *decl, const CXXRecordDecl *query);
+  bool hasOwnStorage(const CXXRecordDecl *decl,
+                     const CXXRecordDecl *query) const;
 
   /// The Microsoft bitfield layout rule allocates discrete storage
   /// units of the field's formal type and only combines adjacent
@@ -124,13 +128,166 @@ struct CIRRecordLowering final {
 
   void calculateZeroInit();
 
-  CharUnits getSize(mlir::Type Ty) {
-    return CharUnits::fromQuantity(dataLayout.layout.getTypeSize(Ty));
+  /// Get the clang LangAS for a CIR pointer's address space.
+  /// Returns LangAS::Default for pointers without an explicit address space.
+  clang::LangAS getLangASForPointer(cir::PointerType ptrTy) const {
+    auto addrSpace = ptrTy.getAddrSpace();
+    if (!addrSpace)
+      return clang::LangAS::Default;
+    if (auto langAS = mlir::dyn_cast<cir::LangAddressSpaceAttr>(addrSpace)) {
+      switch (langAS.getValue()) {
+      case cir::LangAddressSpace::Default:
+        return clang::LangAS::Default;
+      case cir::LangAddressSpace::OffloadPrivate:
+        return clang::LangAS::opencl_private;
+      case cir::LangAddressSpace::OffloadLocal:
+        return clang::LangAS::opencl_local;
+      case cir::LangAddressSpace::OffloadGlobal:
+        return clang::LangAS::opencl_global;
+      case cir::LangAddressSpace::OffloadConstant:
+        return clang::LangAS::opencl_constant;
+      case cir::LangAddressSpace::OffloadGeneric:
+        return clang::LangAS::opencl_generic;
+      }
+    }
+    if (auto targetAS =
+            mlir::dyn_cast<cir::TargetAddressSpaceAttr>(addrSpace)) {
+      return clang::getLangASFromTargetAS(targetAS.getValue());
+    }
+    return clang::LangAS::Default;
+  }
+
+  CharUnits getSize(mlir::Type Ty) const {
+    // VPtrType and PointerType hardcode 64-bit size in their
+    // DataLayoutTypeInterface implementations. On targets with different pointer
+    // widths (e.g. i386), use the target's actual pointer size.
+    // For PointerType, use the address-space-aware pointer width so that
+    // targets like AMDGCN (where private AS pointers are 32-bit but flat AS
+    // pointers are 64-bit) get correct sizes.
+    if (mlir::isa<cir::VPtrType>(Ty))
+      return astContext.toCharUnitsFromBits(
+          astContext.getTargetInfo().getPointerWidth(clang::LangAS::Default));
+    if (auto ptrTy = mlir::dyn_cast<cir::PointerType>(Ty))
+      return astContext.toCharUnitsFromBits(
+          astContext.getTargetInfo().getPointerWidth(
+              getLangASForPointer(ptrTy)));
+    // MethodType is { fnptr_t, ptrdiff_t } — both pointer-width.
+    if (mlir::isa<cir::MethodType>(Ty)) {
+      auto ptrWidth = astContext.getTargetInfo().getPointerWidth(
+          clang::LangAS::Default);
+      return astContext.toCharUnitsFromBits(ptrWidth * 2);
+    }
+    // DataMemberType is ptrdiff_t — pointer-width.
+    if (mlir::isa<cir::DataMemberType>(Ty))
+      return astContext.toCharUnitsFromBits(
+          astContext.getTargetInfo().getPointerWidth(clang::LangAS::Default));
+    // RecordTypes compute their size by iterating members via
+    // mlir::DataLayout, which hits the hardcoded VPtrType/PointerType sizes.
+    // Re-compute struct/union sizes here to get correct results on all targets.
+    if (auto recordTy = mlir::dyn_cast<cir::RecordType>(Ty)) {
+      if (!recordTy.isComplete())
+        return CharUnits::Zero();
+      if (auto it = cirGenTypes.completeRecordSizeCache.find(Ty);
+          it != cirGenTypes.completeRecordSizeCache.end())
+        return it->second;
+      if (recordTy.isUnion()) {
+        llvm::ArrayRef<mlir::Type> unionMembers = recordTy.getMembers();
+        if (recordTy.getPadded() && !unionMembers.empty()) {
+          // For padded unions, the last member is explicit padding that
+          // extends the union to its full AST layout size. The padding was
+          // computed during lowerUnion as: layoutSize - getSize(storageType),
+          // where storageType is the member with the highest alignment
+          // (breaking ties by size). To recover layoutSize, we must identify
+          // the same storageType member and add its size to the padding.
+          //
+          // Using max(non-padding) + padding is WRONG when a lower-alignment
+          // member is larger than storageType (e.g. aligned_storage<48,16>
+          // has CIR alignment 1 but size 48, while storageType might be a
+          // 24-byte struct with alignment 8). In that case max(non-padding)
+          // would exceed storageType and the sum would exceed layoutSize.
+          //
+          // This matches getLargestMember() + padding in computeUnionSize().
+          auto nonPadMembers = unionMembers.drop_back(1);
+          mlir::Type bestMember = nullptr;
+          for (mlir::Type memberTy : nonPadMembers) {
+            if (!bestMember ||
+                getAlignment(memberTy) > getAlignment(bestMember) ||
+                (getAlignment(memberTy) == getAlignment(bestMember) &&
+                 getSize(memberTy) > getSize(bestMember)))
+              bestMember = memberTy;
+          }
+          uint64_t bestSize =
+              bestMember ? (uint64_t)getSize(bestMember).getQuantity() : 0;
+          uint64_t padSize =
+              (uint64_t)getSize(unionMembers.back()).getQuantity();
+          return (cirGenTypes.completeRecordSizeCache[Ty] =
+                      CharUnits::fromQuantity(llvm::alignTo(
+                          bestSize + padSize, getAlignment(Ty).getQuantity())));
+        }
+        uint64_t maxSize = 0;
+        for (mlir::Type memberTy : unionMembers)
+          maxSize =
+              std::max(maxSize, (uint64_t)getSize(memberTy).getQuantity());
+        return (cirGenTypes.completeRecordSizeCache[Ty] = CharUnits::fromQuantity(
+                    llvm::alignTo(maxSize, getAlignment(Ty).getQuantity())));
+      }
+      uint64_t size = 0;
+      uint64_t maxAlign = 1;
+      for (mlir::Type memberTy : recordTy.getMembers()) {
+        uint64_t align = recordTy.getPacked()
+                             ? 1
+                             : getAlignment(memberTy).getQuantity();
+        size = llvm::alignTo(size, align);
+        size += getSize(memberTy).getQuantity();
+        maxAlign = std::max(maxAlign, align);
+      }
+      size = llvm::alignTo(size, maxAlign);
+      return (cirGenTypes.completeRecordSizeCache[Ty] =
+                  CharUnits::fromQuantity(size));
+    }
+    if (auto arrayTy = mlir::dyn_cast<cir::ArrayType>(Ty))
+      return CharUnits::fromQuantity(getSize(arrayTy.getElementType())
+                                         .getQuantity() *
+                                     arrayTy.getSize());
+    // Use alloc size (store size padded to ABI alignment), matching
+    // OGCG's CGRecordLowering::getSize which uses DataLayout::getTypeAllocSize.
+    // This is important for non-power-of-2 vector types like <3 x float>
+    // where store size (12) differs from alloc size (16).
+    return CharUnits::fromQuantity(dataLayout.getTypeAllocSize(Ty));
   }
   CharUnits getSizeInBits(mlir::Type ty) {
-    return CharUnits::fromQuantity(dataLayout.layout.getTypeSizeInBits(ty));
+    return CharUnits::fromQuantity(astContext.toBits(getSize(ty)));
   }
-  CharUnits getAlignment(mlir::Type Ty) {
+  CharUnits getAlignment(mlir::Type Ty) const {
+    if (mlir::isa<cir::VPtrType>(Ty))
+      return astContext.toCharUnitsFromBits(
+          astContext.getTargetInfo().getPointerAlign(clang::LangAS::Default));
+    if (auto ptrTy = mlir::dyn_cast<cir::PointerType>(Ty))
+      return astContext.toCharUnitsFromBits(
+          astContext.getTargetInfo().getPointerAlign(
+              getLangASForPointer(ptrTy)));
+    // MethodType is { fnptr_t, ptrdiff_t } — aligned to pointer alignment.
+    // DataMemberType is ptrdiff_t — aligned to pointer alignment.
+    if (mlir::isa<cir::MethodType, cir::DataMemberType>(Ty))
+      return astContext.toCharUnitsFromBits(
+          astContext.getTargetInfo().getPointerAlign(clang::LangAS::Default));
+    if (auto recordTy = mlir::dyn_cast<cir::RecordType>(Ty)) {
+      if (!recordTy.isComplete())
+        return CharUnits::One();
+      if (auto it = cirGenTypes.completeRecordAlignCache.find(Ty);
+          it != cirGenTypes.completeRecordAlignCache.end())
+        return it->second;
+      if (recordTy.getPacked())
+        return (cirGenTypes.completeRecordAlignCache[Ty] = CharUnits::One());
+      uint64_t maxAlign = 1;
+      for (mlir::Type memberTy : recordTy.getMembers())
+        maxAlign =
+            std::max(maxAlign, (uint64_t)getAlignment(memberTy).getQuantity());
+      return (cirGenTypes.completeRecordAlignCache[Ty] =
+                  CharUnits::fromQuantity(maxAlign));
+    }
+    if (auto arrayTy = mlir::dyn_cast<cir::ArrayType>(Ty))
+      return getAlignment(arrayTy.getElementType());
     return CharUnits::fromQuantity(dataLayout.layout.getTypeABIAlignment(Ty));
   }
 
@@ -180,12 +337,14 @@ struct CIRRecordLowering final {
   }
 
   mlir::Type getStorageType(const FieldDecl *fieldDecl) {
-    mlir::Type type = cirGenTypes.convertTypeForMem(fieldDecl->getType());
-    if (fieldDecl->isBitField()) {
-      cirGenTypes.getCGModule().errorNYI(recordDecl->getSourceRange(),
-                                         "getStorageType for bitfields");
-    }
-    return type;
+    mlir::Type type = cirGenTypes.convertTypeForMemForField(fieldDecl->getType());
+    if (!fieldDecl->isBitField())
+      return type;
+    if (isDiscreteBitFieldABI())
+      return type;
+    return getBitfieldStorageType(std::min(
+        fieldDecl->getBitWidthValue(),
+        (unsigned)astContext.toBits(getSize(type))));
   }
 
   uint64_t getFieldBitOffset(const FieldDecl *fieldDecl) {
@@ -273,7 +432,7 @@ void CIRRecordLowering::setBitFieldInfo(const FieldDecl *fd,
 
 void CIRRecordLowering::lower(bool nonVirtualBaseType) {
   if (recordDecl->isUnion()) {
-    lowerUnion();
+    lowerUnion(nonVirtualBaseType);
     computeVolatileBitfields();
     return;
   }
@@ -281,7 +440,7 @@ void CIRRecordLowering::lower(bool nonVirtualBaseType) {
   CharUnits size = nonVirtualBaseType ? astRecordLayout.getNonVirtualSize()
                                       : astRecordLayout.getSize();
 
-  accumulateFields();
+  accumulateFields(nonVirtualBaseType);
 
   if (cxxRecordDecl) {
     accumulateVPtrs();
@@ -296,8 +455,7 @@ void CIRRecordLowering::lower(bool nonVirtualBaseType) {
   }
 
   llvm::stable_sort(members);
-  // TODO: Verify bitfield clipping
-  assert(!cir::MissingFeatures::checkBitfieldClipping());
+  checkBitfieldClipping(nonVirtualBaseType);
 
   members.push_back(makeStorageInfo(size, getUIntNType(8)));
   determinePacked(nonVirtualBaseType);
@@ -332,7 +490,8 @@ void CIRRecordLowering::fillOutputFields() {
 }
 
 RecordDecl::field_iterator
-CIRRecordLowering::accumulateBitFields(RecordDecl::field_iterator field,
+CIRRecordLowering::accumulateBitFields(bool isNonVirtualBaseType,
+                                       RecordDecl::field_iterator field,
                                        RecordDecl::field_iterator fieldEnd) {
   if (isDiscreteBitFieldABI()) {
     // run stores the first element of the current run of bitfields. fieldEnd is
@@ -352,7 +511,7 @@ CIRRecordLowering::accumulateBitFields(RecordDecl::field_iterator field,
         continue;
       }
       uint64_t bitOffset = getFieldBitOffset(*field);
-      mlir::Type type = cirGenTypes.convertTypeForMem(field->getType());
+      mlir::Type type = cirGenTypes.convertTypeForMemForField(field->getType());
       // If we don't have a run yet, or don't live within the previous run's
       // allocated storage then we allocate some storage and start a new run.
       if (run == fieldEnd || bitOffset >= tail) {
@@ -474,9 +633,28 @@ CIRRecordLowering::accumulateBitFields(RecordDecl::field_iterator field,
         // Determine if accumulating the just-seen span will create an expensive
         // access unit or not.
         mlir::Type type = getUIntNType(astContext.toBits(accessSize));
-        if (!astContext.getTargetInfo().hasCheapUnalignedBitFieldAccess())
-          cirGenTypes.getCGModule().errorNYI(
-              field->getSourceRange(), "NYI CheapUnalignedBitFieldAccess");
+        if (!astContext.getTargetInfo().hasCheapUnalignedBitFieldAccess()) {
+          // Unaligned accesses are expensive. Only accumulate if the new unit
+          // is naturally aligned. Otherwise install the best we have, which is
+          // either the initial access unit (can't do better), or a naturally
+          // aligned accumulation (since we would have already installed it if
+          // it wasn't naturally aligned).
+          CharUnits align = getAlignment(type);
+          if (align > astRecordLayout.getAlignment())
+            // The alignment required is greater than the containing structure
+            // itself.
+            installBest = true;
+          else if (!beginOffset.isMultipleOf(align))
+            // The access unit is not at a naturally aligned offset within the
+            // structure.
+            installBest = true;
+
+          if (installBest && bestEnd == field)
+            // We're installing the first span, whose clipping was presumed
+            // above. Compute it correctly.
+            if (getSize(type) == accessSize)
+              bestClipped = false;
+        }
 
         if (!installBest) {
           // Find the next used storage offset to determine what the limit of
@@ -492,8 +670,8 @@ CIRRecordLowering::accumulateBitFields(RecordDecl::field_iterator field,
               limitOffset = bitsToCharUnits(getFieldBitOffset(*probe));
               goto FoundLimit;
             }
-          limitOffset = cxxRecordDecl ? astRecordLayout.getNonVirtualSize()
-                                      : astRecordLayout.getDataSize();
+          limitOffset =
+              calculateTailClippingOffset(isNonVirtualBaseType);
 
         FoundLimit:
           CharUnits typeSize = getSize(type);
@@ -563,22 +741,27 @@ CIRRecordLowering::accumulateBitFields(RecordDecl::field_iterator field,
   return field;
 }
 
-void CIRRecordLowering::accumulateFields() {
+void CIRRecordLowering::accumulateFields(bool isNonVirtualBaseType) {
   for (RecordDecl::field_iterator field = recordDecl->field_begin(),
                                   fieldEnd = recordDecl->field_end();
        field != fieldEnd;) {
     if (field->isBitField()) {
-      field = accumulateBitFields(field, fieldEnd);
+      field = accumulateBitFields(isNonVirtualBaseType, field, fieldEnd);
       assert((field == fieldEnd || !field->isBitField()) &&
              "Failed to accumulate all the bitfields");
-    } else if (!field->isZeroSize(astContext)) {
-      members.push_back(MemberInfo(bitsToCharUnits(getFieldBitOffset(*field)),
-                                   MemberInfo::InfoKind::Field,
-                                   getStorageType(*field), *field));
+    } else if (isEmptyFieldForLayout(astContext, *field)) {
+      // Empty fields have no storage.
       ++field;
     } else {
-      // TODO(cir): do we want to do anything special about zero size members?
-      assert(!cir::MissingFeatures::zeroSizeRecordMembers());
+      // Use base subobject layout for the potentially-overlapping field,
+      // as it is done in RecordLayoutBuilder.
+      members.push_back(MemberInfo(bitsToCharUnits(getFieldBitOffset(*field)),
+                                   MemberInfo::InfoKind::Field,
+                                   field->isPotentiallyOverlapping()
+                                       ? getStorageType(field->getType()
+                                                            ->getAsCXXRecordDecl())
+                                       : getStorageType(*field),
+                                   *field));
       ++field;
     }
   }
@@ -667,9 +850,8 @@ CIRGenTypes::computeRecordLayout(const RecordDecl *rd, cir::RecordType *ty) {
   lowering.lower(/*nonVirtualBaseType=*/false);
 
   // If we're in C++, compute the base subobject type.
-  cir::RecordType baseTy;
-  if (llvm::isa<CXXRecordDecl>(rd) && !rd->isUnion() &&
-      !rd->hasAttr<FinalAttr>()) {
+  cir::RecordType baseTy = *ty;
+  if (llvm::isa<CXXRecordDecl>(rd) && !rd->hasAttr<FinalAttr>()) {
     baseTy = *ty;
     if (lowering.astRecordLayout.getNonVirtualSize() !=
         lowering.astRecordLayout.getSize()) {
@@ -678,7 +860,7 @@ CIRGenTypes::computeRecordLayout(const RecordDecl *rd, cir::RecordType *ty) {
       std::string baseIdentifier = getRecordTypeName(rd, ".base");
       baseTy = builder.getCompleteNamedRecordType(
           baseLowering.fieldTypes, baseLowering.packed, baseLowering.padded,
-          baseIdentifier);
+          baseIdentifier, builder.getRecordKind(rd->getTagKind()));
       // TODO(cir): add something like addRecordTypeName
 
       // BaseTy and Ty must agree on their packedness for getCIRFieldNo to work
@@ -691,8 +873,8 @@ CIRGenTypes::computeRecordLayout(const RecordDecl *rd, cir::RecordType *ty) {
   // Fill in the record *after* computing the base type.  Filling in the body
   // signifies that the type is no longer opaque and record layout is complete,
   // but we may need to recursively layout rd while laying D out as a base type.
-  assert(!cir::MissingFeatures::astRecordDeclAttr());
-  ty->complete(lowering.fieldTypes, lowering.packed, lowering.padded);
+  auto astAttr = cir::ASTRecordDeclAttr::get(ty->getContext(), rd);
+  ty->complete(lowering.fieldTypes, lowering.packed, lowering.padded, astAttr);
 
   auto rl = std::make_unique<CIRGenRecordLayout>(
       ty ? *ty : cir::RecordType{}, baseTy ? baseTy : cir::RecordType{},
@@ -716,6 +898,10 @@ CIRGenTypes::computeRecordLayout(const RecordDecl *rd, cir::RecordType *ty) {
   }
 
   // TODO: implement verification
+  // OGCG verifies that the computed LLVM struct size matches the AST layout
+  // size, that the base subobject type size matches, and that all field
+  // offsets agree between LLVM and AST layouts. CIR intentionally skips this
+  // verification.
   return rl;
 }
 
@@ -757,8 +943,10 @@ void CIRGenRecordLayout::dump() const { print(llvm::errs()); }
 
 void CIRGenBitFieldInfo::dump() const { print(llvm::errs()); }
 
-void CIRRecordLowering::lowerUnion() {
-  CharUnits layoutSize = astRecordLayout.getSize();
+void CIRRecordLowering::lowerUnion(bool isNonVirtualBaseType) {
+  CharUnits layoutSize =
+      isNonVirtualBaseType ? astRecordLayout.getDataSize()
+                           : astRecordLayout.getSize();
   mlir::Type storageType = nullptr;
   bool seenNamedMember = false;
 
@@ -769,8 +957,11 @@ void CIRRecordLowering::lowerUnion() {
     if (field->isBitField()) {
       if (field->isZeroLengthBitField())
         continue;
-      fieldType = getBitfieldStorageType(field->getBitWidthValue());
-      setBitFieldInfo(field, CharUnits::Zero(), fieldType);
+      fieldType = getStorageType(field);
+      mlir::Type bfType = fieldType;
+      if (layoutSize < getSize(bfType))
+        bfType = getByteArrayType(layoutSize);
+      setBitFieldInfo(field, CharUnits::Zero(), bfType);
     } else {
       fieldType = getStorageType(field);
     }
@@ -797,8 +988,16 @@ void CIRRecordLowering::lowerUnion() {
 
     // Because our union isn't zero initializable, we won't be getting a better
     // storage type.
-    if (!zeroInitializable)
+    if (!zeroInitializable) {
+      // NOTE(cir): Track all union member's types even when non-zero-
+      // initializable. CIR retains all member types unlike OGCG which only
+      // tracks the storage type. Clip to layoutSize for base subobject types.
+      fieldTypes.push_back(
+          (isNonVirtualBaseType && getSize(fieldType) > layoutSize)
+              ? getByteArrayType(layoutSize)
+              : fieldType);
       continue;
+    }
 
     // Conditionally update our storage type if we've got a new "better" one.
     if (!storageType || getAlignment(fieldType) > getAlignment(storageType) ||
@@ -808,7 +1007,11 @@ void CIRRecordLowering::lowerUnion() {
 
     // NOTE(cir): Track all union member's types, not just the largest one. It
     // allows for proper type-checking and retain more info for analisys.
-    fieldTypes.push_back(fieldType);
+    // Clip to layoutSize for base subobject types.
+    fieldTypes.push_back(
+        (isNonVirtualBaseType && getSize(fieldType) > layoutSize)
+            ? getByteArrayType(layoutSize)
+            : fieldType);
   }
 
   if (!storageType) {
@@ -822,12 +1025,17 @@ void CIRRecordLowering::lowerUnion() {
     appendPaddingBytes(layoutSize - getSize(storageType));
 
   // Set packed if we need it.
-  if (!layoutSize.isMultipleOf(getAlignment(storageType)))
+  const auto storageAlignment = getAlignment(storageType);
+  assert((astRecordLayout.getSize().isMultipleOf(storageAlignment) ||
+          !astRecordLayout.getDataSize().isMultipleOf(storageAlignment)) &&
+         "Union's standard layout and no_unique_address layout must agree on "
+         "packedness");
+  if (!astRecordLayout.getDataSize().isMultipleOf(storageAlignment))
     packed = true;
 }
 
 bool CIRRecordLowering::hasOwnStorage(const CXXRecordDecl *decl,
-                                      const CXXRecordDecl *query) {
+                                      const CXXRecordDecl *query) const {
   const ASTRecordLayout &declLayout = astContext.getASTRecordLayout(decl);
   if (declLayout.isPrimaryBaseVirtual() && declLayout.getPrimaryBase() == query)
     return false;
@@ -971,13 +1179,59 @@ void CIRRecordLowering::accumulateBases() {
     // Bases can be zero-sized even if not technically empty if they
     // contain only a trailing array member.
     const CXXRecordDecl *baseDecl = base.getType()->getAsCXXRecordDecl();
-    if (!baseDecl->isEmpty() &&
+    if (!isEmptyRecordForLayout(astContext, base.getType()) &&
         !astContext.getASTRecordLayout(baseDecl).getNonVirtualSize().isZero()) {
       members.push_back(MemberInfo(astRecordLayout.getBaseClassOffset(baseDecl),
                                    MemberInfo::InfoKind::Base,
                                    getStorageType(baseDecl), baseDecl));
     }
   }
+}
+
+CharUnits CIRRecordLowering::calculateTailClippingOffset(
+    bool isNonVirtualBaseType) const {
+  if (!cxxRecordDecl)
+    return astRecordLayout.getDataSize();
+
+  CharUnits scissorOffset = astRecordLayout.getNonVirtualSize();
+  // In the Itanium ABI, it's possible to place a vbase at a dsize that is
+  // smaller than the nvsize. Here we check to see if such a base is placed
+  // before the nvsize and set the scissor offset to that, instead of the
+  // nvsize.
+  if (!isNonVirtualBaseType && isOverlappingVBaseABI())
+    for (const auto &base : cxxRecordDecl->vbases()) {
+      const CXXRecordDecl *baseDecl = base.getType()->getAsCXXRecordDecl();
+      if (isEmptyRecordForLayout(astContext, base.getType()))
+        continue;
+      // If the vbase is a primary virtual base of some base, then it doesn't
+      // get its own storage location but instead lives inside of that base.
+      if (astContext.isNearlyEmpty(baseDecl) &&
+          !hasOwnStorage(cxxRecordDecl, baseDecl))
+        continue;
+      scissorOffset = std::min(scissorOffset,
+                               astRecordLayout.getVBaseClassOffset(baseDecl));
+    }
+
+  return scissorOffset;
+}
+
+// Verify accumulateBitfields computed the correct storage representations.
+void CIRRecordLowering::checkBitfieldClipping(
+    bool isNonVirtualBaseType) const {
+#ifndef NDEBUG
+  auto scissorOffset = calculateTailClippingOffset(isNonVirtualBaseType);
+  auto tail = CharUnits::Zero();
+  for (const auto &m : members) {
+    // Only members with data could possibly overlap.
+    if (!m.data)
+      continue;
+
+    assert(m.offset >= tail && "Bitfield access unit is not clipped");
+    tail = m.offset + getSize(m.data);
+    assert((tail <= scissorOffset || m.offset >= scissorOffset) &&
+           "Bitfield straddles scissor offset");
+  }
+#endif
 }
 
 void CIRRecordLowering::accumulateVBases() {
@@ -1010,9 +1264,11 @@ void CIRRecordLowering::accumulateVPtrs() {
     members.push_back(MemberInfo(CharUnits::Zero(), MemberInfo::InfoKind::VFPtr,
                                  getVFPtrType()));
 
-  if (astRecordLayout.hasOwnVBPtr())
+  if (astRecordLayout.hasOwnVBPtr()) {
     cirGenTypes.getCGModule().errorNYI(recordDecl->getSourceRange(),
                                        "accumulateVPtrs: hasOwnVBPtr");
+    return;
+  }
 }
 
 mlir::Type CIRRecordLowering::getVFPtrType() {

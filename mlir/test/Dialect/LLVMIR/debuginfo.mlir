@@ -1,4 +1,5 @@
 // RUN: mlir-opt %s --verify-roundtrip | mlir-opt | FileCheck %s
+// RUN: mlir-opt -emit-bytecode %s | mlir-opt | FileCheck %s
 
 // CHECK-DAG: #[[FILE:.*]] = #llvm.di_file<"debuginfo.mlir" in "/test/">
 #file = #llvm.di_file<"debuginfo.mlir" in "/test/">
@@ -50,13 +51,16 @@
   line = 10, sizeInBits = 128, alignInBits = 32
 >
 
-// CHECK-DAG: #[[COMP1:.*]] = #llvm.di_composite_type<tag = DW_TAG_array_type, name = "array1", file = #[[FILE]], scope = #[[FILE]], baseType = #[[INT0]], allocated = {{.*}}, elements = #llvm.di_subrange<count = 4 : i64>>
+// CHECK-DAG: #[[COMP1:.*]] = #llvm.di_composite_type<tag = DW_TAG_array_type, name = "array1", file = #[[FILE]], scope = #[[FILE]], baseType = #[[INT0]], allocated = {{.*}}, annotations = [#llvm.di_annotation<name = "foo", value = "bar">], elements = [#llvm.di_subrange<count = 4 : i64>]>
 #comp1 = #llvm.di_composite_type<
   tag = DW_TAG_array_type, name = "array1", file = #file,
   scope = #file, baseType = #int0,
   // Specify the subrange count.
   allocated = <[DW_OP_push_object_address, DW_OP_deref]>,
-  elements = #llvm.di_subrange<count = 4>
+  // A node array with another populated field after it. Printed bare the two
+  // would run together, so the brackets are what makes this read back.
+  annotations = [#llvm.di_annotation<name = "foo", value = "bar">],
+  elements = [#llvm.di_subrange<count = 4>]
 >
 
 // CHECK-DAG: #[[TOPLEVEL:.*]] = #llvm.di_namespace<name = "toplevel", exportSymbols = true>
@@ -81,7 +85,7 @@
   flags = "TypePassByReference|NonTrivial"
 >
 
-// CHECK-DAG: #[[COMP3:.+]] = #llvm.di_composite_type<{{.*}}, name = "expr_elements2"{{.*}}elements = #llvm.di_generic_subrange<count = #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(16), DW_OP_deref]>, lowerBound = #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(24), DW_OP_deref]>, stride = #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(32), DW_OP_deref]>>>
+// CHECK-DAG: #[[COMP3:.+]] = #llvm.di_composite_type<{{.*}}, name = "expr_elements2"{{.*}}elements = [#llvm.di_generic_subrange<count = #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(16), DW_OP_deref]>, lowerBound = #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(24), DW_OP_deref]>, stride = #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(32), DW_OP_deref]>>]>
 #exp1 =  #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(16), DW_OP_deref]>
 #exp2 =  #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(24), DW_OP_deref]>
 #exp3 =  #llvm.di_expression<[DW_OP_push_object_address, DW_OP_plus_uconst(32), DW_OP_deref]>
@@ -109,7 +113,8 @@
 // CHECK-DAG: #[[SP0:.*]] = #llvm.di_subprogram<compileUnit = #[[CU]], scope = #[[ANONYMOUS_NS]], name = "addr", linkageName = "addr", file = #[[FILE]], line = 3, scopeLine = 3, subprogramFlags = "Definition|Optimized", type = #[[SPTYPE0]]>
 #sp0 = #llvm.di_subprogram<
   compileUnit = #cu, scope = #anonymous_namespace, name = "addr", linkageName = "addr",
-  file = #file, line = 3, scopeLine = 3, subprogramFlags = "Definition|Optimized", type = #spType0
+  file = #file, line = 3, scopeLine = 3,
+  subprogramFlags = "Definition|Optimized", type = #spType0
 >
 
 // CHECK-DAG: #[[SP1:.*]] = #llvm.di_subprogram<scope = #[[COMP2]], file = #[[FILE]], type = #[[SPTYPE1]]>
@@ -125,11 +130,19 @@
   apinotes = "/", line = 42, isDecl = true
 >
 
-// CHECK-DAG: #[[SP2:.*]] = #llvm.di_subprogram<compileUnit = #[[CU]], scope = #[[MODULE]], name = "value", file = #[[FILE]], subprogramFlags = Definition, type = #[[SPTYPE2]], annotations = #llvm.di_annotation<name = "foo", value = "bar">
+// CHECK-DAG: #[[IMPORTED:.*]] = #llvm.di_imported_entity<tag = DW_TAG_imported_module, scope = #[[SP1]], entity = #[[MODULE]]>
+#imported = #llvm.di_imported_entity<tag = DW_TAG_imported_module, scope = #sp1, entity = #module>
+
+// An annotation value may be a string or an integer; IRPGO debug info profile
+// correlation relies on the integer form for "CFG Hash" and "Num Counters".
+// CHECK-DAG: #[[SP2:.*]] = #llvm.di_subprogram<compileUnit = #[[CU]], scope = #[[MODULE]], name = "value", file = #[[FILE]], subprogramFlags = Definition, type = #[[SPTYPE2]], retainedNodes = [#[[IMPORTED]]], annotations = [#llvm.di_annotation<name = "foo", value = "bar">, #llvm.di_annotation<name = "count", value = 42 : i32>]
 #sp2 = #llvm.di_subprogram<
   compileUnit = #cu, scope = #module, name = "value",
   file = #file, subprogramFlags = "Definition", type = #spType2,
-  annotations = #llvm.di_annotation<name = "foo", value = "bar">
+  // Two node arrays in a row, the shape LLVM emits for an annotated function.
+  retainedNodes = [#imported],
+  annotations = [#llvm.di_annotation<name = "foo", value = "bar">,
+                 #llvm.di_annotation<name = "count", value = 42 : i32>]
 >
 
 // CHECK-DAG: #[[SP3:.*]] = #llvm.di_subprogram<scope = #[[PTR2]], file = #[[FILE]], type = #[[SPTYPE1]]>
@@ -197,6 +210,25 @@ llvm.mlir.global @data() {dbg_exprs = [#var_expression, #var_expression1]} : i64
 // CHECK-DAG: #[[EXP2]] = #llvm.di_global_variable_expression<var = #[[GV2:.*]], expr = <>>
 // CHECK-DAG: #[[GV1]] = #llvm.di_global_variable<{{.*}}name = "a"{{.*}}>
 // CHECK-DAG: #[[GV2]] = #llvm.di_global_variable<{{.*}}name = "b"{{.*}}>
+
+// A global variable carries annotations too, and IRPGO debug info profile
+// correlation puts the function name, CFG hash and counter count of a
+// __profc_* counter there and nowhere else. Both value kinds have to survive
+// the bytecode round trip as well as the textual one -- the bytecode encoding
+// spells its fields out separately from the ODS definition, in
+// mlir/include/mlir/Dialect/LLVMIR/LLVMDialectBytecode.td.
+#global_var2 = #llvm.di_global_variable<scope = #cu, name = "__profc_fn",
+ file = #file, line = 4, type = #int0, isDefined = true,
+ annotations = [#llvm.di_annotation<name = "Function Name", value = "fn">,
+                #llvm.di_annotation<name = "CFG Hash", value = 742261418966908927 : i64>,
+                #llvm.di_annotation<name = "Num Counters", value = 2 : i32>]>
+#var_expression2 = #llvm.di_global_variable_expression<var = #global_var2,
+ expr = <>>
+llvm.mlir.global @counters() {dbg_exprs = [#var_expression2]} : i64
+
+// CHECK-DAG: llvm.mlir.global external @counters() {{{.*}}dbg_exprs = [#[[EXP3:.*]]]} : i64
+// CHECK-DAG: #[[EXP3]] = #llvm.di_global_variable_expression<var = #[[GV3:.*]], expr = <>>
+// CHECK-DAG: #[[GV3]] = #llvm.di_global_variable<{{.*}}name = "__profc_fn"{{.*}}annotations = [#llvm.di_annotation<name = "Function Name", value = "fn">, #llvm.di_annotation<name = "CFG Hash", value = 742261418966908927 : i64>, #llvm.di_annotation<name = "Num Counters", value = 2 : i32>]>
 
 
 // CHECK: llvm.func @addr(%[[ARG:.*]]: i64)

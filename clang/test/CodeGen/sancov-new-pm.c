@@ -1,6 +1,8 @@
 // Test that SanitizerCoverage works under the new pass manager.
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=fuzzer %s -S -emit-llvm -o - | FileCheck %s --check-prefixes=CHECK,CHECK-O0
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=fuzzer %s -O2 -S -emit-llvm -o - | FileCheck %s --check-prefixes=CHECK,CHECK-O2
+// RUN: %if cir-support %{ %clang -target x86_64-linux-gnu -fsanitize=fuzzer %s -S -emit-llvm -fclangir -o - | FileCheck %s --check-prefixes=CHECK,CHECK-O0 %}
+// RUN: %if cir-support %{ %clang -target x86_64-linux-gnu -fsanitize=fuzzer %s -O2 -S -emit-llvm -fclangir -o - | FileCheck %s --check-prefixes=CHECK,CHECK-O2 %}
 
 extern void *memcpy(void *, const void *, unsigned long);
 extern int printf(const char *restrict, ...);
@@ -19,6 +21,7 @@ int LLVMFuzzerTestOneInput(const unsigned char *data, unsigned long size) {
   return 0;
 }
 
+// CHECK-LABEL: define{{.*}}@LLVMFuzzerTestOneInput
 // CHECK-DAG: declare void @__sanitizer_cov_pcs_init(ptr, ptr)
 // CHECK-O0-DAG: declare void @__sanitizer_cov_trace_pc_indir(i64)
 // CHECK-O0-DAG: declare void @__sanitizer_cov_trace_cmp1(i8 zeroext, i8 zeroext)
@@ -35,3 +38,4 @@ int LLVMFuzzerTestOneInput(const unsigned char *data, unsigned long size) {
 // CHECK-O0-DAG: declare void @__sanitizer_cov_trace_switch(i64, ptr)
 // CHECK-O0-DAG: declare void @__sanitizer_cov_trace_pc()
 // CHECK-O0-DAG: declare void @__sanitizer_cov_trace_pc_guard(ptr)
+// CHECK: attributes #{{[0-9]+}} = { {{.*}}optforfuzzing{{.*}} }

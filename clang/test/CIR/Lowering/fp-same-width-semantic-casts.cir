@@ -1,0 +1,58 @@
+// RUN: cir-opt %s -cir-to-llvm -o %t.llvmdialect
+// RUN: FileCheck %s --input-file=%t.llvmdialect --check-prefix=LLVM-DIALECT
+// RUN: cir-opt %s -cir-to-mlir -o %t.mlir
+// RUN: FileCheck %s --input-file=%t.mlir --check-prefix=MLIR
+// RUN: cir-translate %s -cir-to-llvmir --target x86_64-unknown-linux-gnu \
+// RUN:   --disable-cc-lowering -o %t.ll
+// RUN: FileCheck %s --input-file=%t.ll --check-prefix=LLVMIR
+
+module {
+  cir.func @ld_to_double(%arg0: !cir.long_double<!cir.double>) -> !cir.double {
+    %0 = cir.cast floating %arg0 : !cir.long_double<!cir.double> -> !cir.double
+    cir.return %0 : !cir.double
+  }
+  // LLVM-DIALECT-LABEL: llvm.func @ld_to_double
+  // LLVM-DIALECT-SAME: (%arg0: f64) -> f64
+  // LLVM-DIALECT-NEXT: llvm.return %arg0 : f64
+  // MLIR-LABEL: func.func @ld_to_double
+  // MLIR-SAME: (%arg0: f64) -> f64
+  // MLIR-NEXT: return %arg0 : f64
+  // LLVMIR-LABEL: define double @ld_to_double(double %{{.*}})
+  // LLVMIR: ret double %{{.*}}
+
+  cir.func @bf16_to_f16(%arg0: !cir.bf16) -> !cir.f16 {
+    %0 = cir.cast floating %arg0 : !cir.bf16 -> !cir.f16
+    cir.return %0 : !cir.f16
+  }
+  // LLVM-DIALECT-LABEL: llvm.func @bf16_to_f16
+  // LLVM-DIALECT-SAME: (%arg0: bf16) -> f16
+  // LLVM-DIALECT-NEXT: %[[EXT:.*]] = llvm.fpext %arg0 : bf16 to f32
+  // LLVM-DIALECT-NEXT: %[[TRUNC:.*]] = llvm.fptrunc %[[EXT]] : f32 to f16
+  // LLVM-DIALECT-NEXT: llvm.return %[[TRUNC]] : f16
+  // MLIR-LABEL: func.func @bf16_to_f16
+  // MLIR-SAME: (%arg0: bf16) -> f16
+  // MLIR-NEXT: %[[EXT:.*]] = arith.extf %arg0 : bf16 to f32
+  // MLIR-NEXT: %[[TRUNC:.*]] = arith.truncf %[[EXT]] : f32 to f16
+  // MLIR-NEXT: return %[[TRUNC]] : f16
+  // LLVMIR-LABEL: define half @bf16_to_f16(bfloat %{{.*}})
+  // LLVMIR: %{{.*}} = fpext bfloat %{{.*}} to float
+  // LLVMIR-NEXT: %{{.*}} = fptrunc float %{{.*}} to half
+
+  cir.func @f16_to_bf16(%arg0: !cir.f16) -> !cir.bf16 {
+    %0 = cir.cast floating %arg0 : !cir.f16 -> !cir.bf16
+    cir.return %0 : !cir.bf16
+  }
+  // LLVM-DIALECT-LABEL: llvm.func @f16_to_bf16
+  // LLVM-DIALECT-SAME: (%arg0: f16) -> bf16
+  // LLVM-DIALECT-NEXT: %[[EXT:.*]] = llvm.fpext %arg0 : f16 to f32
+  // LLVM-DIALECT-NEXT: %[[TRUNC:.*]] = llvm.fptrunc %[[EXT]] : f32 to bf16
+  // LLVM-DIALECT-NEXT: llvm.return %[[TRUNC]] : bf16
+  // MLIR-LABEL: func.func @f16_to_bf16
+  // MLIR-SAME: (%arg0: f16) -> bf16
+  // MLIR-NEXT: %[[EXT:.*]] = arith.extf %arg0 : f16 to f32
+  // MLIR-NEXT: %[[TRUNC:.*]] = arith.truncf %[[EXT]] : f32 to bf16
+  // MLIR-NEXT: return %[[TRUNC]] : bf16
+  // LLVMIR-LABEL: define bfloat @f16_to_bf16(half %{{.*}})
+  // LLVMIR: %{{.*}} = fpext half %{{.*}} to float
+  // LLVMIR-NEXT: %{{.*}} = fptrunc float %{{.*}} to bfloat
+}

@@ -1,0 +1,12 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @omp_flush_1() {
+    omp.flush
+    cir.return
+  }
+}
+
+// CHECK: define void @omp_flush_1()
+// CHECK: call void @__kmpc_flush(ptr {{.*}})
+// CHECK: ret void

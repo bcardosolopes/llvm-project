@@ -27,6 +27,16 @@ typedef struct {
 // LLVM-DAG: %struct.T = type { i8, i32 }
 // OGCG-DAG: %struct.T = type { i8, i32 }
 
+// Test that bitfield width exceeding underlying type width uses correct
+// storage representation in unions. char val : 16 should produce {i8, i8}
+// (storage unit clipped to underlying type width), not {i16}.
+union OversizedBF {
+  char val : 16;
+};
+// CIR-DAG:  !rec_OversizedBF = !cir.record<union "OversizedBF" padded {!u8i, !u8i}>
+// LLVM-DAG: %union.OversizedBF = type { i8, i8 }
+// OGCG-DAG: %union.OversizedBF = type { i8, i8 }
+
 void def() {
   S s;
   T t;
@@ -41,11 +51,10 @@ int load_field(S* s) {
 // CIR:   [[TMP2:%.*]] = cir.get_member [[TMP1]][0] {name = "c"} : !cir.ptr<!rec_S> -> !cir.ptr<!u64i>
 // CIR:   [[TMP3:%.*]] = cir.get_bitfield align(4) (#bfi_c, [[TMP2]] : !cir.ptr<!u64i>) -> !s32i
 
-// LLVM: define dso_local i32 @_Z10load_fieldP1S
+// LLVM: define dso_local noundef i32 @_Z10load_fieldP1S
 // LLVM:   [[TMP0:%.*]] = alloca ptr, i64 1, align 8
-// LLVM:   [[TMP1:%.*]] = alloca i32, i64 1, align 4
 // LLVM:   [[TMP2:%.*]] = load ptr, ptr [[TMP0]], align 8
-// LLVM:   [[TMP3:%.*]] = getelementptr %struct.S, ptr [[TMP2]], i32 0, i32 0
+// LLVM:   [[TMP3:%.*]] = getelementptr inbounds nuw %struct.S, ptr [[TMP2]], i32 0, i32 0
 // LLVM:   [[TMP4:%.*]] = load i64, ptr [[TMP3]], align 4
 // LLVM:   [[TMP5:%.*]] = shl i64 [[TMP4]], 15
 // LLVM:   [[TMP6:%.*]] = ashr i64 [[TMP5]], 47
@@ -71,7 +80,7 @@ void store_field() {
 
 // LLVM: define dso_local void @_Z11store_fieldv
 // LLVM:   [[TMP0:%.*]] = alloca %struct.S, i64 1, align 4
-// LLVM:   [[TMP1:%.*]] = getelementptr %struct.S, ptr [[TMP0]], i32 0, i32 0
+// LLVM:   [[TMP1:%.*]] = getelementptr inbounds nuw %struct.S, ptr [[TMP0]], i32 0, i32 0
 // LLVM:   [[TMP2:%.*]] = load i64, ptr [[TMP1]], align 4
 // LLVM:   [[TMP3:%.*]] = and i64 [[TMP2]], -16
 // LLVM:   [[TMP4:%.*]] = or i64 [[TMP3]], 3
@@ -101,13 +110,13 @@ void store_bitfield_to_bitfield(S* s) {
 // LLVM: define dso_local void @_Z26store_bitfield_to_bitfieldP1S
 // LLVM:   [[TMP0:%.*]] = alloca ptr, i64 1, align 8
 // LLVM:   [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8
-// LLVM:   [[TMP2:%.*]] = getelementptr %struct.S, ptr [[TMP1]], i32 0, i32 0
+// LLVM:   [[TMP2:%.*]] = getelementptr inbounds nuw %struct.S, ptr [[TMP1]], i32 0, i32 0
 // LLVM:   [[TMP3:%.*]] = load i64, ptr [[TMP2]], align 4
 // LLVM:   [[TMP4:%.*]] = and i64 [[TMP3]], -2147483633
 // LLVM:   [[TMP5:%.*]] = or i64 [[TMP4]], 48
 // LLVM:   store i64 [[TMP5]], ptr [[TMP2]], align 4
 // LLVM:   [[TMP6:%.*]] = load ptr, ptr [[TMP0]], align 8
-// LLVM:   [[TMP7:%.*]] = getelementptr %struct.S, ptr [[TMP6]], i32 0, i32 0
+// LLVM:   [[TMP7:%.*]] = getelementptr inbounds nuw %struct.S, ptr [[TMP6]], i32 0, i32 0
 // LLVM:   [[TMP8:%.*]] = load i64, ptr [[TMP7]], align 4
 // LLVM:   [[TMP9:%.*]] = and i64 [[TMP8]], -16
 // LLVM:   [[TMP10:%.*]] = or i64 [[TMP9]], 3
@@ -125,3 +134,21 @@ void store_bitfield_to_bitfield(S* s) {
 // OGCG:   [[TMP7:%.*]] = and i64 [[TMP6]], -16
 // OGCG:   [[TMP8:%.*]] = or i64 [[TMP7]], 3
 // OGCG:   store i64 [[TMP8]], ptr [[TMP5]], align 4
+
+void store_oversized() {
+  OversizedBF ob;
+  ob.val = 42;
+}
+// CIR: cir.func {{.*}} @_Z15store_oversizedv
+// CIR:   [[TMP0:%.*]] = cir.alloca !rec_OversizedBF, !cir.ptr<!rec_OversizedBF>
+// CIR:   [[TMP1:%.*]] = cir.const #cir.int<42> : !s8i
+// CIR:   [[TMP2:%.*]] = cir.get_member [[TMP0]][0] {name = "val"} : !cir.ptr<!rec_OversizedBF> -> !cir.ptr<!u8i>
+// CIR:   cir.set_bitfield align(2) (#bfi_val, [[TMP2]] : !cir.ptr<!u8i>, [[TMP1]] : !s8i)
+
+// LLVM: define dso_local void @_Z15store_oversizedv
+// LLVM:   [[TMP0:%.*]] = alloca %union.OversizedBF, i64 1, align 2
+// LLVM:   store i8 42, ptr [[TMP0]], align 2
+
+// OGCG: define dso_local void @_Z15store_oversizedv
+// OGCG:   [[TMP0:%.*]] = alloca %union.OversizedBF, align 2
+// OGCG:   store i8 42, ptr [[TMP0]], align 2

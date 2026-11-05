@@ -1,0 +1,9 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: unsupported annotation argument type in args struct
+// CHECK-NOT: LLVM ERROR:
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+module attributes {cir.global_annotations = #cir<global_annotations [["a", #cir.annotation<name = "bad", args = [unit]>]]>} {
+  cir.global external @a = #cir.int<0> : !s32i
+}

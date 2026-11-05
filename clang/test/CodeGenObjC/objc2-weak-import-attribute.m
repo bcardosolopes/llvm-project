@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -o - %s | FileCheck -check-prefix=CHECK-X86-64 %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fclangir -o - %s | FileCheck -check-prefix=CHECK-CIR-X86-64 %s %}
 
 __attribute__((weak_import)) @interface WeakRootClass @end
 
@@ -46,3 +47,11 @@ __attribute__((weak_import)) @interface Root @end
 @implementation Root @end
 
 // CHECK-X86-64-NOT: OBJC_METACLASS_$_Root" = extern_weak global
+
+// CHECK-CIR-X86-64-DAG: OBJC_METACLASS_$_WeakRootClass" = extern_weak global
+// CHECK-CIR-X86-64-DAG: OBJC_METACLASS_$_WeakClass" = extern_weak global
+// CHECK-CIR-X86-64-DAG: OBJC_CLASS_$_WeakClass" = extern_weak global
+// CHECK-CIR-X86-64-DAG: OBJC_CLASS_$_WeakClass1" = extern_weak global
+// CHECK-CIR-X86-64-DAG: OBJC_CLASS_$_WeakClass3" = extern_weak global
+// CHECK-CIR-X86-64: @"OBJC_CLASS_$_Root" = global {
+// CHECK-CIR-X86-64: @"OBJC_METACLASS_$_Root" = global {

@@ -33,6 +33,15 @@ class Type;
 /// elements. Multiple walk functions may be registered.
 class AttrTypeWalker {
 public:
+  AttrTypeWalker() {
+    // AttrTypeWalker instances are often short-lived and register a small
+    // number of callbacks (commonly one to three). Reserve upfront to avoid
+    // repeated tiny reallocations in hot call paths.
+    attrWalkFns.reserve(4);
+    typeWalkFns.reserve(4);
+    visitedAttrTypes.reserve(64);
+  }
+
   //===--------------------------------------------------------------------===//
   // Application
   //===--------------------------------------------------------------------===//

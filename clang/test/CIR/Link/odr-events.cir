@@ -1,0 +1,168 @@
+// RUN: cir-link %s %S/Inputs/odr-events-b.cir -o %t.plain.cir
+// RUN: cir-link %s %S/Inputs/odr-events-b.cir --odr-events=%t.json \
+// RUN:   -o %t.recorded.cir
+// RUN: cmp %t.plain.cir %t.recorded.cir
+// RUN: FileCheck %s --input-file=%t.json
+// RUN: cir-link %s %S/Inputs/odr-events-b.cir --odr-events=%t2.json \
+// RUN:   -o %t2.cir
+// RUN: cmp %t.json %t2.json
+// RUN: cir-link %s %S/Inputs/odr-events-b.cir --warn-odr-divergence \
+// RUN:   -o %t3.cir 2>&1 | FileCheck %s --check-prefix=STATS
+
+// --odr-events records every choice the merge makes between two definitions,
+// including the ones it makes silently. Recording must not change the link:
+// the first cmp is the assertion that it does not. The second is that the
+// record itself is reproducible.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+
+module {
+  // Identical weak copies: the common case, counted and never listed.
+  cir.func linkonce_odr @same_inline() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Identical except for which TU-local helper each calls: the helpers are
+  // renamed apart on the way in, and that must not count as a difference.
+  cir.func internal private @helper() -> !s32i {
+    %0 = cir.const #cir.int<10> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @calls_helper() -> !s32i {
+    %0 = cir.call @helper() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Identical except for the source location CIRGen keeps on inline asm
+  // for backend diagnostics: a location, so not a difference.
+  cir.func linkonce_odr @asm_inline() {
+    "cir.asm"() <{asm_flavor = 0 : i32, asm_string = "isb", constraints = "", operand_attrs = [], operands_segments = array<i32: 0, 0, 0>, side_effects}> {cir.asm_srcloc = [1]} : () -> ()
+    cir.return
+  }
+
+  // Weak copies whose bodies disagree: the inline-function ODR case.
+  cir.func linkonce_odr @diff_inline() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // A `weak` default an out-of-line definition overrides: legal.
+  cir.func weak @weak_default() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // An implicit instantiation (linkonce_odr) beside an explicit
+  // specialization (strong): the same choice as above, different linkage.
+  cir.func linkonce_odr @implicit_vs_explicit() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Strong first, weak second: still strong-over-weak, kept from input 0.
+  cir.func @strong_then_weak() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @conflict() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // B defines S differently, so S is renamed there, and B's copy of this
+  // function takes the renamed record: its type differs.
+  cir.func linkonce_odr @uses_s(%arg0: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}
+
+// Symbols are listed in the order their first recorded choice was made, which
+// is input order then definition order in B.
+// CHECK:      "version": 1,
+// CHECK:      "inputs": [
+// CHECK:          "path": "{{.*}}odr-events.cir",
+// CHECK-NEXT:     "no_rtti": false,
+// CHECK-NEXT:     "no_exceptions": false
+// CHECK:          "path": "{{.*}}odr-events-b.cir",
+
+// CHECK:      "symbols": [
+// CHECK-NOT:  "symbol": "same_inline"
+// CHECK-NOT:  "symbol": "calls_helper"
+// CHECK-NOT:  "symbol": "asm_inline"
+// CHECK:          "symbol": "diff_inline",
+// CHECK-NEXT:     "op": "cir.func",
+// CHECK-NEXT:     "equal_weak_copies": 0,
+// CHECK:              "kind": "weak-weak",
+// CHECK-NEXT:         "kept": {
+// CHECK-NEXT:           "input": 0,
+// CHECK-NEXT:           "linkage": "linkonce_odr",
+// CHECK-NEXT:           "digest": "[[DIFF_A:[0-9a-f]+]]"
+// CHECK:              "dropped": {
+// CHECK-NEXT:           "input": 1,
+// CHECK-NEXT:           "linkage": "linkonce_odr",
+// CHECK-NEXT:           "digest": "[[DIFF_B:[0-9a-f]+]]"
+// CHECK:              "same_type": true,
+// CHECK-NEXT:         "same_attributes": true,
+// CHECK-NEXT:         "same_body": false
+
+// CHECK:          "symbol": "weak_default",
+// CHECK:              "kind": "strong-over-weak",
+// CHECK-NEXT:         "kept": {
+// CHECK-NEXT:           "input": 1,
+// CHECK-NEXT:           "linkage": "external",
+// CHECK:              "dropped": {
+// CHECK-NEXT:           "input": 0,
+// CHECK-NEXT:           "linkage": "weak",
+// CHECK:              "same_body": false
+
+// CHECK:          "symbol": "implicit_vs_explicit",
+// CHECK:              "kind": "strong-over-weak",
+// CHECK:              "dropped": {
+// CHECK-NEXT:           "input": 0,
+// CHECK-NEXT:           "linkage": "linkonce_odr",
+
+// CHECK:          "symbol": "strong_then_weak",
+// CHECK:              "kind": "strong-over-weak",
+// CHECK-NEXT:         "kept": {
+// CHECK-NEXT:           "input": 0,
+// CHECK-NEXT:           "linkage": "external",
+// CHECK-NEXT:           "digest": "[[STW:[0-9a-f]+]]"
+// CHECK:              "dropped": {
+// CHECK-NEXT:           "input": 1,
+// CHECK-NEXT:           "linkage": "linkonce_odr",
+// CHECK-NEXT:           "digest": "[[STW]]"
+// CHECK:              "same_type": true,
+// CHECK-NEXT:         "same_attributes": true,
+// CHECK-NEXT:         "same_body": true
+
+// CHECK:          "symbol": "conflict",
+// CHECK:              "kind": "strong-strong",
+
+// CHECK:          "symbol": "uses_s",
+// CHECK:              "kind": "weak-weak",
+// CHECK:              "same_type": false,
+
+// CHECK:      "records": [
+// CHECK:          "kind": "record-renamed",
+// CHECK-NEXT:     "input": 1,
+// CHECK-NEXT:     "record": "S",
+// CHECK-NEXT:     "renamed_to": "S.m1"
+
+// CHECK:      "stats": {
+// CHECK-NEXT:   "weak_copies_equal": 3,
+// CHECK-NEXT:   "weak_copies_differ": 2,
+// CHECK-NEXT:   "weak-weak": 2,
+// CHECK-NEXT:   "strong-over-weak": 3,
+// CHECK-NEXT:   "rtti-over-nortti": 0,
+// CHECK-NEXT:   "strong-strong": 1,
+// CHECK-NEXT:   "records_renamed": 1
+
+// The text report is unchanged apart from the new count: the weak cases stay
+// out of it.
+// STATS-NOT: 'diff_inline'
+// STATS-NOT: 'weak_default'
+// STATS:     warning: 'conflict' defined in more than one input
+// STATS:     2 weak copies differ

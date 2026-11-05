@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -O2 -disable-llvm-passes -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime-has-weak -fblocks -fobjc-arc -O2 -disable-llvm-passes -fclangir -o - %s | FileCheck %s --check-prefix=CIR %}
 
 struct NSFastEnumerationState;
 @interface NSArray
@@ -44,6 +45,10 @@ struct Test1_helper { Test1_helper(); };
 // CHECK:      call void @_ZN12Test1_helperC1Ev(
 // CHECK-NEXT: load
 // CHECK-NEXT: ret ptr
+// CIR-LABEL: define internal noundef ptr @"\01-[Test1 .cxx_construct]"(
+// CIR: call void @_ZN12Test1_helperC1Ev(
+// CIR: load ptr, ptr
+// CIR: ret ptr
 
 void test34(int cond) {
   __strong id strong;

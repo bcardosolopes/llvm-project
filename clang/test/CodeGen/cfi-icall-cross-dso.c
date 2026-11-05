@@ -3,14 +3,28 @@
 // RUN:   -fsanitize-cfi-canonical-jump-tables -emit-llvm -o - %s | FileCheck \
 // RUN:       --check-prefix=CHECK --check-prefix=CHECK-DIAG \
 // RUN:       --check-prefix=ITANIUM --check-prefix=ITANIUM-DIAG \
+// RUN:       --check-prefix=OGCG-ITANIUM-DIAG \
 // RUN:       %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -O1 -fno-inline \
+// RUN:   -fsanitize=cfi-icall -fsanitize-cfi-cross-dso \
+// RUN:   -fsanitize-cfi-canonical-jump-tables -fclangir -emit-llvm -o - %s | FileCheck \
+// RUN:       --check-prefix=CIR-MOD --check-prefix=CIR-DIAG --check-prefix=CIR-ITANIUM \
+// RUN:       --check-prefix=CIR-ITANIUM-DIAG \
+// RUN:       %s %}
 
 // RUN: %clang_cc1 -triple x86_64-unknown-linux -O1 -fno-inline \
 // RUN:   -fsanitize=cfi-icall -fsanitize-cfi-cross-dso -fsanitize-trap=cfi-icall \
 // RUN:   -fsanitize-cfi-canonical-jump-tables -emit-llvm -o - %s | FileCheck \
 // RUN:       --check-prefix=CHECK \
 // RUN:       --check-prefix=ITANIUM --check-prefix=ITANIUM-TRAP \
+// RUN:       --check-prefix=OGCG-ITANIUM-TRAP \
 // RUN:       %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -O1 -fno-inline \
+// RUN:   -fsanitize=cfi-icall -fsanitize-cfi-cross-dso -fsanitize-trap=cfi-icall \
+// RUN:   -fsanitize-cfi-canonical-jump-tables -fclangir -emit-llvm -o - %s | FileCheck \
+// RUN:       --check-prefix=CIR-MOD --check-prefix=CIR-ITANIUM \
+// RUN:       --check-prefix=CIR-ITANIUM-TRAP \
+// RUN:       %s %}
 
 // RUN: %clang_cc1 -triple x86_64-pc-windows-msvc -O1 -fno-inline \
 // RUN:   -fsanitize=cfi-icall -fsanitize-cfi-cross-dso \
@@ -29,20 +43,31 @@
 // CHECK-DIAG: @[[SRC:.*]] = private unnamed_addr constant {{.*}}cfi-icall-cross-dso.c\00
 // CHECK-DIAG: @[[TYPE:.*]] = private unnamed_addr constant { i16, i16, [{{.*}} x i8] } { i16 -1, i16 0, [{{.*}} x i8] c"'void ()'\00"
 // CHECK-DIAG: @[[DATA:.*]] = private unnamed_addr global {{.*}}@[[SRC]]{{.*}}@[[TYPE]]
+// CIR-DIAG: @[[CIR_SRC:.*]] = private unnamed_addr constant {{.*}}cfi-icall-cross-dso.c\00
+// CIR-DIAG: @[[CIR_TYPE:.*]] = private unnamed_addr constant { i16, i16, [{{.*}} x i8] } { i16 -1, i16 0, [{{.*}} x i8] c"'void ()'\00"
+// CIR-DIAG: @[[CIR_DATA:.*]] = private unnamed_addr global {{.*}}@[[CIR_SRC]]{{.*}}@[[CIR_TYPE]]
 
 
 // ITANIUM: call i1 @llvm.type.test(ptr %{{.*}}, metadata !"_ZTSFvE"), !nosanitize
 // ITANIUM-DIAG: call void @__cfi_slowpath_diag(i64 6588678392271548388, ptr %{{.*}}, {{.*}}@[[DATA]]{{.*}}) {{.*}}, !nosanitize
 // ITANIUM-TRAP: call void @__cfi_slowpath(i64 6588678392271548388, ptr %{{.*}}) {{.*}}, !nosanitize
+// CIR-ITANIUM: call i1 @llvm.type.test(ptr %{{.*}}, metadata !"_ZTSFvE"), !nosanitize
+// CIR-ITANIUM-DIAG: call void @__cfi_slowpath_diag(i64 6588678392271548388, ptr %{{.*}}, {{.*}}@[[CIR_DATA]]{{.*}}) {{.*}}, !nosanitize
+// CIR-ITANIUM-TRAP: call void @__cfi_slowpath(i64 6588678392271548388, ptr %{{.*}}) {{.*}}, !nosanitize
 
 // MS: call i1 @llvm.type.test(ptr %{{.*}}, metadata !"?6AX@Z"), !nosanitize
 // MS-DIAG: call void @__cfi_slowpath_diag(i64 4195979634929632483, ptr %{{.*}}, {{.*}}@[[DATA]]{{.*}}) {{.*}}, !nosanitize
 // MS-TRAP: call void @__cfi_slowpath(i64 4195979634929632483, ptr %{{.*}}) {{.*}}, !nosanitize
 
-// ITANIUM-DIAG: declare void @__cfi_slowpath_diag(
-// ITANIUM-TRAP: declare void @__cfi_slowpath(
+// OGCG-ITANIUM-DIAG: declare void @__cfi_slowpath_diag(
+// CIR-ITANIUM-DIAG: declare void @__cfi_slowpath_diag(
+// OGCG-ITANIUM-TRAP: declare void @__cfi_slowpath(
+// CIR-ITANIUM-TRAP: declare void @__cfi_slowpath(
 // MS-DIAG: declare dso_local void @__cfi_slowpath_diag(
 // MS-TRAP: declare dso_local void @__cfi_slowpath(
+
+// CIR-MOD-DAG: !{i32 4, !"Cross-DSO CFI", i32 1}
+// CIR-MOD-DAG: !{i32 4, !"CFI Canonical Jump Tables", i32 1}
 
 void caller(void (*f)()) {
   f();

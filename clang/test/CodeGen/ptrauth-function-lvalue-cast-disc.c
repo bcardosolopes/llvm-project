@@ -2,6 +2,8 @@
 // RUN: %clang_cc1 %s -triple aarch64-linux-gnu  -fptrauth-calls -fptrauth-intrinsics -emit-llvm -o- -fptrauth-function-pointer-type-discrimination | FileCheck -check-prefixes CHECK,TYPE %s
 // RUN: %clang_cc1 %s -triple arm64e-apple-ios13 -fptrauth-calls -fptrauth-intrinsics -emit-llvm -o- | FileCheck -check-prefixes CHECK,ZERO %s
 // RUN: %clang_cc1 %s -triple aarch64-linux-gnu  -fptrauth-calls -fptrauth-intrinsics -emit-llvm -o- | FileCheck -check-prefixes CHECK,ZERO %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple arm64e-apple-ios13 -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm -o- -fptrauth-function-pointer-type-discrimination | FileCheck -check-prefix=CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 %s -triple aarch64-linux-gnu  -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm -o- -fptrauth-function-pointer-type-discrimination | FileCheck -check-prefix=CIR %s %}
 
 typedef void (*fptr_t)(void);
 
@@ -9,6 +11,7 @@ char *cptr;
 void (*fptr)(void);
 
 // CHECK-LABEL: define{{.*}} void @test1
+// CIR-LABEL: define{{.*}} void @test1
 void test1() {
   // TYPE: [[LOAD:%.*]] = load ptr, ptr @cptr
   // TYPE: [[TOINT:%.*]] = ptrtoint ptr [[LOAD]] to i64
@@ -17,9 +20,16 @@ void test1() {
   // ZERO-NOT: @llvm.ptrauth.resign
 
   (*(fptr_t)cptr)();
+
+  // CIR: [[LOAD:%.*]] = load ptr, ptr @cptr
+  // CIR: [[CMP:%.*]] = icmp ne ptr [[LOAD]], null
+  // CIR: [[TOINT:%.*]] = ptrtoint ptr [[LOAD]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT]], i32 0, i64 0, i32 0, i64 18983)
+  // CIR: call void {{.*}}() [ "ptrauth"(i32 0, i64 18983) ]
 }
 
 // CHECK-LABEL: define{{.*}} i8 @test2
+// CIR-LABEL: define{{.*}} i8 @test2
 char test2() {
   return *(char *)fptr;
 
@@ -35,6 +45,12 @@ char test2() {
   // TYPE: [[CONT]]:
   // TYPE: phi ptr [ null, {{.*}} ], [ [[TOPTR]], %[[NONNULL]] ]
   // ZERO-NOT: @llvm.ptrauth.resign
+  // CIR: [[LOAD:%.*]] = load ptr, ptr @fptr
+  // CIR: [[CMP:%.*]] = icmp ne ptr [[LOAD]], null
+  // CIR: [[TOINT:%.*]] = ptrtoint ptr [[LOAD]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT]], i32 0, i64 18983, i32 0, i64 0)
+  // CIR: [[PHI:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+  // CIR: load i8, ptr [[PHI]], align 1
 }
 
 // CHECK-LABEL: define{{.*}} void @test4
@@ -52,6 +68,7 @@ void test4() {
 
 void *vptr;
 // CHECK-LABEL: define{{.*}} void @test5
+// CIR-LABEL: define{{.*}} void @test5
 void test5() {
   vptr = &*(char *)fptr;
 
@@ -67,4 +84,10 @@ void test5() {
   // TYPE: [[PHI:%.*]] = phi ptr [ null, {{.*}} ], [ [[CAST]], %[[NONNULL]] ]
   // TYPE: store ptr [[PHI]], ptr @vptr
   // ZERO-NOT: @llvm.ptrauth.resign
+  // CIR: [[LOAD:%.*]] = load ptr, ptr @fptr
+  // CIR: [[CMP:%.*]] = icmp ne ptr [[LOAD]], null
+  // CIR: [[TOINT:%.*]] = ptrtoint ptr [[LOAD]] to i64
+  // CIR: call i64 @llvm.ptrauth.resign(i64 [[TOINT]], i32 0, i64 18983, i32 0, i64 0)
+  // CIR: [[PHI:%.*]] = phi ptr [ null, {{.*}} ], [ {{.*}}, {{.*}} ]
+  // CIR: store ptr [[PHI]], ptr @vptr
 }

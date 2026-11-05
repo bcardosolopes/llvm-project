@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple i386-unknown-unknown -Wno-strict-prototypes -emit-llvm < %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple i386-unknown-unknown -Wno-strict-prototypes -emit-llvm -fclangir < %s | FileCheck %s %}
 
 void __attribute__((fastcall)) f1(void);
 void __attribute__((stdcall)) f2(void);
@@ -153,7 +154,7 @@ void bar13(long long a, int b, int c) {
 }
 
 struct S2 __attribute__((fastcall)) foo14(int a) {
-  // CHECK-LABEL: define dso_local x86_fastcallcc void @foo14(ptr dead_on_unwind noalias writable sret(%struct.S2) align 4 %agg.result, i32 inreg noundef %a)
+  // CHECK-LABEL: define dso_local x86_fastcallcc void @foo14(ptr dead_on_unwind noalias writable sret(%struct.S2) align 4 %{{.*}}, i32 inreg noundef %{{.*}})
   struct S2 r = {a};
   return r;
 }

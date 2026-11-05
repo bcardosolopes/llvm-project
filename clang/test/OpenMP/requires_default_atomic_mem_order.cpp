@@ -2,12 +2,21 @@
 // RUN: %clang_cc1 -emit-llvm -fopenmp -triple=x86_64-unknown-linux-gnu \
 // RUN:   -DORDERING=seq_cst -o - %s \
 // RUN: | FileCheck %s --check-prefix=SEQ_CST
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -fopenmp -fclangir -triple=x86_64-unknown-linux-gnu \
+// RUN:   -DORDERING=seq_cst -o - %s \
+// RUN: | FileCheck %s --check-prefix=CIR-SEQ_CST %}
 // RUN: %clang_cc1 -emit-llvm -fopenmp -triple=x86_64-unknown-linux-gnu \
 // RUN:   -DORDERING=acq_rel -o - %s \
 // RUN: | FileCheck %s --check-prefix=ACQ_REL
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -fopenmp -fclangir -triple=x86_64-unknown-linux-gnu \
+// RUN:   -DORDERING=acq_rel -o - %s \
+// RUN: | FileCheck %s --check-prefix=CIR-ACQ_REL %}
 // RUN: %clang_cc1 -emit-llvm -fopenmp -triple=x86_64-unknown-linux-gnu \
 // RUN:   -DORDERING=relaxed -o - %s \
 // RUN: | FileCheck %s --check-prefix=RELAXED
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -fopenmp -fclangir -triple=x86_64-unknown-linux-gnu \
+// RUN:   -DORDERING=relaxed -o - %s \
+// RUN: | FileCheck %s --check-prefix=CIR-RELAXED %}
 
 #pragma omp requires atomic_default_mem_order(ORDERING)
 
@@ -39,6 +48,15 @@
 // RELAXED-NEXT:    [[TMP0:%.*]] = load ptr, ptr [[X_ADDR]], align 8
 // RELAXED-NEXT:    [[TMP1:%.*]] = atomicrmw add ptr [[TMP0]], i32 1 monotonic, align 4
 // RELAXED-NEXT:    ret void
+//
+// CIR-SEQ_CST: atomicrmw add ptr {{.*}} seq_cst, align 4
+// CIR-SEQ_CST: call void @__kmpc_flush(
+//
+// CIR-ACQ_REL: atomicrmw add ptr {{.*}} release, align 4
+// CIR-ACQ_REL: call void @__kmpc_flush(
+//
+// CIR-RELAXED: atomicrmw add ptr {{.*}} monotonic, align 4
+// CIR-RELAXED-NOT: call void @__kmpc_flush(
 //
 void foo(int *x) {
   #pragma omp atomic update

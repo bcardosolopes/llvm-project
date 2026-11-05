@@ -1,0 +1,11 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: #cir.global_view references undefined symbol @missing
+// CHECK-NOT: Stack dump:
+// CHECK-NOT: Segmentation fault
+
+!u8i = !cir.int<u, 8>
+!rec_anon_struct = !cir.record<struct {!cir.array<!cir.ptr<!u8i> x 1>}>
+
+module {
+  cir.global external @_ZTV1S = #cir.vtable<{#cir.const_array<[#cir.global_view<@missing> : !cir.ptr<!u8i>]> : !cir.array<!cir.ptr<!u8i> x 1>}> : !rec_anon_struct {alignment = 8 : i64}
+}

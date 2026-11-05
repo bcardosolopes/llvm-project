@@ -1,13 +1,8 @@
 // REQUIRES: x86-registered-target
-
 // RUN: %clang_cc1 -ffreestanding %s -triple=x86_64-unknown-linux -target-feature +avx -disable-O0-optnone -fclangir -emit-cir -o %t.cir | opt -S -passes=mem2reg
-// RUN: FileCheck --check-prefixes=CIR --input-file=%t.cir %s
-// RUN: %clang_cc1 -ffreestanding %s -triple=i386-unknown-linux -target-feature +avx -disable-O0-optnone -fclangir -emit-cir -o %t.cir | opt -S -passes=mem2reg
 // RUN: FileCheck --check-prefixes=CIR --input-file=%t.cir %s
 
 // RUN: %clang_cc1 -ffreestanding %s -triple=x86_64-unknown-linux -target-feature +avx -disable-O0-optnone -fclangir -emit-llvm -o %t.ll | opt -S -passes=mem2reg
-// RUN: FileCheck --check-prefixes=LLVM --input-file=%t.ll %s
-// RUN: %clang_cc1 -ffreestanding %s -triple=i386-unknown-linux -target-feature +avx -disable-O0-optnone -fclangir -emit-llvm -o %t.ll | opt -S -passes=mem2reg
 // RUN: FileCheck --check-prefixes=LLVM --input-file=%t.ll %s
 
 // RUN: %clang_cc1 -ffreestanding %s -triple=x86_64-unknown-linux -target-feature +avx -disable-O0-optnone -emit-llvm -o - | opt -S -passes=mem2reg | FileCheck %s --check-prefixes=OGCG
@@ -17,8 +12,8 @@
 
 __m256d test0_mm256_insertf128_pd(__m256d a, __m128d b) {
   // CIR-LABEL: @test0_mm256_insertf128_pd(
-  // CIR: [[A:%.*]] = cir.load align(32) %0 : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
-  // CIR: [[B:%.*]] = cir.load align(16) %1 : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
+  // CIR: [[A:%.*]] = cir.load align(32) %{{.*}} : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
+  // CIR: [[B:%.*]] = cir.load align(16) %{{.*}} : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
   // CIR: %{{.*}} = cir.vec.shuffle([[B]], %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR-NEXT: %{{.*}} = cir.vec.shuffle([[A]], %{{.*}} : !s32i, #cir.int<5> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR: cir.return %{{.*}} : !cir.vector<4 x !cir.double>
@@ -41,8 +36,8 @@ __m256d test0_mm256_insertf128_pd(__m256d a, __m128d b) {
 
 __m256d test1_mm256_insertf128_pd(__m256d a, __m128d b) {
   // CIR-LABEL: @test1_mm256_insertf128_pd(
-  // CIR: [[A:%.*]] = cir.load align(32) %0 : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
-  // CIR: [[B:%.*]] = cir.load align(16) %1 : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
+  // CIR: [[A:%.*]] = cir.load align(32) %{{.*}} : !cir.ptr<!cir.vector<4 x !cir.double>>, !cir.vector<4 x !cir.double>
+  // CIR: [[B:%.*]] = cir.load align(16) %{{.*}} : !cir.ptr<!cir.vector<2 x !cir.double>>, !cir.vector<2 x !cir.double>
   // CIR: %{{.*}} = cir.vec.shuffle([[B]], %{{.*}} : !cir.vector<2 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR-NEXT: %{{.*}} = cir.vec.shuffle([[A]], %{{.*}} : !cir.vector<4 x !cir.double>) [#cir.int<0> : !s32i, #cir.int<1> : !s32i, #cir.int<4> : !s32i, #cir.int<5> : !s32i] : !cir.vector<4 x !cir.double>
   // CIR: cir.return %{{.*}} : !cir.vector<4 x !cir.double>

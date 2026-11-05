@@ -13,6 +13,7 @@
 #include <numeric>
 
 #include "CIRGenOpenACCRecipe.h"
+#include "llvm/Support/SaveAndRestore.h"
 
 namespace clang::CIRGen {
 mlir::Block *OpenACCRecipeBuilderBase::createRecipeBlock(mlir::Region &region,
@@ -78,11 +79,13 @@ void OpenACCRecipeBuilderBase::makeAllocaCopy(mlir::Location loc,
           auto srcOffset = builder.createMul(loc, offsetPerSubarray, loadCur);
 
           auto ptrToOffsetIntoSrc = cir::PtrStrideOp::create(
-              builder, loc, copyType, srcAlloca, srcOffset);
+              builder, loc, copyType, srcAlloca, srcOffset,
+              cir::GEPNoWrapFlags::inbounds);
 
           auto offsetIntoDecayDest = cir::PtrStrideOp::create(
               builder, loc, builder.getPointerTo(copyType), destAlloca,
-              loadCur);
+              loadCur,
+              cir::GEPNoWrapFlags::inbounds);
 
           builder.CIRBaseBuilderTy::createStore(loc, ptrToOffsetIntoSrc,
                                                 offsetIntoDecayDest);
@@ -133,8 +136,10 @@ mlir::Value OpenACCRecipeBuilderBase::makeBoundsAlloca(
   };
 
   auto isArrayTy = [&](QualType ty) {
-    if (ty->isArrayType() && !ty->isConstantArrayType())
+    if (ty->isArrayType() && !ty->isConstantArrayType()) {
       cgf.cgm.errorNYI(exprRange, "OpenACC recipe init for VLAs");
+      return false;
+    }
     return ty->isConstantArrayType();
   };
 
@@ -247,7 +252,8 @@ std::pair<mlir::Value, mlir::Value> OpenACCRecipeBuilderBase::createBoundsLoop(
     auto eltLoad = cir::LoadOp::create(builder, loc, {subVal});
 
     return cir::PtrStrideOp::create(builder, loc, eltLoad.getType(), eltLoad,
-                                    idxLoad);
+                                    idxLoad,
+        cir::GEPNoWrapFlags::inbounds);
   };
 
   auto forStmtBuilder = [&]() {
@@ -270,7 +276,8 @@ std::pair<mlir::Value, mlir::Value> OpenACCRecipeBuilderBase::createBoundsLoop(
       cir::ConstantOp constOne = builder.getConstInt(loc, itrTy, 1);
 
       auto sub = cir::BinOp::create(builder, loc, itrTy, cir::BinOpKind::Sub,
-                                    ubConversion.getResult(0), constOne);
+                                    ubConversion.getResult(0), constOne,
+                                    {}, {}, {}, {}, {}, {});
 
       // Upperbound is exclusive, so subtract 1.
       builder.CIRBaseBuilderTy::createStore(loc, sub, itr);
@@ -374,7 +381,8 @@ void OpenACCRecipeBuilderBase::createRecipeDestroySection(
   auto emitDestroy = [&](mlir::Value var, mlir::Type ty) {
     Address addr{var, ty, alignment};
     cgf.emitDestroy(addr, origType,
-                    cgf.getDestroyer(QualType::DK_cxx_destructor));
+                    cgf.getDestroyer(QualType::DK_cxx_destructor),
+                    cgf.needsEHCleanup(QualType::DK_cxx_destructor));
   };
 
   if (numBounds) {
@@ -458,6 +466,7 @@ void OpenACCRecipeBuilderBase::createInitRecipe(
     // emit an error to tell us.  However, emitting those errors during
     // production is a violation of the standard, so we cannot do them.
     cgf.cgm.errorNYI(exprRange, "private/reduction default-init recipe");
+    return;
   }
 
   if (!numBounds) {
@@ -465,8 +474,11 @@ void OpenACCRecipeBuilderBase::createInitRecipe(
     // initialize this variable correctly.
     CIRGenFunction::AutoVarEmission tempDeclEmission =
         cgf.emitAutoVarAlloca(*allocaDecl, builder.saveInsertionPoint());
-    if (emitInitExpr)
+    if (emitInitExpr) {
+      llvm::SaveAndRestore<bool> suppressAggExprMemSetUseScope(
+          cgf.suppressAggExprMemSetUse, true);
       cgf.emitAutoVarInit(tempDeclEmission);
+    }
   } else {
     mlir::Value alloca = makeBoundsAlloca(
         block, exprRange, loc, allocaDecl->getName(), numBounds, boundTypes);
@@ -545,7 +557,6 @@ void OpenACCRecipeBuilderBase::createReductionRecipeCombiner(
 
   if (llvm::any_of(combinerRecipes, [](auto &r) { return r.Op == nullptr; })) {
     cgf.cgm.errorNYI(loc, "OpenACC Reduction combiner not generated");
-    mlir::acc::YieldOp::create(builder, locEnd, block->getArgument(0));
     return;
   }
 

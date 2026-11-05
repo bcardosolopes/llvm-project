@@ -41,6 +41,7 @@ int a = 0;
 // CHECKSH-NOT: -mno-incremental-linker-compatible
 // CHECKSH-NOT: -finput-charset=utf-8
 // CHECKSH-NEXT: # Original command: {{.*$}}
-// CHECKSH-NEXT: "-cc1"
+// CHECKSH-NEXT: cd "$(dirname "$0")" || exit 1
+// CHECKSH: "-cc1"
 // CHECKSH: "-main-file-name" "crash-report-clang-cl.cpp"
 // CHECKSH: "crash-report-{{[^ ]*}}.cpp"

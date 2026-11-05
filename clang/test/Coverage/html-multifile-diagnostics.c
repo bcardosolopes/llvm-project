@@ -1,6 +1,6 @@
 // RUN: rm -rf %t
 // RUN: %clang_cc1 -analyze -analyzer-output=html -analyzer-checker=core -o %t %s
-// RUN: find %t -name "*.html" -exec cat "{}" ";" | FileCheck %s
+// RUN: find %t -name "*.html" | xargs -I{} cat "{}" | FileCheck %s
 
 // REQUIRES: staticanalyzer
 

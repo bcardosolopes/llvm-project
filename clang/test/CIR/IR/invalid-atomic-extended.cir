@@ -1,0 +1,26 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify AtomicFetchOp: xor with float is invalid
+cir.func @atomic_fetch_xor_float(%arg0: !cir.ptr<!cir.float>, %arg1: !cir.float) {
+  // expected-error @below {{only atomic add, sub, max, and min operation could operate on floating-point values}}
+  %0 = cir.atomic.fetch xor seq_cst %arg0, %arg1 : (!cir.ptr<!cir.float>, !cir.float) -> !cir.float
+  cir.return
+}
+
+// -----
+
+// Verify AtomicFetchOp: or with float is invalid
+cir.func @atomic_fetch_or_float(%arg0: !cir.ptr<!cir.float>, %arg1: !cir.float) {
+  // expected-error @below {{only atomic add, sub, max, and min operation could operate on floating-point values}}
+  %0 = cir.atomic.fetch or seq_cst %arg0, %arg1 : (!cir.ptr<!cir.float>, !cir.float) -> !cir.float
+  cir.return
+}
+
+// -----
+
+// Verify AtomicFetchOp: nand with float is invalid
+cir.func @atomic_fetch_nand_float(%arg0: !cir.ptr<!cir.float>, %arg1: !cir.float) {
+  // expected-error @below {{only atomic add, sub, max, and min operation could operate on floating-point values}}
+  %0 = cir.atomic.fetch nand seq_cst %arg0, %arg1 : (!cir.ptr<!cir.float>, !cir.float) -> !cir.float
+  cir.return
+}

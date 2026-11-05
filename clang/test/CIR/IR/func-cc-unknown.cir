@@ -1,0 +1,8 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+
+// The caret names the convention, not the start of the function.
+
+module {
+  // CHECK: :[[@LINE+1]]:33: error: {{.*}}unknown calling convention
+  cir.func private @bad_cc() cc(nonesuch)
+}

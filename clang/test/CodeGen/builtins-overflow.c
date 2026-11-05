@@ -3,6 +3,7 @@
 // RUN: %clang_cc1 -triple "i686-unknown-unknown"   -emit-llvm -x c %s -o - | FileCheck -DLONG_TYPE=i32 -DLONG_MAX=2147483647 %s
 // RUN: %clang_cc1 -triple "x86_64-unknown-unknown" -emit-llvm -x c %s -o - | FileCheck -DLONG_TYPE=i64 -DLONG_MAX=9223372036854775807 %s
 // RUN: %clang_cc1 -triple "x86_64-mingw32"         -emit-llvm -x c %s -o - | FileCheck -DLONG_TYPE=i32 -DLONG_MAX=2147483647 %s
+// RUN: %if cir-support %{ %clang_cc1 -triple "x86_64-unknown-unknown" -fclangir -emit-llvm -x c %s -o - | FileCheck --check-prefix=CIR %s %}
 
 extern unsigned UnsignedErrorCode;
 extern unsigned long UnsignedLongErrorCode;
@@ -611,6 +612,25 @@ _BitInt(65) test_mixed_sign_mul_overflow_bitint(unsigned _BitInt(65) y, _BitInt(
 // CHECK: trunc i119
 // CHECK: zext i65
 // CHECK: store
+// CIR-LABEL: define {{(dso_local )?}}{ i64, i64 } @test_mixed_sign_mul_overflow_bitint
+// CIR: [[UNSIGNED:%.*]] = zext i65 %{{.*}} to i119
+// CIR: [[ISNEG:%.*]] = icmp slt i119 %{{.*}}, 0
+// CIR: [[NEGATED:%.*]] = sub i119 0, %{{.*}}
+// CIR: [[ABS:%.*]] = select i1 [[ISNEG]], i119 [[NEGATED]], i119 %{{.*}}
+// CIR: [[MUL:%.*]] = call { i119, i1 } @llvm.umul.with.overflow.i119(i119 [[ABS]], i119 [[UNSIGNED]])
+// CIR: [[RESULT:%.*]] = extractvalue { i119, i1 } [[MUL]], 0
+// CIR: [[OVERFLOW:%.*]] = extractvalue { i119, i1 } [[MUL]], 1
+// CIR: [[NONZERO:%.*]] = icmp ne i119 [[RESULT]], 0
+// CIR: [[UNDERFLOW:%.*]] = and i1 [[ISNEG]], [[NONZERO]]
+// CIR: [[OVERFLOW1:%.*]] = or i1 [[OVERFLOW]], [[UNDERFLOW]]
+// CIR: [[TRUNC_OVERFLOW:%.*]] = icmp ugt i119 [[RESULT]], 36893488147419103231
+// CIR: [[OVERFLOW2:%.*]] = or i1 [[OVERFLOW1]], [[TRUNC_OVERFLOW]]
+// CIR: [[NEG_RESULT:%.*]] = sub i119 0, [[RESULT]]
+// CIR: [[SIGNED_RESULT:%.*]] = select i1 [[ISNEG]], i119 [[NEG_RESULT]], i119 [[RESULT]]
+// CIR: [[TRUNCATED:%.*]] = trunc i119 [[SIGNED_RESULT]] to i65
+// CIR: [[EXTENDED:%.*]] = zext i65 [[TRUNCATED]] to i128
+// CIR: store i128 [[EXTENDED]], ptr
+// CIR: br i1 [[OVERFLOW2]]
   unsigned _BitInt(65) result;
   if (__builtin_mul_overflow(a, y, &result))
     return LongLongErrorCode;

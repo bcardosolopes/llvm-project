@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -triple arm64-linux-gnu -emit-llvm -o - %s | FileCheck --check-prefix=CHECK --check-prefix=CHECK-LE %s
 // RUN: %clang_cc1 -triple aarch64_be-linux-gnu -emit-llvm -o - %s | FileCheck --check-prefix=CHECK --check-prefix=CHECK-BE %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-linux-gnu -fclangir -emit-cir -clangir-disable-passes -o - %s | FileCheck --check-prefix=RAW-CIR %s %}
 
 #include <stdarg.h>
 
@@ -216,6 +217,15 @@ struct hfa simple_hfa(void) {
 
 // CHECK: [[VAARG_END]]
 // CHECK: [[ADDR:%[a-z._0-9]+]] = phi ptr [ %[[TMP_HFA]], %[[VAARG_IN_REG]] ], [ [[STACK]], %[[VAARG_ON_STACK]] ]
+// RAW-CIR-LABEL: cir.func no_inline optnone dso_local @simple_hfa() -> !rec_hfa
+// RAW-CIR: %[[RETVAL:[0-9]+]] = cir.alloca !rec_hfa, !cir.ptr<!rec_hfa>, ["__retval"] {alignment = 4 : i64}
+// RAW-CIR-NOT: ["vaarg.tmp"]
+// RAW-CIR: %[[LIST:[0-9]+]] = cir.get_global @the_list : !cir.ptr<!rec___va_list>
+// RAW-CIR: %[[ARG:[0-9]+]] = cir.va_arg %[[LIST]] {alignment = 4 : i64} : (!cir.ptr<!rec___va_list>) -> !rec_hfa
+// RAW-CIR: cir.store align(4) %[[ARG]], %[[RETVAL]] : !rec_hfa, !cir.ptr<!rec_hfa>
+// RAW-CIR-NOT: cir.copy
+// RAW-CIR: %[[RESULT:[0-9]+]] = cir.load %[[RETVAL]] : !cir.ptr<!rec_hfa>, !rec_hfa
+// RAW-CIR: cir.return %[[RESULT]] : !rec_hfa
 }
 
 // Over and under alignment on fundamental types has no effect on parameter
@@ -564,6 +574,8 @@ typedef struct __attribute__((packed,aligned(2))) {
 } underaligned_int128_struct;
 underaligned_int128_struct underaligned_int128_struct_test(void) {
 // CHECK-LABEL: define{{.*}} [2 x i64] @underaligned_int128_struct_test()
+// CHECK: [[RETVAL:%[a-z_0-9]+]] = alloca %struct.underaligned_int128_struct, {{.*}}align 2
+// CHECK-NOT: alloca %struct.underaligned_int128_struct
   return va_arg(the_list, underaligned_int128_struct);
 // CHECK: [[GR_OFFS:%[a-z_0-9]+]] = load i32, ptr getelementptr inbounds nuw (%struct.__va_list, ptr @the_list, i32 0, i32 3)
 // CHECK: [[EARLY_ONSTACK:%[a-z_0-9]+]] = icmp sge i32 [[GR_OFFS]], 0
@@ -588,6 +600,9 @@ underaligned_int128_struct underaligned_int128_struct_test(void) {
 
 // CHECK: [[VAARG_END]]
 // CHECK: [[ADDR:%[a-z._0-9]+]] = phi ptr [ [[REG_ADDR]], %[[VAARG_IN_REG]] ], [ [[STACK]], %[[VAARG_ON_STACK]] ]
+// CHECK-NOT: load %struct.underaligned_int128_struct
+// CHECK-NOT: store %struct.underaligned_int128_struct
+// CHECK: call void @llvm.memcpy.p0.p0.i64(ptr align 2 [[RETVAL]], ptr align 8 [[ADDR]], i64 16, i1 false)
 }
 
 // Overaligning to 32 bytes causes it to be passed indirectly via a pointer
@@ -763,6 +778,8 @@ typedef struct {
 } underaligned_int128_struct_member;
 underaligned_int128_struct_member underaligned_int128_struct_member_test(void) {
 // CHECK-LABEL: define{{.*}} [2 x i64] @underaligned_int128_struct_member_test()
+// CHECK: [[RETVAL:%[a-z_0-9]+]] = alloca %struct.underaligned_int128_struct_member, {{.*}}align 2
+// CHECK-NOT: alloca %struct.underaligned_int128_struct_member
   return va_arg(the_list, underaligned_int128_struct_member);
 // CHECK: [[GR_OFFS:%[a-z_0-9]+]] = load i32, ptr getelementptr inbounds nuw (%struct.__va_list, ptr @the_list, i32 0, i32 3)
 // CHECK: [[EARLY_ONSTACK:%[a-z_0-9]+]] = icmp sge i32 [[GR_OFFS]], 0
@@ -787,6 +804,9 @@ underaligned_int128_struct_member underaligned_int128_struct_member_test(void) {
 
 // CHECK: [[VAARG_END]]
 // CHECK: [[ADDR:%[a-z._0-9]+]] = phi ptr [ [[REG_ADDR]], %[[VAARG_IN_REG]] ], [ [[STACK]], %[[VAARG_ON_STACK]] ]
+// CHECK-NOT: load %struct.underaligned_int128_struct_member
+// CHECK-NOT: store %struct.underaligned_int128_struct_member
+// CHECK: call void @llvm.memcpy.p0.p0.i64(ptr align 2 [[RETVAL]], ptr align 8 [[ADDR]], i64 16, i1 false)
 }
 
 // Overaligning to 32 bytes causes it to be passed indirectly via a pointer

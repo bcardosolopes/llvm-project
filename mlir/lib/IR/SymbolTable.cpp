@@ -557,18 +557,46 @@ LogicalResult detail::verifySymbol(Operation *op) {
 
 /// Walk all of the symbol references within the given operation, invoking the
 /// provided callback for each found use. The callbacks takes the use of the
-/// symbol.
+/// symbol. `attrsWithoutRefs`, when given, remembers the attributes found to
+/// hold no reference across the ops of one walk: attributes are uniqued, and
+/// the same ones recur on many ops.
 static WalkResult
 walkSymbolRefs(Operation *op,
-               function_ref<WalkResult(SymbolTable::SymbolUse)> callback) {
-  return op->getAttrDictionary().walk<WalkOrder::PreOrder>(
-      [&](SymbolRefAttr symbolRef) {
-        if (callback({op, symbolRef}).wasInterrupted())
-          return WalkResult::interrupt();
+               function_ref<WalkResult(SymbolTable::SymbolUse)> callback,
+               DenseSet<Attribute> *attrsWithoutRefs = nullptr) {
+  auto walkAttr = [&](Attribute attr) {
+    if (attrsWithoutRefs && attrsWithoutRefs->contains(attr))
+      return WalkResult::advance();
+    bool foundRef = false;
+    WalkResult result =
+        attr.walk<WalkOrder::PreOrder>([&](SymbolRefAttr symbolRef) {
+          foundRef = true;
+          if (callback({op, symbolRef}).wasInterrupted())
+            return WalkResult::interrupt();
 
-        // Don't walk nested references.
-        return WalkResult::skip();
-      });
+          // Don't walk nested references.
+          return WalkResult::skip();
+        });
+    if (!foundRef && attrsWithoutRefs)
+      attrsWithoutRefs->insert(attr);
+    return result;
+  };
+
+  // getAttrDictionary builds and uniques a dictionary to show an op's inherent
+  // attributes when it keeps them in properties, which is costly on a large
+  // module; read them one by one instead.
+  std::optional<RegisteredOperationName> info = op->getRegisteredInfo();
+  if (!info || !op->getPropertiesStorageSize())
+    return walkAttr(op->getAttrDictionary());
+  for (StringAttr name : info->getAttributeNames()) {
+    std::optional<Attribute> attr = op->getInherentAttr(name.getValue());
+    if (attr && *attr && walkAttr(*attr).wasInterrupted())
+      return WalkResult::interrupt();
+  }
+  for (NamedAttribute attr : op->getDiscardableAttrs())
+    if (walkAttr(attr.getValue()).wasInterrupted())
+      return WalkResult::interrupt();
+  return WalkResult::advance();
 }
 
 /// Walk all of the uses, for any symbol, that are nested within the given
@@ -577,6 +605,7 @@ walkSymbolRefs(Operation *op,
 static std::optional<WalkResult>
 walkSymbolUses(MutableArrayRef<Region> regions,
                function_ref<WalkResult(SymbolTable::SymbolUse)> callback) {
+  DenseSet<Attribute> attrsWithoutRefs;
   return walkSymbolTable(regions,
                          [&](Operation *op) -> std::optional<WalkResult> {
                            // Check that this isn't a potentially unknown symbol
@@ -584,7 +613,8 @@ walkSymbolUses(MutableArrayRef<Region> regions,
                            if (isPotentiallyUnknownSymbolTable(op))
                              return std::nullopt;
 
-                           return walkSymbolRefs(op, callback);
+                           return walkSymbolRefs(op, callback,
+                                                 &attrsWithoutRefs);
                          });
 }
 /// Walk all of the uses, for any symbol, that are nested within the given

@@ -1,0 +1,9 @@
+// RUN: not cir-opt %s -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: custom op 'cir.global' global initializer must be a typed constant attribute
+// CHECK-NOT: Non-typed attrs shouldn't appear here
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+module {
+  cir.global external @g = unit : !s32i
+}

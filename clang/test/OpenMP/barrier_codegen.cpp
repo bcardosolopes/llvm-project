@@ -9,6 +9,7 @@
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple x86_64-unknown-unknown -fopenmp-enable-irbuilder -mllvm -openmp-ir-builder-optimistic-attributes -emit-llvm %s -o - | FileCheck %s --check-prefixes=CHECK,IRBUILDER_OPT
 // RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -triple x86_64-unknown-unknown -fopenmp-enable-irbuilder -emit-pch -o %t %s
 // RUN: %clang_cc1 -fopenmp -x c++ -triple x86_64-unknown-unknown -fopenmp-enable-irbuilder -mllvm -openmp-ir-builder-optimistic-attributes -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s --check-prefixes=CHECK,IRBUILDER_OPT
+// RUN: %if cir-support %{ %clang_cc1 -verify -fopenmp -x c++ -triple x86_64-unknown-unknown -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=CIRCHECK %}
 
 // RUN: %clang_cc1 -verify -fopenmp-simd -x c++ -triple x86_64-unknown-unknown -emit-llvm %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
 // RUN: %clang_cc1 -fopenmp-simd -x c++ -std=c++11 -triple x86_64-unknown-unknown -emit-pch -o %t %s
@@ -55,5 +56,17 @@ int main(int argc, char **argv) {
 // CHECK: define {{.+}} [[TMAIN_CHAR]](
 // CHECK: [[GTID:%.+]] = call i32 @__kmpc_global_thread_num(ptr [[LOC]])
 // CHECK: call void @__kmpc_barrier(ptr [[EXPLICIT_BARRIER_LOC]], i32 [[GTID]])
+
+// CIRCHECK: define linkonce_odr noundef i32 @_Z5tmainIiET_S0_(
+// CIRCHECK: %[[GTID1:.+]] = call i32 @__kmpc_global_thread_num(ptr @2)
+// CIRCHECK: call void @__kmpc_barrier(ptr @1, i32 %[[GTID1]])
+// CIRCHECK: define linkonce_odr noundef signext i8 @_Z5tmainIcET_S0_(
+// CIRCHECK: %[[GTID2:.+]] = call i32 @__kmpc_global_thread_num(ptr @2)
+// CIRCHECK: call void @__kmpc_barrier(ptr @1, i32 %[[GTID2]])
+// CIRCHECK: define dso_local noundef i32 @main(
+// CIRCHECK: %[[GTID3:.+]] = call i32 @__kmpc_global_thread_num(ptr @2)
+// CIRCHECK: call void @__kmpc_barrier(ptr @1, i32 %[[GTID3]])
+// CIRCHECK: declare i32 @__kmpc_global_thread_num(ptr)
+// CIRCHECK: declare void @__kmpc_barrier(ptr, i32)
 
 #endif

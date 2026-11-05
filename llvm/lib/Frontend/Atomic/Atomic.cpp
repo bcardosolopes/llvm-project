@@ -75,10 +75,12 @@ std::pair<Value *, Value *> AtomicInfo::EmitAtomicCompareExchangeLibcall(
       ExpectedVal,
       DesiredVal,
       Constant::getIntegerValue(IntegerType::get(ctx, IntBits),
-                                APInt(IntBits, static_cast<uint64_t>(Success),
+                                APInt(IntBits,
+                                      static_cast<uint64_t>(toCABI(Success)),
                                       /*signed=*/true)),
       Constant::getIntegerValue(IntegerType::get(ctx, IntBits),
-                                APInt(IntBits, static_cast<uint64_t>(Failure),
+                                APInt(IntBits,
+                                      static_cast<uint64_t>(toCABI(Failure)),
                                       /*signed=*/true)),
   };
   auto Result = EmitAtomicLibcall("__atomic_compare_exchange",
@@ -162,6 +164,18 @@ void AtomicInfo::EmitAtomicStoreLibcall(AtomicOrdering AO, Value *Source) {
   Builder->restoreIP(AllocaIP);
   Value *SourceAlloca = Builder->CreateAlloca(Source->getType());
   Builder->restoreIP(CurrentIP);
+
+  // When the atomic size is larger than the value size (e.g. x86_fp80 is 10
+  // bytes but occupies 16 bytes), zero the padding bytes so that the libcall
+  // writes deterministic data.  This matches clang's CGAtomic.cpp which
+  // zeroes via emitMemSetZeroIfNecessary before materialising the value.
+  if (hasPadding()) {
+    Builder->CreateMemSet(
+        SourceAlloca, ConstantInt::get(Type::getInt8Ty(Ctx), 0),
+        ConstantInt::get(DL.getIntPtrType(Ctx), getAtomicSizeInBits() / 8),
+        DL.getPrefTypeAlign(Source->getType()));
+  }
+
   Builder->CreateStore(Source, SourceAlloca);
   SourceAlloca = Builder->CreatePointerBitCastOrAddrSpaceCast(
       SourceAlloca, Builder->getPtrTy());

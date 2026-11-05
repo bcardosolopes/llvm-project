@@ -1,10 +1,12 @@
-// RUN: cir-opt %s -verify-diagnostics -split-input-file
+// RUN: cir-opt %s -split-input-file | FileCheck %s
 
 !s32i = !cir.int<s, 32>
 
 module  {
-  // expected-error@+3 {{must be the first operation in a block}}
-  cir.func @error(){
+  // Labels are allowed to not be at block front during CIR-to-CIR passes
+  // (FlattenCFG may place them mid-block). GotoSolver splits blocks later.
+  // CHECK: cir.label "label"
+  cir.func @label_mid_block(){
     %0 = cir.const #cir.int<0> : !s32i
     cir.label "label"
     cir.return

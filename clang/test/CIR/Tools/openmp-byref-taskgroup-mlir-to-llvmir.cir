@@ -1,0 +1,24 @@
+// RUN: cir-translate %s -mlir-to-llvmir -o /dev/null
+
+!s32i = !cir.int<s, 32>
+
+module {
+  omp.declare_reduction @add_reduction_byref_array4 : !cir.ptr<!cir.array<!s32i x 4>> attributes {byref_element_type = !cir.array<!s32i x 4>} alloc {
+    %0 = cir.alloca !cir.array<!s32i x 4>, !cir.ptr<!cir.array<!s32i x 4>>, ["a"] {alignment = 16 : i64}
+    omp.yield(%0 : !cir.ptr<!cir.array<!s32i x 4>>)
+  } init {
+  ^bb0(%arg0: !cir.ptr<!cir.array<!s32i x 4>>, %arg1: !cir.ptr<!cir.array<!s32i x 4>>):
+    omp.yield(%arg1 : !cir.ptr<!cir.array<!s32i x 4>>)
+  } combiner {
+  ^bb0(%arg0: !cir.ptr<!cir.array<!s32i x 4>>, %arg1: !cir.ptr<!cir.array<!s32i x 4>>):
+    omp.yield(%arg0 : !cir.ptr<!cir.array<!s32i x 4>>)
+  }
+
+  cir.func @taskgroup_byref() {
+    %0 = cir.alloca !cir.array<!s32i x 4>, !cir.ptr<!cir.array<!s32i x 4>>, ["a"] {alignment = 16 : i64}
+    omp.taskgroup task_reduction(byref @add_reduction_byref_array4 %0 -> %arg0 : !cir.ptr<!cir.array<!s32i x 4>>) {
+      omp.terminator
+    }
+    cir.return
+  }
+}

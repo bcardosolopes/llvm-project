@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 %s -triple=amdgcn-amd-amdhsa -emit-llvm -o - -fcxx-exceptions -fexceptions | FileCheck %s
 // RUN: %clang_cc1 %s -triple=spirv64-amd-amdhsa -emit-llvm -o - -fcxx-exceptions -fexceptions | FileCheck %s --check-prefix=WITH-NONZERO-DEFAULT-AS
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=amdgcn-amd-amdhsa -fclangir -emit-llvm -o - -fcxx-exceptions -fexceptions | FileCheck %s %}
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=spirv64-amd-amdhsa -fclangir -emit-llvm -o - -fcxx-exceptions -fexceptions | FileCheck %s --check-prefix=WITH-NONZERO-DEFAULT-AS %}
 
 struct X { };
 

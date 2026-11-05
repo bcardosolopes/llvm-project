@@ -19,7 +19,6 @@
 
 #include "clang/AST/ExprCXX.h"
 
-#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/OpenACC/OpenACC.h"
 #include "llvm/ADT/TypeSwitch.h"
 
@@ -98,13 +97,6 @@ class OpenACCClauseCIREmitter final
   mlir::Value createConstantInt(mlir::Location loc, unsigned width,
                                 int64_t value) {
     return cgf.createOpenACCConstantInt(loc, width, value);
-    mlir::IntegerType ty = mlir::IntegerType::get(
-        &cgf.getMLIRContext(), width,
-        mlir::IntegerType::SignednessSemantics::Signless);
-    auto constOp = mlir::arith::ConstantOp::create(
-        builder, loc, builder.getIntegerAttr(ty, value));
-
-    return constOp;
   }
 
   mlir::Value createConstantInt(SourceLocation loc, unsigned width,
@@ -394,7 +386,7 @@ public:
     } else if constexpr (isCombinedType<OpTy>) {
       applyToComputeOp(clause);
     } else {
-      llvm_unreachable("Unknown construct kind in VisitNumGangsClause");
+      llvm_unreachable("Unknown construct kind in VisitNumWorkersClause");
     }
   }
 

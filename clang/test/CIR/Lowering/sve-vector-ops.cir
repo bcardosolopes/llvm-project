@@ -1,0 +1,22 @@
+// REQUIRES: aarch64-registered-target
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s --check-prefix=MLIR
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @vec_extract_scalable(%vec: !cir.vector<[4] x !s32i>, %idx: !s32i) -> !s32i {
+    %ext = cir.vec.extract %vec[%idx : !s32i] : !cir.vector<[4] x !s32i>
+    cir.return %ext : !s32i
+  }
+
+  // MLIR-LABEL: llvm.func @vec_extract_scalable
+  // MLIR: llvm.extractelement
+
+  cir.func @vec_bitcast_scalable(%vec: !cir.vector<[4] x !s32i>) -> !cir.vector<[4] x !cir.float> {
+    %cast = cir.cast bitcast %vec : !cir.vector<[4] x !s32i> -> !cir.vector<[4] x !cir.float>
+    cir.return %cast : !cir.vector<[4] x !cir.float>
+  }
+
+  // MLIR-LABEL: llvm.func @vec_bitcast_scalable
+  // MLIR: llvm.bitcast
+}

@@ -2675,6 +2675,20 @@ llvm.func @willreturn_call() {
 
 llvm.func @f()
 
+// CHECK-LABEL: @noreturn_call
+// CHECK: call void @f() #[[ATTRS:[0-9]+]]
+llvm.func @noreturn_call() {
+  llvm.call @f() {no_return} : () -> ()
+  llvm.return
+}
+
+// CHECK: #[[ATTRS]]
+// CHECK-SAME: noreturn
+
+// -----
+
+llvm.func @f()
+
 // CHECK-LABEL: @no_inline_call
 // CHECK: call void @f() #[[ATTRS:[0-9]+]]
 llvm.func @no_inline_call() {

@@ -5,6 +5,7 @@
 //RUN:   | FileCheck --check-prefix=CHECKARM %s
 //RUN: %clang_cc1 %s -emit-llvm -o - -triple=x86_64-unknown-fuchsia | FileCheck --check-prefix=CHECKFUCHSIA %s
 //RUN: %clang_cc1 %s -emit-llvm -o - -triple=aarch64-unknown-fuchsia | FileCheck --check-prefix=CHECKFUCHSIA %s
+//RUN: %if cir-support %{ %clang_cc1 %s -emit-llvm -o - -triple=aarch64-unknown-fuchsia -fclangir | FileCheck --check-prefix=CHECKFUCHSIA %s %}
 //RUN: %clang_cc1 %s -emit-llvm -o - -triple=i386-pc-win32 -fno-rtti | FileCheck --check-prefix=CHECKMS %s
 //RUN: %clang_cc1 %s -emit-llvm -o - -triple=i686-unknown-linux-gnu -fctor-dtor-return-this | FileCheck --check-prefix=CHECKI686RET %s
 //RUN: %clang_cc1 %s -emit-llvm -o - -triple=aarch64-unknown-linux-gnu -fctor-dtor-return-this | FileCheck --check-prefix=CHECKAARCH64RET %s
@@ -54,10 +55,10 @@ B::~B() { }
 // CHECKIOS5-LABEL: define{{.*}} ptr @_ZN1BD2Ev(ptr {{[^,]*}} %this)
 // CHECKIOS5-LABEL: define{{.*}} ptr @_ZN1BD1Ev(ptr {{[^,]*}} %this)
 
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BC2EPi(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %i)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BC1EPi(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %i)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BD2Ev(ptr {{[^,]*}} returned{{[^,]*}} %this)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BD1Ev(ptr {{[^,]*}} returned{{[^,]*}} %this)
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BC2EPi(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BC1EPi(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BD2Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1BD1Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}})
 
 // CHECKMS-LABEL: define dso_local x86_thiscallcc noundef ptr @"??0B@@QAE@PAH@Z"(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %i)
 // CHECKMS-LABEL: define dso_local x86_thiscallcc void @"??1B@@UAE@XZ"(ptr {{[^,]*}} %this)
@@ -107,13 +108,13 @@ C::~C() { }
 // CHECKIOS5-LABEL: define{{.*}} void @_ZN1CD0Ev(ptr {{[^,]*}} %this)
 // CHECKIOS5-LABEL: define{{.*}} void @_ZThn8_N1CD0Ev(ptr noundef %this)
 
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CC2EPiPc(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %i, ptr noundef %c)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CC1EPiPc(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %i, ptr noundef %c)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CD2Ev(ptr {{[^,]*}} returned{{[^,]*}} %this)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CD1Ev(ptr {{[^,]*}} returned{{[^,]*}} %this)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZThn16_N1CD1Ev(ptr noundef %this)
-// CHECKFUCHSIA-LABEL: define{{.*}} void @_ZN1CD0Ev(ptr {{[^,]*}} %this)
-// CHECKFUCHSIA-LABEL: define{{.*}} void @_ZThn16_N1CD0Ev(ptr noundef %this)
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CC2EPiPc(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CC1EPiPc(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CD2Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1CD1Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZThn16_N1CD1Ev(ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} void @_ZN1CD0Ev(ptr {{[^,]*}} %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} void @_ZThn16_N1CD0Ev(ptr noundef %{{[a-z_0-9]+}})
 
 // CHECKMS-LABEL: define dso_local x86_thiscallcc noundef ptr @"??0C@@QAE@PAHPAD@Z"(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %i, ptr noundef %c)
 // CHECKMS-LABEL: define dso_local x86_thiscallcc void @"??1C@@UAE@XZ"(ptr {{[^,]*}} %this)
@@ -147,10 +148,10 @@ D::~D() { }
 // CHECKIOS5-LABEL: define{{.*}} ptr @_ZN1DD2Ev(ptr {{[^,]*}} %this, ptr noundef %vtt)
 // CHECKIOS5-LABEL: define{{.*}} ptr @_ZN1DD1Ev(ptr {{[^,]*}} %this)
 
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DC2Ev(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %vtt)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DC1Ev(ptr {{[^,]*}} returned{{[^,]*}} %this)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DD2Ev(ptr {{[^,]*}} returned{{[^,]*}} %this, ptr noundef %vtt)
-// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DD1Ev(ptr {{[^,]*}} returned{{[^,]*}} %this)
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DC2Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DC1Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DD2Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}}, ptr noundef %{{[a-z_0-9]+}})
+// CHECKFUCHSIA-LABEL: define{{.*}} ptr @_ZN1DD1Ev(ptr {{[^,]*}} returned{{[^,]*}} %{{[a-z_0-9]+}})
 
 // CHECKMS-LABEL: define dso_local x86_thiscallcc noundef ptr @"??0D@@QAE@XZ"(ptr {{[^,]*}} returned{{[^,]*}} %this, i32 noundef %is_most_derived)
 // CHECKMS-LABEL: define dso_local x86_thiscallcc void @"??1D@@UAE@XZ"(ptr{{[^,]*}} %this)
@@ -175,10 +176,10 @@ void test_destructor() {
 // this parameter at the call site...
 // CHECKARM,CHECKAARCH64RET: [[VFN:%.*]] = getelementptr inbounds ptr, ptr
 // CHECKARM,CHECKAARCH64RET: [[THUNK:%.*]] = load ptr, ptr [[VFN]]
-// CHECKFUCHSIA: [[THUNK:%.*]] = call ptr @llvm.load.relative.i32(ptr {{.*}}, i32 0)
+// CHECKFUCHSIA: [[THUNK:%.*]] = {{(tail )?}}call ptr @llvm.load.relative.i32(ptr {{.*}}, i32 0)
 // CHECKARM,CHECKFUCHSIA,CHECKAARCH64RET: call noundef ptr [[THUNK]](ptr {{[^,]*}} %
 
 // ...but static calls create declarations with 'returned' this
-// CHECKARM,CHECKFUCHSIA,CHECKAARCH64RET: {{%.*}} = call noundef ptr @_ZN1ED1Ev(ptr {{[^,]*}} %
+// CHECKARM,CHECKFUCHSIA,CHECKAARCH64RET: {{%.*}} = {{(tail )?}}call noundef ptr @_ZN1ED1Ev(ptr {{[^,]*}} %
 
 // CHECKARM,CHECKFUCHSIA,CHECKAARCH64RET: declare noundef  ptr @_ZN1ED1Ev(ptr {{[^,]*}} returned{{[^,]*}})

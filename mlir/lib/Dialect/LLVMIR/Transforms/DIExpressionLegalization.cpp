@@ -57,5 +57,17 @@ void mlir::LLVM::legalizeDIExpressionsRecursively(Operation *op) {
   replacer.addReplacement([&rewriter](LLVM::DIExpressionAttr expr) {
     return rewriter.simplify(expr);
   });
-  replacer.recursivelyReplaceElementsIn(op);
+  // Each attribute is replaced on its own: `recursivelyReplaceElementsIn`
+  // replaces `Operation::getAttrDictionary()`, which for an op that keeps
+  // inherent attributes in properties is a new dictionary of all of them that
+  // the context keeps for good, one per distinct op.
+  op->walk([&](Operation *nested) {
+    NamedAttrList attrs(nested->getRawDictionaryAttrs());
+    nested->getName().populateInherentAttrs(nested, attrs);
+    for (NamedAttribute attr : attrs) {
+      Attribute replaced = replacer.replace(attr.getValue());
+      if (replaced && replaced != attr.getValue())
+        nested->setAttr(attr.getName(), replaced);
+    }
+  });
 }

@@ -54,10 +54,16 @@ void CIRGenCXXABI::buildThisParam(CIRGenFunction &cgf,
   params.push_back(thisDecl);
   cgf.cxxabiThisDecl = thisDecl;
 
-  // Classic codegen computes the alignment of thisDecl and saves it in
-  // CodeGenFunction::CXXABIThisAlignment, but it is only used in emitTypeCheck
-  // in CodeGenFunction::StartFunction().
-  assert(!cir::MissingFeatures::cxxabiThisAlignment());
+  // Compute the presumed alignment of 'this', which basically comes
+  // down to whether we know it's a complete object or not.
+  auto &layout = cgm.getASTContext().getASTRecordLayout(md->getParent());
+  if (md->getParent()->getNumVBases() == 0 || // avoid vcall in common case
+      md->getParent()->isEffectivelyFinal() ||
+      isThisCompleteObject(cgf.curGD)) {
+    cgf.cxxabiThisAlignment = layout.getAlignment();
+  } else {
+    cgf.cxxabiThisAlignment = layout.getNonVirtualAlignment();
+  }
 }
 
 cir::GlobalLinkageKind CIRGenCXXABI::getCXXDestructorLinkage(
@@ -96,3 +102,98 @@ bool CIRGenCXXABI::requiresArrayCookie(const CXXNewExpr *e) {
 
   return e->getAllocatedType().isDestructedType();
 }
+
+bool CIRGenCXXABI::requiresArrayCookie(const CXXDeleteExpr *e,
+                                       QualType elementType) {
+  // If the class's usual deallocation function takes two arguments,
+  // it needs a cookie.
+  if (e->doesUsualArrayDeleteWantSize())
+    return true;
+
+  return elementType.isDestructedType();
+}
+
+void CIRGenCXXABI::readArrayCookie(CIRGenFunction &cgf, Address ptr,
+                                   const CXXDeleteExpr *e,
+                                   QualType elementType,
+                                   mlir::Value &numElements,
+                                   mlir::Value &allocPtr,
+                                   CharUnits &cookieSize) {
+  auto &builder = cgf.getBuilder();
+  mlir::Type byteTy = builder.getUInt8Ty();
+  ptr = ptr.withElementType(builder, byteTy);
+
+  if (!requiresArrayCookie(e, elementType)) {
+    allocPtr = ptr.emitRawPointer();
+    numElements = nullptr;
+    cookieSize = CharUnits::Zero();
+    return;
+  }
+
+  mlir::Location loc = cgf.curFn->getLoc();
+  cookieSize = getArrayCookieSizeImpl(elementType);
+  mlir::Value negCookieSize =
+      builder.getSignedInt(loc, -cookieSize.getQuantity(), /*width=*/32);
+  mlir::Value allocBytePtr = builder.createPtrStride(loc, ptr.getPointer(),
+                                                     negCookieSize);
+  Address allocAddr(allocBytePtr, byteTy,
+                    ptr.getAlignment().alignmentAtOffset(-cookieSize),
+                    ptr.isKnownNonNull());
+  allocPtr = allocAddr.emitRawPointer();
+  numElements = readArrayCookieImpl(cgf, allocAddr, cookieSize);
+}
+
+void CIRGenCXXABI::readArrayCookie(CIRGenFunction &cgf, Address ptr,
+                                   QualType elementType,
+                                   mlir::Value &numElements,
+                                   mlir::Value &allocPtr,
+                                   CharUnits &cookieSize) {
+  assert(elementType.isDestructedType());
+
+  auto &builder = cgf.getBuilder();
+  mlir::Type byteTy = builder.getUInt8Ty();
+  ptr = ptr.withElementType(builder, byteTy);
+
+  mlir::Location loc = cgf.curFn->getLoc();
+  cookieSize = getArrayCookieSizeImpl(elementType);
+  mlir::Value negCookieSize =
+      builder.getSignedInt(loc, -cookieSize.getQuantity(), /*width=*/32);
+  mlir::Value allocBytePtr = builder.createPtrStride(loc, ptr.getPointer(),
+                                                     negCookieSize);
+  Address allocAddr(allocBytePtr, byteTy,
+                    ptr.getAlignment().alignmentAtOffset(-cookieSize),
+                    ptr.isKnownNonNull());
+  allocPtr = allocAddr.emitRawPointer();
+  numElements = readArrayCookieImpl(cgf, allocAddr, cookieSize);
+}
+
+bool CIRGenCXXABI::isZeroInitializable(const MemberPointerType *mpt) {
+  // Fake answer.
+  return true;
+}
+
+void CIRGenCXXABI::emitReturnFromThunk(CIRGenFunction &cgf, RValue rv,
+                                       QualType resultType) {
+  assert(!cgf.hasAggregateEvaluationKind(resultType) &&
+         "cannot handle aggregates");
+  auto loc = cgf.curFn->getLoc();
+  // Thunks are forwarding trampolines; when the return value is already a
+  // scalar SSA value, return it directly instead of routing through
+  // emitReturnOfRValue's temporary return slot path.
+  if (rv.isScalar()) {
+    cir::ReturnOp::create(cgf.getBuilder(), loc, rv.getValue());
+    return;
+  }
+  cgf.emitReturnOfRValue(loc, rv, resultType);
+}
+
+void CIRGenCXXABI::emitGuardedInit(CIRGenFunction &cgf, const VarDecl &d,
+                                   cir::GlobalOp var, bool shouldPerformInit) {
+  // Default: not supported. ABI-specific subclasses should override.
+  cgm.errorNYI(d.getSourceRange(), "emitGuardedInit: unsupported ABI");
+}
+
+
+// OGCG has emitTerminateForUnexpectedException which calls std::terminate
+// via a nounwind runtime call when an unexpected exception is thrown. CIR
+// does not implement this base class method yet.

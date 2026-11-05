@@ -81,16 +81,16 @@ void binary_assign_struct() {
 // CIR:   %[[LS:.*]] = cir.alloca ![[REC_S:.*]], !cir.ptr<![[REC_S]]>, ["ls"]
 // CIR:   %[[LSV:.*]] = cir.alloca ![[REC_SV:.*]], !cir.ptr<![[REC_SV]]>, ["lsv"]
 // CIR:   %[[GS_PTR:.*]] = cir.get_global @gs : !cir.ptr<![[REC_S]]>
-// CIR:   cir.copy %[[GS_PTR]] to %[[LS]] : !cir.ptr<![[REC_S]]>
+// CIR:   cir.copy %[[GS_PTR]] to %[[LS]] {{.*}}: !cir.ptr<![[REC_S]]>
 // CIR:   %[[GSV_PTR:.*]] = cir.get_global @gsv : !cir.ptr<![[REC_SV]]>
-// CIR:   cir.copy %[[GSV_PTR]] to %[[LSV]] volatile : !cir.ptr<![[REC_SV]]>
+// CIR:   cir.copy %[[GSV_PTR]] to %[[LSV]] volatile {{.*}}: !cir.ptr<![[REC_SV]]>
 // CIR:   cir.return
 
 // LLVM: define {{.*}}void @binary_assign_struct()
 // LLVM:   %[[LS_PTR:.*]] = alloca %struct.S
 // LLVM:   %[[LSV_PTR:.*]] = alloca %struct.SV
-// LLVM:   call void @llvm.memcpy.p0.p0.i32(ptr %[[LS_PTR]], ptr @gs, i32 8, i1 false)
-// LLVM:   call void @llvm.memcpy.p0.p0.i32(ptr %[[LSV_PTR]], ptr @gsv, i32 8, i1 true)
+// LLVM:   call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %[[LS_PTR]], ptr{{.*}} @gs, i64 8, i1 false)
+// LLVM:   call void @llvm.memcpy.p0.p0.i64(ptr{{.*}} %[[LSV_PTR]], ptr{{.*}} @gsv, i64 8, i1 true)
 // LLVM:   ret void
 
 // OGCG: define {{.*}}void @binary_assign_struct()
@@ -111,7 +111,7 @@ int ignore_result_assign() {
   return 0;
 }
 
-// CIR-LABEL: cir.func{{.*}} @ignore_result_assign() -> !s32i
+// CIR-LABEL: cir.func{{.*}} @ignore_result_assign() -> {{.*}}!s32i
 // CIR:         %[[RETVAL:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"]
 // CIR:         %[[ARR:.*]] = cir.alloca !cir.array<!s32i x 10>, !cir.ptr<!cir.array<!s32i x 10>>, ["arr"]
 // CIR:         %[[I:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["i"]
@@ -121,7 +121,6 @@ int ignore_result_assign() {
 // CIR:         %[[VAL_123:.*]] = cir.const #cir.int<123> : !s32i
 // CIR:         cir.store{{.*}} %[[VAL_123]], %[[I]] : !s32i, !cir.ptr<!s32i>
 // CIR:         cir.store{{.*}} %[[VAL_123]], %[[J]] : !s32i, !cir.ptr<!s32i>
-// CIR:         %[[VAL_0:.*]] = cir.const #cir.int<0> : !s32i
 // CIR:         %[[VAL_5:.*]] = cir.const #cir.int<5> : !s32i
 // CIR:         cir.store{{.*}} %[[VAL_5]], %[[I]] : !s32i, !cir.ptr<!s32i>
 // CIR:         %[[ARR_ELEM:.*]] = cir.get_element %[[ARR]][%[[VAL_5]] : !s32i] : !cir.ptr<!cir.array<!s32i x 10>> -> !cir.ptr<!s32i>
@@ -129,16 +128,14 @@ int ignore_result_assign() {
 // CIR:         cir.store{{.*}} %[[ARR_LOAD]], %[[J]] : !s32i, !cir.ptr<!s32i>
 // CIR:         %[[NULL:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!s32i>
 // CIR:         cir.store{{.*}} %[[NULL]], %[[Q]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CIR:         cir.scope {
-// CIR:           %[[Q_VAL:.*]] = cir.load{{.*}} %[[Q]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CIR:           cir.store{{.*}} %[[Q_VAL]], %[[P]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CIR:           %[[COND:.*]] = cir.cast ptr_to_bool %[[Q_VAL]] : !cir.ptr<!s32i> -> !cir.bool
-// CIR:           cir.if %[[COND]] {
-// CIR:             %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
-// CIR:             cir.store %[[ONE]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
-// CIR:             %{{.*}} = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
-// CIR:             cir.return
-// CIR:           }
+// CIR:         %[[Q_VAL:.*]] = cir.load{{.*}} %[[Q]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// CIR:         cir.store{{.*}} %[[Q_VAL]], %[[P]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CIR:         %[[COND:.*]] = cir.cast ptr_to_bool %[[Q_VAL]] : !cir.ptr<!s32i> -> !cir.bool
+// CIR:         cir.if %[[COND]] {
+// CIR:           %[[ONE:.*]] = cir.const #cir.int<1> : !s32i
+// CIR:           cir.store %[[ONE]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
+// CIR:           %{{.*}} = cir.load %[[RETVAL]] : !cir.ptr<!s32i>, !s32i
+// CIR:           cir.return
 // CIR:         }
 // CIR:         %[[ZERO:.*]] = cir.const #cir.int<0> : !s32i
 // CIR:         cir.store %[[ZERO]], %[[RETVAL]] : !s32i, !cir.ptr<!s32i>
@@ -155,22 +152,21 @@ int ignore_result_assign() {
 // LLVM:         store i32 123, ptr %[[I_PTR]]
 // LLVM:         store i32 123, ptr %[[J_PTR]]
 // LLVM:         store i32 5, ptr %[[I_PTR]]
-// LLVM:         %[[GEP:.*]] = getelementptr [10 x i32], ptr %[[ARR_PTR]], i32 0, i64 5
+// LLVM:         %[[GEP:.*]] = getelementptr inbounds [10 x i32], ptr %[[ARR_PTR]], i32 0, i64 5
 // LLVM:         %[[ARR_VAL:.*]] = load i32, ptr %[[GEP]]
 // LLVM:         store i32 %[[ARR_VAL]], ptr %[[J_PTR]]
 // LLVM:         store ptr null, ptr %[[Q_PTR]]
-// LLVM:         br label
 // LLVM:         %[[Q_VAL:.*]] = load ptr, ptr %[[Q_PTR]]
 // LLVM:         store ptr %[[Q_VAL]], ptr %[[P_PTR]]
 // LLVM:         %[[CMP:.*]] = icmp ne ptr %[[Q_VAL]], null
 // LLVM:         br i1 %[[CMP]], label %[[THEN:.*]], label %[[ELSE:.*]]
 // LLVM:       [[THEN]]:
 // LLVM:         store i32 1, ptr %[[RETVAL_PTR]]
-// LLVM:         %{{.*}} = load i32, ptr %[[RETVAL_PTR]]
-// LLVM:         ret i32
+// LLVM:         br label %[[RETURN:.*]]
 // LLVM:       [[ELSE]]:
-// LLVM:         br label
 // LLVM:         store i32 0, ptr %[[RETVAL_PTR]]
+// LLVM:         br label %[[RETURN]]
+// LLVM:       [[RETURN]]:
 // LLVM:         %{{.*}} = load i32, ptr %[[RETVAL_PTR]]
 // LLVM:         ret i32
 

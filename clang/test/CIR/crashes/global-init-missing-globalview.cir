@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: #cir.global_view references undefined symbol @missing
+// CHECK-NOT: initializer region cannot return void
+// CHECK-NOT: Stack dump:
+
+!u8i = !cir.int<u, 8>
+!p8 = !cir.ptr<!u8i>
+module {
+  cir.global external @g = #cir.global_view<@missing> : !p8
+}

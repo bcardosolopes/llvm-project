@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -std=c++1y -Wno-unused-value -triple x86_64-linux-gnu -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -std=c++1y -Wno-unused-value -triple x86_64-linux-gnu -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR --implicit-check-not='@__tls_init' %}
 
 // Check that we keep the 'extern' when we instantiate the definition of this
 // variable template specialization.
@@ -46,6 +47,11 @@ int *p = &n<0>;
 namespace PR42111 {
   int f();
   namespace { template <int = 0> thread_local int n = f(); }
+  // CIR: @_ZTHN7PR4211112_GLOBAL__N_11nILi0EEE = internal alias void (), ptr @__cxx_global_var_init.{{[0-9]+}}
+  // CIR-LABEL: define internal void @__cxx_global_var_init.{{[0-9]+}}(
+  // CIR: [[N_ADDR:%.+]] = call align 4 ptr @llvm.threadlocal.address.p0(ptr align 4 @_ZN7PR4211112_GLOBAL__N_11nILi0EEE)
+  // CIR: call noundef i32 @_ZN7PR421111fEv(
+  // CIR: store i32 {{.*}}, ptr [[N_ADDR]]
   // CHECK: define {{.*}}@[[PR42111_CTOR]](
   // CHECK: load {{.*}} @_ZGVN7PR4211112_GLOBAL__N_11nILi0EEE
   // CHECK: icmp eq i8 {{.*}}, 0

@@ -12,13 +12,9 @@ module {
     cir.return
   }
 // CHECK:  cir.func{{.*}} @foo() {
-// CHECK:    cir.br ^bb1
-// CHECK:  ^bb1:  // pred: ^bb0
 // CHECK:    %0 = cir.alloca !u32i, !cir.ptr<!u32i>, ["a", init] {alignment = 4 : i64}
 // CHECK:    %1 = cir.const #cir.int<4> : !u32i
 // CHECK:    cir.store %1, %0 : !u32i, !cir.ptr<!u32i>
-// CHECK:    cir.br ^bb2
-// CHECK:  ^bb2:  // pred: ^bb1
 // CHECK:    cir.return
 // CHECK:  }
 
@@ -46,15 +42,40 @@ module {
 
 // CHECK:  cir.func{{.*}} @scope_with_return() -> !u32i {
 // CHECK:    %0 = cir.alloca !u32i, !cir.ptr<!u32i>, ["__retval"] {alignment = 4 : i64}
-// CHECK:    cir.br ^bb1
-// CHECK:  ^bb1:  // pred: ^bb0
 // CHECK:    %1 = cir.const #cir.int<0> : !u32i
 // CHECK:    cir.store %1, %0 : !u32i, !cir.ptr<!u32i>
 // CHECK:    %2 = cir.load %0 : !cir.ptr<!u32i>, !u32i
 // CHECK:    cir.return %2 : !u32i
-// CHECK:  ^bb2:  // no predecessors
-// CHECK:    %3 = cir.load %0 : !cir.ptr<!u32i>, !u32i
-// CHECK:    cir.return %3 : !u32i
+// CHECK:  }
+
+  // Scope with a dead block containing a cir.yield. The yield in the dead
+  // block (^bb1, no predecessors) must be replaced with a branch to the
+  // continue block during flattening. Otherwise it survives into the parent
+  // region with an invalid parent op (e.g. cir.func) and fails verification.
+  cir.func @scope_dead_yield(%arg0 : !cir.bool) -> !u32i {
+    %0 = cir.alloca !u32i, !cir.ptr<!u32i>, ["retval"] {alignment = 4 : i64}
+    cir.scope {
+      %1 = cir.const #cir.int<42> : !u32i
+      cir.store %1, %0 : !u32i, !cir.ptr<!u32i>
+      cir.brcond %arg0 ^bb2, ^bb2
+    ^bb1:  // no predecessors — dead block with yield
+      cir.yield
+    ^bb2:  // 2 preds: ^bb0, ^bb0
+      cir.yield
+    }
+    %2 = cir.load %0 : !cir.ptr<!u32i>, !u32i
+    cir.return %2 : !u32i
+  }
+// CHECK:  cir.func{{.*}} @scope_dead_yield(%arg0: !cir.bool) -> !u32i {
+// CHECK:    %[[RETVAL:.*]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["retval"] {alignment = 4 : i64}
+// CHECK:    %[[C42:.*]] = cir.const #cir.int<42> : !u32i
+// CHECK:    cir.store %[[C42]], %[[RETVAL]] : !u32i, !cir.ptr<!u32i>
+// CHECK:    cir.brcond %arg0 ^bb1, ^bb1
+// CHECK:  ^bb1:  // 2 preds: ^bb0, ^bb0
+// CHECK:    cir.br ^bb2
+// CHECK:  ^bb2:  // pred: ^bb1
+// CHECK:    %[[RET:.*]] = cir.load %[[RETVAL]] : !cir.ptr<!u32i>, !u32i
+// CHECK:    cir.return %[[RET]] : !u32i
 // CHECK:  }
 
 }

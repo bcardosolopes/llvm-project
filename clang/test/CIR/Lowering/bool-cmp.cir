@@ -1,0 +1,21 @@
+// RUN: cir-opt %s -cir-to-llvm -o %t.mlir 2>&1
+// RUN: FileCheck %s --input-file=%t.mlir
+
+// Test that CmpOp lowering handles cir.bool operands directly.
+// Previously this failed with "unsupported type for CmpOp: cir.bool".
+
+module {
+  cir.func @test_bool_cmp(%arg0: !cir.bool, %arg1: !cir.bool) -> !cir.bool {
+    %0 = cir.cmp(eq, %arg0, %arg1) : !cir.bool, !cir.bool
+    cir.return %0 : !cir.bool
+  }
+  // CHECK: llvm.func @test_bool_cmp(%arg0: i1, %arg1: i1) -> i1
+  // CHECK:   llvm.icmp "eq" %arg0, %arg1 : i1
+
+  cir.func @test_bool_cmp_ne(%arg0: !cir.bool, %arg1: !cir.bool) -> !cir.bool {
+    %0 = cir.cmp(ne, %arg0, %arg1) : !cir.bool, !cir.bool
+    cir.return %0 : !cir.bool
+  }
+  // CHECK: llvm.func @test_bool_cmp_ne(%arg0: i1, %arg1: i1) -> i1
+  // CHECK:   llvm.icmp "ne" %arg0, %arg1 : i1
+}

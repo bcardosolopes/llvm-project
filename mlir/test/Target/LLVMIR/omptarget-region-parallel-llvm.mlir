@@ -29,27 +29,63 @@ module attributes {omp.is_target_device = false} {
   }
 }
 
-// CHECK: call void @__omp_offloading_[[DEV:.*]]_[[FIL:.*]]_omp_target_region__l[[LINE:.*]](ptr %{{.*}}, ptr %{{.*}}, ptr %{{.*}})
-// CHECK: define internal void @__omp_offloading_[[DEV]]_[[FIL]]_omp_target_region__l[[LINE]](ptr %[[ADDR_A:.*]], ptr %[[ADDR_B:.*]], ptr %[[ADDR_C:.*]])
-// CHECK:  %[[STRUCTARG:.*]] = alloca { ptr, ptr, ptr }, align 8
-// CHECK: %[[GEP1:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[STRUCTARG]], i32 0, i32 0
-// CHECK: store ptr %[[ADDR_A]], ptr %[[GEP1]], align 8
-// CHECK: %[[GEP2:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[STRUCTARG]], i32 0, i32 1
-// CHECK: store ptr %[[ADDR_B]], ptr %[[GEP2]], align 8
-// CHECK: %[[GEP3:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[STRUCTARG]], i32 0, i32 2
-// CHECK: store ptr %[[ADDR_C]], ptr %[[GEP3]], align 8
-// CHECK: call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @{{.*}}, i32 1, ptr @__omp_offloading_[[DEV]]_[[FIL]]_omp_target_region__l[[LINE]]..omp_par, ptr %[[STRUCTARG]])
-
-
-// CHECK: define internal void @__omp_offloading_[[DEV]]_[[FIL]]_omp_target_region__l[[LINE]]..omp_par(ptr noalias %tid.addr, ptr noalias %zero.addr, ptr %[[STRUCTARG2:.*]]) #0 {
-// CHECK: %[[GEP4:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[STRUCTARG2]], i32 0, i32 0
-// CHECK: %[[LOADGEP1:.*]] = load ptr, ptr %[[GEP4]], align 8
-// CHECK: %[[GEP5:.*]] = getelementptr { ptr, ptr, ptr }, ptr %0, i32 0, i32 1
-// CHECK: %[[LOADGEP2:.*]] = load ptr, ptr %[[GEP5]], align 8
-// CHECK: %[[GEP6:.*]] = getelementptr { ptr, ptr, ptr }, ptr %0, i32 0, i32 2
-// CHECK: %[[LOADGEP3:.*]] = load ptr, ptr %[[GEP6]], align 8
-
-// CHECK: %[[VAL_A:.*]] = load i32, ptr %[[LOADGEP1]], align 4
-// CHECK: %[[VAL_B:.*]] = load i32, ptr %[[LOADGEP2]], align 4
-// CHECK: %[[SUM:.*]] = add i32 %[[VAL_A]], %[[VAL_B]]
-// CHECK: store i32 %[[SUM]], ptr %[[LOADGEP3]], align 4
+// CHECK: @0 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @1 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @2 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @3 = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00", align 1
+// CHECK: @4 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 2, i32 0, i32 22, ptr @3 }, align 8
+// CHECK-LABEL: define void @omp_target_region_(
+// CHECK:   %[[VAL_0:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_2:.*]] = alloca i32, i64 1, align 4
+// CHECK:   store i32 10, ptr %[[VAL_0]], align 4
+// CHECK:   store i32 20, ptr %[[VAL_1]], align 4
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_omp_target_region__l{{.*}}(ptr %[[VAL_0]], ptr %[[VAL_1]], ptr %[[VAL_2]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_omp_target_region__l{{.*}}(
+// CHECK: entry:
+// CHECK:   br label %[[VAL_0:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_1:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_3:.*]] = call i32 @__kmpc_global_thread_num(ptr @4)
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp_parallel:
+// CHECK:   call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @4, i32 3, ptr @__omp_offloading_{{.*}}_{{.*}}_omp_target_region__l{{.*}}..omp_par, ptr %[[VAL_5:.*]], ptr %[[VAL_6:.*]], ptr %[[VAL_7:.*]])
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.par.exit:
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_omp_target_region__l{{.*}}..omp_par(
+// CHECK: omp.par.entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = load i32, ptr %[[VAL_2:.*]], align 4
+// CHECK:   store i32 %[[VAL_1]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_3:.*]] = load i32, ptr %[[VAL_0]], align 4
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.region.after_alloca1:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.par.region:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.par.region3:
+// CHECK:   %[[VAL_7:.*]] = load i32, ptr %[[VAL_8:.*]], align 4
+// CHECK:   %[[VAL_9:.*]] = load i32, ptr %[[VAL_10:.*]], align 4
+// CHECK:   %[[VAL_11:.*]] = add i32 %[[VAL_7]], %[[VAL_9]]
+// CHECK:   store i32 %[[VAL_11]], ptr %[[VAL_12:.*]], align 4
+// CHECK:   br label %[[VAL_13:.*]]
+// CHECK: omp.region.cont2:
+// CHECK:   br label %[[VAL_14:.*]]
+// CHECK: omp.par.pre_finalize:
+// CHECK:   br label %[[VAL_15:.*]]
+// CHECK: .fini:
+// CHECK:   br label %[[VAL_16:.*]]
+// CHECK: omp.par.exit.exitStub:
+// CHECK:   ret void
+// CHECK: }

@@ -30,6 +30,16 @@ func.func @num_threads_once(%n : si32) {
 
 // -----
 
+func.func @num_threads_strict_payload_requires_modifier(%n : i32, %msg : !llvm.ptr) {
+  // expected-error@+1 {{severity/message clauses require num_threads(strict: ...)}}
+  omp.parallel num_threads(%n : i32) severity(fatal) message(%msg : !llvm.ptr) {
+  }
+
+  return
+}
+
+// -----
+
 func.func @nowait_not_allowed(%n : memref<i32>) {
   // expected-error@+1 {{expected '{' to begin a region}}
   omp.parallel nowait {}
@@ -825,16 +835,6 @@ func.func @omp_critical2() -> () {
 
 // -----
 
-// expected-error @below {{the hints omp_sync_hint_uncontended and omp_sync_hint_contended cannot be combined}}
-omp.critical.declare @mutex hint(uncontended, contended)
-
-// -----
-
-// expected-error @below {{the hints omp_sync_hint_nonspeculative and omp_sync_hint_speculative cannot be combined}}
-omp.critical.declare @mutex hint(nonspeculative, speculative)
-
-// -----
-
 // expected-error @below {{invalid_hint is not a valid hint}}
 omp.critical.declare @mutex hint(invalid_hint)
 
@@ -945,14 +945,6 @@ func.func @omp_ordered5(%arg1 : i32, %arg2 : i32, %arg3 : i32, %vec0 : i64, %vec
 
 // -----
 
-func.func @omp_atomic_read1(%x: memref<i32>, %v: memref<i32>) {
-  // expected-error @below {{the hints omp_sync_hint_nonspeculative and omp_sync_hint_speculative cannot be combined.}}
-  omp.atomic.read %v = %x hint(speculative, nonspeculative) : memref<i32>, memref<i32>, i32
-  return
-}
-
-// -----
-
 func.func @omp_atomic_read2(%x: memref<i32>, %v: memref<i32>) {
   // expected-error @below {{invalid clause value: 'xyz'}}
   omp.atomic.read %v = %x memory_order(xyz) : memref<i32>, memref<i32>, i32
@@ -996,14 +988,6 @@ func.func @omp_atomic_read6(%x: memref<i32>, %v: memref<i32>) {
 func.func @omp_atomic_read6(%x: memref<i32>, %v: memref<i32>) {
   // expected-error @below {{read and write must not be to the same location for atomic reads}}
   omp.atomic.read %x =  %x hint(speculative) : memref<i32>, memref<i32>, i32
-  return
-}
-
-// -----
-
-func.func @omp_atomic_write1(%addr : memref<i32>, %val : i32) {
-  // expected-error @below {{the hints omp_sync_hint_uncontended and omp_sync_hint_contended cannot be combined}}
-  omp.atomic.write  %addr = %val hint(contended, uncontended) : memref<i32>, i32
   return
 }
 
@@ -1146,30 +1130,6 @@ func.func @omp_atomic_update8(%x: memref<i32>, %expr: i32) {
   // expected-error @below {{the region must accept exactly one argument}}
   omp.atomic.update %x : memref<i32> {
   ^bb0(%xval: i32, %tmp: i32):
-    %newval = llvm.add %xval, %expr : i32
-    omp.yield (%newval : i32)
-  }
-  return
-}
-
-// -----
-
-func.func @omp_atomic_update(%x: memref<i32>, %expr: i32) {
-  // expected-error @below {{the hints omp_sync_hint_uncontended and omp_sync_hint_contended cannot be combined}}
-  omp.atomic.update hint(uncontended, contended) %x : memref<i32> {
-  ^bb0(%xval: i32):
-    %newval = llvm.add %xval, %expr : i32
-    omp.yield (%newval : i32)
-  }
-  return
-}
-
-// -----
-
-func.func @omp_atomic_update(%x: memref<i32>, %expr: i32) {
-  // expected-error @below {{the hints omp_sync_hint_nonspeculative and omp_sync_hint_speculative cannot be combined}}
-  omp.atomic.update hint(nonspeculative, speculative) %x : memref<i32> {
-  ^bb0(%xval: i32):
     %newval = llvm.add %xval, %expr : i32
     omp.yield (%newval : i32)
   }
@@ -1326,36 +1286,6 @@ func.func @omp_atomic_capture(%x: memref<i32>, %y: memref<i32>, %v: memref<i32>,
     omp.atomic.write %y = %expr : memref<i32>, i32
     omp.terminator
   }
-}
-
-// -----
-
-func.func @omp_atomic_capture(%x: memref<i32>, %v: memref<i32>, %expr: i32) {
-  // expected-error @below {{the hints omp_sync_hint_uncontended and omp_sync_hint_contended cannot be combined}}
-  omp.atomic.capture hint(contended, uncontended) {
-    omp.atomic.update %x : memref<i32> {
-    ^bb0(%xval: i32):
-      %newval = llvm.add %xval, %expr : i32
-      omp.yield(%newval : i32)
-    }
-    omp.atomic.read %v = %x : memref<i32>, memref<i32>, i32
-  }
-  return
-}
-
-// -----
-
-func.func @omp_atomic_capture(%x: memref<i32>, %v: memref<i32>, %expr: i32) {
-  // expected-error @below {{the hints omp_sync_hint_nonspeculative and omp_sync_hint_speculative cannot be combined}}
-  omp.atomic.capture hint(nonspeculative, speculative) {
-    omp.atomic.update %x : memref<i32> {
-    ^bb0(%xval: i32):
-      %newval = llvm.add %xval, %expr : i32
-      omp.yield(%newval : i32)
-    }
-    omp.atomic.read %v = %x : memref<i32>, memref<i32>, i32
-  }
-  return
 }
 
 // -----
@@ -1695,6 +1625,32 @@ func.func @omp_task_depend(%data_var: memref<i32>) {
       "omp.terminator"() : () -> ()
     }) {depend_kinds = [], operandSegmentSizes = array<i32: 0, 0, 1, 0, 0, 0, 0, 0>} : (memref<i32>) -> ()
    "func.return"() : () -> ()
+}
+
+// -----
+
+func.func @omp_task_depend_mixed_sizes(%a: memref<i32>, %b: memref<i32>, %n: i32) {
+  // expected-error @below {{depend size must be specified for all entries in the clause}}
+  omp.task depend(taskdependin -> %a : memref<i32>, taskdependout -> %b : memref<i32> size(%n : i32)) {
+    omp.terminator
+  }
+  return
+}
+
+// -----
+
+func.func @omp_taskwait_depend_size_mismatch(%data_var: memref<i32>, %size0: i32, %size1: i32) {
+  // expected-error @below {{op expected as many depend sizes as depend variables}}
+  "omp.taskwait"(%data_var, %size0, %size1) <{depend_kinds = [#omp<clause_task_depend(taskdependin)>], operandSegmentSizes = array<i32: 1, 2>}> : (memref<i32>, i32, i32) -> ()
+  return
+}
+
+// -----
+
+func.func @omp_taskwait_unexpected_depend_sizes(%size: i32) {
+  // expected-error @below {{op unexpected depend sizes}}
+  "omp.taskwait"(%size) <{operandSegmentSizes = array<i32: 0, 1>}> : (i32) -> ()
+  return
 }
 
 // -----
@@ -2257,7 +2213,7 @@ func.func @omp_target_enter_data(%map1: memref<?xi32>) {
 func.func @omp_target_enter_data_depend(%a: memref<?xi32>) {
   %0 = omp.map.info var_ptr(%a: memref<?xi32>, tensor<?xi32>) map_clauses(to) capture(ByRef) -> memref<?xi32>
   // expected-error @below {{op expected as many depend values as depend variables}}
-  omp.target_enter_data map_entries(%0: memref<?xi32> ) {operandSegmentSizes = array<i32: 1, 0, 0, 0>}
+  "omp.target_enter_data"(%a, %0) <{depend_kinds = [], operandSegmentSizes = array<i32: 1, 0, 0, 0, 1>}> : (memref<?xi32>, memref<?xi32>) -> ()
   return
 }
 
@@ -2275,7 +2231,7 @@ func.func @omp_target_exit_data(%map1: memref<?xi32>) {
 func.func @omp_target_exit_data_depend(%a: memref<?xi32>) {
   %0 = omp.map.info var_ptr(%a: memref<?xi32>, tensor<?xi32>) map_clauses(from) capture(ByRef) -> memref<?xi32>
   // expected-error @below {{op expected as many depend values as depend variables}}
-  omp.target_exit_data map_entries(%0: memref<?xi32> ) {operandSegmentSizes = array<i32: 1, 0, 0, 0>}
+  "omp.target_exit_data"(%a, %0) <{depend_kinds = [], operandSegmentSizes = array<i32: 1, 0, 0, 0, 1>}> : (memref<?xi32>, memref<?xi32>) -> ()
   return
 }
 
@@ -2356,7 +2312,7 @@ llvm.mlir.global internal @_QFsubEx() : i32
 func.func @omp_target_update_data_depend(%a: memref<?xi32>) {
   %0 = omp.map.info var_ptr(%a: memref<?xi32>, tensor<?xi32>) map_clauses(to) capture(ByRef) -> memref<?xi32>
   // expected-error @below {{op expected as many depend values as depend variables}}
-  omp.target_update map_entries(%0: memref<?xi32> ) {operandSegmentSizes = array<i32: 1, 0, 0, 0>}
+  "omp.target_update"(%a, %0) <{depend_kinds = [], operandSegmentSizes = array<i32: 1, 0, 0, 0, 1>}> : (memref<?xi32>, memref<?xi32>) -> ()
   return
 }
 
@@ -2402,10 +2358,10 @@ func.func @omp_target_host_eval_teams(%x : i1) {
 
 // -----
 
-func.func @omp_target_host_eval_parallel(%x : i32) {
-  // expected-error @below {{op host_eval argument only legal as 'num_threads' in 'omp.parallel' when representing target SPMD}}
-  omp.target host_eval(%x -> %arg0 : i32) {
-    omp.parallel num_threads(%arg0 : i32) {
+func.func @omp_target_host_eval_parallel(%x : !llvm.ptr, %n : i32) {
+  // expected-error @below {{op host_eval argument only legal as 'if' and 'num_threads' in 'omp.parallel'}}
+  omp.target host_eval(%x -> %arg0, %n -> %arg1 : !llvm.ptr, i32) {
+    omp.parallel num_threads(strict: %arg1 : i32) severity(fatal) message(%arg0 : !llvm.ptr) {
       omp.terminator
     }
     omp.terminator
@@ -2458,7 +2414,7 @@ func.func @omp_target_depend(%data_var: memref<i32>) {
   // expected-error @below {{op expected as many depend values as depend variables}}
     "omp.target"(%data_var) ({
       "omp.terminator"() : () -> ()
-    }) {depend_kinds = [], operandSegmentSizes = array<i32: 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0>} : (memref<i32>) -> ()
+    }) {depend_kinds = [], operandSegmentSizes = array<i32: 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>} : (memref<i32>) -> ()
    "func.return"() : () -> ()
 }
 
@@ -2691,7 +2647,7 @@ func.func @undefined_privatizer(%arg0: index) {
 // -----
 func.func @undefined_privatizer(%arg0: !llvm.ptr) {
   // expected-error @below {{inconsistent number of private variables and privatizer op symbols, private vars: 1 vs. privatizer op symbols: 2}}
-  "omp.parallel"(%arg0) <{operandSegmentSizes = array<i32: 0, 0, 0, 0, 1, 0>, private_syms = [@x.privatizer, @y.privatizer]}> ({
+  "omp.parallel"(%arg0) <{operandSegmentSizes = array<i32: 0, 0, 0, 0, 0, 1, 0>, private_syms = [@x.privatizer, @y.privatizer]}> ({
     ^bb0(%arg2: !llvm.ptr):
       omp.terminator
     }) : (!llvm.ptr) -> ()

@@ -331,6 +331,13 @@ static void testDebugInfoAttributes(MlirContext ctx) {
   mlirAttributeDump(di_annotation);
   // CHECK: #llvm.di_annotation<{{.*}}>
 
+  MlirAttribute di_int_annotation = mlirLLVMDIAnnotationAttrGet(
+      ctx, mlirStringAttrGet(ctx, mlirStringRefCreateFromCString("CFG Hash")),
+      mlirIntegerAttrGet(mlirIntegerTypeGet(ctx, 64), 742261418966908927));
+
+  mlirAttributeDump(di_int_annotation);
+  // CHECK: #llvm.di_annotation<name = "CFG Hash", value = 742261418966908927 : i64>
+
   MlirAttribute di_subprogram = mlirLLVMDISubprogramAttrGet(
       ctx, recId0, false, id, compile_unit, compile_unit, foo, bar, file, 1, 2,
       0, subroutine_type, 1, &di_imported_entity, 1, &di_annotation);

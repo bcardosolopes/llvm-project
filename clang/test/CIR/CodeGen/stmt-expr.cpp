@@ -37,17 +37,11 @@ void test1() {
 // LLVM:   %[[VAR1:.+]] = alloca %class.A, i64 1
 // LLVM:   %[[VAR2:.+]] = alloca %class.A, i64 1
 // LLVM:   %[[VAR3:.+]] = alloca %class.A, i64 1
-// LLVM:   br label %[[LBL4:.+]]
-// LLVM: [[LBL4]]:
-// LLVM:     br label %[[LBL5:.+]]
-// LLVM: [[LBL5]]:
-// LLVM:     call void @_ZN1AC2Ev(ptr %[[VAR3]])
-// LLVM:     call void @_ZN1AC2ERS_(ptr %[[VAR1]], ptr %[[VAR3]])
+// LLVM:     call void @_ZN1AC2Ev(ptr noundef nonnull align 4 dereferenceable(4) %[[VAR3]])
+// LLVM:     call void @_ZN1AC2ERS_(ptr noundef nonnull align 4 dereferenceable(4) %[[VAR1]], ptr noundef nonnull align 4 dereferenceable(4) %[[VAR3]])
 // LLVM:     br label %[[LBL6:.+]]
 // LLVM: [[LBL6]]:
-// LLVM:     call void @_ZN1A3FooEv(ptr %[[VAR1]])
-// LLVM:     br label %[[LBL7:.+]]
-// LLVM: [[LBL7]]:
+// LLVM:     call void @_ZN1A3FooEv(ptr noundef nonnull align 4 dereferenceable(4) %[[VAR1]])
 // LLVM:     ret void
 
 // OGCG: define dso_local void @_Z5test1v()
@@ -76,11 +70,7 @@ void cleanup() {
 
 // LLVM: define dso_local void @_Z7cleanupv()
 // LLVM:   %[[WD:.+]] = alloca %struct.with_dtor, i64 1
-// LLVM:   br label %[[LBL2:.+]]
-// LLVM: [[LBL2]]:
-// LLVM:     call void @_ZN9with_dtorD1Ev(ptr %[[WD]])
-// LLVM:     br label %[[LBL3:.+]]
-// LLVM: [[LBL3]]:
+// LLVM:     call void @_ZN9with_dtorD1Ev(ptr {{[^%]*}}%[[WD]])
 // LLVM:     ret void
 
 // OGCG: define dso_local void @_Z7cleanupv()
@@ -107,12 +97,8 @@ void gnu_statement_extension() {
 // LLVM:   %[[A_ADDR:.*]] = alloca { float, float }, i64 1, align 4
 // LLVM:   %[[B_ADDR:.*]] = alloca float, i64 1, align 4
 // LLVM:   %[[TMP_ADDR:.*]] = alloca { float, float }, i64 1, align 4
-// LLVM:   br label %[[LABEL_1:.*]]
-// LLVM: [[LABEL_1]]:
 // LLVM:   %[[TMP_A:.*]] = load { float, float }, ptr %[[A_ADDR]], align 4
 // LLVM:   store { float, float } %[[TMP_A]], ptr %[[TMP_ADDR]], align 4
-// LLVM:   br label %[[LABEL_2:.*]]
-// LLVM: [[LABEL_2]]:
 // LLVM:   %[[TMP:.*]] = load { float, float }, ptr %[[TMP_ADDR]], align 4
 // LLVM:   %[[REAL:.*]] = extractvalue { float, float } %[[TMP]], 0
 // LLVM:   store float %[[REAL]], ptr %[[B_ADDR]], align 4

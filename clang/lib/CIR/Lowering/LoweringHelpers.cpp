@@ -12,7 +12,6 @@
 
 #include "clang/CIR/LoweringHelpers.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "clang/CIR/MissingFeatures.h"
 
 mlir::DenseElementsAttr
 convertStringAttrToDenseElementsAttr(cir::ConstArrayAttr attr,
@@ -24,8 +23,8 @@ convertStringAttrToDenseElementsAttr(cir::ConstArrayAttr attr,
     values.push_back({8, (uint64_t)element});
 
   const auto arrayTy = mlir::cast<cir::ArrayType>(attr.getType());
-  if (arrayTy.getSize() != stringAttr.size())
-    assert(!cir::MissingFeatures::stringTypeWithDifferentArraySize());
+  assert(arrayTy.getSize() == stringAttr.size() &&
+         "NYI: lowering StringAttr with mismatched CIR array size");
 
   return mlir::DenseElementsAttr::get(
       mlir::RankedTensorType::get({(int64_t)values.size()}, type),
@@ -65,7 +64,7 @@ void convertToDenseElementsAttrImpl(
     if (auto arrayType = mlir::dyn_cast<cir::ArrayType>(attr.getType())) {
       for (auto element : stringAttr) {
         auto intAttr = cir::IntAttr::get(arrayType.getElementType(), element);
-        values[currentIndex++] = mlir::dyn_cast<AttrTy>(intAttr).getValue();
+        values[currentIndex++] = mlir::cast<AttrTy>(intAttr).getValue();
       }
       return;
     }

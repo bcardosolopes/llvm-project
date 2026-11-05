@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -emit-llvm -fobjc-runtime=gcc -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -fobjc-runtime=gcc -fclangir -o - %s | FileCheck --check-prefix=CHECK-CIR %s %}
 
 @protocol NSCopying
 @end
@@ -33,6 +34,10 @@ int main(void) {
 // CHECK: = private unnamed_addr constant [12 x i8] c"@\22NSString\22\00"
 // CHECK: = private unnamed_addr constant [9 x i8] c"_intIvar\00"
 // CHECK: = private unnamed_addr constant [2 x i8] c"i\00"
+// CHECK-CIR: = private unnamed_addr constant [12 x i8] c"_stringIvar\00"
+// CHECK-CIR: = private unnamed_addr constant [12 x i8] c"@\22NSString\22\00"
+// CHECK-CIR: = private unnamed_addr constant [9 x i8] c"_intIvar\00"
+// CHECK-CIR: = private unnamed_addr constant [2 x i8] c"i\00"
 
 @interface Class1 {
   int : 3;
@@ -49,3 +54,7 @@ int main(void) {
 // CHECK: @{{.*}} = private unnamed_addr constant [5 x i8] c"b3s2\00"
 // CHECK: @{{.*}} = private unnamed_addr constant [2 x i8] c"q\00"
 // CHECK: @{{.*}} = private unnamed_addr constant [{{7|6}} x i8] c"b{{128|96}}c1\00"
+// CHECK-CIR: @{{.*}} = private unnamed_addr constant [5 x i8] c"b0i3\00"
+// CHECK-CIR: @{{.*}} = private unnamed_addr constant [5 x i8] c"b3s2\00"
+// CHECK-CIR: @{{.*}} = private unnamed_addr constant [2 x i8] c"q\00"
+// CHECK-CIR: @{{.*}} = private unnamed_addr constant [{{7|6}} x i8] c"b{{128|96}}c1\00"

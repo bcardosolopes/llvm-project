@@ -14,8 +14,8 @@ void calls_noreturn(void) {
   // CHECK-NEXT: unreachable
 }
 
-// CHECK: declare void @my_longjmp() [[FN_ATTR:#[0-9]+]]
-// CHECK: declare void @__asan_handle_no_return()
+// CHECK-DAG: declare void @my_longjmp() [[FN_ATTR:#[0-9]+]]
+// CHECK-DAG: declare void @__asan_handle_no_return()
 
 // CHECK-LABEL: attributes
 // CHECK-NOT: [[FN_ATTR]] = { {{.*noreturn.*}} }

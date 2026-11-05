@@ -1,0 +1,23 @@
+// RUN: not cir-opt %s -cir-to-llvm -split-input-file -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: failed to lower #cir.global_view source type for @g (opaque type requires LowerModule target info)
+// CHECK: error: failed to lower #cir.global_view destination pointee type
+// CHECK-SAME: opaque type requires LowerModule target info
+// CHECK-NOT: Assertion `lowerModule && "LowerModule is not available"' failed.
+// CHECK-NOT: Stack dump:
+
+!opaque = !cir.opaque<"foo">
+
+module {
+  cir.global external @p = #cir.global_view<@g, [0 : i32]> : !cir.ptr<!opaque>
+  cir.global external @g = #cir.zero : !opaque
+}
+
+// -----
+
+!opaque = !cir.opaque<"foo">
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.global external @p = #cir.global_view<@g> : !cir.ptr<!opaque>
+  cir.global external @g = #cir.int<0> : !s32i
+}

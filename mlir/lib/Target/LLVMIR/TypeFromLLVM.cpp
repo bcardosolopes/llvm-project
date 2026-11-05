@@ -11,6 +11,9 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
@@ -110,15 +113,49 @@ private:
                                               type->isPacked());
     }
 
-    if (type->isOpaque())
-      return LLVM::LLVMStructType::getOpaque(type->getName(), &context);
+    // An opaque type imports as the type of its name that is already in the
+    // context, or as a new opaque type if there is none. A body that an
+    // earlier suffixed type of this module put under its name belongs to a
+    // different LLVM type, so it stays opaque, under a new name: giving it that
+    // body would make an external global of the type dereferenceable.
+    if (type->isOpaque()) {
+      StringRef name = type->getName();
+      if (!bodiedFromSuffix.contains(name))
+        return LLVM::LLVMStructType::getOpaque(name, &context);
+      for (unsigned i = 0;; ++i) {
+        std::string candidate = (name + "." + Twine(i)).str();
+        if (!LLVM::LLVMStructType::getIdentified(&context, candidate)
+                 .isInitialized())
+          return LLVM::LLVMStructType::getOpaque(candidate, &context);
+      }
+    }
 
-    // With opaque pointers, types in LLVM can't be recursive anymore. Note that
-    // using getIdentified is not possible, as type names in LLVM are not
-    // guaranteed to be unique.
+    // With opaque pointers, types in LLVM can't be recursive anymore. LLVM
+    // keeps two types of one name apart with a numeric suffix, so a type is
+    // imported under its name without that suffix, reusing a type of that name
+    // and body that an earlier type put in the context. Types that one LLVM
+    // context kept apart, or that came from two LLVM contexts, thus become
+    // one. A type of another body keeps its LLVM name if that name is free in
+    // the context or holds the same body, and otherwise gets a new numeric
+    // suffix.
     translateTypes(type->subtypes(), subtypes);
-    LLVM::LLVMStructType translated = LLVM::LLVMStructType::getNewIdentified(
-        &context, type->getName(), subtypes, type->isPacked());
+    StringRef name = type->getName();
+    StringRef unsuffixed = name;
+    if (size_t dot = name.rfind('.');
+        dot != StringRef::npos && dot + 1 < name.size() &&
+        llvm::all_of(name.drop_front(dot + 1), llvm::isDigit))
+      unsuffixed = name.take_front(dot);
+    LLVM::LLVMStructType translated =
+        LLVM::LLVMStructType::getIdentified(&context, unsuffixed);
+    if (succeeded(translated.setBody(subtypes, type->isPacked()))) {
+      if (unsuffixed != name)
+        bodiedFromSuffix.insert(unsuffixed);
+    } else {
+      translated = LLVM::LLVMStructType::getIdentified(&context, name);
+      if (failed(translated.setBody(subtypes, type->isPacked())))
+        translated = LLVM::LLVMStructType::getNewIdentified(
+            &context, name, subtypes, type->isPacked());
+    }
     knownTranslations.try_emplace(type, translated);
     return translated;
   }
@@ -156,6 +193,9 @@ private:
   /// Map of known translations. Serves as a cache and as recursion stopper for
   /// translating recursive structs.
   llvm::DenseMap<llvm::Type *, Type> knownTranslations;
+
+  /// The names of this import whose body a suffixed LLVM type supplied.
+  llvm::StringSet<> bodiedFromSuffix;
 
   /// The context in which MLIR types are created.
   MLIRContext &context;

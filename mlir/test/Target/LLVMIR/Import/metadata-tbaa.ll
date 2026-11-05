@@ -1,10 +1,10 @@
 ; RUN: mlir-translate -import-llvm -split-input-file %s | FileCheck %s
 
 ; CHECK-DAG: #[[R0:.*]] = #llvm.tbaa_root<id = "Simple C/C++ TBAA">
-; CHECK-DAG: #[[D0:.*]] = #llvm.tbaa_type_desc<id = "scalar type", members = {<#[[R0]], 0>}>
+; CHECK-DAG: #[[D0:.*]] = #llvm.tbaa_type_desc<id = "scalar type", members = {<typeDesc = #[[R0]], offset = 0>}>
 ; CHECK-DAG: #[[$T0:.*]] = #llvm.tbaa_tag<base_type = #[[D0]], access_type = #[[D0]], offset = 0>
 ; CHECK-DAG: #[[R1:.*]] = #llvm.tbaa_root<id = "Other language TBAA">
-; CHECK-DAG: #[[D1:.*]] = #llvm.tbaa_type_desc<id = "other scalar type", members = {<#[[R1]], 0>}>
+; CHECK-DAG: #[[D1:.*]] = #llvm.tbaa_type_desc<id = "other scalar type", members = {<typeDesc = #[[R1]], offset = 0>}>
 ; CHECK-DAG: #[[$T1:.*]] = #llvm.tbaa_tag<base_type = #[[D1]], access_type = #[[D1]], offset = 0>
 
 ; CHECK-LABEL: llvm.func @tbaa1
@@ -32,12 +32,12 @@ define dso_local void @tbaa1(ptr %0, ptr %1) {
 
 ; CHECK-DAG: #[[R0:.*]] = #llvm.tbaa_root<id = "Simple C/C++ TBAA">
 ; CHECK-DAG: #[[$T0:.*]] = #llvm.tbaa_tag<base_type = #[[D2:.*]], access_type = #[[D1:.*]], offset = 8>
-; CHECK-DAG: #[[D1]] = #llvm.tbaa_type_desc<id = "long long", members = {<#[[D0:.*]], 0>}>
-; CHECK-DAG: #[[D0]] = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<#[[R0]], 0>}>
-; CHECK-DAG: #[[D2]] = #llvm.tbaa_type_desc<id = "agg2_t", members = {<#[[D1]], 0>, <#[[D1]], 8>}>
+; CHECK-DAG: #[[D1]] = #llvm.tbaa_type_desc<id = "long long", members = {<typeDesc = #[[D0:.*]], offset = 0>}>
+; CHECK-DAG: #[[D0]] = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<typeDesc = #[[R0]], offset = 0>}>
+; CHECK-DAG: #[[D2]] = #llvm.tbaa_type_desc<id = "agg2_t", members = {<typeDesc = #[[D1]], offset = 0>, <typeDesc = #[[D1]], offset = 8>}>
 ; CHECK-DAG: #[[$T1:.*]] = #llvm.tbaa_tag<base_type = #[[D4:.*]], access_type = #[[D3:.*]], offset = 0>
-; CHECK-DAG: #[[D3]] = #llvm.tbaa_type_desc<id = "int", members = {<#[[D0]], 0>}>
-; CHECK-DAG: #[[D4]] = #llvm.tbaa_type_desc<id = "agg1_t", members = {<#[[D3]], 0>, <#[[D3]], 4>}>
+; CHECK-DAG: #[[D3]] = #llvm.tbaa_type_desc<id = "int", members = {<typeDesc = #[[D0]], offset = 0>}>
+; CHECK-DAG: #[[D4]] = #llvm.tbaa_type_desc<id = "agg1_t", members = {<typeDesc = #[[D3]], offset = 0>, <typeDesc = #[[D3]], offset = 4>}>
 
 ; CHECK-LABEL: llvm.func @tbaa2
 ; CHECK:         llvm.load %{{.*}} {

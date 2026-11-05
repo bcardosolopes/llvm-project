@@ -260,7 +260,8 @@ def LoopUnswitchAttr : LLVM_Attr<"LoopUnswitch", "loop_unswitch"> {
   }];
 
   let parameters = (ins
-    OptionalParameter<"BoolAttr">:$partialDisable
+    OptionalParameter<"BoolAttr">:$partialDisable,
+    OptionalParameter<"BoolAttr">:$injectionDisable
   );
 
   let assemblyFormat = "`<` struct(params) `>`";
@@ -291,9 +292,23 @@ def LoopAnnotationAttr : LLVM_Attr<"LoopAnnotation", "loop_annotation"> {
     OptionalParameter<"LoopUnswitchAttr">:$unswitch,
     OptionalParameter<"BoolAttr">:$mustProgress,
     OptionalParameter<"BoolAttr">:$isVectorized,
-    OptionalParameter<"FusedLoc">:$startLoc,
-    OptionalParameter<"FusedLoc">:$endLoc,
-    OptionalArrayRefParameter<"AccessGroupAttr">:$parallelAccesses
+    OptionalParameter<"IntegerAttr">:$codeAlign,
+    OptionalParameter<"LocationAttr">:$startLoc,
+    OptionalParameter<"LocationAttr">:$endLoc,
+    OptionalArrayRefParameter<"AccessGroupAttr">:$parallelAccesses,
+    // Each loop needs its own `!llvm.loop` node: LLVM builds them distinct and
+    // uses the node as the loop's identity. Two loops that happen to carry the
+    // same options are still two loops, and without an identity here they
+    // unique to one attribute and so export sharing one node -- at which point
+    // a transformation recorded on one reads as recorded on the other.
+    //
+    // Optional, because sharing is meaningful when it is the *same* loop: all
+    // latches of one loop carry one node. An attribute built without an id
+    // keeps the old behaviour and uniques structurally.
+    //
+    // Last rather than first so the bytecode field order only grows at the
+    // end, which is what keeps previously serialized attributes readable.
+    OptionalParameter<"DistinctAttr">:$id
   );
 
   let assemblyFormat = "`<` struct(params) `>`";
@@ -370,6 +385,41 @@ def LLVM_DIExpressionAttr : LLVM_Attr<"DIExpression", "di_expression"> {
   let constBuilderCall =
             "::mlir::LLVM::DIExpressionAttr::get($_builder.getContext(), $0)";
   let assemblyFormat = "`<` ( `[` $operations^ `]` ) : (``)? `>`";
+}
+
+//===----------------------------------------------------------------------===//
+// DITypeAttr
+//===----------------------------------------------------------------------===//
+
+// Accepts any attribute in the debug info type hierarchy. The concrete DI
+// attributes each have their own def, but the shared base has none, so the
+// constraint is spelled against the C++ class.
+def LLVM_DITypeAttr :
+    Attr<CPred<"::llvm::isa<::mlir::LLVM::DITypeAttr>($_self)">,
+         "LLVM debug info type attribute"> {
+  let storageType = "::mlir::LLVM::DITypeAttr";
+  let returnType = "::mlir::LLVM::DITypeAttr";
+  let convertFromStorage = "$_self";
+}
+
+//===----------------------------------------------------------------------===//
+// DIAssignIDAttr
+//===----------------------------------------------------------------------===//
+
+def LLVM_DIAssignIDAttr : LLVM_Attr<"DIAssignID", "di_assign_id"> {
+  let summary = "The identity that links a store to its `#dbg_assign`";
+  let description = [{
+    `!DIAssignID` carries nothing: it is a name, and assignment tracking works
+    by two things sharing it -- the store that performs an assignment and the
+    `#dbg_assign` record that describes it. So the only parameter is the
+    identity itself, and it is always distinct, exactly as LLVM always builds
+    the node distinct.
+
+    It is deliberately not a `DINodeAttr`: `llvm::DIAssignID` derives from
+    `MDNode`, not `DINode`, so it does not belong on that dispatch.
+  }];
+  let parameters = (ins "DistinctAttr":$id);
+  let assemblyFormat = "`<` struct(params) `>`";
 }
 
 //===----------------------------------------------------------------------===//
@@ -450,6 +500,46 @@ def LLVM_DICompileUnitAttr : LLVM_Attr<"DICompileUnit", "di_compile_unit",
 // DICompositeTypeAttr
 //===----------------------------------------------------------------------===//
 
+// A `DINodeAttr` list that prints inside brackets.
+//
+// `struct(params)` prints a bare `ArrayRef` as a comma-separated list with
+// nothing around it, so the parser cannot tell where the list ends and the next
+// `name = value` field begins. Any such array that is not the last populated
+// field therefore prints in a form its own parser rejects -- `elements`
+// followed by `dataLocation`, or `retainedNodes` followed by `annotations`,
+// both of which LLVM emits. Brackets make the extent explicit. This mirrors
+// what `LLVM_TBAAMemberAttrArray` already does with braces.
+def LLVM_DINodeArray : OptionalArrayRefParameter<"DINodeAttr"> {
+  let printer = [{
+    $_printer << '[';
+    llvm::interleaveComma($_self, $_printer, [&](DINodeAttr attr) {
+        $_printer << attr;
+    });
+    $_printer << ']';
+  }];
+
+  // The brackets are optional on the way in. The printer always writes them,
+  // so anything this dialect produces round-trips; accepting the bare list as
+  // well keeps every hand-written `.mlir` that predates the brackets parsing.
+  // A bare list is still ambiguous when another field follows it -- that is the
+  // bug -- so only the bracketed form is guaranteed to read back.
+  let parser = [{
+    [&]() -> FailureOr<SmallVector<DINodeAttr>> {
+        using Result = SmallVector<DINodeAttr>;
+        if (failed($_parser.parseOptionalLSquare()))
+            return FieldParser<Result>::parse($_parser);
+        if (succeeded($_parser.parseOptionalRSquare()))
+            return Result{};
+        FailureOr<Result> result = FieldParser<Result>::parse($_parser);
+        if (failed(result))
+            return failure();
+        if ($_parser.parseRSquare())
+            return failure();
+        return result;
+    }()
+  }];
+}
+
 def LLVM_DICompositeTypeAttr : LLVM_Attr<"DICompositeType", "di_composite_type",
                                          [LLVM_DIRecursiveTypeAttrInterface],
                                          "DITypeAttr"> {
@@ -471,7 +561,8 @@ def LLVM_DICompositeTypeAttr : LLVM_Attr<"DICompositeType", "di_composite_type",
     OptionalParameter<"DIExpressionAttr">:$rank,
     OptionalParameter<"DIExpressionAttr">:$allocated,
     OptionalParameter<"DIExpressionAttr">:$associated,
-    OptionalArrayRefParameter<"DINodeAttr">:$elements
+    LLVM_DINodeArray:$annotations,
+    LLVM_DINodeArray:$elements
   );
   let builders = [
     AttrBuilder<(ins
@@ -482,10 +573,11 @@ def LLVM_DICompositeTypeAttr : LLVM_Attr<"DICompositeType", "di_composite_type",
       "DIExpressionAttr":$allocated, "DIExpressionAttr":$associated,
       "ArrayRef<DINodeAttr>":$elements
     ), [{
-      return $_get($_ctxt, /*recId=*/nullptr, /*isRecSelf=*/nullptr,
+      return $_get($_ctxt, /*recId=*/nullptr, /*isRecSelf=*/false,
                    tag, name, file, line, scope, baseType, flags, sizeInBits,
                    alignInBits, dataLocation, rank, allocated,
-                   associated, elements);
+                   associated, /*annotations=*/::llvm::ArrayRef<DINodeAttr>{},
+                   elements);
     }]>
   ];
   let assemblyFormat = "`<` struct(params) `>`";
@@ -581,7 +673,19 @@ def LLVM_DIGlobalVariable : LLVM_Attr<"DIGlobalVariable", "di_global_variable",
     "DITypeAttr":$type,
     OptionalParameter<"bool">:$isLocalToUnit,
     OptionalParameter<"bool">:$isDefined,
-    OptionalParameter<"unsigned">:$alignInBits);
+    OptionalParameter<"unsigned">:$alignInBits,
+    LLVM_DINodeArray:$annotations);
+  let builders = [
+    AttrBuilder<(ins
+      "DIScopeAttr":$scope, "StringAttr":$name, "StringAttr":$linkageName,
+      "DIFileAttr":$file, "unsigned":$line, "DITypeAttr":$type,
+      "bool":$isLocalToUnit, "bool":$isDefined, "unsigned":$alignInBits
+    ), [{
+      return $_get($_ctxt, scope, name, linkageName, file, line, type,
+                   isLocalToUnit, isDefined, alignInBits,
+                   /*annotations=*/::llvm::ArrayRef<DINodeAttr>{});
+    }]>
+  ];
   let assemblyFormat = "`<` struct(params) `>`";
 
   // Generate mnemonic alias for the attribute.
@@ -663,6 +767,16 @@ def LLVM_DILocalVariableAttr : LLVM_Attr<"DILocalVariable", "di_local_variable",
       MLIRContext *ctx = scope.getContext();
       return $_get(ctx, scope, StringAttr::get(ctx, name), file, line,
                    arg, alignInBits, type, flags);
+    }]>,
+    // The exact match for a rebuild from the attribute's own parameters, so a
+    // null name is not converted to the StringRef above.
+    AttrBuilderWithInferredContext<(ins
+      "DIScopeAttr":$scope, "StringAttr":$name, "DIFileAttr":$file,
+      "unsigned":$line, "unsigned":$arg, "unsigned":$alignInBits,
+      "DITypeAttr":$type, "DIFlags":$flags
+    ), [{
+      return $_get(scope.getContext(), scope, name, file, line, arg,
+                   alignInBits, type, flags);
     }]>
   ];
   let assemblyFormat = "`<` struct(params) `>`";
@@ -691,22 +805,26 @@ def LLVM_DISubprogramAttr : LLVM_Attr<"DISubprogram", "di_subprogram",
     OptionalParameter<"DIFileAttr">:$file,
     OptionalParameter<"unsigned">:$line,
     OptionalParameter<"unsigned">:$scopeLine,
+    OptionalParameter<"DIFlags", "DIFlags::Zero">:$flags,
     OptionalParameter<"DISubprogramFlags">:$subprogramFlags,
     OptionalParameter<"DISubroutineTypeAttr">:$type,
-    OptionalArrayRefParameter<"DINodeAttr">:$retainedNodes,
-    OptionalArrayRefParameter<"DINodeAttr">:$annotations
+    LLVM_DINodeArray:$retainedNodes,
+    LLVM_DINodeArray:$annotations,
+    OptionalParameter<"bool">:$keyInstructions
   );
   let builders = [
     AttrBuilder<(ins
       "DistinctAttr":$id, "DICompileUnitAttr":$compileUnit,
       "DIScopeAttr":$scope, "StringAttr":$name, "StringAttr":$linkageName,
       "DIFileAttr":$file, "unsigned":$line, "unsigned":$scopeLine,
-      "DISubprogramFlags":$subprogramFlags, "DISubroutineTypeAttr":$type,
-      "ArrayRef<DINodeAttr>":$retainedNodes, "ArrayRef<DINodeAttr>":$annotations
+      "DIFlags":$flags, "DISubprogramFlags":$subprogramFlags,
+      "DISubroutineTypeAttr":$type, "ArrayRef<DINodeAttr>":$retainedNodes,
+      "ArrayRef<DINodeAttr>":$annotations, "bool":$keyInstructions
     ), [{
       return $_get($_ctxt, /*recId=*/nullptr, /*isRecSelf=*/false, id, compileUnit,
                    scope, name, linkageName, file, line, scopeLine,
-                   subprogramFlags, type, retainedNodes, annotations);
+                   flags, subprogramFlags, type, retainedNodes, annotations,
+                   keyInstructions);
     }]>
   ];
   let assemblyFormat = "`<` struct(params) `>`";
@@ -781,7 +899,7 @@ def LLVM_DIImportedEntityAttr : LLVM_Attr<"DIImportedEntity", "di_imported_entit
     OptionalParameter<"DIFileAttr">:$file,
     OptionalParameter<"unsigned">:$line,
     OptionalParameter<"StringAttr">:$name,
-    OptionalArrayRefParameter<"DINodeAttr">:$elements
+    LLVM_DINodeArray:$elements
   );
 
   let assemblyFormat = "`<` struct(params) `>`";
@@ -797,11 +915,20 @@ def LLVM_DIImportedEntityAttr : LLVM_Attr<"DIImportedEntity", "di_imported_entit
 def LLVM_DIAnnotationAttr : LLVM_Attr<"DIAnnotation",
                                       "di_annotation",
                                       /*traits=*/[], "DINodeAttr"> {
+  let description = [{
+    A single `!{name, value}` entry of a debug info `annotations` array. LLVM
+    allows the value to be either a string or a constant integer -- IRPGO
+    debug info profile correlation, for one, stores a function name, a CFG
+    hash and a counter count on the same variable -- so `value` is a generic
+    attribute restricted to `StringAttr` or a signless `IntegerAttr`.
+  }];
+
   let parameters = (ins
     "StringAttr":$name,
-    "StringAttr":$value
+    "::mlir::Attribute":$value
   );
 
+  let genVerifyDecl = 1;
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
@@ -895,6 +1022,14 @@ def LLVM_DILabelAttr : LLVM_Attr<"DILabel", "di_label",
     ), [{
       MLIRContext *ctx = scope.getContext();
       return $_get(ctx, scope, StringAttr::get(ctx, name), file, line);
+    }]>,
+    // The exact match for a rebuild from the attribute's own parameters, so a
+    // null name is not converted to the StringRef above.
+    AttrBuilderWithInferredContext<(ins
+      "DIScopeAttr":$scope, "StringAttr":$name, "DIFileAttr":$file,
+      "unsigned":$line
+    ), [{
+      return $_get(scope.getContext(), scope, name, file, line);
     }]>
   ];
 
@@ -1113,17 +1248,18 @@ def LLVM_TBAARootAttr : LLVM_Attr<"TBAARoot", "tbaa_root", [], "TBAANodeAttr"> {
 def LLVM_TBAAMemberAttr : LLVM_Attr<"TBAAMember", "tbaa_member"> {
   let parameters = (ins
     "TBAANodeAttr":$typeDesc,
-    "int64_t":$offset
+    "int64_t":$offset,
+    DefaultValuedParameter<"int64_t", "0">:$size
   );
 
   let builders = [
     AttrBuilderWithInferredContext<(ins "TBAANodeAttr":$typeDesc,
                                         "int64_t":$offset), [{
-      return $_get(typeDesc.getContext(), typeDesc, offset);
+      return $_get(typeDesc.getContext(), typeDesc, offset, /*size=*/0);
     }]>
   ];
 
-  let assemblyFormat = "`<` params `>`";
+  let assemblyFormat = "`<` struct(params) `>`";
 }
 
 def LLVM_TBAAMemberAttrArray : ArrayRefParameter<"TBAAMemberAttr"> {
@@ -1154,7 +1290,9 @@ def LLVM_TBAATypeDescriptorAttr : LLVM_Attr<"TBAATypeDescriptor",
     "tbaa_type_desc", [], "TBAANodeAttr"> {
   let parameters = (ins
     StringRefParameter<>:$id,
-    LLVM_TBAAMemberAttrArray:$members
+    LLVM_TBAAMemberAttrArray:$members,
+    OptionalParameter<"TBAANodeAttr">:$parent,
+    DefaultValuedParameter<"int64_t", "0">:$size
   );
 
   let summary = "LLVM dialect TBAA type metadata";
@@ -1162,14 +1300,31 @@ def LLVM_TBAATypeDescriptorAttr : LLVM_Attr<"TBAATypeDescriptor",
   let description = [{
     Defines a TBAA node describing a type.
 
-    Example:
+    In the old (default) format, the `id` is the type name and members
+    describe either the parent type (for scalar types) or field types
+    (for struct types).
+
+    In the new struct-path format (when `parent` is set), the `parent`
+    field specifies the parent type, `size` is the overall type size,
+    and members describe field types with (type, offset, size) triples.
+    For scalar types in new format, `members` is empty.
+
+    Example (old format):
     ```mlir
     #tbaa_root = #llvm.tbaa_root<identity = "Simple C/C++ TBAA">
-    #tbaa_type_desc1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<#tbaa_root, 0>}>
-    #tbaa_type_desc2 = #llvm.tbaa_type_desc<id = "long long", members = {<#tbaa_root, 0>}>
-    #tbaa_type_desc3 = #llvm.tbaa_type_desc<id = "agg2_t", members = {<#tbaa_type_desc2, 0>, <#tbaa_type_desc2, 8>}>
-    #tbaa_type_desc4 = #llvm.tbaa_type_desc<id = "int", members = {<#tbaa_type_desc1, 0>}>
-    #tbaa_type_desc5 = #llvm.tbaa_type_desc<id = "agg1_t", members = {<#tbaa_type_desc4, 0>, <#tbaa_type_desc4, 4>}>
+    #tbaa_type_desc1 = #llvm.tbaa_type_desc<id = "omnipotent char",
+        members = {<typeDesc = #tbaa_root, offset = 0>}>
+    #tbaa_type_desc2 = #llvm.tbaa_type_desc<id = "int",
+        members = {<typeDesc = #tbaa_type_desc1, offset = 0>}>
+    ```
+
+    Example (new struct-path format):
+    ```mlir
+    #tbaa_root = #llvm.tbaa_root<identity = "Simple C/C++ TBAA">
+    #tbaa_char = #llvm.tbaa_type_desc<id = "omnipotent char",
+        members = {}, parent = #tbaa_root, size = 1>
+    #tbaa_int = #llvm.tbaa_type_desc<id = "int",
+        members = {}, parent = #tbaa_char, size = 4>
     ```
 
     See the following link for more details:
@@ -1186,12 +1341,41 @@ def LLVM_TBAATypeDescriptorAttr : LLVM_Attr<"TBAATypeDescriptor",
 // TBAATagAttr
 //===----------------------------------------------------------------------===//
 
+//===----------------------------------------------------------------------===//
+// TBAAStructFieldAttr
+//===----------------------------------------------------------------------===//
+
+def LLVM_TBAAStructFieldAttr
+    : LLVM_Attr<"TBAAStructField", "tbaa_struct_field"> {
+  let parameters = (ins
+    "int64_t":$offset,
+    "int64_t":$size,
+    "TBAATagAttr":$tag
+  );
+
+  let summary = "One field of an LLVM dialect tbaa.struct description";
+
+  let description = [{
+    One entry of a `!tbaa.struct` node, which describes the fields an aggregate
+    copy touches so that the copy is not treated as one opaque access. The
+    fields need not be contiguous -- a gap is padding, which carries no data.
+
+    Example:
+    ```mlir
+    #field = #llvm.tbaa_struct_field<offset = 0, size = 4, tag = #tbaa_tag>
+    ```
+  }];
+
+  let assemblyFormat = "`<` struct(params) `>`";
+}
+
 def LLVM_TBAATagAttr : LLVM_Attr<"TBAATag", "tbaa_tag"> {
   let parameters = (ins
     "TBAATypeDescriptorAttr":$base_type,
     "TBAATypeDescriptorAttr":$access_type,
     "int64_t":$offset,
-    DefaultValuedParameter<"bool", "false">:$constant
+    DefaultValuedParameter<"bool", "false">:$constant,
+    DefaultValuedParameter<"int64_t", "0">:$size
   );
 
   let builders = [
@@ -1199,7 +1383,7 @@ def LLVM_TBAATagAttr : LLVM_Attr<"TBAATag", "tbaa_tag"> {
                                         "TBAATypeDescriptorAttr":$accessType,
                                         "int64_t":$offset), [{
       return $_get(baseType.getContext(), baseType, accessType, offset,
-                    /*constant=*/false);
+                    /*constant=*/false, /*size=*/0);
     }]>
   ];
 
@@ -1272,6 +1456,65 @@ def LLVM_MMRATagAttr : LLVM_Attr<"MMRATag", "mmra_tag"> {
   let assemblyFormat = "`<` $prefix `` `:` `` $suffix `>`";
 
   let genMnemonicAlias = 1;
+}
+
+def LLVM_TBAAStructFieldArrayAttr
+    : TypedArrayAttrBase<LLVM_TBAAStructFieldAttr,
+                         LLVM_TBAAStructFieldAttr.summary # " array"> {
+  let constBuilderCall = ?;
+}
+
+//===----------------------------------------------------------------------===//
+// MemProf attributes
+//===----------------------------------------------------------------------===//
+
+def LLVM_MemProfContextSizeAttr
+    : LLVM_Attr<"MemProfContextSize", "memprof_context_size"> {
+  let parameters = (ins
+    "uint64_t":$id,
+    "uint64_t":$size
+  );
+
+  let summary = "One full-context size record of a MemProf MemInfoBlock";
+
+  let description = [{
+    A `(context id, total size)` pair carried by a `!memprof` MemInfoBlock when
+    the profile was gathered with full context-size information.
+
+    Example:
+    ```mlir
+    #ctx = #llvm.memprof_context_size<id = 123456789, size = 4096>
+    ```
+  }];
+
+  let assemblyFormat = "`<` struct(params) `>`";
+}
+
+def LLVM_MemProfMIBAttr : LLVM_Attr<"MemProfMIB", "memprof_mib"> {
+  let parameters = (ins
+    "DenseI64ArrayAttr":$call_stack,
+    "ArrayAttr":$tags,
+    OptionalParameter<"ArrayAttr">:$context_sizes
+  );
+
+  let summary = "One MemInfoBlock of LLVM dialect memprof metadata";
+
+  let description = [{
+    One MemInfoBlock of a `!memprof` node: the allocation call stack it was
+    profiled on, one or more allocation-type tags (`"cold"`, `"notcold"`, ...),
+    and optionally the per-context total sizes behind them.
+
+    Example:
+    ```mlir
+    #mib = #llvm.memprof_mib<call_stack = [123456789], tags = ["cold"]>
+    ```
+
+    See the following link for more details:
+    https://llvm.org/docs/LangRef.html#memprof-metadata
+  }];
+
+  let assemblyFormat = "`<` struct(params) `>`";
+  let genVerifyDecl = 1;
 }
 
 //===----------------------------------------------------------------------===//

@@ -130,6 +130,24 @@ public:
                        << ", but got: " << baseResult;
   }
 
+  /// Publish `type` as the result of the entry currently being read, before
+  /// that entry has finished reading its own body.
+  ///
+  /// This is the bytecode analogue of AsmParser::tryStartCyclicParse, and it
+  /// exists for the same reason: a mutable type may refer to itself, directly
+  /// or through a pointer, so the body cannot be read until the type it
+  /// belongs to already exists. A dialect creates the incomplete type, calls
+  /// this, reads the body -- during which a nested reference back to this same
+  /// entry resolves to the incomplete type rather than re-entering it -- and
+  /// then completes it.
+  ///
+  /// Returns failure if the reader is not currently resolving an entry that
+  /// can be published this way, in which case the dialect should fail rather
+  /// than risk unbounded recursion.
+  virtual LogicalResult tryStartCyclicRead(Type type) {
+    return failure();
+  }
+
   /// Read a reference to the given type.
   virtual LogicalResult readType(Type &result) = 0;
   template <typename T>

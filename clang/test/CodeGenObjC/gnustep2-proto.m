@@ -27,6 +27,9 @@
 // CHECK: @._OBJC_REF_PROTOCOL_X = linkonce_odr global
 // CHECK-SAME: @._OBJC_PROTOCOL_X
 // CHECK-SAME: , section "__objc_protocol_refs", comdat, align 8
+// CHECK-DAG: @.objc_null_cls_init_ref = linkonce_odr hidden global { ptr } zeroinitializer, section "__objc_classes", comdat, align 8
+// CHECK-DAG: @.objc_null_class_ref = linkonce_odr hidden global { ptr, ptr } zeroinitializer, section "__objc_class_refs", comdat, align 8
+// CHECK-DAG: @llvm.used = appending global {{.*}}ptr @.objc_null_cls_init_ref{{.*}}ptr @.objc_null_class_ref{{.*}}
 
 
 // Check that we load from the indirection variable on protocol references.

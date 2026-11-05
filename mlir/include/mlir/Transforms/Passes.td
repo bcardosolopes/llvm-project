@@ -399,6 +399,10 @@ def Mem2Reg : Pass<"mem2reg"> {
     Option<"enableRegionSimplification", "region-simplify", "bool",
        /*default=*/"true",
        "Perform control flow optimizations to the region tree">,
+    Option<"followPromotableChains", "follow-promotable-chains", "bool",
+       /*default=*/"false",
+       "Count a store through a chain of PromotableOpInterface users of the "
+       "slot (e.g. a cast) as defining the slot; see tryToPromoteMemorySlots">,
   ];
 
   let statistics = [

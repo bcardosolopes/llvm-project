@@ -1,0 +1,43 @@
+// RUN: cir-translate %s -cir-to-llvmir --target x86_64-unknown-linux-gnu --disable-cc-lowering | FileCheck %s
+// Tests that BinOp overflow flags (nsw, nuw) are correctly accumulated
+// during LLVM lowering when both flags are set simultaneously.
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+
+module {
+  cir.func @test_nsw(%arg0: !s32i, %arg1: !s32i) -> !s32i {
+    %0 = cir.binop(add, %arg0, %arg1) nsw : !s32i
+    cir.return %0 : !s32i
+  }
+  // CHECK-LABEL: define i32 @test_nsw
+  // CHECK: add nsw i32
+
+  cir.func @test_nuw(%arg0: !u32i, %arg1: !u32i) -> !u32i {
+    %0 = cir.binop(add, %arg0, %arg1) nuw : !u32i
+    cir.return %0 : !u32i
+  }
+  // CHECK-LABEL: define i32 @test_nuw
+  // CHECK: add nuw i32
+
+  cir.func @test_nsw_nuw(%arg0: !s32i, %arg1: !s32i) -> !s32i {
+    %0 = cir.binop(add, %arg0, %arg1) nsw nuw : !s32i
+    cir.return %0 : !s32i
+  }
+  // CHECK-LABEL: define i32 @test_nsw_nuw
+  // CHECK: add nuw nsw i32
+
+  cir.func @test_sub_nsw_nuw(%arg0: !s32i, %arg1: !s32i) -> !s32i {
+    %0 = cir.binop(sub, %arg0, %arg1) nsw nuw : !s32i
+    cir.return %0 : !s32i
+  }
+  // CHECK-LABEL: define i32 @test_sub_nsw_nuw
+  // CHECK: sub nuw nsw i32
+
+  cir.func @test_mul_nsw_nuw(%arg0: !s32i, %arg1: !s32i) -> !s32i {
+    %0 = cir.binop(mul, %arg0, %arg1) nsw nuw : !s32i
+    cir.return %0 : !s32i
+  }
+  // CHECK-LABEL: define i32 @test_mul_nsw_nuw
+  // CHECK: mul nuw nsw i32
+}

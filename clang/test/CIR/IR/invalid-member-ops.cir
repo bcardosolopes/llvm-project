@@ -1,0 +1,98 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify GetMemberOp: index out of bounds
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i, !s32i}>
+
+cir.func @get_member_oob(%arg0: !cir.ptr<!rec_S>) {
+  // expected-error@+1 {{member index out of bounds}}
+  %0 = cir.get_member %arg0[5] {name = "x"} : !cir.ptr<!rec_S> -> !cir.ptr<!s32i>
+  cir.return
+}
+
+// -----
+
+// Verify GetMemberOp: member type mismatch
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+!rec_S = !cir.record<struct "S" {!s32i, !s32i}>
+
+cir.func @get_member_type_mismatch(%arg0: !cir.ptr<!rec_S>) {
+  // expected-error@+1 {{member type mismatch}}
+  %0 = cir.get_member %arg0[0] {name = "x"} : !cir.ptr<!rec_S> -> !cir.ptr<!u64i>
+  cir.return
+}
+
+// -----
+
+// Verify ExtractMemberOp: index out of bounds
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i, !s32i}>
+
+cir.func @extract_member_oob(%arg0: !rec_S) {
+  // expected-error@+1 {{member index out of bounds}}
+  %0 = cir.extract_member %arg0[5] {name = "x"} : !rec_S -> !s32i
+  cir.return
+}
+
+// -----
+
+// Verify ExtractMemberOp: type mismatch
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+!rec_S = !cir.record<struct "S" {!s32i, !s32i}>
+
+cir.func @extract_member_type_mismatch(%arg0: !rec_S) {
+  // expected-error@+1 {{member type mismatch}}
+  %0 = cir.extract_member %arg0[0] {name = "x"} : !rec_S -> !u64i
+  cir.return
+}
+
+// -----
+
+// Verify ExtractMemberOp: unions not supported
+!s32i = !cir.int<s, 32>
+!rec_U = !cir.record<union "U" {!s32i}>
+
+cir.func @extract_member_union(%arg0: !rec_U) {
+  // expected-error@+1 {{cir.extract_member currently does not support unions}}
+  %0 = cir.extract_member %arg0[0] {name = "x"} : !rec_U -> !s32i
+  cir.return
+}
+
+// -----
+
+// Verify InsertMemberOp: index out of bounds
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i, !s32i}>
+
+cir.func @insert_member_oob(%arg0: !rec_S, %arg1: !s32i) {
+  // expected-error@+1 {{member index out of bounds}}
+  %0 = cir.insert_member %arg0[5], %arg1 : !rec_S, !s32i
+  cir.return
+}
+
+// -----
+
+// Verify InsertMemberOp: type mismatch
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+!rec_S = !cir.record<struct "S" {!s32i, !s32i}>
+
+cir.func @insert_member_type_mismatch(%arg0: !rec_S, %arg1: !u64i) {
+  // expected-error@+1 {{member type mismatch}}
+  %0 = cir.insert_member %arg0[0], %arg1 : !rec_S, !u64i
+  cir.return
+}
+
+// -----
+
+// Verify InsertMemberOp: unions not supported
+!s32i = !cir.int<s, 32>
+!rec_U = !cir.record<union "U" {!s32i}>
+
+cir.func @insert_member_union(%arg0: !rec_U, %arg1: !s32i) {
+  // expected-error@+1 {{cir.insert_member currently does not support unions}}
+  %0 = cir.insert_member %arg0[0], %arg1 : !rec_U, !s32i
+  cir.return
+}

@@ -1,0 +1,46 @@
+// RUN: cir-link %s %S/Inputs/local-rename-batch-collision-b.cir -o %t.cir
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Renaming colliding locals is done in one batch, and a name handed out during
+// that batch has to be claimed as it is handed out.
+//
+// The claim map holds what *earlier inputs* put in the output, which is enough
+// when renames happen one at a time: each one lands in the map before the next
+// is chosen. A batch chooses all the names before any of them is applied, so
+// without a second set the batch can hand the same name to two symbols.
+//
+// Reaching it takes a translation unit with both `helper` and a symbol already
+// literally called `helper.cirlink.1`, which is why this is a test and not a
+// bug report: `helper` wants exactly the name its neighbour already has. The
+// result would be two definitions of one symbol in the merged module -- the
+// verifier catches that, so it is a hard failure rather than a silent one,
+// but it is still a failure on legal input.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func internal private @helper() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.global "private" internal @data = #cir.int<1> : !s32i
+}
+
+// The second input brings its own `helper` and `data`, both of which collide,
+// plus a `helper.cirlink.1` that is the name the renamer would otherwise reach
+// for first.
+//
+// So `helper` must skip past the taken name, and the pre-existing
+// `helper.cirlink.1` -- which collides with nothing in the first input -- must
+// keep the name it came with.
+// CHECK-DAG: cir.func internal private @helper()
+// CHECK-DAG: cir.func internal private @helper.cirlink.1()
+// CHECK-DAG: cir.func internal private @helper.cirlink.2()
+// CHECK-DAG: cir.global "private"  internal  @data = #cir.int<1>
+// CHECK-DAG: cir.global "private"  internal  @data.cirlink.1 = #cir.int<2>
+
+// Each body still belongs to the symbol it arrived with: a batch that mixed
+// two renames up would link and verify and simply call the wrong function.
+// CHECK-DAG: cir.const #cir.int<1>
+// CHECK-DAG: cir.const #cir.int<2>
+// CHECK-DAG: cir.const #cir.int<3>

@@ -1,4 +1,5 @@
 // RUN: cir-opt %s -cir-goto-solver --verify-roundtrip -o - | FileCheck %s
+// RUN: cir-opt %s -cir-hoist-allocas -cir-flatten-cfg -cir-goto-solver --verify-roundtrip -o - | FileCheck %s --check-prefix=FLAT
 
 !void = !cir.void
 
@@ -60,3 +61,52 @@ cir.func @c() {
 // CHECK:   cir.label "label1"
 // CHECK:   %1 = cir.block_address <@c, "label1"> : !cir.ptr<!void>
 // CHECK:   cir.store align(8) %1, {{.*}} : !cir.ptr<!void>, !cir.ptr<!cir.ptr<!void>>
+
+cir.func @cross_region_preserved(%cond : !cir.bool) {
+  cir.scope {
+    cir.brcond %cond ^bb1, ^bb2
+  ^bb1:
+    cir.goto "exit"
+  ^bb2:
+    cir.yield
+  }
+  cir.br ^bb3
+^bb3:
+  cir.label "exit"
+  cir.return
+}
+
+// CHECK-LABEL: cir.func @cross_region_preserved
+// CHECK:       cir.scope
+// CHECK:       cir.goto "exit"
+// CHECK:       cir.label "exit"
+
+// FLAT-LABEL: cir.func @cross_region_preserved
+// FLAT-NOT:   cir.goto "exit"
+// FLAT-NOT:   cir.label "exit"
+
+!s32i = !cir.int<s, 32>
+
+// Test mid-block label: a label that is not at the start of its block needs
+// to be split into a separate block. The predecessor block must get a branch
+// to the new label block. This previously crashed with an ilist_iterator
+// sentinel assertion because splitBlock was called during a walk.
+cir.func @mid_block_label(%arg0 : !s32i) -> !s32i {
+  %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["result", init] {alignment = 4 : i64}
+  %1 = cir.alloca !cir.ptr<!cir.void>, !cir.ptr<!cir.ptr<!cir.void>>, ["p", init] {alignment = 8 : i64}
+  %2 = cir.const #cir.int<0> : !s32i
+  cir.store align(4) %2, %0 : !s32i, !cir.ptr<!s32i>
+  // The label is in the middle of this block, not at the start.
+  cir.label "target"
+  %3 = cir.load align(4) %0 : !cir.ptr<!s32i>, !s32i
+  %4 = cir.block_address <@mid_block_label, "target"> : !cir.ptr<!cir.void>
+  cir.store align(8) %4, %1 : !cir.ptr<!cir.void>, !cir.ptr<!cir.ptr<!cir.void>>
+  cir.return %3 : !s32i
+}
+
+// CHECK-LABEL: cir.func @mid_block_label
+// CHECK:        cir.store
+// CHECK:        cir.br [[BB:\^bb[0-9]+]]
+// CHECK:      [[BB]]:
+// CHECK:        cir.label "target"
+// CHECK:        cir.load

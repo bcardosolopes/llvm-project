@@ -1,8 +1,10 @@
 // RUN: %clang_cc1 -no-enable-noundef-analysis %s -triple=x86_64-linux-gnu -emit-llvm -std=c++98 -o - -fcxx-exceptions -fexceptions | FileCheck -check-prefix=CHECK -check-prefix=CHECK98 %s
 // RUN: %clang_cc1 -no-enable-noundef-analysis %s -triple=x86_64-linux-gnu -emit-llvm -std=c++11 -o - -fcxx-exceptions -fexceptions | FileCheck --check-prefixes=CHECK,CHECK11,THROWEND11 %s
 // RUN: %clang_cc1 -no-enable-noundef-analysis %s -triple=x86_64-linux-gnu -emit-llvm -std=c++11 -o - -fcxx-exceptions -fexceptions -fassume-nothrow-exception-dtor | FileCheck --check-prefixes=CHECK,CHECK11,NOTHROWEND11 %s
+// RUN: %if cir-support %{ %clang_cc1 -no-enable-noundef-analysis %s -triple=x86_64-linux-gnu -emit-llvm -fclangir -std=c++11 -o - -fcxx-exceptions -fexceptions | FileCheck --check-prefix=CIR %s %}
 
 // CHECK: %[[STRUCT_TEST13_A:.*]] = type { i32, i32 }
+// CIR: %[[STRUCT_TEST13_A:.*]] = type { i32, i32 }
 
 typedef __typeof(sizeof(0)) size_t;
 
@@ -615,6 +617,19 @@ struct A {
 // CHECK: br i1 %[[CLEANUP_IS_ACTIVE]],
 
 // CHECK: void @_ZN6test131AD1Ev(ptr {{[^,]*}} %[[REF_TMP]])
+
+// CIR-LABEL: define dso_local void @_ZN6test134testEi(
+// CIR: call void @_ZN6test131AC1Ev(ptr {{[^,]*}} %[[REF_TMP:[0-9]+]])
+// CIR: store i8 1, ptr %[[CLEANUP_COND:[0-9]+]], align 1
+// CIR: invoke void @_ZN6test131AC1Ev(ptr {{[^,]*}} %[[REF_TMP1:[0-9]+]])
+// CIR: to label %[[INVOKE_CONT:[0-9]+]] unwind label %[[LPAD:[0-9]+]]
+// CIR: [[LPAD]]:
+// CIR: landingpad { ptr, i32 }
+// CIR: %[[CLEANUP_IS_ACTIVE:[0-9]+]] = load i8, ptr %[[CLEANUP_COND]], align 1
+// CIR: %[[CLEANUP_IS_ACTIVE_I1:[0-9]+]] = trunc i8 %[[CLEANUP_IS_ACTIVE]] to i1
+// CIR: br i1 %[[CLEANUP_IS_ACTIVE_I1]], label %[[CLEANUP_ACTION:[0-9]+]], label %[[RESUME:[0-9]+]]
+// CIR: [[CLEANUP_ACTION]]:
+// CIR: call void @_ZN6test131AD1Ev(ptr {{[^,]*}} %[[REF_TMP]])
 
 void test(int c) {
   const A &s = c ? static_cast<const A &>(A()) : static_cast<const A &>(A());

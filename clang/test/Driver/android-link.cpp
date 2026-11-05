@@ -15,6 +15,13 @@
 // RUN:   -mcpu=cortex-a57 -### -v %s 2> %t
 // RUN: FileCheck -check-prefix=CORTEX-A57 < %t %s
 
+// A user can override the implicitly added --fix-cortex-a53-843419 by passing
+// --no-fix-cortex-a53-843419 to the linker. It is emitted after the implicit
+// flag, so lld (last flag wins) disables the fix.
+// RUN: %clang --target=aarch64-none-linux-android \
+// RUN:   -mcpu=cortex-a53 -Wl,--no-fix-cortex-a53-843419 -### -v %s 2> %t
+// RUN: FileCheck -check-prefix=CORTEX-A53-OVERRIDE < %t %s
+
 // RUN: %clang --target=aarch64-none-linux-android \
 // RUN:   -mno-fix-cortex-a53-843419 \
 // RUN:   -### -v %s 2> %t
@@ -43,6 +50,8 @@
 // CORTEX-A57-NOT: --fix-cortex-a53-843419
 // OVERRIDDEN-NOT: --fix-cortex-a53-843419
 // OVERRIDDEN2: --fix-cortex-a53-843419
+// CORTEX-A53-OVERRIDE: "--fix-cortex-a53-843419"
+// CORTEX-A53-OVERRIDE-SAME: "--no-fix-cortex-a53-843419"
 // MAX-PAGE-SIZE-4KB: "-z" "max-page-size=4096"
 // MAX-PAGE-SIZE-16KB: "-z" "max-page-size=16384"
 // NO-MAX-PAGE-SIZE-16KB-NOT: "-z" "max-page-size=16384"

@@ -1,0 +1,25 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @single_copyprivate(%arg0: !llvm.ptr) {
+    omp.single copyprivate(%arg0 -> @copy_i32 : !llvm.ptr) {
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @copy_i32(%arg0: !llvm.ptr, %arg1: !llvm.ptr) {
+    cir.return
+  }
+}
+
+// CHECK-LABEL: define void @single_copyprivate(ptr %{{.*}})
+// CHECK: %[[DIDIT:.*]] = alloca i32
+// CHECK: store i32 0, ptr %[[DIDIT]]
+// CHECK: call i32 @__kmpc_single(
+// CHECK: call void @__kmpc_end_single(
+// CHECK: call void @__kmpc_copyprivate(
+// CHECK-SAME: ptr @copy_i32,
+// CHECK-NOT: call void @__kmpc_barrier(
+
+// CHECK-LABEL: define void @copy_i32(ptr %{{.*}}, ptr %{{.*}})

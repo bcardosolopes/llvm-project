@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: indirect call expects callee operand as first operand
+// CHECK-NOT: operands list must no be empty for the indirect call
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @f() {
+    %0 = "cir.call"() <{calling_conv = 1 : i32, extra_attrs = #cir<extra({})>, side_effect = 0 : i32}> ({}) : () -> !s32i
+    cir.return
+  }
+}

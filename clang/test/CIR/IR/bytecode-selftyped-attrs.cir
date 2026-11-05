@@ -1,0 +1,56 @@
+// RUN: cir-opt %s -o %t.text
+// RUN: cir-opt %s --emit-bytecode -o %t.bc
+// RUN: cir-opt %t.bc -o %t.roundtrip
+// RUN: diff %t.text %t.roundtrip
+// RUN: FileCheck --input-file=%t.roundtrip %s
+
+// No CIR attribute that declares its type as an AttributeSelfTypeParameter may
+// also print it from its assembly format.
+//
+// Printed after the closing `>`, the type escapes the pretty form and the file
+// cannot be read back. Text hides that -- a trailing `:` makes the body fail
+// MLIR's pretty-form check, so the printer falls back to the generic
+// `#cir<...>` wrapper where the stray type is contained -- but the bytecode
+// writer serializes an unencoded attribute by *printing* it and has no such
+// fallback:
+//
+//   #cir.global_view_diff<...> : !cir.int<s, 32> : !cir.int<s, 32>
+//   error: expected ',' or ']'
+//
+// Relative vtables put a global_view_diff in every slot, so this made the .cir
+// section of every fat object built with that ABI unreadable.
+//
+// All three affected attributes are covered here, not just the one that was
+// caught in the wild, because the defect is a property of the format and the
+// other two only escaped notice for lack of a caller.
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!rec_anon_struct = !cir.record<struct  {!cir.array<!s32i x 2>}>
+
+module {
+  cir.global external @tgt = #cir.int<0> : !s32i
+
+  // global_view_diff. Its operands carry their own types, and printing them
+  // is the point: GlobalViewAttr::print does not emit a type, so nesting one
+  // used to drop it and re-parsing produced a null-typed operand that MLIR's
+  // alias walk and bytecode numbering both dereferenced.
+  cir.global external @vt = #cir.vtable<{#cir.const_array<[#cir.int<0> : !s32i, #cir.global_view_diff<#cir.global_view<@tgt> : !cir.ptr<!u8i>, #cir.global_view<@vt, [0 : i32, 2 : i32], inbounds = true> : !cir.ptr<!s32i>> : !s32i]> : !cir.array<!s32i x 2>}> : !rec_anon_struct
+
+  // block_addr and block_addr_diff. Same defect. block_addr_diff does have a
+  // real producer -- a GNU address-of-label difference, see
+  // CodeGen/global-block-addr-diff.cpp -- so its printed form changing is a
+  // visible change, not a theoretical one. block_addr is given a pointer self
+  // type, which is what its own summary says it wraps; no verifier enforces it.
+  cir.global external @ba = #cir.block_addr<<@fn, "lbl">> : !cir.ptr<!u8i>
+  cir.global external @bad = #cir.block_addr_diff<<@fn, "lbl">, <@fn, "lbl2">> : !s32i
+
+  cir.func @fn() {
+    cir.return
+  }
+}
+
+// Each type appears once, inside its own brackets.
+// CHECK-DAG: #cir.global_view_diff<#cir.global_view<@tgt> : !cir.ptr<!u8i>, #cir.global_view<@vt, [0 : i32, 2 : i32], inbounds = true> : !cir.ptr<!s32i>>
+// CHECK-DAG: #cir.block_addr<<@fn, "lbl">> : !cir.ptr<!u8i>
+// CHECK-DAG: #cir.block_addr_diff<<@fn, "lbl">, <@fn, "lbl2">> : !s32i

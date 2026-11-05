@@ -1,4 +1,5 @@
 // RUN: %clang_cc1  -triple x86_64-unknown-linux -fsanitize=realtime %s -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1  -triple x86_64-unknown-linux -fsanitize=realtime -fclangir %s -emit-llvm -o - %s | FileCheck %s %}
 
 float process(float *a) [[clang::nonblocking]] { return *a; }
 // CHECK: @process{{.*}} #0 {

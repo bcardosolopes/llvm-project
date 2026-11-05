@@ -19,6 +19,8 @@
 #include "mlir/Target/LLVMIR/Import.h"
 #include "mlir/Target/LLVMIR/LLVMImportInterface.h"
 #include "mlir/Target/LLVMIR/TypeFromLLVM.h"
+
+#include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/Module.h"
 
 namespace llvm {
@@ -238,9 +240,23 @@ public:
   /// attribute.
   LogicalResult convertCommandlineMetadata();
 
+  /// Records `!ro_after_init`, the marker a read-only-after-init pass writes
+  /// so it does not run twice on the same module.
+  LogicalResult convertRoAfterInitMetadata();
+
   /// Converts !llvm.dependent-libraries metadata to llvm.dependent_libraries
   /// LLVM ModuleOp attribute.
   LogicalResult convertDependentLibrariesMetadata();
+
+  /// Records the compile units named by `!llvm.dbg.cu` that nothing else in
+  /// the module reaches. A compile unit normally arrives through the
+  /// subprogram that points at it; one with no subprogram left has no such
+  /// path and would otherwise stop being named at all.
+  ///
+  /// Cannot fail: an operand that is not a compile unit, or one that will not
+  /// translate, is reported and skipped, so the rest of the import finishes
+  /// and the loss is counted rather than aborting.
+  void convertDebugCompileUnitsMetadata();
 
   /// Converts all LLVM metadata nodes that translate to attributes such as
   /// alias analysis or access group metadata, and builds a map from the
@@ -278,6 +294,17 @@ public:
   FailureOr<SmallVector<AliasScopeAttr>>
   lookupAliasScopeAttrs(const llvm::MDNode *node) const;
 
+  /// Returns the debug info type attribute that corresponds to the given LLVM
+  /// debug info type, or nullptr if it cannot be translated. Shares the
+  /// importer's node cache, so a type already reached through the debug info
+  /// graph is not translated twice.
+  DITypeAttr translateDebugType(llvm::DIType *type);
+
+  /// Translates the given LLVM assignment-tracking identity. Goes through the
+  /// importer's cache, so a store and the `#dbg_assign` describing it come back
+  /// naming one identity -- which is the entire content of the node.
+  DIAssignIDAttr translateDIAssignID(llvm::DIAssignID *node);
+
   /// Adds a debug intrinsics to the list of intrinsics that should be converted
   /// after the function conversion has finished.
   void addDebugIntrinsic(llvm::CallInst *intrinsic);
@@ -314,6 +341,14 @@ public:
   }
 
 private:
+  /// Renders `value` into a bounded string for a diagnostic.
+  std::string renderValue(const llvm::Value &value);
+  /// Renders `node` into a bounded string for a diagnostic.
+  std::string renderMetadata(const llvm::Metadata *node);
+  /// Returns the slot tracker shared by every diagnostic this importer renders,
+  /// creating it on first use.
+  llvm::ModuleSlotTracker &getDiagSlotTracker();
+
   /// Clears the accumulated state before processing a new region.
   void clearRegionState() {
     valueMapping.clear();
@@ -370,6 +405,14 @@ private:
   /// Converts an LLVM intrinsic to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
   LogicalResult convertIntrinsic(llvm::CallInst *inst);
+  /// Records an intrinsic call's call-site attributes on the op it became.
+  void setIntrinsicCallAttrs(llvm::CallInst *inst, Operation *op);
+  /// Records each phi's incoming order where it differs from the export's
+  /// default; see `LLVMDialect::getPhiPositionsAttrName`.
+  void setPhiPositions(const SetVector<llvm::BasicBlock *> &blocks);
+  /// Records the fast-math flags of each block's phis on the edges into it;
+  /// see `LLVMDialect::getPhiFastmathAttrName`.
+  void setPhiFastmath(const SetVector<llvm::BasicBlock *> &blocks);
   /// Converts an LLVM instruction to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
   LogicalResult convertInstruction(llvm::Instruction *inst);
@@ -414,8 +457,15 @@ private:
   DictionaryAttr convertArgOrResultAttrSet(llvm::AttributeSet llvmAttrSet);
   /// Converts the attributes attached to `inst` and adds them to the `op`.
   LogicalResult convertCallAttributes(llvm::CallInst *inst, CallOp op);
+  /// Converts the call-site function and result attributes of the inline asm
+  /// call `inst` to `op`.
+  LogicalResult convertInlineAsmAttributes(llvm::CallInst *inst,
+                                           InlineAsmOp op);
   /// Converts the attributes attached to `inst` and adds them to the `op`.
   LogicalResult convertInvokeAttributes(llvm::InvokeInst *inst, InvokeOp op);
+  /// Converts the call-site function attributes of the callbr `inst` to
+  /// `op`.
+  LogicalResult convertCallBrAttributes(llvm::CallBrInst *inst, CallBrOp op);
   /// Returns the builtin type equivalent to the given LLVM dialect type or
   /// nullptr if there is no equivalent. The returned type can be used to create
   /// an attribute for a GlobalOp or a ConstantOp.
@@ -479,6 +529,8 @@ private:
   Operation *constantInsertionOp = nullptr;
   /// Operation to insert the next global after.
   Operation *globalInsertionOp = nullptr;
+  /// Operation to insert the next alias after.
+  Operation *aliasInsertionOp = nullptr;
   /// Operation to insert comdat selector operations into.
   ComdatOp globalComdatOp = nullptr;
   /// The current context.
@@ -525,6 +577,14 @@ private:
   std::unique_ptr<detail::DebugImporter> debugImporter;
   /// Loop annotation importer.
   std::unique_ptr<detail::LoopAnnotationImporter> loopAnnotationImporter;
+  /// Slot tracker shared by every diagnostic that renders an LLVM entity.
+  /// Metadata::print and Value::print each construct their own tracker when not
+  /// given one, and SlotTracker::processModule then walks the metadata of every
+  /// function in the module -- so a per-call tracker makes a per-instruction
+  /// diagnostic quadratic in module size. Sharing one makes that walk a
+  /// per-import cost instead. Created lazily, so an import that renders nothing
+  /// never pays for it at all.
+  std::unique_ptr<llvm::ModuleSlotTracker> diagSlotTracker;
 
   /// An option to control if expensive but uncritical diagnostics should be
   /// emitted. Avoids generating warnings for unhandled debug intrinsics and

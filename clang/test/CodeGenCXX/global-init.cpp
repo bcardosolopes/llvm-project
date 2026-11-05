@@ -4,6 +4,8 @@
 // RUN:   | FileCheck -check-prefix CHECK-FP %s
 // RUN: %clang_cc1 %std_cxx98-14 -triple=x86_64-apple-darwin10 -emit-llvm %s -o - -fno-builtin \
 // RUN:   | FileCheck -check-prefix CHECK-NOBUILTIN %s
+// RUN: %if cir-support %{ %clang_cc1 %std_cxx98-14 -triple=x86_64-apple-darwin10 -fclangir -emit-llvm %s -o - -fno-builtin \
+// RUN:   | FileCheck -check-prefix CHECK-CIR-NOBUILTIN %s %}
 // RUN: %clang_cc1 %std_cxx17- -triple=x86_64-apple-darwin10 -emit-llvm -fexceptions %s -o - | FileCheck %s
 
 struct A {
@@ -208,6 +210,8 @@ namespace test7 {
 // Make sure we mark global initializers with the no-builtins attribute.
 // CHECK-NOBUILTIN: define internal void @_GLOBAL__sub_I_global_init.cpp() [[NUW:#[0-9]+]] section "__TEXT,__StaticInit,regular,pure_instructions" {
 // CHECK-NOBUILTIN: attributes [[NUW]] = { noinline nounwind{{.*}}"no-builtins"{{.*}} }
+// CHECK-CIR-NOBUILTIN: define internal void @_GLOBAL__sub_I_global_init.cpp() [[NUW:#[0-9]+]] section "__TEXT,__StaticInit,regular,pure_instructions" {
+// CHECK-CIR-NOBUILTIN: attributes [[NUW]] = { noinline nounwind{{.*}}"no-builtins"{{.*}} }
 
 // PR21811: attach the appropriate attribute to the global init function
 // CHECK-FP: define internal void @_GLOBAL__sub_I_global_init.cpp() [[NUX:#[0-9]+]] section "__TEXT,__StaticInit,regular,pure_instructions" {

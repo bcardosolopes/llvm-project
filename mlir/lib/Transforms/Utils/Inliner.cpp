@@ -33,16 +33,15 @@ using ResolvedCall = Inliner::ResolvedCall;
 // Symbol Use Tracking
 //===----------------------------------------------------------------------===//
 
-/// Walk all of the used symbol callgraph nodes referenced with the given op.
+/// Walk the used symbol callgraph nodes among `symbolUses`, the symbol uses
+/// held by `op`.
 static void walkReferencedSymbolNodes(
-    Operation *op, CallGraph &cg, SymbolTableCollection &symbolTable,
+    Operation *op, const SymbolTable::UseRange &symbolUses, CallGraph &cg,
+    SymbolTableCollection &symbolTable,
     DenseMap<Attribute, CallGraphNode *> &resolvedRefs,
     function_ref<void(CallGraphNode *, Operation *)> callback) {
-  auto symbolUses = SymbolTable::getSymbolUses(op);
-  assert(symbolUses && "expected uses to be valid");
-
   Operation *symbolTableOp = op->getParentOp();
-  for (const SymbolTable::SymbolUse &use : *symbolUses) {
+  for (const SymbolTable::SymbolUse &use : symbolUses) {
     auto refIt = resolvedRefs.try_emplace(use.getSymbolRef());
     CallGraphNode *&node = refIt.first->second;
 
@@ -59,6 +58,17 @@ static void walkReferencedSymbolNodes(
     if (node)
       callback(node, use.getUser());
   }
+}
+
+/// Walk all of the used symbol callgraph nodes referenced with the given op.
+static void walkReferencedSymbolNodes(
+    Operation *op, CallGraph &cg, SymbolTableCollection &symbolTable,
+    DenseMap<Attribute, CallGraphNode *> &resolvedRefs,
+    function_ref<void(CallGraphNode *, Operation *)> callback) {
+  auto symbolUses = SymbolTable::getSymbolUses(op);
+  assert(symbolUses && "expected uses to be valid");
+  walkReferencedSymbolNodes(op, *symbolUses, cg, symbolTable, resolvedRefs,
+                            callback);
 }
 
 //===----------------------------------------------------------------------===//
@@ -101,6 +111,11 @@ struct CGUseList {
 
   /// Recompute the uses held by the given callgraph node.
   void recomputeUses(CallGraphNode *node, CallGraph &cg);
+
+  /// Recompute the uses held by the given callgraph node from `symbolUses`,
+  /// the symbol uses of its callable operation.
+  void recomputeUses(CallGraphNode *node, CallGraph &cg,
+                     const SymbolTable::UseRange &symbolUses);
 
   /// Merge the uses of 'lhs' with the uses of the 'rhs' after inlining a copy
   /// of 'lhs' into 'rhs'.
@@ -155,9 +170,25 @@ CGUseList::CGUseList(Operation *op, CallGraph &cg,
   for (auto &it : alwaysLiveNodes)
     discardableSymNodeUses.erase(it.second);
 
-  // Compute the uses for each of the callable nodes in the graph.
-  for (CallGraphNode *node : cg)
-    recomputeUses(node, cg);
+  // Compute the uses for each of the callable nodes in the graph. Finding a
+  // callable's symbol uses is a read-only walk of it, so those walks run in
+  // parallel, a batch of nodes at a time to bound the uses held at once;
+  // resolving them and updating the counts stays serial, in graph order.
+  SmallVector<CallGraphNode *> nodes(cg.begin(), cg.end());
+  constexpr size_t batchSize = 4096;
+  std::vector<std::optional<SymbolTable::UseRange>> batchUses;
+  for (size_t begin = 0; begin < nodes.size(); begin += batchSize) {
+    size_t count = std::min(batchSize, nodes.size() - begin);
+    batchUses.assign(count, std::nullopt);
+    parallelFor(op->getContext(), 0, count, [&](size_t i) {
+      batchUses[i] = SymbolTable::getSymbolUses(
+          nodes[begin + i]->getCallableRegion()->getParentOp());
+    });
+    for (size_t i = 0; i < count; ++i) {
+      assert(batchUses[i] && "expected uses to be valid");
+      recomputeUses(nodes[begin + i], cg, *batchUses[i]);
+    }
+  }
 }
 
 void CGUseList::dropCallUses(CallGraphNode *userNode, Operation *callOp,
@@ -212,6 +243,14 @@ bool CGUseList::hasOneUseAndDiscardable(CallGraphNode *node) const {
 
 void CGUseList::recomputeUses(CallGraphNode *node, CallGraph &cg) {
   Operation *parentOp = node->getCallableRegion()->getParentOp();
+  auto symbolUses = SymbolTable::getSymbolUses(parentOp);
+  assert(symbolUses && "expected uses to be valid");
+  recomputeUses(node, cg, *symbolUses);
+}
+
+void CGUseList::recomputeUses(CallGraphNode *node, CallGraph &cg,
+                              const SymbolTable::UseRange &symbolUses) {
+  Operation *parentOp = node->getCallableRegion()->getParentOp();
   CGUser &uses = nodeUses[node];
   decrementDiscardableUses(uses);
 
@@ -229,7 +268,8 @@ void CGUseList::recomputeUses(CallGraphNode *node, CallGraph &cg) {
       return;
     ++discardSymIt->second;
   };
-  walkReferencedSymbolNodes(parentOp, cg, symbolTable, resolvedRefs, walkFn);
+  walkReferencedSymbolNodes(parentOp, symbolUses, cg, symbolTable,
+                            resolvedRefs, walkFn);
 }
 
 void CGUseList::mergeUsesAfterInlining(CallGraphNode *lhs, CallGraphNode *rhs) {
@@ -436,7 +476,8 @@ private:
   /// pass pipelines. Returns failure if an error occurred during the
   /// optimization of the SCC, success otherwise.
   LogicalResult optimizeSCC(CallGraph &cg, CGUseList &useList,
-                            CallGraphSCC &currentSCC, MLIRContext *context);
+                            CallGraphSCC &currentSCC, MLIRContext *context,
+                            bool inlinedIntoSCC);
 
   /// Optimize the nodes within the given SCC in parallel. Returns failure if an
   /// error occurred during the optimization of the SCC, success otherwise.
@@ -472,7 +513,8 @@ LogicalResult Inliner::Impl::inlineSCC(InlinerInterfaceImpl &inlinerIface,
   // model, and in future iterations may devirtualize new calls.
   unsigned iterationCount = 0;
   do {
-    if (failed(optimizeSCC(inlinerIface.cg, useList, currentSCC, context)))
+    if (failed(optimizeSCC(inlinerIface.cg, useList, currentSCC, context,
+                           /*inlinedIntoSCC=*/iterationCount != 0)))
       return failure();
     if (failed(inlineCallsInSCC(inlinerIface, useList, currentSCC)))
       break;
@@ -482,7 +524,8 @@ LogicalResult Inliner::Impl::inlineSCC(InlinerInterfaceImpl &inlinerIface,
 
 LogicalResult Inliner::Impl::optimizeSCC(CallGraph &cg, CGUseList &useList,
                                          CallGraphSCC &currentSCC,
-                                         MLIRContext *context) {
+                                         MLIRContext *context,
+                                         bool inlinedIntoSCC) {
   // Collect the sets of nodes to simplify.
   SmallVector<CallGraphNode *, 4> nodesToVisit;
   for (auto *node : currentSCC) {
@@ -503,6 +546,13 @@ LogicalResult Inliner::Impl::optimizeSCC(CallGraph &cg, CGUseList &useList,
     nodesToVisit.push_back(node);
   }
   if (nodesToVisit.empty())
+    return success();
+
+  // With no pipeline to run, nothing changes these nodes here: their uses are
+  // still the ones last computed, unless calls were inlined into them since.
+  // Recomputing them anyway walks every callable once more.
+  if (!inlinedIntoSCC && !inliner.config.getDefaultPipeline() &&
+      inliner.config.getOpPipelines().empty())
     return success();
 
   // Optimize each of the nodes within the SCC in parallel.

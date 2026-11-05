@@ -15,11 +15,277 @@
 #include "CIRGenModule.h"
 
 #include "clang/AST/GlobalDecl.h"
+#include "clang/AST/VTableBuilder.h"
+#include "clang/CIR/Dialect/IR/CIRTypes.h"
 #include "clang/CIR/MissingFeatures.h"
 #include "llvm/Support/SaveAndRestore.h"
 
 using namespace clang;
 using namespace clang::CIRGen;
+
+static mlir::Value getTLSRegistrationAddress(CIRGenBuilderTy &builder,
+                                             mlir::Value addr) {
+  if (auto getGlobal = addr.getDefiningOp<cir::GetGlobalOp>()) {
+    if (!getGlobal.getTls())
+      return addr;
+    return cir::GetGlobalOp::create(builder, getGlobal.getLoc(),
+                                    getGlobal.getType(), getGlobal.getName());
+  }
+
+  auto cast = addr.getDefiningOp<cir::CastOp>();
+  if (!cast || cast.getKind() != cir::CastKind::bitcast)
+    return addr;
+
+  mlir::Value src = getTLSRegistrationAddress(builder, cast.getSrc());
+  if (src == cast.getSrc())
+    return addr;
+  return builder.createBitcast(cast.getLoc(), src, cast.getType());
+}
+
+cir::FuncOp CIRGenFunction::generateDestroyHelper(Address addr, QualType type,
+                                                  Destroyer *destroyer,
+                                                  bool useEHCleanupForArray,
+                                                  const VarDecl *vd) {
+  SourceLocation helperSourceLoc = vd ? vd->getLocation() : SourceLocation();
+  mlir::Location loc =
+      helperSourceLoc.isValid() ? getLoc(helperSourceLoc) : builder.getUnknownLoc();
+
+  QualType helperArgTy = getContext().VoidPtrTy;
+  mlir::Type helperArgIRTy = convertType(helperArgTy);
+  const IdentifierInfo *helperII =
+      &getContext().Idents.get("__cxx_global_array_dtor");
+  QualType helperFnTy =
+      getContext().getFunctionType(getContext().VoidTy, {helperArgTy}, {});
+  FunctionDecl *helperDecl = FunctionDecl::Create(
+      getContext(), getContext().getTranslationUnitDecl(), helperSourceLoc,
+      helperSourceLoc, helperII, helperFnTy, /*TInfo=*/nullptr, SC_Static,
+      /*UsesFPIntrin=*/false, /*isInlineSpecified=*/false,
+      /*hasWrittenPrototype=*/false);
+  ParmVarDecl *helperParam = ParmVarDecl::Create(
+      getContext(), helperDecl, helperSourceLoc, helperSourceLoc,
+      /*Id=*/nullptr, helperArgTy,
+      getContext().getTrivialTypeSourceInfo(helperArgTy, helperSourceLoc),
+      SC_None, /*DefArg=*/nullptr);
+  ParmVarDecl *helperParams[] = {helperParam};
+  helperDecl->setParams(helperParams);
+
+  cir::FuncOp fn = cgm.createCIRFunction(
+      loc, cgm.getUniqueGlobalName("__cxx_global_array_dtor"),
+      builder.getFuncType({helperArgIRTy}, builder.getVoidTy()), nullptr);
+  fn.setLinkage(cir::GlobalLinkageKind::InternalLinkage);
+  fn.setSymVisibility("private");
+  cgm.setCIRFunctionAttributesForDefinition(GlobalDecl{}, fn);
+  if (const char *section =
+          getContext().getTargetInfo().getStaticInitSectionSpecifier())
+    fn.setSectionAttr(builder.getStringAttr(section));
+
+  mlir::Value basePtr = addr.getPointer();
+  cir::GetGlobalOp getGlobalOp = basePtr.getDefiningOp<cir::GetGlobalOp>();
+  if (!getGlobalOp) {
+    auto castOp = basePtr.getDefiningOp<cir::CastOp>();
+    if (castOp && castOp.getKind() == cir::CastKind::bitcast)
+      getGlobalOp = castOp.getSrc().getDefiningOp<cir::GetGlobalOp>();
+  }
+  assert(getGlobalOp && "expected GetGlobalOp for destroy helper target");
+  auto globalOp = mlir::dyn_cast_or_null<cir::GlobalOp>(
+      cgm.getGlobalValue(getGlobalOp.getName()));
+  assert(globalOp && "expected GlobalOp for destroy helper target");
+
+  mlir::OpBuilder::InsertionGuard guard(builder);
+  CIRGenFunction helperCGF(cgm, builder, /*suppressNewContext=*/true);
+  helperCGF.curGD = GlobalDecl{};
+  SourceLocRAIIObject helperLoc(helperCGF, loc);
+  mlir::Block *entry = fn.addEntryBlock();
+
+  FunctionArgList args;
+  args.push_back(helperParam);
+
+  SymTableScopeTy varScope(helperCGF.symbolTable);
+  {
+    LexicalScope fnScope(helperCGF, loc, entry);
+    helperCGF.startFunction(GlobalDecl{}, getContext().VoidTy, fn,
+                            fn.getFunctionType(), args, helperSourceLoc,
+                            helperSourceLoc);
+
+    auto &helperBuilder = helperCGF.getBuilder();
+    mlir::Value globalVal = helperBuilder.createGetGlobal(globalOp);
+    if (globalVal.getType() != addr.getPointer().getType())
+      globalVal = helperBuilder.createBitcast(loc, globalVal,
+                                              addr.getPointer().getType());
+    Address helperAddr(globalVal, addr.getElementType(), addr.getAlignment());
+    helperCGF.emitDestroy(helperAddr, type, destroyer, useEHCleanupForArray);
+    cir::ReturnOp::create(helperBuilder, loc);
+    if (mlir::failed(fn.verifyBody()))
+      return {};
+    helperCGF.finishFunction(SourceLocation());
+  }
+
+  return fn;
+}
+
+/// Try to emit a base destructor as an alias to its primary
+/// base-class destructor.
+bool CIRGenModule::tryEmitBaseDestructorAsAlias(const CXXDestructorDecl *d) {
+  if (!getCodeGenOpts().CXXCtorDtorAliases)
+    return true;
+
+  // Producing an alias to a base class ctor/dtor can degrade debug quality
+  // as the debugger cannot tell them apart.
+  if (getCodeGenOpts().OptimizationLevel == 0)
+    return true;
+
+  // OGCG disables this optimization for ARM64EC due to symbol table
+  // complications (CGCXX.cpp:42-44).
+  if (astContext.getTargetInfo().getTriple().isWindowsArm64EC())
+    return true;
+
+  // If sanitizing memory to check for use-after-dtor, do not emit as
+  // an alias, unless this class owns no members. The actual sanitizer
+  // callbacks are emitted in enterDtorCleanups.
+  if (getCodeGenOpts().SanitizeMemoryUseAfterDtor &&
+      !d->getParent()->field_empty())
+    return true;
+
+  // If the destructor doesn't have a trivial body, we have to emit it
+  // separately.
+  if (!d->hasTrivialBody())
+    return true;
+
+  const CXXRecordDecl *klass = d->getParent();
+
+  // We are going to instrument this destructor, so give up even if it is
+  // currently empty.
+  if (klass->mayInsertExtraPadding())
+    return true;
+
+  // If we need to manipulate a VTT parameter, give up.
+  if (klass->getNumVBases()) {
+    // Extra Credit:  passing extra parameters is perfectly safe
+    // in many calling conventions, so only bail out if the ctor's
+    // calling convention is nonstandard.
+    return true;
+  }
+
+  // If any field has a non-trivial destructor, we have to emit the
+  // destructor separately.
+  for (const auto *i : klass->fields())
+    if (i->getType().isDestructedType())
+      return true;
+
+  // Try to find a unique base class with a non-trivial destructor.
+  const CXXRecordDecl *uniqueBase = nullptr;
+  for (const auto &i : klass->bases()) {
+
+    // We're in the base destructor, so skip virtual bases.
+    if (i.isVirtual())
+      continue;
+
+    // Skip base classes with trivial destructors.
+    const auto *base = i.getType()->castAsCXXRecordDecl();
+    if (base->hasTrivialDestructor())
+      continue;
+
+    // If we've already found a base class with a non-trivial
+    // destructor, give up.
+    if (uniqueBase)
+      return true;
+    uniqueBase = base;
+  }
+
+  // If we didn't find any bases with a non-trivial destructor, then
+  // the base destructor is actually effectively trivial, which can
+  // happen if it was needlessly user-defined or if there are virtual
+  // bases with non-trivial destructors.
+  if (!uniqueBase)
+    return true;
+
+  // If the base is at a non-zero offset, give up.
+  const ASTRecordLayout &classLayout = astContext.getASTRecordLayout(klass);
+  if (!classLayout.getBaseClassOffset(uniqueBase).isZero())
+    return true;
+
+  // Give up if the calling conventions don't match. We could update the call,
+  // but it is probably not worth it.
+  const CXXDestructorDecl *baseD = uniqueBase->getDestructor();
+  if (baseD->getType()->castAs<FunctionType>()->getCallConv() !=
+      d->getType()->castAs<FunctionType>()->getCallConv())
+    return true;
+
+  GlobalDecl aliasDecl(d, Dtor_Base);
+  GlobalDecl targetDecl(baseD, Dtor_Base);
+
+  // The alias will use the linkage of the referent.  If we can't
+  // support aliases with that linkage, fail.
+  auto linkage = getFunctionLinkage(aliasDecl);
+
+  // We can't use an alias if the linkage is not valid for one.
+  if (!cir::isValidLinkage(linkage))
+    return true;
+
+  auto targetLinkage = getFunctionLinkage(targetDecl);
+
+  // Check if we have it already.
+  StringRef mangledName = getMangledName(aliasDecl);
+  auto entry = getGlobalValue(mangledName);
+  auto globalValue = dyn_cast_or_null<cir::CIRGlobalValueInterface>(entry);
+  if (entry && globalValue && !globalValue.isDeclaration())
+    return false;
+  if (replacements.count(mangledName))
+    return false;
+
+  // Find the referent once and reuse it in all downstream checks/creation to
+  // avoid repeated symbol lookup/creation work on this hot alias path.
+  auto aliaseeOp = getAddrOfGlobal(targetDecl);
+  StringRef targetName = getMangledName(targetDecl);
+  auto aliaseeGV = dyn_cast_or_null<cir::CIRGlobalValueInterface>(aliaseeOp);
+
+  // Instead of creating as alias to a linkonce_odr, replace all of the uses
+  // of the aliasee.
+  if (cir::isDiscardableIfUnused(linkage) &&
+      !(targetLinkage == cir::GlobalLinkageKind::AvailableExternallyLinkage &&
+        targetDecl.getDecl()->hasAttr<AlwaysInlineAttr>())) {
+    // FIXME: An extern template instantiation will create functions with
+    // linkage "AvailableExternally". In libc++, some classes also define
+    // members with attribute "AlwaysInline" and expect no reference to
+    // be generated. It is desirable to reenable this optimisation after
+    // corresponding LLVM changes.
+    addReplacement(mangledName, targetName);
+    return false;
+  }
+
+  // If we have a weak, non-discardable alias (weak, weak_odr), like an
+  // extern template instantiation or a dllexported class, avoid forming it on
+  // COFF. A COFF weak external alias cannot satisfy a normal undefined
+  // symbol reference from another TU. The other TU must also mark the
+  // referenced symbol as weak, which we cannot rely on.
+  if (cir::isWeakForLinker(linkage) && getTriple().isOSBinFormatCOFF()) {
+    llvm_unreachable("please sent a PR with a test and remove this.\n");
+    return true;
+  }
+
+  // If we don't have a definition for the destructor yet or the definition
+  // is available_externally, don't emit an alias.  We can't emit aliases to
+  // declarations; that's just not how aliases work.
+  if (aliaseeGV && aliaseeGV.isDeclarationForLinker())
+    return true;
+
+  // Don't create an alias to a linker weak symbol. This avoids producing
+  // different COMDATs in different TUs. Another option would be to
+  // output the alias both for weak_odr and linkonce_odr, but that
+  // requires explicit comdat support in the IL.
+  if (cir::isWeakForLinker(targetLinkage))
+    return true;
+
+  // Create the alias with no name.
+  auto aliasee = cast<cir::FuncOp>(aliaseeOp);
+  emitAliasForGlobal(mangledName, entry, aliasDecl, aliasee, linkage);
+  return false;
+}
+
+// OGCG has EmitDefinitionAsAlias (CGCXX.cpp) for unconditionally aliasing
+// one global definition to another, used by MSVC ABI for destructor aliasing.
+// Itanium destructor aliasing is handled directly in
+// tryEmitBaseDestructorAsAlias. MSVC ABI is not a supported CIR target.
 
 /// Emit code to cause the variable at the given address to be considered as
 /// constant from this point onwards.
@@ -43,11 +309,14 @@ void CIRGenFunction::emitInvariantStart(CharUnits size, mlir::Value addr,
                                               static_cast<int64_t>(width));
 
   // Create the intrinsic call. The llvm.invariant.start intrinsic returns a
-  // token, but we don't need to capture it. The address space will be
-  // automatically handled when the intrinsic is lowered to LLVM IR.
+  // token in the default address space regardless of the operand's address
+  // space; it is overloaded only on the operand pointer. Using the operand's
+  // (possibly non-default) address space for the result type would select a
+  // non-existent overload and fail intrinsic translation. We don't capture the
+  // result, so use a default-address-space pointer for it.
   cir::LLVMIntrinsicCallOp::create(
-      builder, loc, builder.getStringAttr("invariant.start"), addr.getType(),
-      mlir::ValueRange{sizeValue, addr});
+      builder, loc, cgm.getStringAttrCached("invariant.start"),
+      builder.getVoidPtrTy(), mlir::ValueRange{sizeValue, addr});
 }
 
 static void emitDeclInit(CIRGenFunction &cgf, const VarDecl *varDecl,
@@ -59,6 +328,15 @@ static void emitDeclInit(CIRGenFunction &cgf, const VarDecl *varDecl,
   assert(!varDecl->getType()->isReferenceType() &&
          "Should not call emitDeclInit on a reference!");
 
+  // Guard against double emission. For template instantiations used multiple
+  // times (e.g., `n<> + n<>`), emitGlobalVarDefinition may be called more
+  // than once for the same global, each time reaching emitDeclInit. Since CIR
+  // attaches init code to the ctorRegion (unlike OGCG which creates a separate
+  // init function), adding another block would violate the MaxSizedRegion<1>
+  // constraint.
+  if (!globalOp.getCtorRegion().empty())
+    return;
+
   CIRGenBuilderTy &builder = cgf.getBuilder();
 
   // Set up the ctor region.
@@ -69,23 +347,38 @@ static void emitDeclInit(CIRGenFunction &cgf, const VarDecl *varDecl,
   lexScope.setAsGlobalInit();
   builder.setInsertionPointToStart(block);
 
-  Address declAddr(cgf.cgm.getAddrOfGlobalVar(varDecl),
-                   cgf.cgm.getASTContext().getDeclAlign(varDecl));
+  mlir::Value declPtr = cgf.cgm.getAddrOfGlobalVar(varDecl);
 
+  // The address space of a global variable may differ from the expected address
+  // space of its type. For example, on AMDGCN, globals live in AS 1 (global
+  // memory) but the constructor's `this` pointer expects AS 0 (generic/flat).
+  // Insert an addrspacecast if needed (matches OGCG CGDeclCXX.cpp:198-205).
   QualType type = varDecl->getType();
+  LangAS expectedAS = type.getAddressSpace();
+  auto declPtrTy = mlir::cast<cir::PointerType>(declPtr.getType());
+  mlir::ptr::MemorySpaceAttrInterface expectedAddrSpace =
+      (expectedAS == LangAS::Default)
+          ? mlir::ptr::MemorySpaceAttrInterface{}
+          : cir::toCIRLangAddressSpaceAttr(&cgf.cgm.getMLIRContext(),
+                                           expectedAS);
+  if (declPtrTy.getAddrSpace() != expectedAddrSpace) {
+    auto newPtrTy =
+        cir::PointerType::get(declPtrTy.getPointee(), expectedAddrSpace);
+    declPtr = builder.createAddrSpaceCast(declPtr, newPtrTy);
+  }
+
+  Address declAddr(declPtr, cgf.cgm.getASTContext().getDeclAlign(varDecl));
   LValue lv = cgf.makeAddrLValue(declAddr, type);
 
   const Expr *init = varDecl->getInit();
   switch (CIRGenFunction::getEvaluationKind(type)) {
   case cir::TEK_Scalar:
-    assert(!cir::MissingFeatures::objCGC());
     cgf.emitScalarInit(init, cgf.getLoc(varDecl->getLocation()), lv, false);
     break;
   case cir::TEK_Complex:
     cgf.emitComplexExprIntoLValue(init, lv, /*isInit=*/true);
     break;
   case cir::TEK_Aggregate:
-    assert(!cir::MissingFeatures::aggValueSlotGC());
     cgf.emitAggExpr(init,
                     AggValueSlot::forLValue(lv, AggValueSlot::IsDestructed,
                                             AggValueSlot::IsNotAliased,
@@ -115,6 +408,9 @@ static void emitDeclDestroy(CIRGenFunction &cgf, const VarDecl *vd,
     return;
 
   case QualType::DK_cxx_destructor:
+    // TLS variables with C++ destructors are handled by
+    // emitCXXThreadLocalInitFuncs which registers via __cxa_thread_atexit.
+    // Non-TLS variables fall through to the __cxa_atexit path below.
     break;
 
   case QualType::DK_objc_strong_lifetime:
@@ -153,20 +449,27 @@ static void emitDeclDestroy(CIRGenFunction &cgf, const VarDecl *vd,
   // generated elsewhere which uses atexit instead, and it takes the destructor
   // directly.
   cir::FuncOp fnOp;
-  if (record && (canRegisterDestructor || cgm.getCodeGenOpts().CXAAtExit)) {
-    if (vd->getTLSKind())
-      cgm.errorNYI(vd->getSourceRange(), "TLS destructor");
+  if (record && (canRegisterDestructor || !cgm.getCodeGenOpts().CXAAtExit)) {
     assert(!record->hasTrivialDestructor());
-    assert(!cir::MissingFeatures::openCL());
     CXXDestructorDecl *dtor = record->getDestructor();
     // In LLVM OG codegen this is done in registerGlobalDtor, but CIRGen
     // relies on LoweringPrepare for further decoupling, so build the
     // call right here.
     auto gd = GlobalDecl(dtor, Dtor_Complete);
     fnOp = cgm.getAddrAndTypeOfCXXStructor(gd).second;
-    builder.createCallOp(cgf.getLoc(vd->getSourceRange()),
-                         mlir::FlatSymbolRefAttr::get(fnOp.getSymNameAttr()),
-                         mlir::ValueRange{cgm.getAddrOfGlobalVar(vd)});
+    mlir::Value globalAddr = cgm.getAddrOfGlobalVar(vd);
+    mlir::Type expectedThisTy = fnOp.getFunctionType().getInput(0);
+    if (globalAddr.getType() != expectedThisTy) {
+      auto globalPtrTy = mlir::cast<cir::PointerType>(globalAddr.getType());
+      auto expectedPtrTy = mlir::cast<cir::PointerType>(expectedThisTy);
+      if (globalPtrTy.getAddrSpace() != expectedPtrTy.getAddrSpace())
+        globalAddr = builder.createAddrSpaceCast(globalAddr, expectedThisTy);
+      else
+        globalAddr = builder.createBitcast(cgf.getLoc(vd->getSourceRange()),
+                                           globalAddr, expectedThisTy);
+    }
+    builder.createCallOp(cgf.getLoc(vd->getSourceRange()), fnOp,
+                         mlir::ValueRange{globalAddr});
     assert(fnOp && "expected cir.func");
     // TODO(cir): This doesn't do anything but check for unhandled conditions.
     // What it is meant to do should really be happening in LoweringPrepare.
@@ -181,9 +484,27 @@ static void emitDeclDestroy(CIRGenFunction &cgf, const VarDecl *vd,
     // address of the global into whose dtor region we are emiiting the destroy.
     // The same applies to code above where it is calling getAddrOfGlobalVar.
     mlir::Value globalVal = builder.createGetGlobal(addr);
+    mlir::Type expectedElTy = cgf.convertTypeForMem(type);
+    // The global's sym type may differ from the C-level type when the class
+    // has a vtable (the initializer is an anonymous struct with vptr fields).
+    // Bitcast the pointer to match the expected element type, preserving the
+    // global's address space (a bitcast cannot cross address spaces).
+    auto ptrTy = mlir::cast<cir::PointerType>(globalVal.getType());
+    if (ptrTy.getPointee() != expectedElTy)
+      globalVal = builder.createBitcast(
+          globalVal,
+          cir::PointerType::get(expectedElTy, ptrTy.getAddrSpace()));
     CharUnits alignment = cgf.getContext().getDeclAlign(vd);
-    Address globalAddr{globalVal, cgf.convertTypeForMem(type), alignment};
-    cgf.emitDestroy(globalAddr, type, cgf.getDestroyer(dtorKind));
+    Address globalAddr{globalVal, expectedElTy, alignment};
+    // Do NOT pass useEHCleanupForArray=true here. The dtor region
+    // will be extracted into a standalone helper function by
+    // LoweringPrepare. Using EH cleanups would cause the landing
+    // pad to emit all in-scope EH cleanups from the enclosing
+    // function's EH stack (e.g., destructors for local variables,
+    // guard-abort calls), creating cross-function SSA references
+    // that violate MLIR dominance rules.
+    cgf.emitDestroy(globalAddr, type, cgf.getDestroyer(dtorKind),
+                    /*useEHCleanupForArray=*/false);
   }
 
   builder.setInsertionPointToEnd(block);
@@ -193,6 +514,219 @@ static void emitDeclDestroy(CIRGenFunction &cgf, const VarDecl *vd,
     builder.clearInsertionPoint();
   } else {
     cir::YieldOp::create(builder, addr.getLoc());
+  }
+}
+
+void CIRGenFunction::emitCXXAtExit(mlir::Location loc, cir::FuncOp dtorFn,
+                                   mlir::Value varAddr, bool isTLS) {
+  auto &builder = getBuilder();
+  auto voidTy = builder.getVoidTy();
+  auto voidPtrTy = cir::PointerType::get(voidTy);
+
+  // When -fno-use-cxa-atexit is set (and not TLS), use atexit() with a
+  // wrapper function instead of __cxa_atexit. Matches OGCG's
+  // registerGlobalDtorWithAtExit in ItaniumCXXABI.cpp.
+  if (!cgm.getCodeGenOpts().CXAAtExit && !isTLS) {
+    // Create a wrapper stub: void __dtor_<varname>() { dtor(&var); }
+    std::string stubName;
+    {
+      llvm::raw_string_ostream os(stubName);
+      os << "__dtor_" << dtorFn.getSymName();
+      // Use the variable address to make unique names for static locals.
+      // The varAddr is a get_global op — extract the symbol name.
+      if (auto getGlobal = varAddr.getDefiningOp<cir::GetGlobalOp>())
+        stubName = ("__dtor_" + getGlobal.getName()).str();
+    }
+    auto noArgVoidFnTy = builder.getFuncType({}, voidTy);
+    cir::FuncOp stub = cgm.createRuntimeFunction(noArgVoidFnTy, stubName,
+                                                  /*extraAttrs=*/{},
+                                                  /*isLocal=*/true);
+    stub.setLinkage(cir::GlobalLinkageKind::InternalLinkage);
+    // Set section from target if specified. Matches OGCG
+    // CreateGlobalInitOrCleanUpFunction which only sets section from
+    // getStaticInitSectionSpecifier(), not unconditionally.
+    if (const char *section =
+            getContext().getTargetInfo().getStaticInitSectionSpecifier())
+      stub.setSectionAttr(builder.getStringAttr(section));
+    // Match OGCG's CreateGlobalInitOrCleanUpFunction path for atexit stubs:
+    // these compiler-generated helpers carry the full internal-helper attr
+    // bundle, including noinline/nounwind and option-driven attrs like
+    // no-builtins.
+    {
+      mlir::NamedAttrList attrs;
+      if (auto existingExtraAttrs = stub.getExtraAttrs())
+        attrs = mlir::NamedAttrList{
+            existingExtraAttrs->getElements().getValue()};
+      cgm.getDefaultInternalFunctionAttributes(attrs);
+      stub.setExtraAttrsAttr(cir::ExtraFuncAttributesAttr::get(
+          attrs.getDictionary(&cgm.getMLIRContext())));
+      if (attrs.get("noinline"))
+        stub.setInlineKind(cir::InlineKind::NoInline);
+    }
+
+    // Build stub body: call dtor(&var) or dtor(nullptr) for callbacks that
+    // capture the global directly and ignore the registration pointer.
+    cir::GetGlobalOp getGlobalOp;
+    if (varAddr) {
+      getGlobalOp = varAddr.getDefiningOp<cir::GetGlobalOp>();
+      if (!getGlobalOp) {
+        auto castOp = varAddr.getDefiningOp<cir::CastOp>();
+        if (castOp && castOp.getKind() == cir::CastKind::bitcast)
+          getGlobalOp = castOp.getSrc().getDefiningOp<cir::GetGlobalOp>();
+      }
+      assert(getGlobalOp &&
+             "expected get_global or bitcast thereof for atexit registration");
+    }
+
+    if (stub.empty()) {
+      mlir::OpBuilder::InsertionGuard guard(builder);
+      mlir::Block *stubBlock = stub.addEntryBlock();
+      builder.setInsertionPointToStart(stubBlock);
+      mlir::Type expectedThisTy = dtorFn.getFunctionType().getInput(0);
+      mlir::Value objAddr;
+      if (getGlobalOp) {
+        objAddr = cir::GetGlobalOp::create(builder, loc, getGlobalOp.getType(),
+                                           getGlobalOp.getName());
+        if (objAddr.getType() != varAddr.getType())
+          objAddr = builder.createBitcast(loc, objAddr, varAddr.getType());
+        if (objAddr.getType() != expectedThisTy)
+          objAddr = builder.createBitcast(loc, objAddr, expectedThisTy);
+      } else {
+        objAddr = builder.getNullPtr(expectedThisTy, loc);
+      }
+      builder.createCallOp(loc, dtorFn, {objAddr});
+      cir::ReturnOp::create(builder, loc);
+    }
+
+    // Register with atexit():
+    //   extern "C" int atexit(void (*f)(void));
+    auto noArgVoidFnPtrTy = cir::PointerType::get(noArgVoidFnTy);
+    auto atexitType = builder.getFuncType(
+        {noArgVoidFnPtrTy}, builder.getSInt32Ty());
+    cir::FuncOp fnAtExit = cgm.createRuntimeFunction(atexitType, "atexit");
+    // atexit does not throw. Matches OGCG CGDeclCXX.cpp.
+    {
+      mlir::NamedAttrList attrs;
+      if (auto existingAttrs = fnAtExit.getExtraAttrs())
+        attrs = mlir::NamedAttrList{existingAttrs->getElements().getValue()};
+      attrs.set("nothrow", mlir::UnitAttr::get(builder.getContext()));
+      fnAtExit.setExtraAttrsAttr(cir::ExtraFuncAttributesAttr::get(
+          builder.getContext(),
+          mlir::DictionaryAttr::get(builder.getContext(), attrs)));
+    }
+
+    auto stubPtrTy = cir::PointerType::get(stub.getFunctionType());
+    mlir::Value stubRef = cir::GetGlobalOp::create(
+        builder, loc, stubPtrTy, stub.getSymNameAttr());
+    stubRef = builder.createBitcast(loc, stubRef, noArgVoidFnPtrTy);
+    auto call = builder.createCallOp(loc, fnAtExit, {stubRef});
+    call.setNothrow(true);
+    return;
+  }
+
+  auto i8Ty = builder.getUInt8Ty();
+  auto i8PtrTy = cir::PointerType::get(i8Ty);
+
+  // Declare __dso_handle as an external hidden global if not already present.
+  cir::GlobalOp dsoHandleGlobal;
+  {
+    auto *existingSym = cgm.getGlobalValue("__dso_handle");
+    if (existingSym) {
+      dsoHandleGlobal = mlir::cast<cir::GlobalOp>(existingSym);
+    } else {
+      mlir::OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(
+          &cgm.getModule().getBodyRegion().front());
+      dsoHandleGlobal = cir::GlobalOp::create(
+          builder, loc, "__dso_handle", i8Ty,
+          /*isConstant=*/false,
+          cir::GlobalLinkageKind::ExternalLinkage);
+      cgm.insertGlobalSymbol(dsoHandleGlobal);
+      // __dso_handle has hidden visibility (defined in the runtime but
+      // not exported from the DSO), matching OGCG.
+      dsoHandleGlobal.setSymVisibility("private");
+      dsoHandleGlobal.setGlobalVisibility(cir::VisibilityKind::Hidden);
+      cgm.setDSOLocal(static_cast<mlir::Operation *>(dsoHandleGlobal));
+    }
+  }
+  mlir::Value dsoHandle = builder.createGetGlobal(loc, dsoHandleGlobal);
+
+  // Select the right atexit function: __cxa_thread_atexit for TLS variables,
+  // __cxa_atexit for regular static variables. On Darwin, TLS uses
+  // _tlv_atexit instead.
+  const char *atExitName = "__cxa_atexit";
+  if (isTLS) {
+    const llvm::Triple &T = getTarget().getTriple();
+    atExitName = T.isOSDarwin() ? "_tlv_atexit" : "__cxa_thread_atexit";
+  }
+
+  // Declare the atexit function:
+  //   extern "C" int __cxa_atexit(void (*f)(void *), void *p, void *d);
+  //   extern "C" int __cxa_thread_atexit(void (*f)(void *), void *p, void *d);
+  auto voidFnTy = builder.getFuncType({voidPtrTy}, voidTy);
+  auto voidFnPtrTy = cir::PointerType::get(voidFnTy);
+  auto atExitFnTy =
+      builder.getFuncType({voidFnPtrTy, voidPtrTy, i8PtrTy},
+                          builder.getSInt32Ty());
+  cir::FuncOp atExitFn =
+      cgm.createRuntimeFunction(atExitFnTy, atExitName);
+  // __cxa_atexit does not throw. Matches OGCG's
+  // fn->setDoesNotThrow() in ItaniumCXXABI.cpp:2955.
+  {
+    mlir::NamedAttrList attrs;
+    if (auto existingAttrs = atExitFn.getExtraAttrs())
+      attrs = mlir::NamedAttrList{existingAttrs->getElements().getValue()};
+    attrs.set("nothrow", mlir::UnitAttr::get(builder.getContext()));
+    atExitFn.setExtraAttrsAttr(cir::ExtraFuncAttributesAttr::get(
+        builder.getContext(),
+        mlir::DictionaryAttr::get(builder.getContext(), attrs)));
+  }
+
+  // Get destructor function address and cast to void(*)(void*).
+  auto dtorPtrTy = cir::PointerType::get(dtorFn.getFunctionType());
+  mlir::Value dtorRef = cir::GetGlobalOp::create(
+      builder, loc, dtorPtrTy, dtorFn.getSymNameAttr());
+  mlir::Value dtorCast = builder.createBitcast(loc, dtorRef, voidFnPtrTy);
+
+  // Match OGCG: some helper callbacks capture the target global directly and
+  // ignore the registration pointer, so they are registered with nullptr.
+  mlir::Value varCast;
+  if (varAddr) {
+    if (isTLS)
+      varAddr = getTLSRegistrationAddress(builder, varAddr);
+    // __cxa_atexit takes a generic (default-address-space) pointer; a global in
+    // a non-default address space must be address-space cast, not bitcast (a
+    // bitcast cannot cross address spaces).
+    auto varPtrTy = mlir::cast<cir::PointerType>(varAddr.getType());
+    if (varPtrTy.getAddrSpace() != voidPtrTy.getAddrSpace()) {
+      if (varPtrTy.getPointee() != voidPtrTy.getPointee())
+        varAddr = builder.createBitcast(
+            loc, varAddr,
+            cir::PointerType::get(voidPtrTy.getPointee(),
+                                  varPtrTy.getAddrSpace()));
+      varCast = builder.createAddrSpaceCast(loc, varAddr, voidPtrTy);
+    } else {
+      varCast = builder.createBitcast(loc, varAddr, voidPtrTy);
+    }
+  } else {
+    varCast = builder.getNullPtr(voidPtrTy, loc);
+  }
+
+  auto call = builder.createCallOp(loc, atExitFn, {dtorCast, varCast, dsoHandle},
+                                   atExitFn.getCallingConv());
+  call->setAttr("nothrow", mlir::UnitAttr::get(&cgm.getMLIRContext()));
+
+  FunctionProtoType::ExtProtoInfo EPI(
+      cgm.getASTContext().getDefaultCallingConvention(/*IsVariadic=*/false,
+                                                      /*IsCXXMethod=*/false));
+  QualType atExitCallbackTy = cgm.getASTContext().getFunctionType(
+      cgm.getASTContext().VoidTy, {cgm.getASTContext().VoidPtrTy}, EPI);
+  if (auto pointerAuth = cgm.getFunctionPointerAuthInfo(atExitCallbackTy)) {
+    call->setAttr(
+        "cir.atexit_callback_ptrauth",
+        builder.getArrayAttr(
+            {builder.getI32IntegerAttr(pointerAuth->key),
+             builder.getI64IntegerAttr(pointerAuth->discriminator)}));
   }
 }
 
@@ -207,13 +741,19 @@ cir::FuncOp CIRGenModule::codegenCXXStructor(GlobalDecl gd) {
   curCGF = &cgf;
   {
     mlir::OpBuilder::InsertionGuard guard(builder);
-    cgf.generateCode(gd, fn, funcType);
+    fn = cgf.generateCode(gd, fn, funcType);
   }
   curCGF = nullptr;
 
+  if (!fn)
+    return nullptr;
+
   setNonAliasAttributes(gd, fn);
-  setCIRFunctionAttributesForDefinition(mlir::cast<FunctionDecl>(gd.getDecl()),
-                                        fn);
+  setCIRFunctionAttributesForDefinition(gd, fn);
+  // setGVProperties is called transitively via
+  // setNonAliasAttributes -> setCommonAttributes -> setGVProperties.
+  maybeHandleStaticInExternC(cast<FunctionDecl>(gd.getDecl()), fn.getSymName());
+  maybeSetTrivialComdat(*gd.getDecl(), fn);
   return fn;
 }
 
@@ -245,21 +785,59 @@ void CIRGenModule::emitCXXGlobalVarDeclInit(const VarDecl *varDecl,
   // For example, in the above CUDA code, the static local variable s has a
   // "shared" address space qualifier, but the constructor of StructWithCtor
   // expects "this" in the "generic" address space.
-  assert(!cir::MissingFeatures::addressSpace());
-
+  // Address space casting is handled in emitDeclInit.
   // Create a CIRGenFunction to emit the initializer. While this isn't a true
   // function, the handling works the same way.
   CIRGenFunction cgf{*this, builder, true};
   llvm::SaveAndRestore<CIRGenFunction *> savedCGF(curCGF, &cgf);
   curCGF->curFn = addr;
 
+  // Initialize sanitizer options for global init context. In OGCG this happens
+  // via StartFunction in GenerateCXXGlobalVarDeclInitFunc. Since CIR emits
+  // global init code into GlobalOp ctor regions without calling startFunction,
+  // we must set sanOpts here so that emitTypeCheck (for reference binding,
+  // object-size checks, etc.) works correctly.
+  cgf.sanOpts.set(getLangOpts().Sanitize.Mask);
+
   CIRGenFunction::SourceLocRAIIObject fnLoc{cgf,
                                             getLoc(varDecl->getLocation())};
 
   assert(!cir::MissingFeatures::astVarDeclInterface());
 
+  // Set init_priority if the variable has the attribute.
+  if (const auto *ipa = varDecl->getAttr<InitPriorityAttr>())
+    addr.setInitPriorityAttr(builder.getI32IntegerAttr(ipa->getPriority()));
+
+  auto emitOMPThreadPrivateRegistration = [&](mlir::Type valueTy) {
+    if (!varDecl->hasAttr<OMPThreadPrivateDeclAttr>())
+      return;
+
+    if (addr.getCtorRegion().empty()) {
+      mlir::OpBuilder::InsertionGuard guard(builder);
+      mlir::Block *block = builder.createBlock(&addr.getCtorRegion());
+      CIRGenFunction::LexicalScope lexScope{cgf, addr.getLoc(),
+                                            builder.getInsertionBlock()};
+      lexScope.setAsGlobalInit();
+      builder.setInsertionPointToStart(block);
+      cir::YieldOp::create(builder, addr.getLoc());
+    }
+
+    mlir::OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToStart(&addr.getCtorRegion().front());
+
+    mlir::Value declPtr = cgf.cgm.getAddrOfGlobalVar(varDecl);
+    auto declPtrTy = mlir::cast<cir::PointerType>(declPtr.getType());
+    auto expectedPtrTy =
+        cir::PointerType::get(valueTy, declPtrTy.getAddrSpace());
+    if (declPtrTy != expectedPtrTy)
+      declPtr = builder.createBitcast(declPtr, expectedPtrTy);
+
+    Address declAddr(declPtr, valueTy, getASTContext().getDeclAlign(varDecl));
+    cgf.emitOMPThreadPrivateVarDefinition(varDecl, declAddr, performInit);
+  };
+
   if (!ty->isReferenceType()) {
-    assert(!cir::MissingFeatures::openMP());
+    mlir::Type valueTy = cgf.convertTypeForMem(ty);
 
     bool needsDtor = varDecl->needsDestruction(getASTContext()) ==
                      QualType::DK_cxx_destructor;
@@ -288,10 +866,163 @@ void CIRGenModule::emitCXXGlobalVarDeclInit(const VarDecl *varDecl,
       emitDeclInvariant(cgf, varDecl);
     }
 
+    emitOMPThreadPrivateRegistration(valueTy);
+
     if (!isConstantStorage)
       emitDeclDestroy(cgf, varDecl, addr);
     return;
   }
 
-  errorNYI(varDecl->getSourceRange(), "global with reference type");
+  // Reference type global variable initialization.
+  // Note: OGCG does NOT call EmitInvariantStart for reference globals
+  // (CGDeclCXX.cpp EmitDeclInit only calls EmitDeclInvariant for non-reference
+  // types), so CIR is correct in not emitting invariant.start here.
+  {
+    mlir::OpBuilder::InsertionGuard guard(builder);
+    mlir::Block *block = builder.createBlock(&addr.getCtorRegion());
+    CIRGenFunction::LexicalScope lexScope{cgf, addr.getLoc(),
+                                          builder.getInsertionBlock()};
+    lexScope.setAsGlobalInit();
+    builder.setInsertionPointToStart(block);
+    auto getGlobal =
+        builder.createGetGlobal(addr, varDecl->getTLSKind() != VarDecl::TLS_None);
+
+    Address declAddr(getGlobal, getASTContext().getDeclAlign(varDecl));
+    assert(performInit && "cannot have constant initializer which needs "
+                          "destruction for reference");
+    const Expr *init = varDecl->getInit();
+    RValue rv = cgf.emitReferenceBindingToExpr(init);
+    {
+      mlir::OpBuilder::InsertionGuard innerGuard(builder);
+      mlir::Operation *rvalueDefOp = rv.getValue().getDefiningOp();
+      if (rvalueDefOp && rvalueDefOp->getBlock()) {
+        mlir::Block *rvalSrcBlock = rvalueDefOp->getBlock();
+        if (!rvalSrcBlock->empty() && isa<cir::YieldOp>(rvalSrcBlock->back())) {
+          auto &front = rvalSrcBlock->front();
+          getGlobal.getDefiningOp()->moveBefore(&front);
+          auto yield = cast<cir::YieldOp>(rvalSrcBlock->back());
+          builder.setInsertionPoint(yield);
+        }
+      }
+      LValue lv = cgf.makeAddrLValue(declAddr, ty);
+      cgf.emitStoreOfScalar(rv.getValue(), lv, /*isInit=*/true);
+    }
+    builder.setInsertionPointToEnd(block);
+    cir::YieldOp::create(builder, addr->getLoc());
+  }
+
+  emitOMPThreadPrivateRegistration(cgf.convertTypeForMem(ty));
+}
+
+/// Build an apple-kext virtual call by indexing directly into the vtable
+/// global. This is used under -fapple-kext when a qualified virtual call is
+/// made (e.g. Base::method()) and bypasses the normal virtual dispatch
+/// through the object's vptr.
+static CIRGenCallee buildAppleKextVirtualCall(CIRGenFunction &cgf,
+                                              GlobalDecl gd, mlir::Type ty,
+                                              const CXXRecordDecl *rd) {
+  assert(!cgf.cgm.getTarget().getCXXABI().isMicrosoft() &&
+         "No kext in Microsoft ABI");
+  CIRGenModule &cgm = cgf.cgm;
+  CIRGenBuilderTy &builder = cgf.getBuilder();
+
+  // Get the vtable global for the class.
+  cir::GlobalOp vtableGlobal = cgm.getCXXABI().getAddrOfVTable(rd, CharUnits());
+  assert(vtableGlobal && "BuildVirtualCall = kext vtbl pointer is null");
+
+  // Compute the flat index into the vtable: method index + address point.
+  uint64_t vtableIndex =
+      cgm.getItaniumVTableContext().getMethodVTableIndex(gd);
+  const VTableLayout &vtLayout =
+      cgm.getItaniumVTableContext().getVTableLayout(rd);
+  VTableLayout::AddressPointLocation addressPoint =
+      vtLayout.getAddressPoint(BaseSubobject(rd, CharUnits::Zero()));
+  vtableIndex += vtLayout.getVTableOffset(addressPoint.VTableIndex) +
+                 addressPoint.AddressPointIndex;
+
+  // Get a pointer to the vtable global.
+  mlir::Location loc = cgf.getLoc(rd->getSourceRange());
+  auto ptrTy = builder.getPointerTo(ty);
+  auto ptrPtrTy = builder.getPointerTo(ptrTy);
+  mlir::Value vtablePtr = cir::GetGlobalOp::create(
+      builder, loc, cir::PointerType::get(vtableGlobal.getSymType()),
+      vtableGlobal.getSymNameAttr());
+
+  // Cast to pointer-to-function-pointer for flat indexing.
+  mlir::Value castVtable = builder.createBitcast(vtablePtr, ptrPtrTy);
+
+  // GEP to the function pointer slot.
+  mlir::Value index =
+      builder.getConstInt(loc, builder.getSInt64Ty(), vtableIndex);
+  mlir::Value vfuncPtr = cir::PtrStrideOp::create(
+      builder, loc, ptrPtrTy, castVtable, index,
+      cir::GEPNoWrapFlags::inbounds);
+
+  // Load the function pointer.
+  mlir::Value vfunc =
+      builder.createAlignedLoad(loc, ptrTy, vfuncPtr, cgf.getPointerAlign());
+
+  std::optional<CIRGenPointerAuthInfo> pointerAuthInfo;
+  if (const auto &schema =
+          cgm.getCodeGenOpts().PointerAuth.CXXVirtualFunctionPointers) {
+    GlobalDecl origGD =
+        cgm.getItaniumVTableContext().findOriginalMethod(gd.getCanonicalDecl());
+
+    uint64_t discriminator = 0;
+    switch (schema.getOtherDiscrimination()) {
+    case PointerAuthSchema::Discrimination::None:
+      break;
+    case PointerAuthSchema::Discrimination::Type:
+      discriminator = cgm.getASTContext().getPointerAuthTypeDiscriminator(
+          cast<CXXMethodDecl>(origGD.getDecl())->getType());
+      break;
+    case PointerAuthSchema::Discrimination::Decl:
+      discriminator = cgm.getPointerAuthDeclDiscriminator(origGD);
+      break;
+    case PointerAuthSchema::Discrimination::Constant:
+      discriminator = schema.getConstantDiscrimination();
+      break;
+    }
+
+    pointerAuthInfo = CIRGenPointerAuthInfo{
+        /*enabled=*/true,
+        /*key=*/schema.getKey(),
+        /*discriminator=*/discriminator,
+        /*authenticationMode=*/schema.getAuthenticationMode(),
+        /*isIsaPointer=*/schema.isIsaPointer(),
+        /*authenticatesNullValues=*/schema.authenticatesNullValues(),
+    };
+  }
+
+  const auto *fpt =
+      cast<CXXMethodDecl>(gd.getDecl())->getType()->getAs<FunctionProtoType>();
+  CIRGenCallee callee(
+      CIRGenCalleeInfo(fpt, gd, pointerAuthInfo,
+                       /*blendVTableSlot=*/true),
+      vfunc.getDefiningOp());
+  return callee;
+}
+
+CIRGenCallee
+CIRGenFunction::buildAppleKextVirtualCall(const CXXMethodDecl *md,
+                                          NestedNameSpecifier qual,
+                                          mlir::Type ty) {
+  const CXXRecordDecl *rd = qual.getAsRecordDecl();
+  assert(rd && "BuildAppleKextVirtualCall - Qual must be record");
+  if (const auto *dd = dyn_cast<CXXDestructorDecl>(md))
+    return buildAppleKextVirtualDestructorCall(dd, Dtor_Complete, rd);
+
+  return ::buildAppleKextVirtualCall(*this, md, ty, rd);
+}
+
+CIRGenCallee CIRGenFunction::buildAppleKextVirtualDestructorCall(
+    const CXXDestructorDecl *dd, CXXDtorType type,
+    const CXXRecordDecl *rd) {
+  assert(dd->isVirtual() && type != Dtor_Base);
+  // Compute the function type for the destructor.
+  const CIRGenFunctionInfo &fInfo =
+      cgm.getTypes().arrangeCXXStructorDeclaration(
+          GlobalDecl(dd, Dtor_Complete));
+  mlir::Type ty = cgm.getTypes().getFunctionType(fInfo);
+  return ::buildAppleKextVirtualCall(*this, GlobalDecl(dd, type), ty, rd);
 }

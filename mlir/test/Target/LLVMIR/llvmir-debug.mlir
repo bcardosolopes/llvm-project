@@ -65,7 +65,8 @@ llvm.func @func_no_debug() {
 >
 #sp0 = #llvm.di_subprogram<
   compileUnit = #cu, scope = #nested_namespace, name = "func_with_debug", linkageName = "func_with_debug",
-  file = #file, line = 3, scopeLine = 3, subprogramFlags = "Definition|Optimized", type = #spType0
+  file = #file, line = 3, scopeLine = 3, flags = Prototyped, subprogramFlags = "Definition|Optimized",
+  type = #spType0, keyInstructions = true
 >
 #calleeType = #llvm.di_subroutine_type<
   // Omit the optional callingConvention parameter.
@@ -90,6 +91,12 @@ llvm.func @func_no_debug() {
   compileUnit = #cu, scope = #module, name = "empty_types",
   file = #file, subprogramFlags = "Definition", type = #spType1,
   annotations = #llvm.di_annotation<name = "foo", value = "bar">
+>
+#spAtom = #llvm.di_subprogram<
+  compileUnit = #cu, scope = #file, name = "atom_loc",
+  file = #file, line = 7, scopeLine = 7,
+  subprogramFlags = "Definition|Optimized", type = #spType1,
+  keyInstructions = true
 >
 
 // CHECK-LABEL: define void @func_with_debug(
@@ -140,10 +147,16 @@ llvm.func @empty_types() {
   llvm.return
 } loc(fused<#sp1>["foo.mlir":2:1])
 
+// CHECK: define void @atom_loc() !dbg ![[ATOM_SP:[0-9]+]]
+llvm.func @atom_loc() {
+  // CHECK: ret void, !dbg ![[ATOM_LOC:[0-9]+]]
+  llvm.return loc(fused<{"llvm.di_atom_group" = 9 : i64, "llvm.di_atom_rank" = 2 : i8}>[fused<#spAtom>["foo.mlir":7:3]])
+} loc(fused<#spAtom>["foo.mlir":7:1])
+
 // CHECK: ![[CU_LOC:.*]] = distinct !DICompileUnit(language: DW_LANG_C, file: ![[CU_FILE_LOC:.*]], producer: "MLIR", isOptimized: true, runtimeVersion: 0, splitDebugFilename: "test.dwo", emissionKind: FullDebug, nameTableKind: None)
 // CHECK: ![[CU_FILE_LOC]] = !DIFile(filename: "foo.mlir", directory: "/test/")
 
-// CHECK: ![[FUNC_LOC]] = distinct !DISubprogram(name: "func_with_debug", linkageName: "func_with_debug", scope: ![[NESTED_NAMESPACE:.*]], file: ![[CU_FILE_LOC]], line: 3, type: ![[FUNC_TYPE:.*]], scopeLine: 3, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: ![[CU_LOC]])
+// CHECK: ![[FUNC_LOC]] = distinct !DISubprogram(name: "func_with_debug", linkageName: "func_with_debug", scope: ![[NESTED_NAMESPACE:.*]], file: ![[CU_FILE_LOC]], line: 3, type: ![[FUNC_TYPE:.*]], scopeLine: 3, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: ![[CU_LOC]], keyInstructions: true)
 // CHECK: ![[NESTED_NAMESPACE]] = !DINamespace(name: "nested", scope: ![[TOPLEVEL_NAMESPACE:.*]])
 // CHECK: ![[TOPLEVEL_NAMESPACE]] = !DINamespace(name: "toplevel", scope: null, exportSymbols: true)
 // CHECK: ![[FUNC_TYPE]] = !DISubroutineType(cc: DW_CC_normal, types: ![[FUNC_ARGS:.*]])
@@ -170,7 +183,6 @@ llvm.func @empty_types() {
 // CHECK-DAG: ![[FILE_LOC]] = !DILocation(line: 1, column: 2,
 // CHECK-DAG: ![[NAMED_LOC]] = !DILocation(line: 10, column: 10
 // CHECK-DAG: ![[FUSED_LOC]] = !DILocation(line: 1, column: 1
-
 // CHECK: ![[FUSEDWITH_LOC]] = !DILocation(line: 2, column: 4, scope: ![[CALLEE_LOC:.*]], inlinedAt: ![[INLINE_LOC:.*]])
 // CHECK: ![[CALLEE_LOC]] = distinct !DISubprogram(name: "callee", scope: ![[COMPOSITE_TYPE]], file: ![[CU_FILE_LOC]], type: ![[CALLEE_TYPE:.*]], spFlags: DISPFlagDefinition, unit: ![[CU_LOC]])
 // CHECK: ![[CALLEE_TYPE]] = !DISubroutineType(types: ![[CALLEE_ARGS:.*]])
@@ -181,9 +193,10 @@ llvm.func @empty_types() {
 // CHECK: ![[MODULE]] = !DIModule(scope: ![[CU_FILE_LOC]], name: "module", configMacros: "bar", includePath: "/", apinotes: "/", file: ![[CU_FILE_LOC]], line: 42, isDecl: true)
 // CHECK: ![[EMPTY_TYPES_TYPE]] = !DISubroutineType(cc: DW_CC_normal, types: ![[EMPTY_TYPES_ARGS:.*]])
 // CHECK: ![[EMPTY_TYPES_ARGS]] = !{}
-
 // CHECK: ![[ANNOTATIONS]] = !{![[ANNOTATION:.*]]}
 // CHECK: ![[ANNOTATION]] = !{!"foo", !"bar"}
+// CHECK: ![[ATOM_SP]] = distinct !DISubprogram(name: "atom_loc"
+// CHECK: ![[ATOM_LOC]] = !DILocation(line: 7, column: 3, scope: ![[ATOM_SP]], atomGroup: 9, atomRank: 2)
 
 // -----
 
@@ -412,6 +425,30 @@ llvm.func @imp_fn() {
 #di_global_variable_expression = #llvm.di_global_variable_expression<var = #di_global_variable, expr = <>>
 
 llvm.mlir.global external constant @".str.1"() {addr_space = 0 : i32, dbg_exprs = [#di_global_variable_expression]} : !llvm.array<10 x i8>
+
+// -----
+
+// Global variable annotations must survive translation, integer-valued ones
+// included: IRPGO debug info profile correlation keeps a CFG hash and a
+// counter count next to the function name, and llvm-profdata needs all three.
+
+// CHECK-DAG: ![[VAR:.*]] = distinct !DIGlobalVariable({{.*}}name: "gv_with_annotations"{{.*}}annotations: ![[ANNS:[0-9]+]])
+// CHECK-DAG: ![[ANNS]] = !{![[ANN0:[0-9]+]], ![[ANN1:[0-9]+]], ![[ANN2:[0-9]+]]}
+// CHECK-DAG: ![[ANN0]] = !{!"Function Name", !"some_function"}
+// CHECK-DAG: ![[ANN1]] = !{!"CFG Hash", i64 742261418966908927}
+// CHECK-DAG: ![[ANN2]] = !{!"Num Counters", i32 2}
+
+#di_file_ann = #llvm.di_file<"file.c" in "/path/to/file">
+#di_type_ann = #llvm.di_basic_type<tag = DW_TAG_base_type, name = "long", sizeInBits = 64, encoding = DW_ATE_signed>
+#di_global_variable_ann = #llvm.di_global_variable<
+  name = "gv_with_annotations", file = #di_file_ann, line = 1,
+  type = #di_type_ann, isLocalToUnit = true, isDefined = true,
+  annotations = [#llvm.di_annotation<name = "Function Name", value = "some_function">,
+                 #llvm.di_annotation<name = "CFG Hash", value = 742261418966908927 : i64>,
+                 #llvm.di_annotation<name = "Num Counters", value = 2 : i32>]>
+#di_global_variable_expression_ann = #llvm.di_global_variable_expression<var = #di_global_variable_ann, expr = <>>
+
+llvm.mlir.global external @gv_with_annotations() {addr_space = 0 : i32, dbg_exprs = [#di_global_variable_expression_ann]} : i64
 
 // -----
 
@@ -727,3 +764,38 @@ llvm.mlir.global @data() {dbg_exprs = [#var_expression, #var_expression1]} : i64
 // CHECK: ![[VAR1]] = {{.*}}!DIGlobalVariable(name: "a"{{.*}})
 // CHECK: ![[EXP2]] = !DIGlobalVariableExpression(var: ![[VAR2:[0-9]+]], expr: !DIExpression())
 // CHECK: ![[VAR2]] = {{.*}}!DIGlobalVariable(name: "b"{{.*}})
+
+// -----
+
+// A debug intrinsic inlined from a callee: the callee frame of its CallSiteLoc
+// carries the callee's scope, and the call site has none of its own. The call
+// site is placed in the enclosing function, not in the callee.
+
+#di_file = #llvm.di_file<"foo.mlir" in "/test/">
+#di_basic_type = #llvm.di_basic_type<tag = DW_TAG_base_type, name = "int", sizeInBits = 32, encoding = DW_ATE_signed>
+#di_compile_unit = #llvm.di_compile_unit<
+  id = distinct[0]<>, sourceLanguage = DW_LANG_C, file = #di_file,
+  producer = "MLIR", isOptimized = true, emissionKind = Full
+>
+#di_subprogram_caller = #llvm.di_subprogram<
+  id = distinct[1]<>, compileUnit = #di_compile_unit, scope = #di_file,
+  name = "caller", file = #di_file, subprogramFlags = "Definition|Optimized"
+>
+#di_subprogram_callee = #llvm.di_subprogram<
+  id = distinct[2]<>, compileUnit = #di_compile_unit, scope = #di_file,
+  name = "callee", file = #di_file, subprogramFlags = "Definition|Optimized"
+>
+#di_param = #llvm.di_local_variable<scope = #di_subprogram_callee, name = "p", file = #di_file, arg = 1, type = #di_basic_type>
+
+// CHECK-LABEL: define i32 @inlined_dbg_value_unscoped_call_site(
+// CHECK-SAME: !dbg ![[CALLER:[0-9]+]]
+llvm.func @inlined_dbg_value_unscoped_call_site(%arg0: i32) -> i32 {
+  // RECORDS: #dbg_value(i32 %{{.*}}, ![[P:[0-9]+]], !DIExpression(), ![[IN_CALLEE:[0-9]+]])
+  llvm.intr.dbg.value #di_param = %arg0 : i32 loc(callsite(fused<#di_subprogram_callee>["foo.mlir":2:3] at "foo.mlir":9:4))
+  llvm.return %arg0 : i32
+} loc(fused<#di_subprogram_caller>["foo.mlir":8:1])
+
+// CHECK-DAG: ![[CALLEE:[0-9]+]] = distinct !DISubprogram(name: "callee"
+// CHECK-DAG: ![[P]] = !DILocalVariable(name: "p", arg: 1, scope: ![[CALLEE]]
+// CHECK-DAG: ![[IN_CALLEE]] = !DILocation(line: 2, column: 3, scope: ![[CALLEE]], inlinedAt: ![[CALL_SITE:[0-9]+]])
+// CHECK-DAG: ![[CALL_SITE]] = !DILocation(line: 9, column: 4, scope: ![[CALLER]])

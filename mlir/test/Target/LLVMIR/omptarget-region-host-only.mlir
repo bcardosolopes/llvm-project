@@ -33,21 +33,51 @@ module attributes {omp.is_target_device = false} {
   }
 }
 
-// CHECK: define void @omp_target_region_()
-// CHECK-NOT: call i32 @__tgt_target_kernel({{.*}})
-// CHECK: call void @__omp_offloading_[[DEV:.*]]_[[FIL:.*]]_omp_target_region__l[[LINE1:.*]](ptr %{{.*}}, ptr %{{.*}}, ptr %{{.*}})
-// CHECK-NEXT: ret void
-
-// CHECK: define void @omp_target_no_map()
-// CHECK-NOT: call i32 @__tgt_target_kernel({{.*}})
-// CHECK: call void @__omp_offloading_[[DEV]]_[[FIL]]_omp_target_no_map_l[[LINE2:.*]]()
-// CHECK-NEXT: ret void
-
-// CHECK: define internal void @__omp_offloading_[[DEV]]_[[FIL]]_omp_target_region__l[[LINE1]](ptr %[[ADDR_A:.*]], ptr %[[ADDR_B:.*]], ptr %[[ADDR_C:.*]])
-// CHECK: %[[VAL_A:.*]] = load i32, ptr %[[ADDR_A]], align 4
-// CHECK: %[[VAL_B:.*]] = load i32, ptr %[[ADDR_B]], align 4
-// CHECK: %[[SUM:.*]] = add i32 %[[VAL_A]], %[[VAL_B]]
-// CHECK: store i32 %[[SUM]], ptr %[[ADDR_C]], align 4
-
-// CHECK: define internal void @__omp_offloading_[[DEV]]_[[FIL]]_omp_target_no_map_l[[LINE2]]()
-// CHECK: ret void
+// CHECK: @0 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @1 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @2 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK-LABEL: define void @omp_target_region_(
+// CHECK:   %[[VAL_0:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_2:.*]] = alloca i32, i64 1, align 4
+// CHECK:   store i32 10, ptr %[[VAL_0]], align 4
+// CHECK:   store i32 20, ptr %[[VAL_1]], align 4
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_omp_target_region__l{{.*}}(ptr %[[VAL_0]], ptr %[[VAL_1]], ptr %[[VAL_2]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define void @omp_target_no_map(
+// CHECK:   br label %[[VAL_0:.*]]
+// CHECK: entry:
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_omp_target_no_map_l{{.*}}()
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_omp_target_region__l{{.*}}(
+// CHECK: entry:
+// CHECK:   br label %[[VAL_0:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_1:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: omp.target:
+// CHECK:   %[[VAL_3:.*]] = load i32, ptr %[[VAL_4:.*]], align 4
+// CHECK:   %[[VAL_5:.*]] = load i32, ptr %[[VAL_6:.*]], align 4
+// CHECK:   %[[VAL_7:.*]] = add i32 %[[VAL_3]], %[[VAL_5]]
+// CHECK:   store i32 %[[VAL_7]], ptr %[[VAL_8:.*]], align 4
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_omp_target_no_map_l{{.*}}(
+// CHECK: entry:
+// CHECK:   br label %[[VAL_0:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_1:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: omp.target:
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   ret void
+// CHECK: }

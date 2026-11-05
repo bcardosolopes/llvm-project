@@ -1,10 +1,14 @@
 // RUN: %clang_cc1 %s -triple arm64-apple-ios8.1.0 -std=c++11 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple arm64-apple-ios8.1.0 -std=c++11 -emit-llvm -fclangir -o - | FileCheck %s --check-prefix=CIR %}
 
 typedef __attribute__((__ext_vector_type__(8))) float vector_float8;
 
 typedef vector_float8 float8;
 
 // CHECK-LABEL: define{{.*}} void @_Z23MandelbrotPolyCalcSIMD8v
+// CIR-LABEL: define void @_Z23MandelbrotPolyCalcSIMD8v()
+// CIR-NOT: @llvm.memcpy
+// CIR: store <8 x float> splat (float 4.000000e+00)
 void MandelbrotPolyCalcSIMD8() {
   constexpr float8 v4 = 4.0;  // value to compare against abs(z)^2, to see if bounded
   float8 vABS;
@@ -21,6 +25,11 @@ typedef __attribute__((__ext_vector_type__(4))) float float4;
 typedef __attribute__((__ext_vector_type__(4))) __int128 bigint4;
 
 // CHECK-LABEL: define{{.*}} void @_Z14BoolConversionv
+// CIR-LABEL: define void @_Z14BoolConversionv()
+// CIR-NOT: @llvm.memcpy
+// CIR: store <4 x i32> splat (i32 -1)
+// CIR: store <4 x float> splat (float -1.000000e+00)
+// CIR: store <4 x i128> splat (i128 -1)
 void BoolConversion() {
   // CHECK: store <4 x i32> splat (i32 -1)
   int4 intsT = (int4)true;

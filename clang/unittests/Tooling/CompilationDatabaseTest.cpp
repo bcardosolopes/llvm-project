@@ -10,8 +10,11 @@
 #include "clang/Tooling/FileMatchTrie.h"
 #include "clang/Tooling/JSONCompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Testing/Support/SupportHelpers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <algorithm>
@@ -189,6 +192,40 @@ TEST(JSONCompilationDatabase, GetAllCompileCommands) {
   EXPECT_EQ(Command1, Commands[1].CommandLine[0]) << ErrorMessage;
 }
 
+TEST(CompilationDatabase, LoadFromDirectory) {
+  llvm::unittest::TempDir Dir("compilation-database", /*Unique=*/true);
+  llvm::SmallString<128> DatabasePath(Dir.path());
+  llvm::sys::path::append(DatabasePath, "compile_commands.json");
+
+  std::error_code EC;
+  llvm::raw_fd_ostream DatabaseOS(DatabasePath, EC);
+  ASSERT_FALSE(EC);
+  DatabaseOS << R"json(
+[
+  {
+    "directory": "/tmp/tooling",
+    "arguments": ["clang++", "-c", "/tmp/tooling/test.cpp"],
+    "file": "/tmp/tooling/test.cpp"
+  }
+]
+)json";
+  DatabaseOS.close();
+
+  std::string ErrorMessage;
+  std::unique_ptr<CompilationDatabase> Database =
+      CompilationDatabase::loadFromDirectory(Dir.path(), ErrorMessage);
+  ASSERT_NE(nullptr, Database) << ErrorMessage;
+
+  std::vector<CompileCommand> Commands =
+      Database->getCompileCommands("/tmp/tooling/test.cpp");
+  ASSERT_EQ(1u, Commands.size()) << ErrorMessage;
+  EXPECT_EQ("/tmp/tooling", Commands[0].Directory);
+  EXPECT_EQ("/tmp/tooling/test.cpp", Commands[0].Filename);
+  EXPECT_THAT(Commands[0].CommandLine,
+              ElementsAre("clang++", "--driver-mode=g++", "-c",
+                          "/tmp/tooling/test.cpp"));
+}
+
 static CompileCommand findCompileArgsInJsonDatabase(StringRef FileName,
                                                     std::string JSONDatabase,
                                                     std::string &ErrorMessage) {
@@ -362,6 +399,26 @@ TEST(findCompileArgsInJsonDatabase, ReadsCompileCommandLinesWithSpaces) {
   EXPECT_EQ("//net/path to compiler",
             FoundCommand.CommandLine[0]) << ErrorMessage;
   EXPECT_EQ("and an argument", FoundCommand.CommandLine[1]) << ErrorMessage;
+}
+
+TEST(findCompileArgsInJsonDatabase,
+     ReadsCompileCommandLinesWithRepeatedWhitespace) {
+  StringRef Directory("//net/some/directory");
+  StringRef FileName("//net/path/to/a-file.cpp");
+  StringRef Command(
+      "   //net/path/to/compiler   \\\"and an argument\\\"   'tail arg'   ");
+  std::string ErrorMessage;
+  CompileCommand FoundCommand = findCompileArgsInJsonDatabase(
+      FileName,
+      ("[{\"directory\":\"" + Directory + "\"," +
+       "\"command\":\"" + Command + "\"," + "\"file\":\"" + FileName + "\"}]")
+          .str(),
+      ErrorMessage);
+  ASSERT_EQ(3u, FoundCommand.CommandLine.size()) << ErrorMessage;
+  EXPECT_EQ("//net/path/to/compiler",
+            FoundCommand.CommandLine[0]) << ErrorMessage;
+  EXPECT_EQ("and an argument", FoundCommand.CommandLine[1]) << ErrorMessage;
+  EXPECT_EQ("tail arg", FoundCommand.CommandLine[2]) << ErrorMessage;
 }
 
 TEST(findCompileArgsInJsonDatabase, ReadsDirectoryWithSpaces) {

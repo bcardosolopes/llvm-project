@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -Wno-objc-root-class -fptrauth-objc-class-ro -fobjc-arc -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -Wno-objc-root-class -fptrauth-objc-class-ro -fobjc-arc -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR %}
 
 // CHECK: @"OBJC_CLASS_$_C" = global %struct._class_t { ptr @"OBJC_METACLASS_$_C", ptr null, ptr @_objc_empty_cache, ptr null, ptr ptrauth (ptr @"_OBJC_CLASS_RO_$_C", i32 2, i64 25080, ptr getelementptr inbounds (%struct._class_t, ptr @"OBJC_CLASS_$_C", i32 0, i32 4)) }, section "__DATA, __objc_data", align 8
 // CHECK: @"OBJC_METACLASS_$_C" = global %struct._class_t { ptr @"OBJC_METACLASS_$_C", ptr @"OBJC_CLASS_$_C", ptr @_objc_empty_cache, ptr null, ptr ptrauth (ptr @"_OBJC_METACLASS_RO_$_C", i32 2, i64 25080, ptr getelementptr inbounds (%struct._class_t, ptr @"OBJC_METACLASS_$_C", i32 0, i32 4)) }, section "__DATA, __objc_data", align 8
@@ -10,6 +11,15 @@
 // CHECK: @"_OBJC_CLASS_RO_$_C" = internal global %struct._class_ro_t { i32 130, i32 0, i32 0, ptr null, ptr @OBJC_CLASS_NAME_, ptr ptrauth (ptr @"_OBJC_$_INSTANCE_METHODS_C", i32 2, i64 49936, ptr getelementptr inbounds (%struct._class_ro_t, ptr @"_OBJC_CLASS_RO_$_C", i32 0, i32 5)), ptr null, ptr null, ptr null, ptr null }, section "__DATA, __objc_const", align 8
 // CHECK: @OBJC_SELECTOR_REFERENCES_ = internal externally_initialized global ptr @OBJC_METH_VAR_NAME_, section "__DATA,__objc_selrefs,literal_pointers,no_dead_strip", align 8
 // CHECK: @"OBJC_LABEL_CLASS_$" = private global [1 x ptr] [ptr @"OBJC_CLASS_$_C"], section "__DATA,__objc_classlist,regular,no_dead_strip"
+
+// CIR-DAG: @"OBJC_CLASS_$_C" = global { ptr, ptr, ptr, ptr, ptr } { ptr @"OBJC_METACLASS_$_C", ptr null, ptr @_objc_empty_cache, ptr null, ptr ptrauth (ptr @"_OBJC_CLASS_RO_$_C", i32 2, i64 25080, ptr getelementptr inbounds ({ ptr, ptr, ptr, ptr, ptr }, ptr @"OBJC_CLASS_$_C", i32 0, i32 4)) }, section "__DATA, __objc_data", align 8
+// CIR-DAG: @"OBJC_METACLASS_$_C" = global { ptr, ptr, ptr, ptr, ptr } { ptr @"OBJC_METACLASS_$_C", ptr @"OBJC_CLASS_$_C", ptr @_objc_empty_cache, ptr null, ptr ptrauth (ptr @"_OBJC_METACLASS_RO_$_C", i32 2, i64 25080, ptr getelementptr inbounds ({ ptr, ptr, ptr, ptr, ptr }, ptr @"OBJC_METACLASS_$_C", i32 0, i32 4)) }, section "__DATA, __objc_data", align 8
+// CIR-DAG: @"_OBJC_CLASS_RO_$_C" = internal global { i32, i32, i32, ptr, ptr, ptr, ptr, ptr, ptr, ptr } { i32 130, i32 0, i32 0, ptr null, ptr @OBJC_CLASS_NAME_, ptr ptrauth (ptr @"_OBJC_$_INSTANCE_METHODS_C", i32 2, i64 49936, ptr getelementptr inbounds ({ i32, i32, i32, ptr, ptr, ptr, ptr, ptr, ptr, ptr }, ptr @"_OBJC_CLASS_RO_$_C", i32 0, i32 5)), ptr null, ptr null, ptr null, ptr null }, section "__DATA, __objc_const", align 8
+// CIR-DAG: @"_OBJC_METACLASS_RO_$_C" = internal global { i32, i32, i32, ptr, ptr, ptr, ptr, ptr, ptr, ptr } { i32 131, i32 40, i32 40, ptr null, ptr @OBJC_CLASS_NAME_, ptr null, ptr null, ptr null, ptr null, ptr null }, section "__DATA, __objc_const", align 8
+// CIR-DAG: @OBJC_SELECTOR_REFERENCES_ = internal externally_initialized global ptr @OBJC_METH_VAR_NAME_, section "__DATA,__objc_selrefs,literal_pointers,no_dead_strip", align 8
+// CIR-DAG: @"OBJC_LABEL_CLASS_$" = private global [1 x ptr] [ptr @"OBJC_CLASS_$_C"], section "__DATA,__objc_classlist,regular,no_dead_strip", align 8
+// CIR: declare ptr @objc_msgSend(ptr, ptr, ...) #[[MSGSEND:[0-9]+]]
+// CIR: attributes #[[MSGSEND]] = { nonlazybind }
 
 @interface C
 - (void) m0;

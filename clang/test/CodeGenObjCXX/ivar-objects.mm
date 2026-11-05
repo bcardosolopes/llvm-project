@@ -1,10 +1,20 @@
 // RUN: %clang_cc1 %s -triple=x86_64-apple-darwin10 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=x86_64-apple-darwin10 -emit-llvm -disable-llvm-passes -fclangir -o - | FileCheck %s --check-prefix=CIR %}
 // CHECK: -[A .cxx_construct]
 // CHECK: -[A .cxx_destruct]
 // CHECK: -[B .cxx_construct]
 // CHECK-NOT: -[B .cxx_destruct]
 // CHECK-NOT: -[C .cxx_construct]
 // CHECK: -[C .cxx_destruct]
+// CIR-LABEL: define internal void @"\01-[A .cxx_destruct]"(
+// CIR-LABEL: define internal noundef ptr @"\01-[A .cxx_construct]"(
+// CIR-LABEL: define internal void @"\01-[I position]"(
+// CIR: ret void
+// CIR-LABEL: define internal void @"\01-[I setPosition:]"(
+// CIR: call noundef nonnull align 1 dereferenceable(1) ptr @_ZN1SaSERKS_(
+// CIR: ret void
+// CIR-LABEL: define internal noundef ptr @"\01-[B .cxx_construct]"(
+// CIR-LABEL: define internal void @"\01-[C .cxx_destruct]"(
 
 @interface NSObject 
 - alloc;

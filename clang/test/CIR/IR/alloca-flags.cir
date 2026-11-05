@@ -1,0 +1,57 @@
+// RUN: cir-opt %s | cir-opt | FileCheck %s
+
+// cir.alloca must be able to parse what it prints.
+//
+// The flags used to be two adjacent optional groups in the declarative
+// assembly format:
+//
+//   `[` $name (`,` `init` $init^)? (`,` `const` $constant^)? `]`
+//
+// Both begin with a literal `,`, so the generated parser committed to the
+// first group the moment it saw one and then demanded `init`. A variable that
+// is const but not initialised in place prints as `["x", const]` -- and that
+// could not be read back:
+//
+//   error: custom op 'cir.alloca' expected 'init'
+//
+// A caught-exception binding is exactly that shape, so *every* function with a
+// `catch` produced CIR that CIR itself rejected. Anything reading CIR from a
+// file -- cir-opt, cir-link, any file-driven pass pipeline -- hit it.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @flags() {
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init]
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["a", init] {alignment = 4 : i64}
+
+    // The regression: const with no init.
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["b", const]
+    %1 = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", const] {alignment = 4 : i64}
+
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["c", init, const]
+    %2 = cir.alloca !s32i, !cir.ptr<!s32i>, ["c", init, const] {alignment = 4 : i64}
+
+    // Accepted in either order and normalised, which costs nothing and removes
+    // a second way to get this wrong.
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["d", init, const]
+    %3 = cir.alloca !s32i, !cir.ptr<!s32i>, ["d", const, init] {alignment = 4 : i64}
+
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["e"]
+    %4 = cir.alloca !s32i, !cir.ptr<!s32i>, ["e"] {alignment = 4 : i64}
+
+    // The name goes through the same directive, so it has the same obligation:
+    // the parser unescapes, so the printer has to escape. Printing raw quotes
+    // would send this back out as `["say "hi"", const]`, which reads as a
+    // *different* name followed by garbage -- the original bug, one field
+    // over. Escaping is asserted through a full round trip rather than by
+    // eyeballing the printer, since only the round trip catches the two sides
+    // disagreeing.
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["say \22hi\22", const]
+    %5 = cir.alloca !s32i, !cir.ptr<!s32i>, ["say \22hi\22", const] {alignment = 4 : i64}
+
+    // CHECK: cir.alloca !s32i, !cir.ptr<!s32i>, ["back\\slash", init]
+    %6 = cir.alloca !s32i, !cir.ptr<!s32i>, ["back\\slash", init] {alignment = 4 : i64}
+    cir.return
+  }
+}

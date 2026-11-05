@@ -16,6 +16,7 @@
 #include "clang/AST/CharUnits.h"
 #include "clang/Basic/AddressSpaces.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
+#include "mlir/IR/Attributes.h"
 
 namespace clang::CIRGen {
 
@@ -80,7 +81,12 @@ struct CIRGenTypeCache {
     unsigned char SizeAlignInBytes;
   };
 
-  cir::TargetAddressSpaceAttr cirAllocaAddressSpace;
+  mlir::ptr::MemorySpaceAttrInterface cirAllocaAddressSpace;
+
+  /// Cached IntegerAttr values for common alignment values (1, 2, 4, 8, 16,
+  /// 32). Indexed by log2(alignment). Avoids repeated MLIR uniquer lookups
+  /// for the ~200K+ alignment attrs created per large TU.
+  mlir::IntegerAttr alignmentAttrCache[6]; // indices 0..5 = align 1..32
 
   clang::CharUnits getSizeSize() const {
     return clang::CharUnits::fromQuantity(SizeSizeInBytes);
@@ -93,7 +99,7 @@ struct CIRGenTypeCache {
     return clang::CharUnits::fromQuantity(PointerAlignInBytes);
   }
 
-  cir::TargetAddressSpaceAttr getCIRAllocaAddressSpace() const {
+  mlir::ptr::MemorySpaceAttrInterface getCIRAllocaAddressSpace() const {
     return cirAllocaAddressSpace;
   }
 };

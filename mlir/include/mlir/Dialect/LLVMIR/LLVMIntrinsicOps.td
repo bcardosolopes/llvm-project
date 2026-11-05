@@ -139,11 +139,12 @@ def LLVM_Log10Op : LLVM_UnaryIntrOpF<"log10">;
 def LLVM_Log2Op : LLVM_UnaryIntrOpF<"log2">;
 def LLVM_LogOp : LLVM_UnaryIntrOpF<"log">;
 def LLVM_Prefetch : LLVM_ZeroResultIntrOp<"prefetch", [0],
-  /*traits=*/[], /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/0,
+  /*traits=*/[], /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/1,
   /*requiresArgAndResultAttrs=*/0, /*requiresOpBundles=*/0,
   /*immArgPositions=*/[1, 2, 3], /*immArgAttrNames=*/["rw", "hint", "cache"]
 > {
-  let arguments = (ins LLVM_AnyPointer:$addr, I32Attr:$rw, I32Attr:$hint, I32Attr:$cache);
+  let arguments = !con((ins LLVM_AnyPointer:$addr, I32Attr:$rw, I32Attr:$hint,
+                           I32Attr:$cache), baseArgs);
 }
 def LLVM_RoundEvenOp : LLVM_UnaryIntrOpF<"roundeven">;
 def LLVM_RoundOp : LLVM_UnaryIntrOpF<"round">;
@@ -225,7 +226,10 @@ class LLVM_MemcpyIntrOpBase<string name> :
     /*immArgPositions=*/[3], /*immArgAttrNames=*/["isVolatile"]> {
   dag args = (ins Arg<LLVM_AnyPointer,"",[MemWrite]>:$dst,
                   Arg<LLVM_AnyPointer,"",[MemRead]>:$src,
-                  AnySignlessInteger:$len, I1Attr:$isVolatile);
+                  AnySignlessInteger:$len, I1Attr:$isVolatile,
+                  // `!tbaa.struct`: which fields of the aggregate the copy
+                  // touches, so it is not treated as one opaque access.
+                  OptionalAttr<LLVM_TBAAStructFieldArrayAttr>:$tbaa_struct);
   // Append the arguments defined by LLVM_IntrOpBase.
   let arguments = !con(args, baseArgs);
   let builders = [
@@ -237,11 +241,21 @@ class LLVM_MemcpyIntrOpBase<string name> :
     OpBuilder<(ins "Value":$dst, "Value":$src, "Value":$len,
                    "IntegerAttr":$isVolatile), [{
       build($_builder, $_state, dst, src, len, isVolatile,
+            /*tbaa_struct=*/nullptr,
             /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
             /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+            /*annotations=*/nullptr,
             /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr);
     }]>
   ];
+
+  // The generated builder writes the alias metadata; tbaa.struct is specific to
+  // the aggregate-copy intrinsics, so it is appended here rather than in the
+  // shared alias code, which also covers loads and stores.
+  let llvmBuilder = baseLlvmBuilder # setAccessGroupsMetadataCode
+      # setAliasAnalysisMetadataCode # [{
+        moduleTranslation.setTBAAStructMetadata(op.getTbaaStructAttr(), inst);
+      }] # baseLlvmBuilderArgAndResultAttrs # baseLlvmBuilderCoda;
 }
 
 def LLVM_MemcpyOp : LLVM_MemcpyIntrOpBase<"memcpy">;
@@ -257,7 +271,8 @@ def LLVM_MemcpyInlineOp :
     /*immArgPositions=*/[2, 3], /*immArgAttrNames=*/["len", "isVolatile"]> {
   dag args = (ins Arg<LLVM_AnyPointer,"",[MemWrite]>:$dst,
                   Arg<LLVM_AnyPointer,"",[MemRead]>:$src,
-                  APIntAttr:$len, I1Attr:$isVolatile);
+                  APIntAttr:$len, I1Attr:$isVolatile,
+                  OptionalAttr<LLVM_TBAAStructFieldArrayAttr>:$tbaa_struct);
   // Append the arguments defined by LLVM_IntrOpBase.
   let arguments = !con(args, baseArgs);
   let builders = [
@@ -269,11 +284,19 @@ def LLVM_MemcpyInlineOp :
     OpBuilder<(ins "Value":$dst, "Value":$src, "IntegerAttr":$len,
                    "IntegerAttr":$isVolatile), [{
       build($_builder, $_state, dst, src, len, isVolatile,
+            /*tbaa_struct=*/nullptr,
             /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
             /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+            /*annotations=*/nullptr,
             /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr);
     }]>
   ];
+
+  // Same as the memcpy base: tbaa.struct is specific to the aggregate copies.
+  let llvmBuilder = baseLlvmBuilder # setAccessGroupsMetadataCode
+      # setAliasAnalysisMetadataCode # [{
+        moduleTranslation.setTBAAStructMetadata(op.getTbaaStructAttr(), inst);
+      }] # baseLlvmBuilderArgAndResultAttrs # baseLlvmBuilderCoda;
 }
 
 def LLVM_MemsetOp : LLVM_ZeroResultIntrOp<"memset", [0, 2],
@@ -298,6 +321,7 @@ def LLVM_MemsetOp : LLVM_ZeroResultIntrOp<"memset", [0, 2],
       build($_builder, $_state, dst, val, len, isVolatile,
             /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
             /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+            /*annotations=*/nullptr,
             /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr);
     }]>
   ];
@@ -325,19 +349,28 @@ def LLVM_MemsetInlineOp : LLVM_ZeroResultIntrOp<"memset.inline", [0, 2],
       build($_builder, $_state, dst, val, len, isVolatile,
             /*access_groups=*/nullptr, /*alias_scopes=*/nullptr,
             /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+            /*annotations=*/nullptr,
             /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr);
     }]>
   ];
 }
 
 def LLVM_NoAliasScopeDeclOp
-    : LLVM_ZeroResultIntrOp<"experimental.noalias.scope.decl"> {
-  let arguments = (ins LLVM_AliasScopeAttr:$scope);
+    : LLVM_ZeroResultIntrOp<"experimental.noalias.scope.decl", [], [],
+                            /*requiresAccessGroup=*/0,
+                            /*requiresAliasAnalysis=*/1> {
+  // The scope this op declares is its operand; the alias attributes below are
+  // the metadata attached to the *call*, which is separate -- a scope
+  // declaration sitting inside another noalias region carries that region's
+  // !noalias like any other instruction.
+  let arguments = !con((ins LLVM_AliasScopeAttr:$scope), baseArgs);
   string llvmBuilder = [{
     // Wrap the scope argument into a list since the LLVM IR intrinsic takes
     // a list containing exactly one scope rather than a scope itself.
     llvm::MDNode* node = moduleTranslation.getOrCreateAliasScopes({$scope});
-    builder.CreateNoAliasScopeDeclaration(node);
+    llvm::Instruction *inst = builder.CreateNoAliasScopeDeclaration(node);
+    moduleTranslation.setAliasScopeMetadata(op, inst);
+    moduleTranslation.setTBAAMetadata(op, inst);
   }];
   string mlirBuilder = [{
     FailureOr<SmallVector<LLVM::AliasScopeAttr>> scopeAttrs =
@@ -350,7 +383,8 @@ def LLVM_NoAliasScopeDeclOp
     if (scopeAttrs->size() != 1)
       return failure();
     $_op = LLVM::NoAliasScopeDeclOp::create(
-      $_builder, $_location, (*scopeAttrs)[0]);
+      $_builder, $_location, (*scopeAttrs)[0], /*alias_scopes=*/nullptr,
+      /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr, /*annotations=*/nullptr);
   }];
   let assemblyFormat = "$scope attr-dict";
 }
@@ -371,8 +405,22 @@ def LLVM_PtrMaskOp
 
 /// Base operation for lifetime markers.
 class LLVM_LifetimeBaseOp<string opName> : LLVM_ZeroResultIntrOp<opName, [0],
-    [DeclareOpInterfaceMethods<PromotableOpInterface>]> {
-  let arguments = (ins LLVM_AnyPointer:$ptr);
+    [DeclareOpInterfaceMethods<PromotableOpInterface>],
+    /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/1> {
+  dag args = (ins LLVM_AnyPointer:$ptr);
+  // Append the alias attributes defined by LLVM_IntrOpBase.
+  let arguments = !con(args, baseArgs);
+  // Keep the pre-alias-attribute spelling working for the many in-tree callers
+  // that build a lifetime marker with just a pointer.
+  let builders = [
+    OpBuilder<(ins "Value":$ptr), [{
+      // No access_groups: LLVM_ZeroResultIntrOp sets requiresAccessGroup=0,
+      // so baseArgs carries only the alias-analysis attributes.
+      build($_builder, $_state, ptr,
+            /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr,
+            /*tbaa=*/nullptr, /*annotations=*/nullptr);
+    }]>
+  ];
   let assemblyFormat = "$ptr attr-dict `:` qualified(type($ptr))";
 }
 
@@ -382,8 +430,18 @@ def LLVM_LifetimeEndOp : LLVM_LifetimeBaseOp<"lifetime.end">;
 def LLVM_InvariantStartOp : LLVM_OneResultIntrOp<"invariant.start", [], [1],
     [DeclareOpInterfaceMethods<PromotableOpInterface>],
     /*requiresFastmath=*/0, /*requiresArgAndResultAttrs=*/0,
-    /*immArgPositions=*/[0], /*immArgAttrNames=*/["size"]> {
-  let arguments = (ins I64Attr:$size, LLVM_AnyPointer:$ptr);
+    /*immArgPositions=*/[0], /*immArgAttrNames=*/["size"],
+    /*requiresAliasAnalysis=*/1> {
+  dag args = (ins I64Attr:$size, LLVM_AnyPointer:$ptr);
+  // Append the alias attributes defined by LLVM_IntrOpBase.
+  let arguments = !con(args, baseArgs);
+  let builders = [
+    OpBuilder<(ins "Type":$res, "uint64_t":$size, "Value":$ptr), [{
+      build($_builder, $_state, res, $_builder.getI64IntegerAttr(size), ptr,
+            /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr,
+            /*tbaa=*/nullptr, /*annotations=*/nullptr);
+    }]>
+  ];
   let results = (outs LLVM_DefaultPointer:$res);
   let assemblyFormat = "$size `,` $ptr attr-dict `:` qualified(type($ptr))";
 }
@@ -531,6 +589,421 @@ def LLVM_ConstrainedFPExtIntr
   }];
 }
 
+def LLVM_ConstrainedFPToSI
+    : LLVM_ConstrainedIntr<"fptosi", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[0],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:` type($arg_0) `to` type(results)
+  }];
+}
+
+def LLVM_ConstrainedFPToUI
+    : LLVM_ConstrainedIntr<"fptoui", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[0],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:` type($arg_0) `to` type(results)
+  }];
+}
+
+class LLVM_ConstrainedFPBinOpIntr<string mnem>
+    : LLVM_ConstrainedIntr<mnem, /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $roundingmode $fpExceptionBehavior attr-dict `:`
+      type($arg_0) `,` type($arg_1) `to` type(results)
+  }];
+}
+
+def LLVM_ConstrainedFAddIntr : LLVM_ConstrainedFPBinOpIntr<"fadd">;
+def LLVM_ConstrainedFSubIntr : LLVM_ConstrainedFPBinOpIntr<"fsub">;
+def LLVM_ConstrainedFMulIntr : LLVM_ConstrainedFPBinOpIntr<"fmul">;
+def LLVM_ConstrainedFDivIntr : LLVM_ConstrainedFPBinOpIntr<"fdiv">;
+def LLVM_ConstrainedFRemIntr : LLVM_ConstrainedFPBinOpIntr<"frem">;
+
+// The rest of the constrained intrinsics. Each is the plain operation plus the
+// two things that make it constrained: the rounding mode it must assume and
+// how it must treat exceptions. LLVM carries both as `MDString` operands,
+// which is why they are attributes rather than operands here.
+//
+// `numArgs` counts only the real arguments and `overloadedOperands` names the
+// ones whose type does not follow the result.
+//
+// `hasRoundingMode` is false where the result does not depend on the current
+// rounding mode, and those take only the exception-behaviour operand. That is
+// not the same as being exact: `maxnum` and `minimum` pick an operand,
+// `ceil`, `floor`, `trunc`, `round` and `roundeven` name their rounding in the
+// operation, `lround` and `llround` round half away from zero by definition,
+// and `fptosi` and `fptoui` truncate by definition. Whether a new one needs a
+// rounding mode is decided by that question, not by whether it is arithmetic.
+//
+// `overloadedResult` is 1 on every one of these, because every one of them
+// mangles its result type into the intrinsic name. It exists for the case
+// where the name is fixed and only the operands vary, which none of the
+// constrained intrinsics are.
+
+def LLVM_ConstrainedPow
+    : LLVM_ConstrainedIntr<"pow", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedATan2
+    : LLVM_ConstrainedIntr<"atan2", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedFMA
+    : LLVM_ConstrainedIntr<"fma", /*numArgs=*/3,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 `,` $arg_2 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedFMulAdd
+    : LLVM_ConstrainedIntr<"fmuladd", /*numArgs=*/3,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 `,` $arg_2 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedSqrt
+    : LLVM_ConstrainedIntr<"sqrt", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedASin
+    : LLVM_ConstrainedIntr<"asin", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedACos
+    : LLVM_ConstrainedIntr<"acos", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedATan
+    : LLVM_ConstrainedIntr<"atan", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedSin
+    : LLVM_ConstrainedIntr<"sin", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedCos
+    : LLVM_ConstrainedIntr<"cos", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedTan
+    : LLVM_ConstrainedIntr<"tan", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedSinh
+    : LLVM_ConstrainedIntr<"sinh", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedCosh
+    : LLVM_ConstrainedIntr<"cosh", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedTanh
+    : LLVM_ConstrainedIntr<"tanh", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLog
+    : LLVM_ConstrainedIntr<"log", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLog10
+    : LLVM_ConstrainedIntr<"log10", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLog2
+    : LLVM_ConstrainedIntr<"log2", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedExp
+    : LLVM_ConstrainedIntr<"exp", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedExp2
+    : LLVM_ConstrainedIntr<"exp2", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedRint
+    : LLVM_ConstrainedIntr<"rint", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedNearbyInt
+    : LLVM_ConstrainedIntr<"nearbyint", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedPowI
+    : LLVM_ConstrainedIntr<"powi", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLdExp
+    : LLVM_ConstrainedIntr<"ldexp", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[1],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLRInt
+    : LLVM_ConstrainedIntr<"lrint", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[0],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLLRInt
+    : LLVM_ConstrainedIntr<"llrint", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[0],
+        /*hasRoundingMode=*/1> {
+  let assemblyFormat = [{
+    $arg_0 $roundingmode $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLRound
+    : LLVM_ConstrainedIntr<"lround", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[0],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedLLRound
+    : LLVM_ConstrainedIntr<"llround", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[0],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedMaxNum
+    : LLVM_ConstrainedIntr<"maxnum", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedMinNum
+    : LLVM_ConstrainedIntr<"minnum", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedMaximum
+    : LLVM_ConstrainedIntr<"maximum", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedMinimum
+    : LLVM_ConstrainedIntr<"minimum", /*numArgs=*/2,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 `,` $arg_1 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedCeil
+    : LLVM_ConstrainedIntr<"ceil", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedFloor
+    : LLVM_ConstrainedIntr<"floor", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedRound
+    : LLVM_ConstrainedIntr<"round", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedRoundEven
+    : LLVM_ConstrainedIntr<"roundeven", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
+def LLVM_ConstrainedTrunc
+    : LLVM_ConstrainedIntr<"trunc", /*numArgs=*/1,
+        /*overloadedResult=*/1, /*overloadedOperands=*/[],
+        /*hasRoundingMode=*/0> {
+  let assemblyFormat = [{
+    $arg_0 $fpExceptionBehavior attr-dict `:`
+      functional-type(operands, results)
+  }];
+}
+
 // Intrinsics with multiple returns.
 
 class LLVM_ArithWithOverflowOp<string mnem>
@@ -563,7 +1036,7 @@ def LLVM_USHLSat : LLVM_BinarySameArgsIntrOpI<"ushl.sat">;
 def LLVM_AssumeOp
     : LLVM_ZeroResultIntrOp<"assume", /*overloadedOperands=*/[], /*traits=*/[],
                             /*requiresAccessGroup=*/0,
-                            /*requiresAliasAnalysis=*/0,
+                            /*requiresAliasAnalysis=*/1,
                             /*requiresArgAndResultAttrs=*/0,
                             /*requiresOpBundles=*/1> {
   dag args = (ins I1:$cond);
@@ -761,6 +1234,224 @@ def LLVM_DbgValueOp : LLVM_DbgIntrOp<"dbg.value", "value",
   }];
 }
 
+// Named machine registers. The register name is an `MDString` inside a node --
+// `metadata !{!"sp"}` -- rather than a bare string as
+// `llvm.allow.runtime.check` uses, so the wrapper is unpacked on the way in and
+// rebuilt on the way out.
+def LLVM_RegisterAccess {
+  code nameFromMetadata = [{
+    auto *wrapper = dyn_cast<llvm::MetadataAsValue>(llvmOperands[0]);
+    if (!wrapper)
+      return failure();
+    auto *node = dyn_cast<llvm::MDNode>(wrapper->getMetadata());
+    if (!node || node->getNumOperands() != 1)
+      return failure();
+    auto *name = dyn_cast<llvm::MDString>(node->getOperand(0).get());
+    if (!name)
+      return failure();
+  }];
+  code nameToMetadata = [{
+    llvm::Module *module = builder.GetInsertBlock()->getModule();
+    llvm::LLVMContext &ctx = module->getContext();
+    llvm::Metadata *nameNode =
+        llvm::MDNode::get(ctx, llvm::MDString::get(ctx, $reg));
+    llvm::Value *nameArg = llvm::MetadataAsValue::get(ctx, nameNode);
+  }];
+}
+
+def LLVM_ReadRegisterOp
+    : LLVM_OneResultIntrOp<"read_register", [0], [], []> {
+  let summary = "Reads a named machine register.";
+  let arguments = (ins StrAttr:$reg);
+  let assemblyFormat = "$reg attr-dict `:` type($res)";
+  let llvmBuilder = LLVM_RegisterAccess.nameToMetadata # [{
+    llvm::Function *fn = llvm::Intrinsic::getOrInsertDeclaration(
+        module, llvm::Intrinsic::read_register, {$_resultType});
+    $res = builder.CreateCall(fn, {nameArg});
+  }];
+  let mlirBuilder = LLVM_RegisterAccess.nameFromMetadata # [{
+    $res = $_builder.create<LLVM::ReadRegisterOp>(
+        $_location, $_resultType, $_builder.getStringAttr(name->getString()));
+  }];
+}
+
+def LLVM_WriteRegisterOp
+    : LLVM_ZeroResultIntrOp<"write_register", [1], []> {
+  let summary = "Writes a named machine register.";
+  let arguments = (ins StrAttr:$reg, AnySignlessInteger:$value);
+  let assemblyFormat = "$reg `,` $value attr-dict `:` qualified(type($value))";
+  let llvmBuilder = LLVM_RegisterAccess.nameToMetadata # [{
+    llvm::Value *value = moduleTranslation.lookupValue(opInst.getOperand(0));
+    llvm::Function *fn = llvm::Intrinsic::getOrInsertDeclaration(
+        module, llvm::Intrinsic::write_register, {value->getType()});
+    builder.CreateCall(fn, {nameArg, value});
+  }];
+  let mlirBuilder = LLVM_RegisterAccess.nameFromMetadata # [{
+    $_op = LLVM::WriteRegisterOp::create($_builder, $_location,
+        $_builder.getStringAttr(name->getString()), $value);
+  }];
+}
+
+def LLVM_ReadVolatileRegisterOp
+    : LLVM_OneResultIntrOp<"read_volatile_register", [0], [], []> {
+  let summary = "Reads a named machine register, without eliding the read.";
+  let description = [{
+    `llvm.read_volatile_register`. The same read as `llvm.read_register`, but
+    LLVM gives it `IntrHasSideEffects` where the other has `IntrReadMem`, so
+    two reads of one register cannot be folded into one.
+
+    A separate op rather than a flag on `llvm.intr.read_register`, because the
+    difference *is* the side-effect behaviour: an op models that in its traits,
+    which cannot vary per instance.
+  }];
+  let arguments = (ins StrAttr:$reg);
+  let assemblyFormat = "$reg attr-dict `:` type($res)";
+  let llvmBuilder = LLVM_RegisterAccess.nameToMetadata # [{
+    llvm::Function *fn = llvm::Intrinsic::getOrInsertDeclaration(
+        module, llvm::Intrinsic::read_volatile_register, {$_resultType});
+    $res = builder.CreateCall(fn, {nameArg});
+  }];
+  let mlirBuilder = LLVM_RegisterAccess.nameFromMetadata # [{
+    $res = $_builder.create<LLVM::ReadVolatileRegisterOp>(
+        $_location, $_resultType, $_builder.getStringAttr(name->getString()));
+  }];
+}
+
+// The two constrained comparisons. They do not fit `LLVM_ConstrainedIntr`:
+// their first metadata operand is a comparison predicate, not a rounding mode,
+// so putting them through that class would read the predicate as one.
+class LLVM_ConstrainedFPCmpIntr<string mnem>
+    : LLVM_OneResultIntrOp<"experimental.constrained." # mnem, [], [0],
+          [DeclareOpInterfaceMethods<FPExceptionBehaviorOpInterface>,
+           // LLVM declares the second operand as `LLVMMatchType<0>`, so the
+           // two always agree; saying so lets the format print one type.
+           AllTypesMatch<["lhs", "rhs"]>]> {
+  let arguments = (ins LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$lhs,
+                       LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$rhs,
+                       FCmpPredicate:$predicate,
+                       FPExceptionBehaviorAttr:$fpExceptionBehavior);
+  let assemblyFormat = [{
+    $predicate `,` $lhs `,` $rhs $fpExceptionBehavior attr-dict `:`
+      qualified(type($lhs)) `to` qualified(type($res))
+  }];
+  let llvmBuilder = [{
+    $res = builder.CreateConstrainedFPCmp(
+        llvm::Intrinsic::experimental_constrained_}] # mnem # [{,
+        convertFCmpPredicateToLLVM($predicate), $lhs, $rhs, "",
+        moduleTranslation.translateFPExceptionBehavior($fpExceptionBehavior));
+  }];
+  let mlirBuilder = [{
+    auto *cmp = cast<llvm::ConstrainedFPCmpIntrinsic>(inst);
+    $res = $_builder.create<$_qualCppClassName>($_location, $_resultType,
+        $lhs, $rhs,
+        LLVM::FCmpPredicateAttr::get($_builder.getContext(),
+            convertFCmpPredicateFromLLVM(cmp->getPredicate())),
+        $_fpExceptionBehavior_attr($fpExceptionBehavior));
+  }];
+}
+
+def LLVM_ConstrainedFCmp : LLVM_ConstrainedFPCmpIntr<"fcmp"> {
+  let summary = "Constrained floating-point comparison, quiet.";
+}
+
+def LLVM_ConstrainedFCmpS : LLVM_ConstrainedFPCmpIntr<"fcmps"> {
+  let summary = "Constrained floating-point comparison, signalling.";
+}
+
+def LLVM_AllowRuntimeCheckOp
+    : LLVM_OneResultIntrOp<"allow.runtime.check", [], [], []> {
+  let summary = "Asks whether a runtime check of the given kind is allowed.";
+  let description = [{
+    `__builtin_allow_runtime_check`. The kind names the check -- the frontend
+    picks the string -- and LLVM carries it as an `MDString` operand rather
+    than a value, so it is an attribute here.
+  }];
+  let arguments = (ins StrAttr:$kind);
+  let assemblyFormat = "$kind attr-dict `:` type($res)";
+  let llvmBuilder = [{
+    llvm::Module *module = builder.GetInsertBlock()->getModule();
+    llvm::LLVMContext &ctx = module->getContext();
+    llvm::Function *fn = llvm::Intrinsic::getOrInsertDeclaration(
+        module, llvm::Intrinsic::allow_runtime_check);
+    $res = builder.CreateCall(fn, {llvm::MetadataAsValue::get(
+        ctx, llvm::MDString::get(ctx, $kind))});
+  }];
+  let mlirBuilder = [{
+    // The operand is metadata, not a value, so the generic argument
+    // conversion cannot reach it -- it asserts on a `MetadataAsValue`.
+    auto *wrapper = dyn_cast<llvm::MetadataAsValue>(llvmOperands[0]);
+    if (!wrapper)
+      return failure();
+    auto *kind = dyn_cast<llvm::MDString>(wrapper->getMetadata());
+    if (!kind)
+      return failure();
+    $res = $_builder.create<LLVM::AllowRuntimeCheckOp>(
+        $_location, $_resultType, $_builder.getStringAttr(kind->getString()));
+  }];
+}
+
+def LLVM_DbgAssignOp : LLVM_IntrOp<"dbg.assign", [], [], [], 0> {
+  let summary = "Describes an assignment made to a source language variable.";
+  let description = [{
+    The assignment-tracking form of `llvm.dbg.value`. It names the value
+    assigned *and* the address assigned to, and carries a `DIAssignID` linking
+    it to the store that performs the assignment -- the store carries the same
+    identity in its `llvm.dbg_assign_id` attribute.
+  }];
+  let arguments = (ins
+    LLVM_Type:$value,
+    LLVM_DILocalVariableAttr:$varInfo,
+    DefaultValuedAttr<LLVM_DIExpressionAttr, "{}">:$locationExpr,
+    LLVM_DIAssignIDAttr:$assignID,
+    LLVM_AnyPointer:$address,
+    DefaultValuedAttr<LLVM_DIExpressionAttr, "{}">:$addressExpr
+  );
+  let llvmBuilder = [{
+    // Debug records without debug locations are invalid.
+    if(!builder.getCurrentDebugLocation())
+      return success();
+    llvm::DILocalScope *scope = getLocalScopeFromLoc(builder, opInst.getLoc(),
+                                                     moduleTranslation);
+
+    // A debug *record*, not a call to `llvm.dbg.assign`: the intrinsic form no
+    // longer survives a module. `Module::removeDebugIntrinsicDeclarations`
+    // asserts that the declaration has no uses left, so emitting the call
+    // aborts the export rather than producing anything.
+    //
+    // `DIBuilder::insertDbgAssign` takes the linked store and reads the
+    // identity off it; here the identity is the operand, and the store that
+    // shares it carries it in its own `!DIAssignID` attachment, so the record
+    // is built directly.
+    llvm::DbgVariableRecord *record = llvm::DbgVariableRecord::createDVRAssign(
+        moduleTranslation.lookupValue(opInst.getOperand(0)),
+        llvm::cast<llvm::DILocalVariable>(
+            moduleTranslation.translateDebugInfo($varInfo)),
+        moduleTranslation.translateExpression($locationExpr),
+        llvm::cast<llvm::DIAssignID>(
+            moduleTranslation.translateDIAssignID($assignID)),
+        moduleTranslation.lookupValue(opInst.getOperand(1)),
+        moduleTranslation.translateExpression($addressExpr),
+        moduleTranslation.translateLoc(opInst.getLoc(), scope));
+    builder.GetInsertBlock()->insertDbgRecordBefore(record,
+                                                    builder.GetInsertPoint());
+  }];
+  let mlirBuilder = [{
+    // Converted once the full function is available, as the other debug
+    // intrinsics are: the operands need not dominate the record yet.
+    moduleImport.addDebugIntrinsic(inst);
+    return success();
+  }];
+  // The address expression prints before the address rather than after it: an
+  // attribute with no buildable type sitting immediately before the `:` makes
+  // the format ambiguous, and an operand there does not.
+  let assemblyFormat = [{
+    qualified($varInfo) (qualified($locationExpr)^)? `=` $value
+      `,` `id` `=` qualified($assignID)
+      `,` `addr` `=` qualified($addressExpr) $address
+      `:` qualified(type($value)) `,` qualified(type($address)) attr-dict
+  }];
+}
+
 def LLVM_DbgLabelOp : LLVM_IntrOp<"dbg.label", [], [], [], 0> {
   let summary = "Relates the program to a debug information label.";
   let arguments = (ins LLVM_DILabelAttr:$label);
@@ -792,20 +1483,27 @@ def LLVM_DbgLabelOp : LLVM_IntrOp<"dbg.label", [], [], [], 0> {
 // Variadic function intrinsics.
 //
 
-def LLVM_VaStartOp : LLVM_ZeroResultIntrOp<"vastart", [0]>,
-                     Arguments<(ins LLVM_AnyPointer:$arg_list)> {
+def LLVM_VaStartOp : LLVM_ZeroResultIntrOp<"vastart", [0], [],
+                       /*requiresAccessGroup=*/0,
+                       /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins LLVM_AnyPointer:$arg_list), baseArgs);
   let assemblyFormat = "$arg_list attr-dict `:` qualified(type($arg_list))";
   let summary = "Initializes `arg_list` for subsequent variadic argument extractions.";
 }
 
-def LLVM_VaCopyOp : LLVM_ZeroResultIntrOp<"vacopy", [0]>,
-                    Arguments<(ins LLVM_AnyPointer:$dest_list, LLVM_AnyPointer:$src_list)> {
+def LLVM_VaCopyOp : LLVM_ZeroResultIntrOp<"vacopy", [0], [],
+                      /*requiresAccessGroup=*/0,
+                      /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins LLVM_AnyPointer:$dest_list,
+                            LLVM_AnyPointer:$src_list), baseArgs);
   let assemblyFormat = "$src_list `to` $dest_list attr-dict `:` type(operands)";
   let summary = "Copies the current argument position from `src_list` to `dest_list`.";
 }
 
-def LLVM_VaEndOp : LLVM_ZeroResultIntrOp<"vaend", [0]>,
-                   Arguments<(ins LLVM_AnyPointer:$arg_list)> {
+def LLVM_VaEndOp : LLVM_ZeroResultIntrOp<"vaend", [0], [],
+                     /*requiresAccessGroup=*/0,
+                     /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins LLVM_AnyPointer:$arg_list), baseArgs);
   let assemblyFormat = "$arg_list attr-dict `:` qualified(type($arg_list))";
   let summary = "Destroys `arg_list`, which has been initialized by `intr.vastart` or `intr.vacopy`.";
 }
@@ -823,12 +1521,19 @@ def LLVM_EhTypeidForOp : LLVM_OneResultIntrOp<"eh.typeid.for", [], [0]> {
 // Stack save/restore intrinsics.
 //
 
-def LLVM_StackSaveOp : LLVM_OneResultIntrOp<"stacksave", [0]> {
+def LLVM_StackSaveOp : LLVM_OneResultIntrOp<"stacksave", [0], [], [],
+                         /*requiresFastmath=*/0,
+                         /*requiresArgAndResultAttrs=*/0,
+                         /*immArgPositions=*/[], /*immArgAttrNames=*/[],
+                         /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins), baseArgs);
   let assemblyFormat = "attr-dict `:` qualified(type($res))";
 }
 
-def LLVM_StackRestoreOp : LLVM_ZeroResultIntrOp<"stackrestore", [0]> {
-  let arguments = (ins LLVM_AnyPointer:$ptr);
+def LLVM_StackRestoreOp : LLVM_ZeroResultIntrOp<"stackrestore", [0], [],
+                            /*requiresAccessGroup=*/0,
+                            /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins LLVM_AnyPointer:$ptr), baseArgs);
   let assemblyFormat = "$ptr attr-dict `:` qualified(type($ptr))";
 }
 
@@ -1155,25 +1860,36 @@ def LLVM_masked_compressstore
 // Annotate intrinsics.
 //
 
+// The annotation intrinsics take a pointer and clang emits them from
+// `__attribute__((annotate(...)))`, so LLVM attaches the same alias metadata it
+// would to any other pointer use. Without `requiresAliasAnalysis` the op has no
+// slot for it and `!noalias` is declined -- measured on one real library,
+// where this was the single remaining `inst.unhandled` entry across the app.
 def LLVM_VarAnnotation
     : LLVM_ZeroResultIntrOp<"var.annotation", [0, 1],
-        [AllTypesMatch<["annotation", "fileName", "attr"]>]> {
-  let arguments = (ins LLVM_AnyPointer:$val,
-                       LLVM_AnyPointer:$annotation,
-                       LLVM_AnyPointer:$fileName,
-                       I32:$line,
-                       LLVM_AnyPointer:$attr);
+        [AllTypesMatch<["annotation", "fileName", "attr"]>],
+        /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/1> {
+  // `!con(..., baseArgs)` because an explicit `arguments` replaces the list
+  // the base class would have generated, alias attributes included.
+  let arguments = !con((ins LLVM_AnyPointer:$val,
+                            LLVM_AnyPointer:$annotation,
+                            LLVM_AnyPointer:$fileName,
+                            I32:$line,
+                            LLVM_AnyPointer:$attr), baseArgs);
 }
 
 def LLVM_PtrAnnotation
     : LLVM_OneResultIntrOp<"ptr.annotation", [0], [2],
         [AllTypesMatch<["res", "ptr"]>,
-         AllTypesMatch<["annotation", "fileName", "attr"]>]> {
-  let arguments = (ins LLVM_AnyPointer:$ptr,
-                       LLVM_AnyPointer:$annotation,
-                       LLVM_AnyPointer:$fileName,
-                       I32:$line,
-                       LLVM_AnyPointer:$attr);
+         AllTypesMatch<["annotation", "fileName", "attr"]>],
+        /*requiresFastmath=*/0, /*requiresArgAndResultAttrs=*/0,
+        /*immArgPositions=*/[], /*immArgAttrNames=*/[],
+        /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins LLVM_AnyPointer:$ptr,
+                            LLVM_AnyPointer:$annotation,
+                            LLVM_AnyPointer:$fileName,
+                            I32:$line,
+                            LLVM_AnyPointer:$attr), baseArgs);
   let results = (outs LLVM_AnyPointer:$res);
 }
 
@@ -1192,7 +1908,10 @@ def LLVM_Annotation
 // Trap intrinsics.
 //
 
-def LLVM_Trap : LLVM_ZeroResultIntrOp<"trap"> {
+def LLVM_Trap : LLVM_ZeroResultIntrOp<"trap", [], [],
+                  /*requiresAccessGroup=*/0,
+                  /*requiresAliasAnalysis=*/1> {
+  let arguments = !con((ins), baseArgs);
   let assemblyFormat = "attr-dict";
 }
 
@@ -1202,10 +1921,10 @@ def LLVM_DebugTrap : LLVM_ZeroResultIntrOp<"debugtrap"> {
 
 def LLVM_UBSanTrap : LLVM_ZeroResultIntrOp<"ubsantrap",
   /*overloadedOperands=*/[], /*traits=*/[],
-  /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/0,
+  /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/1,
   /*requiresArgAndResultAttrs=*/0, /*requiresOpBundles=*/0,
   /*immArgPositions=*/[0], /*immArgAttrNames=*/["failureKind"]> {
-  let arguments = (ins I8Attr:$failureKind);
+  let arguments = !con((ins I8Attr:$failureKind), baseArgs);
 
   let assemblyFormat = "prop-dict attr-dict";
 }

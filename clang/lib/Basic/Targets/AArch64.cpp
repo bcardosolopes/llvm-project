@@ -127,7 +127,7 @@ static constexpr auto BuiltinAArch64Infos =
 
 AArch64TargetInfo::AArch64TargetInfo(const llvm::Triple &Triple,
                                      const TargetOptions &Opts)
-    : TargetInfo(Triple), ABI("aapcs") {
+    : TargetInfo(Triple), ABI(Triple.isOSDarwin() ? "darwinpcs" : "aapcs") {
   if (getTriple().isOSOpenBSD()) {
     Int64Type = SignedLongLong;
     IntMaxType = SignedLongLong;

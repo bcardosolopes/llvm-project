@@ -1,10 +1,16 @@
 // RUN: %clang_cc1 -triple=aarch64-gnu-linux -emit-llvm -O1 %s -o - | FileCheck --check-prefix=NO-MATH-ERRNO %s
 // RUN: %clang_cc1 -triple=aarch64-gnu-linux -emit-llvm -fmath-errno %s -o - | FileCheck --check-prefix=MATH-ERRNO %s
 // RUN: %clang_cc1 -triple=aarch64-gnu-linux -emit-llvm -ffp-exception-behavior=strict %s -o - | FileCheck --check-prefix=STRICT-FP %s
+// RUN: %if cir-support %{ %clang_cc1 -triple=aarch64-gnu-linux -emit-llvm -O1 -fclangir %s -o - | FileCheck --check-prefix=CIR-NO-MATH-ERRNO %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple=aarch64-gnu-linux -emit-llvm -fmath-errno -fclangir %s -o - | FileCheck --check-prefix=CIR-MATH-ERRNO %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple=aarch64-gnu-linux -emit-llvm -ffp-exception-behavior=strict -fclangir %s -o - | FileCheck --check-prefix=CIR-STRICT-FP %s %}
 
 void sincos(double, double*, double*);
 void sincosf(float, float*, float*);
 void sincosl(long double, long double*, long double*);
+
+// CIR-MATH-ERRNO-NOT: @__builtin_sincos
+// CIR-STRICT-FP-NOT: @__builtin_sincos
 
 // NO-MATH-ERRNO-LABEL: @sincos_f32
 //      NO-MATH-ERRNO:    [[SINCOS:%.*]] = tail call { float, float } @llvm.sincos.f32(float {{.*}})
@@ -63,6 +69,15 @@ void sincos_f64(double x, double* dp0, double* dp1) {
 //
 // MATH-ERRNO-LABEL: @sincos_builtin_f64
 //      MATH-ERRNO:    call void @sincos(
+//
+// CIR-NO-MATH-ERRNO-LABEL: @sincos_builtin_f64(
+//      CIR-NO-MATH-ERRNO:    call { double, double } @llvm.sincos.f64(double
+//
+// CIR-MATH-ERRNO-LABEL: @sincos_builtin_f64(
+//      CIR-MATH-ERRNO:    call void @sincos(
+//
+// CIR-STRICT-FP-LABEL: @sincos_builtin_f64(
+//      CIR-STRICT-FP:    call void @sincos(
 //
 void sincos_builtin_f64(double x, double* dp0, double* dp1) {
   __builtin_sincos(x, dp0, dp1);
@@ -128,6 +143,15 @@ void sincospi_f32(float x, float* fp0, float* fp1) {
 //
 // STRICT-FP-LABEL: @sincospi_f64
 //      STRICT-FP:    call void @sincospi(
+//
+// CIR-NO-MATH-ERRNO-LABEL: @sincospi_f64(
+//      CIR-NO-MATH-ERRNO:    call { double, double } @llvm.sincospi.f64(double
+//
+// CIR-MATH-ERRNO-LABEL: @sincospi_f64(
+//      CIR-MATH-ERRNO:    call void @sincospi(
+//
+// CIR-STRICT-FP-LABEL: @sincospi_f64(
+//      CIR-STRICT-FP:    call void @sincospi(
 //
 void sincospi_f64(double x, double* dp0, double* dp1) {
   __builtin_sincospi(x, dp0, dp1);

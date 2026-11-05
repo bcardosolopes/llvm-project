@@ -64,7 +64,7 @@ cir.func private @f10(!s32i, !s32i)
 cir.func @f11() {
   %0 = cir.const #cir.int<1> : !s32i
   %1 = cir.const #cir.int<2> : !u32i
-  // expected-error @below {{operand type mismatch: expected operand type '!cir.int<s, 32>', but provided '!cir.int<u, 32>' for operand number 1}}
+  // Signedness-compatible integer types are accepted.
   cir.call @f10(%0, %1) : (!s32i, !u32i) -> ()
   cir.return
 }
@@ -79,4 +79,18 @@ cir.func @f13() {
   // expected-error @below {{too few operands for callee}}
   cir.call @f12(%0) : (!s32i) -> ()
   cir.return
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+
+module {
+cir.func private @"ns::f14"(!s32i)
+cir.func @f15() {
+  %0 = cir.const #cir.int<1> : !s32i
+  // Keep this quoted `::` symbol path valid under verifier fast-path changes.
+  cir.call @"ns::f14"(%0) : (!s32i) -> ()
+  cir.return
+}
 }

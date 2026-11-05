@@ -1,0 +1,23 @@
+// RUN: cir-translate -cir-to-llvmir --target x86_64-unknown-linux-gnu --disable-cc-lowering %s -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+cir.func @dup_switch_case(%arg0: !s32i) {
+  cir.switch.flat %arg0 : !s32i, ^bb3 [
+    1: ^bb1,
+    1: ^bb2
+  ]
+^bb1:
+  cir.return
+^bb2:
+  cir.return
+^bb3:
+  cir.return
+}
+
+// CHECK: define void @dup_switch_case(i32 %{{.*}})
+// CHECK: switch i32 %{{.*}}, label %[[DEFAULT:[0-9]+]] [
+// CHECK-NEXT: i32 1, label %[[CASE:[0-9]+]]
+// CHECK-NEXT: ]
+// CHECK: [[CASE]]:
+// CHECK: ret void

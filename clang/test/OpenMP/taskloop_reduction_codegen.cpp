@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fopenmp -x c++ %s -verify -Wno-vla -debug-info-kind=limited -emit-llvm -o - -triple powerpc64le-unknown-linux-gnu -std=c++98 | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -fopenmp -fclangir -x c++ %s -verify -Wno-vla -debug-info-kind=limited -emit-llvm -o /dev/null -triple powerpc64le-unknown-linux-gnu -std=c++98 %}
 
 // RUN: %clang_cc1 -fopenmp-simd -x c++ %s -verify -Wno-vla -debug-info-kind=limited -emit-llvm -o - -triple powerpc64le-unknown-linux-gnu -std=c++98 | FileCheck --check-prefix SIMD-ONLY0 %s
 // SIMD-ONLY0-NOT: {{__kmpc|__tgt}}

@@ -1,0 +1,17 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+
+// The #cir.*.ast attributes wrap a raw clang::Decl* / clang::Expr*, which lives
+// only inside the cc1 invocation that produced the module. It cannot be
+// serialized, so parsing must refuse rather than manufacture an attribute with
+// a null payload: the interface accessors in ASTAttrInterfaces.td dereference
+// getAst() unconditionally, and a null-payload attribute hands every one of
+// them an object that dereferences to nothing.
+//
+// Before this was enforced, the text below parsed successfully and produced
+// exactly that booby-trapped attribute.
+
+module attributes {test.ast = #cir.function.decl.ast} {
+}
+
+// CHECK: 'function.decl.ast' cannot be parsed
+// CHECK-SAME: not serialized

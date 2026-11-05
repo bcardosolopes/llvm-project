@@ -9,8 +9,8 @@
 // This file declares an interface for converting CIR modules to LLVM IR.
 //
 //===----------------------------------------------------------------------===//
-#ifndef CLANG_CIR_LOWERTOLLVM_H
-#define CLANG_CIR_LOWERTOLLVM_H
+#ifndef CLANG_LIB_CIR_LOWERING_DIRECTTOLLVM_LOWERTOLLVM_H
+#define CLANG_LIB_CIR_LOWERING_DIRECTTOLLVM_LOWERTOLLVM_H
 
 #include "LowerModule.h"
 
@@ -26,10 +26,19 @@ namespace direct {
 /// Convert a CIR attribute to an LLVM attribute. May use the datalayout for
 /// lowering attributes to-be-stored in memory.
 mlir::Value lowerCirAttrAsValue(mlir::Operation *parentOp, mlir::Attribute attr,
-                                mlir::ConversionPatternRewriter &rewriter,
-                                const mlir::TypeConverter *converter);
+                                mlir::OpBuilder &builder,
+                                const mlir::TypeConverter *converter,
+                                cir::LowerModule *lowerMod);
 
 mlir::LLVM::Linkage convertLinkage(cir::GlobalLinkageKind linkage);
+
+mlir::ArrayAttr lowerCIRTBAAAttr(mlir::Attribute tbaa,
+                                 mlir::ConversionPatternRewriter &rewriter,
+                                 cir::LowerModule *lowerMod);
+
+mlir::LLVM::TBAATypeDescriptorAttr
+lowerCIRTBAATypeDescAttr(mlir::Attribute tbaa, mlir::MLIRContext *ctx,
+                         bool isCPlusPlus);
 
 void convertSideEffectForCall(mlir::Operation *callOp, bool isNothrow,
                               cir::SideEffect sideEffect,
@@ -43,4 +52,4 @@ void convertSideEffectForCall(mlir::Operation *callOp, bool isNothrow,
 } // namespace direct
 } // namespace cir
 
-#endif // CLANG_CIR_LOWERTOLLVM_H
+#endif // CLANG_LIB_CIR_LOWERING_DIRECTTOLLVM_LOWERTOLLVM_H

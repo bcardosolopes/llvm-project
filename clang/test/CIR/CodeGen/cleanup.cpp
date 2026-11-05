@@ -7,8 +7,6 @@ struct Struk {
 
 // CHECK: !rec_Struk = !cir.record<struct "Struk" padded {!u8i}>
 
-// CHECK: cir.func{{.*}} @_ZN5StrukD1Ev(!cir.ptr<!rec_Struk>)
-
 void test_cleanup() {
   Struk s;
 }
@@ -17,6 +15,7 @@ void test_cleanup() {
 // CHECK:   %[[S_ADDR:.*]] = cir.alloca !rec_Struk, !cir.ptr<!rec_Struk>, ["s"]
 // CHECK:   cir.call @_ZN5StrukD1Ev(%[[S_ADDR]]) nothrow : (!cir.ptr<!rec_Struk>) -> ()
 // CHECK:   cir.return
+// CHECK: cir.func{{.*}} @_ZN5StrukD1Ev(!cir.ptr<!rec_Struk> {{.*cir.noundef.*}})
 
 void test_cleanup_ifelse(bool b) {
   if (b) {
@@ -26,16 +25,14 @@ void test_cleanup_ifelse(bool b) {
   }
 }
 
-// CHECK: cir.func{{.*}} @_Z19test_cleanup_ifelseb(%arg0: !cir.bool
-// CHECK:   cir.scope {
-// CHECK:     %[[B:.*]] = cir.load{{.*}} %0 : !cir.ptr<!cir.bool>
-// CHECK:     cir.if %[[B]] {
-// CHECK:       %[[S:.*]] = cir.alloca !rec_Struk, !cir.ptr<!rec_Struk>, ["s"]
-// CHECK:       cir.call @_ZN5StrukD1Ev(%[[S]]) nothrow : (!cir.ptr<!rec_Struk>) -> ()
-// CHECK:     } else {
-// CHECK:       %[[S_TOO:.*]] = cir.alloca !rec_Struk, !cir.ptr<!rec_Struk>, ["s"]
-// CHECK:       cir.call @_ZN5StrukD1Ev(%[[S_TOO]]) nothrow : (!cir.ptr<!rec_Struk>) -> ()
-// CHECK:     }
+// CHECK: cir.func{{.*}} @_Z19test_cleanup_ifelseb(%arg0: !cir.bool {{.*}}
+// CHECK:   %[[B:.*]] = cir.load{{.*}} %0 : !cir.ptr<!cir.bool>
+// CHECK:   cir.if %[[B]] {
+// CHECK:     %[[S:.*]] = cir.alloca !rec_Struk, !cir.ptr<!rec_Struk>, ["s"]
+// CHECK:     cir.call @_ZN5StrukD1Ev(%[[S]]) nothrow : (!cir.ptr<!rec_Struk>) -> ()
+// CHECK:   } else {
+// CHECK:     %[[S_TOO:.*]] = cir.alloca !rec_Struk, !cir.ptr<!rec_Struk>, ["s"]
+// CHECK:     cir.call @_ZN5StrukD1Ev(%[[S_TOO]]) nothrow : (!cir.ptr<!rec_Struk>) -> ()
 // CHECK:   }
 // CHECK:   cir.return
 

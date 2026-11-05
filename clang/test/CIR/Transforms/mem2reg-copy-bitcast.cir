@@ -1,0 +1,47 @@
+// mem2reg absorbs a cir.copy into a promoted slot only when the copy has the
+// slot's own type. A bitfield struct is initialized through its constant's
+// layout, a different record; promoting that slot would need a value bitcast
+// between the two records, which lowers to undef, so the slot stays in memory.
+//
+// RUN: cir-opt %s --mem2reg -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+!u16i = !cir.int<u, 16>
+!u32i = !cir.int<u, 32>
+!u8i = !cir.int<u, 8>
+!rec_a = !cir.record<struct "a" {!u32i, !u16i, !s32i}>
+!rec_init = !cir.record<struct  {!u32i, !u8i, !u8i, !cir.array<!u8i x 2>, !s32i}>
+
+module {
+  cir.global "private" constant cir_private @init = #cir.const_record<{#cir.int<908> : !u32i, #cir.int<5> : !u8i, #cir.int<0> : !u8i, #cir.const_array<[#cir.zero : !u8i, #cir.zero : !u8i]> : !cir.array<!u8i x 2>, #cir.int<3> : !s32i}> : !rec_init
+  cir.global external @src = #cir.zero : !rec_a
+  cir.global external @g = #cir.zero : !rec_a
+
+  // CHECK-LABEL: cir.func @through_bitcast(
+  // CHECK:         %[[BF:.*]] = cir.alloca !rec_a
+  // CHECK:         cir.copy %{{.*}} to %{{.*}} {{.*}}: !cir.ptr<!rec_anon_struct>
+  // CHECK:         cir.copy %[[BF]] to %{{.*}} {{.*}}: !cir.ptr<!rec_a>
+  cir.func @through_bitcast() {
+    %0 = cir.alloca !rec_a, !cir.ptr<!rec_a>, ["bf"] {alignment = 4 : i64}
+    %1 = cir.cast bitcast %0 : !cir.ptr<!rec_a> -> !cir.ptr<!rec_init>
+    %2 = cir.get_global @init : !cir.ptr<!rec_init>
+    cir.copy %2 to %1 {dst_alignment = 4 : i64, src_alignment = 4 : i64} : !cir.ptr<!rec_init>
+    %3 = cir.get_global @g : !cir.ptr<!rec_a>
+    cir.copy %0 to %3 {dst_alignment = 4 : i64, src_alignment = 4 : i64} : !cir.ptr<!rec_a>
+    cir.return
+  }
+
+  // A copy of the slot's own type is still absorbed.
+  // CHECK-LABEL: cir.func @same_type(
+  // CHECK-NOT:     cir.alloca
+  // CHECK:         %[[V:.*]] = cir.load {{.*}} : !cir.ptr<!rec_a>, !rec_a
+  // CHECK:         cir.store {{.*}}%[[V]], %{{.*}} : !rec_a, !cir.ptr<!rec_a>
+  cir.func @same_type() {
+    %0 = cir.alloca !rec_a, !cir.ptr<!rec_a>, ["x"] {alignment = 4 : i64}
+    %1 = cir.get_global @src : !cir.ptr<!rec_a>
+    cir.copy %1 to %0 {dst_alignment = 4 : i64, src_alignment = 4 : i64} : !cir.ptr<!rec_a>
+    %2 = cir.get_global @g : !cir.ptr<!rec_a>
+    cir.copy %0 to %2 {dst_alignment = 4 : i64, src_alignment = 4 : i64} : !cir.ptr<!rec_a>
+    cir.return
+  }
+}

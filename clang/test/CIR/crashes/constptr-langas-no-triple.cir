@@ -1,0 +1,14 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: failed to lower constant pointer type
+// CHECK-SAME: lang_address_space(offload_global)
+// CHECK-NOT: attempting to construct a TypeRange with null types
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func private @f() {
+    %0 = cir.const #cir.ptr<null> : !cir.ptr<!s32i, lang_address_space(offload_global)>
+    cir.return
+  }
+}

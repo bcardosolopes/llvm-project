@@ -25,8 +25,6 @@ module {
 // MLIR-NEXT:   ^bb2:  // pred: ^bb0
 // MLIR-NEXT:     %3 = llvm.mlir.constant(0 : i32) : i32
 // MLIR-NEXT:     llvm.return %3 : i32
-// MLIR-NEXT:   ^bb3:  // no predecessors
-// MLIR-NEXT:     llvm.return %arg0 : i32
 // MLIR-NEXT:   }
 
 //       LLVM: define i32 @foo(i32 %0)
@@ -38,9 +36,6 @@ module {
 // LLVM-EMPTY:
 //  LLVM-NEXT: 4:
 //  LLVM-NEXT:   ret i32 0
-// LLVM-EMPTY:
-//  LLVM-NEXT: 5:
-//  LLVM-NEXT:   ret i32 %0
 //  LLVM-NEXT: }
 
   cir.func @onlyIf(%arg0: !s32i) -> !s32i {

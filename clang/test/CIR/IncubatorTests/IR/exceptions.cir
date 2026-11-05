@@ -1,0 +1,61 @@
+// RUN: cir-opt %s --verify-roundtrip | FileCheck %s
+//
+// CIR exception handling IR roundtrip test. Generated from:
+//   void may_throw();
+//   int test() {
+//       try { may_throw(); }
+//       catch (int e) { return e; }
+//       catch (...) { return -1; }
+//       return 0;
+//   }
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+!u8i = !cir.int<u, 8>
+!void = !cir.void
+#fn_attr = #cir<extra({mustprogress})>
+module @"exceptions.cir" attributes {cir.lang = #cir.lang<cxx>, cir.module_asm = [], cir.sob = #cir.signed_overflow_behavior<undefined>, cir.triple = "x86_64-unknown-linux-gnu", cir.type_size_info = #cir.type_size_info<char = 8, int = 32, size_t = 64>, dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vector<4xi64>, !llvm.ptr<271> = dense<32> : vector<4xi64>, !llvm.ptr<272> = dense<64> : vector<4xi64>, i64 = dense<64> : vector<2xi64>, i128 = dense<128> : vector<2xi64>, f80 = dense<128> : vector<2xi64>, !llvm.ptr = dense<64> : vector<4xi64>, i1 = dense<8> : vector<2xi64>, i8 = dense<8> : vector<2xi64>, i16 = dense<16> : vector<2xi64>, i32 = dense<32> : vector<2xi64>, f16 = dense<16> : vector<2xi64>, f64 = dense<64> : vector<2xi64>, f128 = dense<128> : vector<2xi64>, "dlti.endianness" = "little", "dlti.mangling_mode" = "e", "dlti.legal_int_widths" = array<i32: 8, 16, 32, 64>, "dlti.stack_alignment" = 128 : i64>} {
+  cir.global "private"  constant external  @_ZTIi : !cir.ptr<!u8i>
+  cir.func private @_Z9may_throwv()
+  cir.func private dso_local @__gxx_personality_v0(...) -> !u32i
+  // CHECK: cir.func {{.*}}@_Z4testv() -> !s32i
+  cir.func no_inline optnone dso_local @_Z4testv() -> !s32i personality(@__gxx_personality_v0) extra(#fn_attr) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
+    cir.scope {
+      %3 = cir.alloca !s32i, !cir.ptr<!s32i>, ["e"] {alignment = 4 : i64}
+      // CHECK: cir.try
+      cir.try {
+        // CHECK: cir.call exception @_Z9may_throwv
+        cir.call exception @_Z9may_throwv() : () -> () cleanup {
+          cir.yield
+        }
+        cir.yield
+      // CHECK: catch [type #cir.global_view<@_ZTIi>
+      } catch [type #cir.global_view<@_ZTIi> : !cir.ptr<!u8i>] {
+        // CHECK: cir.catch_param
+        %4 = cir.catch_param : !cir.ptr<!s32i>
+        %5 = cir.load align(4) %4 : !cir.ptr<!s32i>, !s32i
+        cir.store align(4) %5, %3 : !s32i, !cir.ptr<!s32i>
+        %6 = cir.load align(4) %3 : !cir.ptr<!s32i>, !s32i
+        cir.store %6, %0 : !s32i, !cir.ptr<!s32i>
+        %7 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+        cir.return %7 : !s32i
+      ^bb1:
+        cir.yield
+      // CHECK: catch all
+      } catch all {
+        %4 = cir.catch_param : !cir.ptr<!void>
+        %5 = cir.const #cir.int<-1> : !s32i
+        cir.store %5, %0 : !s32i, !cir.ptr<!s32i>
+        %6 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+        cir.return %6 : !s32i
+      ^bb1:
+        cir.yield
+      }
+    }
+    %1 = cir.const #cir.int<0> : !s32i
+    cir.store %1, %0 : !s32i, !cir.ptr<!s32i>
+    %2 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %2 : !s32i
+  }
+}

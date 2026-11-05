@@ -28,6 +28,7 @@
 // CHECKSH: # Crash reproducer
 // CHECKSH-NEXT: # Driver args: "-fsyntax-only"
 // CHECKSH-NEXT: # Original command: {{.*$}}
+// CHECKSH-NEXT: cd "$(dirname "$0")" || exit 1
 // CHECKSH-NEXT: "-cc1"
 // CHECKSH: "crash-vfs-{{[^ ]*}}.m"
 // CHECKSH: "-ivfsoverlay" "crash-vfs-{{[^ ]*}}.cache/vfs/vfs.yaml"

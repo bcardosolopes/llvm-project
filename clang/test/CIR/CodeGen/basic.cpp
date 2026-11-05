@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o - 2>&1 | FileCheck %s
+// RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-abi %s -o - 2>&1 | FileCheck %s
 
 enum A {
   A_one,
@@ -31,54 +31,42 @@ int f1() {
   return i;
 }
 
-// CHECK: cir.func{{.*}} @_Z2f1v() -> !s32i
-// CHECK:    %[[RV:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
+// CHECK: cir.func{{.*}} @_Z2f1v() -> (!s32i {cir.noundef})
 // CHECK:    %[[I_PTR:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["i"] {alignment = 4 : i64}
 // CHECK:    %[[I:.*]] = cir.load{{.*}} %[[I_PTR]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.store{{.*}} %[[I]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.return %[[R]] : !s32i
+// CHECK:    cir.return %[[I]] : !s32i
 
 int f2() {
   const int i = 2;
   return i;
 }
 
-// CHECK: cir.func{{.*}} @_Z2f2v() -> !s32i
-// CHECK:    %[[RV:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
+// CHECK: cir.func{{.*}} @_Z2f2v() -> (!s32i {cir.noundef})
 // CHECK:    %[[I_PTR:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["i", init, const] {alignment = 4 : i64}
 // CHECK:    %[[TWO:.*]] = cir.const #cir.int<2> : !s32i
 // CHECK:    cir.store{{.*}} %[[TWO]], %[[I_PTR]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[I:.*]] = cir.load{{.*}} %[[I_PTR]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.store{{.*}} %[[I]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:    %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:    cir.return %[[R]] : !s32i
+// CHECK:    %[[C:.*]] = cir.const #cir.int<2> : !s32i
+// CHECK:    cir.return %[[C]] : !s32i
 
 int f3(int i) {
   return i;
 }
 
-// CHECK: cir.func{{.*}} @_Z2f3i(%[[ARG:.*]]: !s32i loc({{.*}})) -> !s32i
+// CHECK: cir.func{{.*}} @_Z2f3i(%[[ARG:.*]]: !s32i {cir.noundef} loc({{.*}})) -> (!s32i {cir.noundef})
 // CHECK:   %[[ARG_ALLOCA:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["i", init] {alignment = 4 : i64}
-// CHECK:   %[[RV:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
 // CHECK:   cir.store{{.*}} %[[ARG]], %[[ARG_ALLOCA]] : !s32i, !cir.ptr<!s32i>
 // CHECK:   %[[ARG_VAL:.*]] = cir.load{{.*}} %[[ARG_ALLOCA]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.store{{.*}} %[[ARG_VAL]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:   %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.return %[[R]] : !s32i
+// CHECK:   cir.return %[[ARG_VAL]] : !s32i
 
 int f4(const int i) {
   return i;
 }
 
-// CHECK: cir.func{{.*}} @_Z2f4i(%[[ARG:.*]]: !s32i loc({{.*}})) -> !s32i
+// CHECK: cir.func{{.*}} @_Z2f4i(%[[ARG:.*]]: !s32i {cir.noundef} loc({{.*}})) -> (!s32i {cir.noundef})
 // CHECK:   %[[ARG_ALLOCA:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["i", init, const] {alignment = 4 : i64}
-// CHECK:   %[[RV:.*]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["__retval"] {alignment = 4 : i64}
 // CHECK:   cir.store{{.*}} %[[ARG]], %[[ARG_ALLOCA]] : !s32i, !cir.ptr<!s32i>
 // CHECK:   %[[ARG_VAL:.*]] = cir.load{{.*}} %[[ARG_ALLOCA]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.store{{.*}} %[[ARG_VAL]], %[[RV]] : !s32i, !cir.ptr<!s32i>
-// CHECK:   %[[R:.*]] = cir.load{{.*}} %[[RV]] : !cir.ptr<!s32i>, !s32i
-// CHECK:   cir.return %[[R]] : !s32i
+// CHECK:   cir.return %[[ARG_VAL]] : !s32i
 
 int *f5() {
   int *p = nullptr;
@@ -91,8 +79,7 @@ int *f5() {
   return p;
 }
 
-// CHECK:      cir.func{{.*}} @_Z2f5v() -> !cir.ptr<!s32i>
-// CHECK-NEXT:   %[[RET_ADDR:.*]] = cir.alloca !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>, ["__retval"] {alignment = 8 : i64}
+// CHECK:      cir.func{{.*}} @_Z2f5v() -> (!cir.ptr<!s32i> {cir.noundef})
 // CHECK-NEXT:   %[[P_ADDR:.*]] = cir.alloca !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>, ["p", init] {alignment = 8 : i64}
 // CHECK-NEXT:   %[[NULLPTR:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!s32i>
 // CHECK-NEXT:   cir.store{{.*}} %[[NULLPTR]], %[[P_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
@@ -106,12 +93,27 @@ int *f5() {
 // CHECK-NEXT:     cir.store{{.*}} %[[FOURTYTWO]], %[[P]] : !s32i, !cir.ptr<!s32i>
 // CHECK-NEXT:   }
 // CHECK-NEXT:   %[[FOURTYTHREE:.*]] = cir.const #cir.int<43> : !s32i
+// CHECK-NEXT:   %[[P1:.*]] = cir.load deref{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// CHECK-NEXT:   cir.store{{.*}} %[[FOURTYTHREE]], %[[P1]] : !s32i, !cir.ptr<!s32i>
+// CHECK-NEXT:   %[[RET_P:.*]] = cir.load{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// CHECK-NEXT:   cir.return %[[RET_P]] : !cir.ptr<!s32i>
+
+int f6(int *p) {
+  {
+    *p = 7;
+  }
+  return *p;
+}
+
+// CHECK:      cir.func{{.*}} @_Z2f6Pi(%[[ARG:.*]]: !cir.ptr<!s32i>{{.*}}) -> (!s32i {cir.noundef})
+// CHECK-NEXT:   %[[P_ADDR:.*]] = cir.alloca !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>, ["p", init] {alignment = 8 : i64}
+// CHECK-NEXT:   cir.store{{.*}} %[[ARG]], %[[P_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
+// CHECK-NEXT:   %[[SEVEN:.*]] = cir.const #cir.int<7> : !s32i
 // CHECK-NEXT:   %[[P:.*]] = cir.load deref{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK-NEXT:   cir.store{{.*}} %[[FOURTYTHREE]], %[[P]] : !s32i, !cir.ptr<!s32i>
-// CHECK-NEXT:   %[[P:.*]] = cir.load{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK-NEXT:   cir.store{{.*}} %[[P]], %[[RET_ADDR]] : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>>
-// CHECK-NEXT:   %[[RET_VAL:.*]] = cir.load{{.*}} %[[RET_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
-// CHECK-NEXT:   cir.return %[[RET_VAL]] : !cir.ptr<!s32i>
+// CHECK-NEXT:   cir.store{{.*}} %[[SEVEN]], %[[P]] : !s32i, !cir.ptr<!s32i>
+// CHECK-NEXT:   %[[P2:.*]] = cir.load deref{{.*}} %[[P_ADDR]] : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+// CHECK-NEXT:   %[[V:.*]] = cir.load{{.*}} %[[P2]] : !cir.ptr<!s32i>, !s32i
+// CHECK-NEXT:   cir.return %[[V]] : !s32i
 
 using size_type = unsigned long;
 using _Tp = unsigned long;
@@ -120,7 +122,7 @@ size_type max_size() {
   return size_type(~0) / sizeof(_Tp);
 }
 
-// CHECK: cir.func{{.*}} @_Z8max_sizev() -> !u64i
+// CHECK: cir.func{{.*}} @_Z8max_sizev() -> (!u64i {cir.noundef})
 // CHECK:   %[[NOT_ZERO:.*]] = cir.const #cir.int<18446744073709551615> : !u64i
 // CHECK:   %[[SIZE_OF_TP:.*]] = cir.const #cir.int<8> : !u64i
 // CHECK:   %[[RESULT:.*]] = cir.binop(div, %[[NOT_ZERO]], %[[SIZE_OF_TP]]) : !u64i
@@ -147,12 +149,9 @@ short &return_ref() {
   return gs;
 }
 
-// CHECK: cir.func{{.*}} @_Z10return_refv() -> !cir.ptr<!s16i>
-// CHECK:   %[[RETVAL_ADDR:.*]] = cir.alloca !cir.ptr<!s16i>, !cir.ptr<!cir.ptr<!s16i>>, ["__retval"] {alignment = 8 : i64}
+// CHECK: cir.func{{.*}} @_Z10return_refv() -> (!cir.ptr<!s16i> {cir.align = 2 : i64, cir.dereferenceable = 2 : i64, cir.nonnull, cir.noundef})
 // CHECK:   %[[GS_ADDR:.*]] = cir.get_global @gs : !cir.ptr<!s16i>
-// CHECK:   cir.store{{.*}} %[[GS_ADDR]], %[[RETVAL_ADDR]] : !cir.ptr<!s16i>, !cir.ptr<!cir.ptr<!s16i>>
-// CHECK:   %[[RETVAL:.*]] = cir.load{{.*}} %[[RETVAL_ADDR]] : !cir.ptr<!cir.ptr<!s16i>>, !cir.ptr<!s16i>
-// CHECK:   cir.return %[[RETVAL]] : !cir.ptr<!s16i>
+// CHECK:   cir.return %[[GS_ADDR]] : !cir.ptr<!s16i>
 
 void ref_local(short x) {
   short &y = x;

@@ -52,6 +52,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 
 #include <optional>
 using namespace clang;
@@ -126,6 +127,19 @@ BackendConsumer::BackendConsumer(CompilerInstance &CI, BackendAction Action,
   if (CodeGenOpts.TimePasses)
     LLVMIRGeneration.init("irgen", "LLVM IR generation", CI.getTimerGroup());
 }
+
+// Public factory + destructor for `BackendConsumer`, used by CIR's
+// `CIRGenAction.cpp`.
+BackendConsumer *CreateBackendConsumer(
+    CompilerInstance &CI, BackendAction Action,
+    IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS, llvm::LLVMContext &C,
+    StringRef InFile, std::unique_ptr<raw_pwrite_stream> OS,
+    CoverageSourceInfo *CoverageInfo, llvm::Module *CurLinkModule) {
+  return new BackendConsumer(CI, Action, VFS, C, {}, InFile, std::move(OS),
+                             CoverageInfo, CurLinkModule);
+}
+
+void DestroyBackendConsumer(BackendConsumer *BC) { delete BC; }
 
 llvm::Module* BackendConsumer::getModule() const {
   return Gen->GetModule();
@@ -306,6 +320,19 @@ void BackendConsumer::HandleTranslationUnit(ASTContext &C) {
   }
 
   EmbedBitcode(getModule(), CodeGenOpts, llvm::MemoryBufferRef());
+
+  // Embed the -fstd-lib-stats=embed report (if any) in a dedicated section of
+  // the output object as an @llvm.embedded.object global, so that it can be
+  // harvested from the per-TU .o files of a whole-app build.
+  //
+  // NOTE: embedBufferInModule tags the global with !exclude, so the section
+  // comes out SHF_EXCLUDE and the linker drops it. That keeps the linked
+  // artifact clean, but it also means the report never reaches the .so:
+  // harvest it from the per-TU .o files.
+  if (llvm::StringRef Report = CI.getStdLibStatsReport(); !Report.empty())
+    llvm::embedBufferInModule(*getModule(),
+                              llvm::MemoryBufferRef(Report, "stdlib.stats"),
+                              ".stdlib_stats");
 
   emitBackendOutput(CI, CI.getCodeGenOpts(),
                     C.getTargetInfo().getDataLayoutString(), getModule(),

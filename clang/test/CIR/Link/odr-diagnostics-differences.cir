@@ -1,0 +1,335 @@
+// What two copies disagree on, shown in each copy, for every kind of
+// difference: the first op of the bodies that does not match, however deeply
+// nested; an op one copy has and the other does not; the parameters and the
+// result of the type; an attribute down to the entry that differs; an
+// initializer down to the element that differs, a symbol demangled. What a
+// local is called, and what a TU inferred or was compiled with -- nothrow,
+// frame pointers, stack protection, whether a pointer may be null, the
+// exception handling around a call it could not prove does not throw -- are
+// not part of the definition: copies that differ only there are the same.
+//
+// Hand-written CIR has no source to point back to: positions are the
+// inputs' own in every style, and an op with no location is reported at its
+// input. The source style says the same in source terms, and leaves out what
+// has none.
+//
+// RUN: rm -rf %t && split-file %s %t
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning -o %t/cir.cir 2>&1 \
+// RUN:     | FileCheck %s
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning --diagnostic-style=mixed \
+// RUN:     -o %t/mixed.cir 2>&1 | FileCheck %s
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning --diagnostic-style=source \
+// RUN:     -o %t/source.cir 2>&1 | FileCheck %s --check-prefix=SOURCE
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning --diagnostic-style=source \
+// RUN:     -o %t/source-again.cir 2>&1 | grep ': note: ' \
+// RUN:     | not grep -E '%%[0-9]+ =|[ (]cir[.][a-z]|!cir[.]|#cir[.]'
+// RUN: cir-link %t/a.cir %t/b.cir --odr-events=%t/events.json -o %t/events.cir
+// RUN: FileCheck %s --check-prefix=JSON --input-file=%t/events.json
+
+// CHECK:      b.cir:9:3: warning: 'nested' has different definitions in '{{.*}}a.cir' and '{{.*}}b.cir' (they differ in body); keeping the one from '{{.*}}a.cir'
+// CHECK:      a.cir:9:3: note: the definition kept is here
+// CHECK:      b.cir:11:12: note: the body differs here: %0 = cir.const #cir.int<2> : !cir.int<s, 32>
+// CHECK-NEXT:       %0 = cir.const #cir.int<2> : !s32i
+// CHECK-NEXT:       ^
+// CHECK-NEXT: a.cir:11:12: note: the kept copy has: %0 = cir.const #cir.int<1> : !cir.int<s, 32>
+
+// CHECK:      b.cir:15:3: warning: 'longer' has different definitions
+// CHECK:      b.cir:16:5: note: the body differs here: cir.call @_Z1fv() : () -> ()
+// CHECK:      a.cir:16:5: note: the kept copy has: cir.return
+
+// The signature is the type difference; the parameters are not reported again
+// as the body's.
+// CHECK:      b.cir:19:3: warning: 'params' has different definitions in '{{.*}}a.cir' and '{{.*}}b.cir' (they differ in type, body)
+// CHECK:      b.cir:19:3: note: the number of parameters differs here: 2
+// CHECK:      a.cir:18:3: note: the kept copy has: 1
+// CHECK-NOT:  block argument
+
+// CHECK:      b.cir:22:3: warning: 'result' has different definitions
+// CHECK:      b.cir:22:3: note: the return type differs here: '!cir.int<s, 64>'
+// CHECK:      a.cir:21:3: note: the kept copy has: '!cir.int<s, 32>'
+// CHECK:      b.cir:23:10: note: the body differs here: %0 = cir.const #cir.int<0> : !cir.int<s, 64>
+// CHECK:      a.cir:22:10: note: the kept copy has: %0 = cir.const #cir.int<0> : !cir.int<s, 32>
+
+// CHECK:      b.cir:26:3: warning: 'arg_attrs' has different definitions in '{{.*}}a.cir' and '{{.*}}b.cir' (they differ in attributes)
+// CHECK:      b.cir:26:3: note: attributes that differ: 'arg_attrs[0].cir.dereferenceable' is 8 : i64 here and 4 : i64 in the kept copy
+
+// CHECK:      b.cir:32:3: warning: 'table' has different definitions
+// CHECK:      b.cir:32:3: note: the initializer at [1] differs here: #cir.int<3> : !cir.int<s, 32>
+// CHECK:      a.cir:31:3: note: the kept copy has: #cir.int<2> : !cir.int<s, 32>
+
+// CHECK:      b.cir:33:3: warning: 'slot' has different definitions
+// CHECK:      b.cir:33:3: note: the initializer differs here: @_Z1gv (g())
+// CHECK:      a.cir:32:3: note: the kept copy has: @_Z1fv (f())
+
+// CHECK:      b.cir:0:0: warning: 'no_location' has different definitions
+// CHECK-NEXT: a.cir:0:0: note: the definition kept is here
+// CHECK-NEXT: b.cir:0:0: note: the body differs here: %0 = cir.const #cir.int<2> : !cir.int<s, 32>
+// CHECK-NEXT: a.cir:0:0: note: the kept copy has: %0 = cir.const #cir.int<1> : !cir.int<s, 32>
+
+// A dereferenceable that reads dereferenceable_or_null in the other copy is
+// left out of what is said to differ.
+// CHECK:      b.cir:49:3: warning: 'aligned' has different definitions
+// CHECK:      b.cir:49:3: note: attributes that differ: 'arg_attrs[0].cir.align' is 4 : i64 here and 8 : i64 in the kept copy{{$}}
+
+// A difference inside a synthetic try is still one, shown as the input has it.
+// CHECK:      b.cir:69:3: warning: 'eh_body' has different definitions
+// CHECK:      b.cir:71:7: note: the body differs here: cir.call exception @_Z1gv() : () -> () cleanup {...}
+// CHECK:      a.cir:58:7: note: the kept copy has: cir.call exception @_Z1fv() : () -> () cleanup {...}
+
+// A synthetic try whose body returns stays: without it, the call after the
+// try would look like it follows the call in it, as it does in the other copy.
+// CHECK:      b.cir:82:3: warning: 'eh_return' has different definitions
+// CHECK:      b.cir:83:5: note: the body differs here: cir.call @_Z1fv() : () -> ()
+// CHECK:      a.cir:70:5: note: the kept copy has: cir.try synthetic {...} catch all {...}
+// CHECK-NOT:  {{warning|note}}:
+
+// SOURCE:      b.cir:11:12: note: the copies first differ here
+// SOURCE:      a.cir:11:12: note: the kept copy has this instead
+// SOURCE:      b.cir:16:5: note: the copies first differ here
+// SOURCE:      b.cir:19:3: note: the number of parameters differs here: 2 parameters
+// SOURCE:      a.cir:18:3: note: the kept copy has: 1 parameter
+// SOURCE:      b.cir:22:3: note: the return type differs here: a 64-bit signed integer
+// SOURCE:      a.cir:21:3: note: the kept copy has: a 32-bit signed integer
+// An attribute with nothing to say in source terms is left out.
+// SOURCE:      b.cir:26:3: warning: 'arg_attrs' has different definitions
+// SOURCE:      a.cir:25:3: note: the definition kept is here
+// SOURCE-NOT:  note:
+// SOURCE:      b.cir:32:3: warning: 'table' has different definitions
+// SOURCE:      b.cir:32:3: note: the initializer differs here: 3
+// SOURCE:      a.cir:31:3: note: the kept copy has: 2
+// SOURCE:      b.cir:33:3: note: the initializer differs here: 'g()'
+// SOURCE:      a.cir:32:3: note: the kept copy has: 'f()'
+// SOURCE:      b.cir:0:0: note: the copies first differ here
+// SOURCE:      b.cir:49:3: warning: 'aligned' has different definitions
+// SOURCE:      a.cir:48:3: note: the definition kept is here
+// SOURCE-NOT:  note:
+// SOURCE:      b.cir:69:3: warning: 'eh_body' has different definitions
+// SOURCE:      b.cir:71:7: note: the copies first differ here
+// SOURCE:      b.cir:82:3: warning: 'eh_return' has different definitions
+// SOURCE:      b.cir:83:5: note: the copies first differ here
+
+// JSON:      "symbol": "nested",
+// JSON:        "body_difference": {
+// JSON-NEXT:     "what": "the body",
+// JSON-NEXT:     "source_what": "the copies first differ",
+// JSON-NEXT:     "kept": {
+// JSON-NEXT:       "location": {
+// JSON-NEXT:         "file": "{{.*}}a.cir",
+// JSON-NEXT:         "line": 11,
+// JSON-NEXT:         "column": 12
+// JSON-NEXT:       },
+// JSON-NEXT:       "text": "%0 = cir.const #cir.int<1> : !cir.int<s, 32>"
+// JSON:      "symbol": "params",
+// JSON:        "type_difference": {
+// JSON-NEXT:     "what": "the number of parameters",
+// JSON-NEXT:     "source_what": "the number of parameters differs",
+// JSON-NEXT:     "kept": {
+// JSON:            "text": "1",
+// JSON-NEXT:       "source_text": "1 parameter"
+// JSON:      "symbol": "arg_attrs",
+// JSON:        "attribute_differences": [
+// JSON-NEXT:     {
+// JSON-NEXT:       "name": "arg_attrs[0].cir.dereferenceable",
+// JSON-NEXT:       "kept": "4 : i64",
+// JSON-NEXT:       "dropped": "8 : i64"
+// JSON-NEXT:     }
+// JSON-NEXT:   ]
+// JSON-NOT:  "symbol": "inferred",
+// JSON:      "symbol": "table",
+// JSON:        "body_difference": {
+// JSON-NEXT:     "what": "the initializer at [1]",
+// JSON-NOT:  "symbol": "named_locals",
+// JSON-NOT:  "symbol": "compile_options",
+// JSON:      "symbol": "aligned",
+// JSON:        "attribute_differences": [
+// JSON-NEXT:     {
+// JSON-NEXT:       "name": "arg_attrs[0].cir.align",
+// JSON-NEXT:       "kept": "8 : i64",
+// JSON-NEXT:       "dropped": "4 : i64"
+// JSON-NEXT:     }
+// JSON-NEXT:   ]
+// JSON-NOT:  "symbol": "eh_shape",
+// JSON:      "symbol": "eh_body",
+// JSON:            "text": "cir.call exception @_Z1fv() : () -> () cleanup {...}"
+// JSON:            "text": "cir.call exception @_Z1gv() : () -> () cleanup {...}"
+// JSON:      "symbol": "eh_return",
+// JSON:            "text": "cir.try synthetic {...} catch all {...}"
+// JSON:      "weak_copies_equal": 4,
+
+//--- a.cir
+!s32i = !cir.int<s, 32>
+!s64i = !cir.int<s, 64>
+!u8i = !cir.int<u, 8>
+#fn_nothrow = #cir<extra({nothrow = #cir.nothrow})>
+#fn_none = #cir<extra({})>
+module {
+  cir.func private @_Z1fv()
+  cir.func private @_Z1gv()
+  cir.func linkonce_odr @nested(%arg0: !s32i) -> !s32i {
+    cir.scope {
+      %0 = cir.const #cir.int<1> : !s32i
+    }
+    cir.return %arg0 : !s32i
+  }
+  cir.func linkonce_odr @longer() {
+    cir.return
+  }
+  cir.func linkonce_odr @params(%arg0: !s32i) {
+    cir.return
+  }
+  cir.func linkonce_odr @result() -> !s32i {
+    %0 = cir.const #cir.int<0> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @arg_attrs(%arg0: !cir.ptr<!s32i> {cir.dereferenceable = 4 : i64}) {
+    cir.return
+  }
+  cir.func linkonce_odr @inferred() extra(#fn_none) {
+    cir.return
+  }
+  cir.global linkonce_odr @table = #cir.const_array<[#cir.int<1> : !s32i, #cir.int<2> : !s32i]> : !cir.array<!s32i x 2>
+  cir.global linkonce_odr @slot = #cir.global_view<@_Z1fv> : !cir.ptr<!cir.func<()>>
+  cir.func linkonce_odr @no_location() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i loc(unknown)
+    cir.return %0 : !s32i loc(unknown)
+  } loc(unknown)
+  cir.func linkonce_odr @named_locals(%arg0: !s32i) -> !s32i {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init] {alignment = 4 : i64}
+    cir.store %arg0, %0 : !s32i, !cir.ptr<!s32i>
+    %1 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %1 : !s32i
+  }
+  cir.func linkonce_odr @compile_options(%arg0: !cir.ptr<!cir.ptr<!s32i>> {cir.nonnull, cir.dereferenceable = 8 : i64}) -> !cir.ptr<!s32i> extra(#cir<extra({nothrow = #cir.nothrow, ssp})>) {
+    cir.call @_Z1fv() nothrow : () -> ()
+    %0 = cir.load %arg0 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i> {cir.nonnull}
+    cir.return %0 : !cir.ptr<!s32i>
+  }
+  cir.func linkonce_odr @aligned(%arg0: !cir.ptr<!s32i> {cir.align = 8 : i64, cir.nonnull, cir.dereferenceable = 4 : i64}) {
+    cir.return
+  }
+  cir.func private @_Z4takev() -> !s32i
+  cir.func linkonce_odr @eh_shape() -> !s32i {
+    %0 = cir.call @_Z4takev() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func linkonce_odr @eh_body() personality(@__gxx_personality_v0) {
+    cir.try synthetic {
+      cir.call exception @_Z1fv() : () -> () cleanup {
+        cir.yield
+      }
+      cir.yield
+    } catch all {
+      %0 = cir.catch_param : !cir.ptr<!cir.void>
+      cir.call @_ZSt9terminatev() nothrow : () -> ()
+      cir.unreachable
+    }
+    cir.return
+  }
+  cir.func linkonce_odr @eh_return() {
+    cir.try synthetic {
+      cir.call exception @_Z1fv() : () -> () cleanup {
+        cir.yield
+      }
+      cir.return
+    } catch all {
+      %0 = cir.catch_param : !cir.ptr<!cir.void>
+      cir.call @_ZSt9terminatev() nothrow : () -> ()
+      cir.unreachable
+    }
+    cir.call @_Z1gv() : () -> ()
+    cir.return
+  }
+  cir.func private @_ZSt9terminatev()
+  cir.func private @__gxx_personality_v0(...) -> !s32i
+}
+
+//--- b.cir
+!s32i = !cir.int<s, 32>
+!s64i = !cir.int<s, 64>
+!u8i = !cir.int<u, 8>
+#fn_nothrow = #cir<extra({nothrow = #cir.nothrow})>
+#fn_none = #cir<extra({})>
+module {
+  cir.func private @_Z1fv()
+  cir.func private @_Z1gv()
+  cir.func linkonce_odr @nested(%arg0: !s32i) -> !s32i {
+    cir.scope {
+      %0 = cir.const #cir.int<2> : !s32i
+    }
+    cir.return %arg0 : !s32i
+  }
+  cir.func linkonce_odr @longer() {
+    cir.call @_Z1fv() : () -> ()
+    cir.return
+  }
+  cir.func linkonce_odr @params(%arg0: !s32i, %arg1: !s32i) {
+    cir.return
+  }
+  cir.func linkonce_odr @result() -> !s64i {
+    %0 = cir.const #cir.int<0> : !s64i
+    cir.return %0 : !s64i
+  }
+  cir.func linkonce_odr @arg_attrs(%arg0: !cir.ptr<!s32i> {cir.dereferenceable = 8 : i64}) {
+    cir.return
+  }
+  cir.func linkonce_odr @inferred() extra(#fn_nothrow) {
+    cir.return
+  }
+  cir.global linkonce_odr @table = #cir.const_array<[#cir.int<1> : !s32i, #cir.int<3> : !s32i]> : !cir.array<!s32i x 2>
+  cir.global linkonce_odr @slot = #cir.global_view<@_Z1gv> : !cir.ptr<!cir.func<()>>
+  cir.func linkonce_odr @no_location() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i loc(unknown)
+    cir.return %0 : !s32i loc(unknown)
+  } loc(unknown)
+  cir.func linkonce_odr @named_locals(%arg0: !s32i) -> !s32i {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["renamed", init] {alignment = 4 : i64}
+    cir.store %arg0, %0 : !s32i, !cir.ptr<!s32i>
+    %1 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %1 : !s32i
+  }
+  cir.func linkonce_odr @compile_options(%arg0: !cir.ptr<!cir.ptr<!s32i>> {cir.dereferenceable_or_null = 8 : i64}) -> !cir.ptr<!s32i> extra(#cir<extra({"frame-pointer" = "all", "null-pointer-is-valid" = "true", sspstrong})>) {
+    cir.call @_Z1fv() : () -> ()
+    %0 = cir.load %arg0 : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i>
+    cir.return %0 : !cir.ptr<!s32i>
+  }
+  cir.func linkonce_odr @aligned(%arg0: !cir.ptr<!s32i> {cir.align = 4 : i64, cir.dereferenceable_or_null = 4 : i64}) {
+    cir.return
+  }
+  cir.func private @_Z4takev() -> !s32i
+  cir.func linkonce_odr @eh_shape() -> !s32i personality(@__gxx_personality_v0) {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["tmp.try.call.res"] {alignment = 4 : i64}
+    cir.try synthetic {
+      %2 = cir.call exception @_Z4takev() : () -> !s32i cleanup {
+        cir.yield
+      }
+      cir.store align(4) %2, %0 : !s32i, !cir.ptr<!s32i>
+      cir.yield
+    } catch all {
+      %2 = cir.catch_param : !cir.ptr<!cir.void>
+      cir.call @_ZSt9terminatev() nothrow : () -> ()
+      cir.unreachable
+    }
+    %1 = cir.load align(4) %0 : !cir.ptr<!s32i>, !s32i
+    cir.return %1 : !s32i
+  }
+  cir.func linkonce_odr @eh_body() personality(@__gxx_personality_v0) {
+    cir.try synthetic {
+      cir.call exception @_Z1gv() : () -> () cleanup {
+        cir.yield
+      }
+      cir.yield
+    } catch all {
+      %0 = cir.catch_param : !cir.ptr<!cir.void>
+      cir.call @_ZSt9terminatev() nothrow : () -> ()
+      cir.unreachable
+    }
+    cir.return
+  }
+  cir.func linkonce_odr @eh_return() {
+    cir.call @_Z1fv() : () -> ()
+    cir.call @_Z1gv() : () -> ()
+    cir.return
+  }
+  cir.func private @_ZSt9terminatev()
+  cir.func private @__gxx_personality_v0(...) -> !s32i
+}

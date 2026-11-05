@@ -659,6 +659,10 @@ def warn_target_unsupported_compact_branches : Warning<
 def warn_target_unsupported_extension : Warning<
   "ignoring extension '%0' because the '%1' architecture does not support it">,
    InGroup<InvalidCommandLineArgument>;
+def warn_drv_clangir_lto_reloc_model_unsupported : Warning<
+  "the relocation model of this link has no equivalent for the merged ClangIR "
+  "module; it will be compiled position independent">,
+  InGroup<DiagGroup<"clangir-lto">>;
 def warn_drv_unsupported_gpopt : Warning<
   "ignoring '-mgpopt' option as it cannot be used with %select{|the implicit"
   " usage of }0-mabicalls">,

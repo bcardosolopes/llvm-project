@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: expected pointer or integer type for #cir.global_view, got '!cir.float'
+// CHECK-NOT: LLVM ERROR:
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!f32 = !cir.float
+module attributes {cir.global_annotations = #cir<global_annotations [["a", #cir.annotation<name = "bad", args = [#cir.global_view<@a> : !f32]>]]>} {
+  cir.global external @a = #cir.int<0> : !s32i
+}

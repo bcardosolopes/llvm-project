@@ -20,14 +20,17 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/ABI.h"
+#include "clang/CIR/Dialect/IR/CIROpsEnums.h"
 #include "clang/CIR/Dialect/IR/CIRTypes.h"
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 namespace clang {
 class ASTContext;
 class FunctionType;
 class GlobalDecl;
+class ObjCMethodDecl;
 class QualType;
 class Type;
 } // namespace clang
@@ -37,6 +40,7 @@ class Type;
 }
 
 namespace clang::CIRGen {
+class FunctionArgList;
 
 class CallArgList;
 class CIRGenBuilderTy;
@@ -60,8 +64,23 @@ class CIRGenTypes {
   /// Contains the CIR type for any converted RecordDecl
   llvm::DenseMap<const clang::Type *, cir::RecordType> recordDeclTypes;
 
+  /// Memoizes the (suffix-free) printed/mangled record-type-name prefix, keyed
+  /// by the canonical tag type. getRecordTypeName is called more than once for
+  /// the same record (e.g. the primary name and the ".base" variant), and for
+  /// deeply-nested template instantiations that prefix is the ~11k-char string
+  /// whose construction dominates StringAttr self-time; this avoids re-mangling
+  /// it. Only the named (getIdentifier) branch is cached.
+  llvm::DenseMap<const clang::Type *, std::string> recordTypeNamePrefixCache;
+
   /// Hold memoized CIRGenFunctionInfo results
   llvm::FoldingSet<CIRGenFunctionInfo> functionInfos;
+
+  /// Cache for getFunctionType() results, keyed by CIRGenFunctionInfo pointer.
+  /// Since CIRGenFunctionInfo objects are deduplicated via FoldingSet and have
+  /// stable addresses, we can use their pointers as cache keys. Invalidated
+  /// whenever typeCache is cleared (e.g., when record layouts complete after
+  /// skipped conversions, or when enum types change size).
+  llvm::DenseMap<const CIRGenFunctionInfo *, cir::FuncType> funcTypeCache;
 
   /// This set keeps track of records that we're currently converting to a CIR
   /// type. For example, when converting:
@@ -70,6 +89,26 @@ class CIRGenTypes {
   llvm::SmallPtrSet<const clang::Type *, 4> recordsBeingLaidOut;
 
   llvm::SmallVector<const clang::RecordDecl *, 8> deferredRecords;
+
+  /// True if we didn't layout a function due to a being inside a recursive
+  /// struct conversion, set this flag so that we can flush cached types when
+  /// we're done.
+  bool skippedLayout = false;
+
+  /// Cache of record type keys known to be safe to convert (i.e.,
+  /// isSafeToConvert returned true). Each entry records the generation at
+  /// which it was validated. A cache hit is only valid if its generation
+  /// matches safeToConvertGeneration (the current generation). The generation
+  /// is incremented whenever a new record is added to recordsBeingLaidOut,
+  /// since adding a new record could make previously-safe types unsafe (if
+  /// they reference the newly-being-laid-out record). Removing a record from
+  /// recordsBeingLaidOut does NOT invalidate the cache since a smaller
+  /// "being laid out" set can only make more types safe, not fewer.
+  llvm::DenseMap<const clang::Type *, unsigned> safeToConvertCache;
+
+  /// Generation counter for safeToConvertCache. Incremented each time
+  /// a new record is added to recordsBeingLaidOut.
+  unsigned safeToConvertGeneration = 0;
 
   /// Heper for convertType.
   mlir::Type convertFunctionTypeInternal(clang::QualType ft);
@@ -105,6 +144,29 @@ public:
     return recordsBeingLaidOut.count(ty);
   }
 
+  /// Check if a record type key is in the safe-to-convert cache and
+  /// was validated at the current generation.
+  bool isCachedSafeToConvert(const clang::Type *key) const {
+    auto it = safeToConvertCache.find(key);
+    return it != safeToConvertCache.end() &&
+           it->second == safeToConvertGeneration;
+  }
+
+  /// Add a record type key to the safe-to-convert cache at the current
+  /// generation.
+  void cacheSafeToConvert(const clang::Type *key) {
+    safeToConvertCache[key] = safeToConvertGeneration;
+  }
+
+  /// Cache of a COMPLETE cir::RecordType -> its size / alignment. A complete
+  /// record's layout is invariant once set, so memoizing here is
+  /// unconditionally safe (a lookup always equals recomputation). This avoids
+  /// the super-linear re-walk of deeply-nested by-value struct/union chains in
+  /// CIRRecordLowering::getSize/getAlignment (each level otherwise re-computes
+  /// the full nested subtree). Keyed on the (complete) mlir::Type.
+  llvm::DenseMap<mlir::Type, clang::CharUnits> completeRecordSizeCache;
+  llvm::DenseMap<mlir::Type, clang::CharUnits> completeRecordAlignCache;
+
   const ABIInfo &getABIInfo() const { return theABIInfo; }
 
   /// Convert a Clang type into a mlir::Type.
@@ -120,12 +182,36 @@ public:
 
   const CIRGenRecordLayout &getCIRGenRecordLayout(const clang::RecordDecl *rd);
 
+  /// Calls fn on every record laid out so far, with its layout.
+  void forEachRecordLayout(llvm::function_ref<void(const clang::RecordDecl *,
+                                                   const CIRGenRecordLayout &)>
+                               fn) const {
+    for (const auto &[type, layout] : cirGenRecordLayouts)
+      if (const clang::RecordDecl *rd = type->getAsRecordDecl())
+        fn(rd, *layout);
+  }
+
+  /// Determine if a C++ inheriting constructor should have parameters matching
+  /// those of its inherited constructor.
+  bool inheritingCtorHasParams(const clang::InheritedConstructor &inherited,
+                               clang::CXXCtorType type);
+
   /// Convert type T into an mlir::Type. This differs from convertType in that
   /// it is used to convert to the memory representation for a type. For
   /// example, the scalar representation for bool is i1, but the memory
   /// representation is usually i8 or i32, depending on the target.
   // TODO: convert this comment to account for MLIR's equivalence
   mlir::Type convertTypeForMem(clang::QualType, bool forBitField = false);
+
+  /// Check whether a _BitInt type requires a byte-array [N x i8] representation
+  /// in struct field layout. This happens when the LLVM alloc size of the
+  /// storage-width integer type differs from the AST type size.
+  bool typeRequiresSplitIntoByteArray(clang::QualType qualType);
+
+  /// Like convertTypeForMem, but for struct field types: returns a byte array
+  /// [N x i8] for large _BitInt types that require it. Matches OGCG's
+  /// ConvertTypeForMem for struct fields (CodeGenTypes.cpp:142-148).
+  mlir::Type convertTypeForMemForField(clang::QualType qualType);
 
   /// Get the CIR function type for \arg Info.
   cir::FuncType getFunctionType(const CIRGenFunctionInfo &info);
@@ -166,7 +252,7 @@ public:
   /// Free functions are functions that are compatible with an ordinary C
   /// function pointer type.
   const CIRGenFunctionInfo &
-  arrangeFunctionDeclaration(const clang::FunctionDecl *fd);
+  arrangeFunctionDeclaration(clang::GlobalDecl gd);
 
   /// Return whether a type can be zero-initialized (in the C++ sense) with an
   /// LLVM zeroinitializer.
@@ -193,18 +279,33 @@ public:
                        const clang::FunctionProtoType *ftp,
                        const clang::CXXMethodDecl *md);
 
+  const CIRGenFunctionInfo &arrangeBlockFunctionCall(const CallArgList &args,
+                                                     const FunctionType *fnType);
+  const CIRGenFunctionInfo &
+  arrangeBlockFunctionDeclaration(const clang::FunctionProtoType *proto,
+                                  const FunctionArgList &params);
+
   const CIRGenFunctionInfo &arrangeFreeFunctionCall(const CallArgList &args,
                                                     const FunctionType *fnType);
 
   const CIRGenFunctionInfo &
   arrangeCIRFunctionInfo(CanQualType returnType,
+                         FnInfoOpts opts,
                          llvm::ArrayRef<CanQualType> argTypes,
-                         RequiredArgs required);
+                         RequiredArgs required,
+                         FunctionType::ExtInfo extInfo);
+
+  /// Map a Clang calling convention to a CIR calling convention.
+  cir::CallingConv ClangCallConvToCIRCallConv(clang::CallingConv cc);
 
   const CIRGenFunctionInfo &
   arrangeFreeFunctionType(CanQual<FunctionProtoType> fpt);
   const CIRGenFunctionInfo &
   arrangeFreeFunctionType(CanQual<FunctionNoProtoType> fnpt);
+
+  /// Objective-C methods are C functions with some implicit parameters.
+  const CIRGenFunctionInfo &
+  arrangeObjCMethodDeclaration(const clang::ObjCMethodDecl *md);
 };
 
 } // namespace clang::CIRGen

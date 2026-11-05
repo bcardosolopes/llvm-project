@@ -1,0 +1,18 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+
+// A second extra() is rejected rather than left for the module parser, which
+// would report it as `custom op 'extra' is unknown` -- the message the
+// either-order parse exists to remove.
+
+!s32i = !cir.int<s, 32>
+
+#fn_attr = #cir<extra({minsize, nothrow = #cir.nothrow, optsize})>
+
+// The message it replaces must not come back.
+// CHECK-NOT: custom op 'extra' is unknown
+
+module {
+  // CHECK: extra already specified for this function
+  cir.func private @twice_extra(!s32i) -> !s32i
+      extra(#fn_attr) [#cir.annotation<name = "a", args = []>] extra(#fn_attr)
+}

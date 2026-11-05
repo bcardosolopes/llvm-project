@@ -28,7 +28,7 @@ Derived *ptr_cast(Base1 *ptr) {
 // CIR-NEXT:     cir.yield %[[NULL_PTR_DEST]] : !cir.ptr<!rec_Derived>
 // CIR-NEXT:   }, false {
 // CIR-NEXT:     %[[EXPECTED_VPTR:.*]] = cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 0, offset = 2>) : !cir.vptr
-// CIR-NEXT:     %[[SRC_VPTR_PTR:.*]] = cir.cast bitcast %[[SRC]] : !cir.ptr<!rec_Base1> -> !cir.ptr<!cir.vptr>
+// CIR-NEXT:     %[[SRC_VPTR_PTR:.*]] = cir.vtable.get_vptr %[[SRC]] : !cir.ptr<!rec_Base1> -> !cir.ptr<!cir.vptr>
 // CIR-NEXT:     %[[SRC_VPTR:.*]] = cir.load{{.*}} %[[SRC_VPTR_PTR]] : !cir.ptr<!cir.vptr>, !cir.vptr
 // CIR-NEXT:     %[[SUCCESS:.*]] = cir.cmp(eq, %[[SRC_VPTR]], %[[EXPECTED_VPTR]]) : !cir.vptr, !cir.bool
 // CIR-NEXT:     %[[EXACT_RESULT:.*]] = cir.ternary(%[[SUCCESS]], true {
@@ -45,12 +45,12 @@ Derived *ptr_cast(Base1 *ptr) {
 //       implicitly %1), so we use %{{.*}} to match the implicit label in the
 //       phi check.
 
-//      LLVM: define dso_local ptr @_Z8ptr_castP5Base1(ptr{{.*}} %[[SRC:.*]])
+//      LLVM: define dso_local noundef ptr @_Z8ptr_castP5Base1(ptr{{.*}} %[[SRC:.*]])
 // LLVM-NEXT:   %[[SRC_IS_NULL:.*]] = icmp eq ptr %0, null
 // LLVM-NEXT:   br i1 %[[SRC_IS_NULL]], label %[[LABEL_END:.*]], label %[[LABEL_NOTNULL:.*]]
 //      LLVM: [[LABEL_NOTNULL]]:
 // LLVM-NEXT:   %[[VPTR:.*]] = load ptr, ptr %[[SRC]], align 8
-// LLVM-NEXT:   %[[SUCCESS:.*]] = icmp eq ptr %[[VPTR]], getelementptr inbounds nuw (i8, ptr @_ZTV7Derived, i64 16)
+// LLVM-NEXT:   %[[SUCCESS:.*]] = icmp eq ptr %[[VPTR]], getelementptr inbounds nuw inrange(-16, 16) (i8, ptr @_ZTV7Derived, i64 16)
 // LLVM-NEXT:   %[[EXACT_RESULT:.*]] = select i1 %[[SUCCESS]], ptr %[[SRC]], ptr null
 // LLVM-NEXT:   br label %[[LABEL_END]]
 //      LLVM: [[LABEL_END]]:
@@ -80,7 +80,7 @@ Derived &ref_cast(Base1 &ref) {
 //      CIR: cir.func {{.*}} @_Z8ref_castR5Base1
 //      CIR:   %[[SRC:.*]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!rec_Base1>>, !cir.ptr<!rec_Base1>
 // CIR-NEXT:   %[[EXPECTED_VPTR:.*]] = cir.vtable.address_point(@_ZTV7Derived, address_point = <index = 0, offset = 2>) : !cir.vptr
-// CIR-NEXT:   %[[SRC_VPTR_PTR:.*]] = cir.cast bitcast %[[SRC]] : !cir.ptr<!rec_Base1> -> !cir.ptr<!cir.vptr>
+// CIR-NEXT:   %[[SRC_VPTR_PTR:.*]] = cir.vtable.get_vptr %[[SRC]] : !cir.ptr<!rec_Base1> -> !cir.ptr<!cir.vptr>
 // CIR-NEXT:   %[[SRC_VPTR:.*]] = cir.load{{.*}} %[[SRC_VPTR_PTR]] : !cir.ptr<!cir.vptr>, !cir.vptr
 // CIR-NEXT:   %[[SUCCESS:.*]] = cir.cmp(eq, %[[SRC_VPTR]], %[[EXPECTED_VPTR]]) : !cir.vptr, !cir.bool
 // CIR-NEXT:   %[[FAILED:.*]] = cir.unary(not, %[[SUCCESS]]) : !cir.bool, !cir.bool
@@ -90,9 +90,9 @@ Derived &ref_cast(Base1 &ref) {
 // CIR-NEXT:   }
 // CIR-NEXT:   %{{.+}} = cir.cast bitcast %[[SRC]] : !cir.ptr<!rec_Base1> -> !cir.ptr<!rec_Derived>
 
-//      LLVM: define{{.*}} ptr @_Z8ref_castR5Base1(ptr{{.*}} %[[SRC:.*]])
+//      LLVM: define{{.*}} noundef nonnull align 8 dereferenceable(8) ptr @_Z8ref_castR5Base1(ptr{{.*}} %[[SRC:.*]])
 // LLVM-NEXT:   %[[VPTR:.*]] = load ptr, ptr %[[SRC]], align 8
-// LLVM-NEXT:   %[[OK:.*]] = icmp eq ptr %[[VPTR]], getelementptr inbounds nuw (i8, ptr @_ZTV7Derived, i64 16)
+// LLVM-NEXT:   %[[OK:.*]] = icmp eq ptr %[[VPTR]], getelementptr inbounds nuw inrange(-16, 16) (i8, ptr @_ZTV7Derived, i64 16)
 // LLVM-NEXT:   br i1 %[[OK]], label %[[LABEL_OK:.*]], label %[[LABEL_FAIL:.*]]
 //      LLVM: [[LABEL_FAIL]]:
 // LLVM-NEXT:   tail call void @__cxa_bad_cast()
@@ -130,13 +130,13 @@ B *offset_cast(A *a) {
 // CIR-NEXT:     cir.yield %[[NULL_PTR_DEST]] : !cir.ptr<!rec_B>
 // CIR-NEXT:   }, false {
 // CIR-NEXT:     %[[EXPECTED_VPTR:.*]] = cir.vtable.address_point(@_ZTV1B, address_point = <index = 1, offset = 2>) : !cir.vptr
-// CIR-NEXT:     %[[SRC_VPTR_PTR:.*]] = cir.cast bitcast %[[SRC]] : !cir.ptr<!rec_A> -> !cir.ptr<!cir.vptr>
+// CIR-NEXT:     %[[SRC_VPTR_PTR:.*]] = cir.vtable.get_vptr %[[SRC]] : !cir.ptr<!rec_A> -> !cir.ptr<!cir.vptr>
 // CIR-NEXT:     %[[SRC_VPTR:.*]] = cir.load{{.*}} %[[SRC_VPTR_PTR]] : !cir.ptr<!cir.vptr>, !cir.vptr
 // CIR-NEXT:     %[[SUCCESS:.*]] = cir.cmp(eq, %[[SRC_VPTR]], %[[EXPECTED_VPTR]]) : !cir.vptr, !cir.bool
 // CIR-NEXT:     %[[EXACT_RESULT:.*]] = cir.ternary(%[[SUCCESS]], true {
 // CIR-NEXT:       %[[MINUS_EIGHT:.*]] = cir.const #cir.int<18446744073709551608> : !u64i
 // CIR-NEXT:       %[[SRC_VOID:.*]] = cir.cast bitcast %[[SRC]] : !cir.ptr<!rec_A> -> !cir.ptr<!u8i>
-// CIR-NEXT:       %[[SRC_OFFSET:.*]] = cir.ptr_stride %[[SRC_VOID]], %[[MINUS_EIGHT]]
+// CIR-NEXT:       %[[SRC_OFFSET:.*]] = cir.ptr_stride inbounds %[[SRC_VOID]], %[[MINUS_EIGHT]]
 // CIR-NEXT:       %[[RES:.*]] = cir.cast bitcast %[[SRC_OFFSET]] : !cir.ptr<!u8i> -> !cir.ptr<!rec_B>
 // CIR-NEXT:       cir.yield %[[RES]] : !cir.ptr<!rec_B>
 // CIR-NEXT:     }, false {
@@ -146,13 +146,13 @@ B *offset_cast(A *a) {
 // CIR-NEXT:     cir.yield %[[EXACT_RESULT]] : !cir.ptr<!rec_B>
 // CIR-NEXT:   }) : (!cir.bool) -> !cir.ptr<!rec_B>
 
-//      LLVM: define dso_local ptr @_Z11offset_castP1A(ptr{{.*}} %[[SRC:.*]])
+//      LLVM: define dso_local noundef ptr @_Z11offset_castP1A(ptr{{.*}} %[[SRC:.*]])
 // LLVM-NEXT:   %[[SRC_IS_NULL:.*]] = icmp eq ptr %0, null
 // LLVM-NEXT:   br i1 %[[SRC_IS_NULL]], label %[[LABEL_END:.*]], label %[[LABEL_NOTNULL:.*]]
 //      LLVM: [[LABEL_NOTNULL]]:
 // LLVM-NEXT:   %[[VTABLE:.*]] = load ptr, ptr %[[SRC]]
-// LLVM-NEXT:   %[[VTABLE_CHECK:.*]] = icmp eq ptr %[[VTABLE]], getelementptr inbounds nuw (i8, ptr @_ZTV1B, i64 48)
-// LLVM-NEXT:   %[[SRC_OFFSET:.*]] = getelementptr i8, ptr %[[SRC]], i64 -8
+// LLVM-NEXT:   %[[VTABLE_CHECK:.*]] = icmp eq ptr %[[VTABLE]], getelementptr inbounds nuw inrange(-16, 16) (i8, ptr @_ZTV1B, i64 48)
+// LLVM-NEXT:   %[[SRC_OFFSET:.*]] = getelementptr inbounds i8, ptr %[[SRC]], i64 -8
 // LLVM-NEXT:   %[[EXACT_RESULT:.*]] = select i1 %[[VTABLE_CHECK]], ptr %[[SRC_OFFSET]], ptr null
 // LLVM-NEXT:   br label %[[LABEL_END]]
 //      LLVM: [[LABEL_END]]:

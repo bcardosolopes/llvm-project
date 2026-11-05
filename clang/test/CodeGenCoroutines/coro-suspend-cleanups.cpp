@@ -1,4 +1,6 @@
 // RUN: %clang_cc1 --std=c++20 -triple x86_64-linux-gnu -emit-llvm %s -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 --std=c++20 -triple x86_64-linux-gnu -fcxx-exceptions -fexceptions -fclangir -emit-cir %s -o - | FileCheck %s --check-prefix=CIR %}
+// RUN: %if cir-support %{ %clang_cc1 --std=c++20 -triple x86_64-linux-gnu -fcxx-exceptions -fexceptions -fclangir -emit-llvm -disable-llvm-passes %s -o - | FileCheck %s --check-prefix=CIR-LLVM %}
 
 #include "Inputs/coroutine.h"
 
@@ -81,6 +83,25 @@ coroutine ArrayInitWithCoReturn() {
   // CHECK-LABEL: define dso_local void @_Z21ArrayInitWithCoReturnv
   // Verify that we start to emit the array destructor.
   // CHECK: %arrayinit.endOfInit = alloca ptr, align 8
+  // CIR-LABEL: cir.func coroutine no_inline optnone dso_local @_Z21ArrayInitWithCoReturnv(
+  // CIR: cir.if %{{.+}} {
+  // CIR: cir.call exception @_ZN9coroutine12promise_type11return_voidEv(%{{.+}})
+  // CIR: cir.goto "_Z21ArrayInitWithCoReturnv.__coro_final"
+  // CIR: } loc(
+  // CIR-NEXT: %{{.+}} = cir.get_global @".str.1"
+  // CIR: cir.label "_Z21ArrayInitWithCoReturnv.__coro_final"
+  // CIR-LLVM-LABEL: define dso_local void @_Z21ArrayInitWithCoReturnv(
+  // CIR-LLVM: invoke void @_ZN9coroutine12promise_type11return_voidEv(
+  // CIR-LLVM: [[FIRST_CORETURN_CONT:[a-zA-Z0-9_.]+]]:
+  // CIR-LLVM: call void @llvm.lifetime.end.p0(ptr %{{.+}})
+  // CIR-LLVM-NEXT: br label %[[CORO_FINAL:[a-zA-Z0-9_.]+]]
+  // CIR-LLVM: invoke void @_ZN9coroutine12promise_type19unhandled_exceptionEv(
+  // CIR-LLVM: to label %[[ENDCATCH:[a-zA-Z0-9_.]+]] unwind label %{{.+}}
+  // CIR-LLVM: [[ENDCATCH]]:
+  // CIR-LLVM: invoke void @__cxa_end_catch()
+  // CIR-LLVM: to label %[[CORO_FINAL]] unwind label %{{.+}}
+  // CIR-LLVM: [[CORO_FINAL]]:
+  // CIR-LLVM: call void @_ZN9coroutine12promise_type13final_suspendEv(
   Printy arr[2] = {"a", ({
                       if (foo()) {
                         co_return;

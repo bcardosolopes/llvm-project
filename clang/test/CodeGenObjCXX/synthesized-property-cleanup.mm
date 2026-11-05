@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple arm64e-apple-ios13.0 -debug-info-kind=standalone -fobjc-arc -fsanitize=nullability-return \
 // RUN:   %s -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64e-apple-ios13.0 -debug-info-kind=standalone -fobjc-arc -fsanitize=nullability-return \
+// RUN:   %s -emit-llvm -disable-llvm-passes -fclangir -o - | FileCheck %s --check-prefix=CIR %}
 
 @interface NSObject
 + (id)alloc;
@@ -32,3 +34,14 @@ struct Data {
 
 @implementation MyData
 @end
+
+// CIR: define internal void @"\01-[MyData setData:]"
+// CIR: call noundef ptr @_ZN4DataD1Ev(ptr {{[^,]*}} [[DATA:%.*]]){{.*}}, !dbg [[CIR_DATA_PROPERTY_LOC:![0-9]+]]
+// CIR-NEXT: ret void
+
+// CIR: define internal noundef ptr @"\01-[MyData string]"
+// CIR: call void @__ubsan_handle_nullability_return_v1_abort{{.*}}, !dbg [[STRING_CALL_LOC:![0-9]+]]
+// CIR: ret
+
+// CIR-DAG: [[CIR_DATA_PROPERTY_LOC]] = !DILocation(line: 28, column: 23,
+// CIR-DAG: [[STRING_CALL_LOC]] = !DILocation(

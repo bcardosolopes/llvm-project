@@ -143,6 +143,18 @@ module {
   // CHECK-NEXT:    cir.return %[[R]] : !u32i
   // CHECK-NEXT:  }
 
+  cir.func @fold_byte_swap_signed() -> !s32i {
+    // 0x01020304 = 16909060
+    %0 = cir.const #cir.int<16909060> : !s32i
+    %1 = cir.byte_swap %0 : !s32i
+    cir.return %1 : !s32i
+  }
+  // CHECK-LABEL: @fold_byte_swap_signed
+  // 67305985 is 0x04030201
+  // CHECK-NEXT:    %[[R:.+]] = cir.const #cir.int<67305985> : !s32i
+  // CHECK-NEXT:    cir.return %[[R]] : !s32i
+  // CHECK-NEXT:  }
+
   cir.func @fold_input_poison() -> !s32i {
     %0 = cir.const #cir.poison : !s32i
     %1 = cir.clrsb %0 : !s32i

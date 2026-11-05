@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple i386-unknown-unknown %s -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple i386-unknown-unknown -fclangir %s -emit-llvm -o - | FileCheck %s %}
 
 void cb0(void);
 

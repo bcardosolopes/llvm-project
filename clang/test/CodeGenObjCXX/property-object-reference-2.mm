@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 %s -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-10.7 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-10.7 -emit-llvm -disable-llvm-passes -fclangir -o - | FileCheck %s --check-prefix=CIR %}
 // RUN: %clang_cc1 %s -triple x86_64-unknown-freebsd -fobjc-runtime=gnustep-1.7 -emit-llvm -o - | FileCheck -check-prefix=CHECK-GNUSTEP %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple x86_64-unknown-freebsd -fobjc-runtime=gnustep-1.7 -emit-llvm -disable-llvm-passes -fclangir -o - | FileCheck %s --check-prefix=CIR-GNUSTEP %}
 
 extern int DEFAULT();
 
@@ -51,3 +53,28 @@ struct TCPPObject
 
 // CHECK-GNUSTEP: objc_getCppObjectAtomic
 // CHECK-GNUSTEP: objc_setCppObjectAtomic
+
+// CIR-LABEL: define internal void @__copy_helper_atomic_property_(ptr noundef %0, ptr noundef %1) #
+// CIR: call noundef i32 @_Z7DEFAULTv()
+// CIR: call void @_ZN10TCPPObjectC1ERKS_i(
+// CIR: ret void
+
+// CIR-LABEL: define internal void @"\01-[MyDocument MyProperty]"(
+// CIR: call void @objc_copyCppObjectAtomic(ptr noundef {{.*}}, ptr noundef {{.*}}, ptr noundef @__copy_helper_atomic_property_)
+// CIR: ret void
+// CIR: declare void @objc_copyCppObjectAtomic(ptr, ptr, ptr)
+
+// CIR-LABEL: define internal void @__assign_helper_atomic_property_(ptr noundef %0, ptr noundef %1) #
+// CIR: call noundef nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) ptr @_ZN10TCPPObjectaSERKS_(
+// CIR: ret void
+
+// CIR-LABEL: define internal void @"\01-[MyDocument setMyProperty:]"(
+// CIR: call void @objc_copyCppObjectAtomic(ptr noundef {{.*}}, ptr noundef {{.*}}, ptr noundef @__assign_helper_atomic_property_)
+// CIR: ret void
+
+// CIR-GNUSTEP-LABEL: define internal void @_i_MyDocument__MyProperty(
+// CIR-GNUSTEP: call void @objc_getCppObjectAtomic(ptr noundef {{.*}}, ptr noundef {{.*}}, ptr noundef @__copy_helper_atomic_property_)
+// CIR-GNUSTEP: declare void @objc_getCppObjectAtomic(ptr, ptr, ptr)
+// CIR-GNUSTEP-LABEL: define internal void @_i_MyDocument__setMyProperty_(
+// CIR-GNUSTEP: call void @objc_setCppObjectAtomic(ptr noundef {{.*}}, ptr noundef {{.*}}, ptr noundef @__assign_helper_atomic_property_)
+// CIR-GNUSTEP: declare void @objc_setCppObjectAtomic(ptr, ptr, ptr)

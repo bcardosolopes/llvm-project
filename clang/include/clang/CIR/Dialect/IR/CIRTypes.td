@@ -16,7 +16,9 @@
 include "clang/CIR/Dialect/IR/CIRDialect.td"
 include "clang/CIR/Dialect/IR/CIREnumAttr.td"
 include "clang/CIR/Dialect/IR/CIRTypeConstraints.td"
+include "clang/CIR/Interfaces/ASTAttrInterfaces.td"
 include "clang/CIR/Interfaces/CIRTypeInterfaces.td"
+include "mlir/Dialect/Ptr/IR/MemorySpaceInterfaces.td"
 include "mlir/Interfaces/DataLayoutInterfaces.td"
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/EnumAttr.td"
@@ -76,7 +78,8 @@ def CIR_IntType : CIR_Type<"Int", "int", [
     /// Returns a minimum bitwidth of cir::IntType
     static unsigned minBitwidth() { return 1; }
     /// Returns a maximum bitwidth of cir::IntType
-    static unsigned maxBitwidth() { return 128; }
+    /// Matches LLVM's IntegerType::MAX_INT_BITS (1 << 23).
+    static unsigned maxBitwidth() { return 8388608; }
   }];
   let genVerifyDecl = 1;
 }
@@ -252,19 +255,20 @@ def CIR_PointerType : CIR_Type<"Pointer", "ptr", [
   let parameters = (ins
     "mlir::Type":$pointee,
     OptionalParameter<
-        "cir::TargetAddressSpaceAttr">:$addrSpace
+        "mlir::ptr::MemorySpaceAttrInterface">:$addrSpace
   );
 
   let skipDefaultBuilders = 1;
+  let genVerifyDecl = 1;
   let builders = [
     TypeBuilderWithInferredContext<(ins
       "mlir::Type":$pointee,
-       CArg<"cir::TargetAddressSpaceAttr", "nullptr">:$addrSpace), [{
+       CArg<"mlir::ptr::MemorySpaceAttrInterface", "nullptr">:$addrSpace), [{
         return $_get(pointee.getContext(), pointee, addrSpace);
     }]>,
     TypeBuilder<(ins
       "mlir::Type":$pointee,
-      CArg<"cir::TargetAddressSpaceAttr", "nullptr">:$addrSpace), [{
+      CArg<"mlir::ptr::MemorySpaceAttrInterface", "nullptr">:$addrSpace), [{
         return $_get($_ctxt, pointee, addrSpace);
     }]>
   ];
@@ -272,7 +276,7 @@ def CIR_PointerType : CIR_Type<"Pointer", "ptr", [
   let assemblyFormat = [{
     `<`
       $pointee
-      ( `,` ` ` custom<TargetAddressSpace>($addrSpace)^ )?
+      ( `,` ` ` custom<AddressSpaceValue>($addrSpace)^ )?
     `>`
   }];
 
@@ -310,7 +314,8 @@ def CIR_PointerType : CIR_Type<"Pointer", "ptr", [
 //===----------------------------------------------------------------------===//
 
 def CIR_DataMemberType : CIR_Type<"DataMember", "data_member",
-    [DeclareTypeInterfaceMethods<DataLayoutTypeInterface>]
+    [DeclareTypeInterfaceMethods<DataLayoutTypeInterface>,
+     DeclareTypeInterfaceMethods<CIR_SizedTypeInterface>]
 > {
   let summary = "CIR type that represents a pointer-to-data-member in C++";
   let description = [{
@@ -423,8 +428,9 @@ def CIR_VectorType : CIR_Type<"Vector", "vector", [
   let summary = "CIR vector type";
   let description = [{
     The `!cir.vector` type represents a one-dimensional vector.
-    It takes three parameters: the element type, the number of elements and the
-    scalability flag (optional, defaults to `false`).
+    It takes the element type, the number of elements, an optional scalability
+    flag (defaults to `false`), and an optional SVE-fixed-length flag (defaults
+    to `false`).
 
     Syntax:
 
@@ -450,20 +456,32 @@ def CIR_VectorType : CIR_Type<"Vector", "vector", [
     ```mlir
     !cir.vector<[4] x !cir.int<u, 8>>
     ```
+
+    SVE fixed-length vectors (from `arm_sve_vector_bits`) are indicated by a
+    trailing `, sve_fixed` keyword. These are fixed-length vectors in memory
+    but must be coerced to their scalable equivalents for ABI purposes (PST
+    classification).
+
+    Example:
+    ```mlir
+    !cir.vector<4 x !cir.float, sve_fixed>
+    ```
   }];
 
   let parameters = (ins
     CIR_VectorElementType:$element_type,
     "uint64_t":$size,
-    OptionalParameter<"bool">:$is_scalable
+    OptionalParameter<"bool">:$is_scalable,
+    OptionalParameter<"bool">:$is_sve_fixed_length
   );
 
   let builders = [
     TypeBuilderWithInferredContext<(ins
       "mlir::Type":$element_type, "uint64_t":$size, CArg<"bool",
-      "false">:$is_scalable
+      "false">:$is_scalable, CArg<"bool", "false">:$is_sve_fixed_length
     ), [{
-        return $_get(element_type.getContext(), element_type, size, is_scalable);
+        return $_get(element_type.getContext(), element_type, size, is_scalable,
+                     is_sve_fixed_length);
     }]>,
   ];
 
@@ -512,12 +530,21 @@ def CIR_FuncType : CIR_Type<"Func", "func"> {
     // MLIR-style.  If the given return type is `cir::VoidType`, ignore it
     // and create the FuncType with no return type, which is how MLIR
     // represents function types.
+    //
+    // A null return type is already that MLIR-style spelling of void, so it
+    // has to be accepted rather than dereferenced: generic walks over the
+    // type -- AttrTypeReplacer, for one -- round-trip a void function type
+    // back through this builder with the return type they were given.
     TypeBuilderWithInferredContext<(ins
       "llvm::ArrayRef<mlir::Type>":$inputs, "mlir::Type":$returnType,
       CArg<"bool", "false">:$isVarArg), [{
-        return $_get(returnType.getContext(), inputs,
-                     mlir::isa<cir::VoidType>(returnType) ? nullptr : returnType,
-                     isVarArg);
+        bool isVoid = !returnType || mlir::isa<cir::VoidType>(returnType);
+        assert((returnType || !inputs.empty()) &&
+               "cannot infer a context from a void function type with no "
+               "inputs; use the MLIRContext overload of get()");
+        mlir::MLIRContext *ctx = returnType ? returnType.getContext()
+                                            : inputs.front().getContext();
+        return $_get(ctx, inputs, isVoid ? nullptr : returnType, isVarArg);
     }]>
   ];
 
@@ -556,7 +583,8 @@ def CIR_FuncType : CIR_Type<"Func", "func"> {
 //===----------------------------------------------------------------------===//
 
 def CIR_MethodType : CIR_Type<"Method", "method",
-    [DeclareTypeInterfaceMethods<DataLayoutTypeInterface>]> {
+    [DeclareTypeInterfaceMethods<DataLayoutTypeInterface>,
+     DeclareTypeInterfaceMethods<CIR_SizedTypeInterface>]> {
   let summary = "CIR type that represents C++ pointer-to-member-function type";
   let description = [{
     `cir.method` models the pointer-to-member-function type in C++. The layout
@@ -656,7 +684,8 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
     "bool":$incomplete,
     "bool":$packed,
     "bool":$padded,
-    "RecordType::RecordKind":$kind
+    "RecordType::RecordKind":$kind,
+    OptionalParameter<"ASTRecordDeclInterface">:$ast
   );
 
   // StorageClass is defined in C++ for mutability.
@@ -676,7 +705,7 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
       "RecordKind":$kind
     ), [{
       return $_get($_ctxt, members, name, /*incomplete=*/false, packed, padded,
-                   kind);
+                   kind, ASTRecordDeclInterface{});
     }]>,
 
     // Create an identified and incomplete record type.
@@ -686,7 +715,8 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
     ), [{
       return $_get($_ctxt, /*members=*/llvm::ArrayRef<Type>{}, name,
                          /*incomplete=*/true, /*packed=*/false,
-                         /*padded=*/false, kind);
+                         /*padded=*/false, kind,
+                         ASTRecordDeclInterface{});
     }]>,
 
     // Create an anonymous record type (always complete).
@@ -697,7 +727,7 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
       "RecordKind":$kind
     ), [{
       return $_get($_ctxt, members, mlir::StringAttr{}, /*incomplete=*/false,
-                      packed, padded, kind);
+                      packed, padded, kind, ASTRecordDeclInterface{});
     }]>];
 
   let extraClassDeclaration = [{
@@ -712,6 +742,14 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
     bool isIncomplete() const;
 
     mlir::Type getLargestMember(const mlir::DataLayout &dataLayout) const;
+
+    /// Return the member type that should be used as the LLVM struct body
+    /// for this union. For non-padded unions, this is the largest member.
+    /// For padded unions, this derives the correct member from the padding
+    /// (which may differ from the largest member when the union is not
+    /// zero-initializable).
+    mlir::Type getStorageMember(const mlir::DataLayout &dataLayout) const;
+
     size_t getNumElements() const { return getMembers().size(); };
     std::string getKindAsStr() {
       switch (getKind()) {
@@ -732,7 +770,20 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
     }
 
     void complete(llvm::ArrayRef<mlir::Type> members, bool packed,
-                  bool isPadded);
+                  bool isPadded, ASTRecordDeclInterface ast = {});
+
+    // Complete the record if it is still incomplete, and otherwise leave it
+    // as it is, atomically: isIncomplete() followed by complete() races when
+    // another thread completes the same record in between.
+    void completeIfIncomplete(llvm::ArrayRef<mlir::Type> members, bool packed,
+                              bool isPadded);
+
+    // Replace member types for a complete identified record. This is
+    // used by the CXX ABI lowering pass to update member types (e.g.,
+    // lowering MethodType and DataMemberType) within record types.
+    // Unlike complete(), this allows modifying members of complete
+    // records but requires the same number of members.
+    void replaceMemberTypes(llvm::ArrayRef<mlir::Type> newMembers);
 
     uint64_t getElementOffset(const mlir::DataLayout &dataLayout,
               unsigned idx) const;
@@ -740,7 +791,8 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
     bool isLayoutIdentical(const RecordType &other);
 
   private:
-    unsigned computeStructSize(const mlir::DataLayout &dataLayout) const;
+    uint64_t computeStructSize(const mlir::DataLayout &dataLayout) const;
+    uint64_t computeUnionSize(const mlir::DataLayout &dataLayout) const;
     uint64_t computeStructAlignment(const mlir::DataLayout &dataLayout) const;
   public:
   }];
@@ -753,6 +805,74 @@ def CIR_RecordType : CIR_Type<"Record", "record", [
 def CIRRecordType : Type<
   CPred<"::mlir::isa<::cir::RecordType>($_self)">, "CIR record type">;
 
+// RecordType or ArrayType — used by extract_member which can receive
+// ABI-coerced member pointers as array<u64, 2> on AArch64.
+def CIRRecordOrArrayType : Type<
+  CPred<"::mlir::isa<::cir::RecordType, ::cir::ArrayType>($_self)">,
+  "CIR record or array type">;
+
+//===----------------------------------------------------------------------===//
+// OpaqueType
+//===----------------------------------------------------------------------===//
+
+def CIR_OpaqueType : CIR_Type<"Opaque", "opaque", [
+    DeclareTypeInterfaceMethods<DataLayoutTypeInterface>,
+    DeclareTypeInterfaceMethods<CIR_SizedTypeInterface, ["isSized"]>
+]> {
+  let summary = "Named opaque type for target-specific builtin objects";
+
+  let description = [{
+    Represents a named opaque type used for target-specific builtin objects
+    such as OpenCL opaque types (`event_t`, `sampler_t`, `clk_event_t`,
+    `queue_t`), AArch64 `svcount_t`, AMDGPU named barriers, and the x86
+    `x86_amx` tile-register type.
+
+    Most opaque kinds have no defined size or layout. CIR carries them through
+    lowering and delegates the final representation to the target codegen
+    (e.g. SPIR/SPIR-V lowering), which maps the logical opaque kind to the
+    correct LLVM type. Some target-specific opaque kinds, such as AArch64
+    `svcount_t` and AMDGPU named barriers, are sized and provide
+    target-defined layout.
+
+    The `tag` attribute identifies the opaque category (e.g. `"event"`).
+
+    Example:
+    ```mlir
+      !cir.opaque<"event">
+    ```
+  }];
+
+  let parameters = (ins "mlir::StringAttr":$tag);
+
+  let builders = [
+    TypeBuilder<(ins "mlir::StringAttr":$tag), [{
+      return $_get($_ctxt, tag);
+    }]>
+  ];
+
+  let extraClassDeclaration = [{
+    static llvm::StringRef getOpenCLEventTag() { return "event"; }
+    static llvm::StringRef getAArch64SVCountTag() { return "aarch64.svcount"; }
+    static llvm::StringRef getAMDGCNNamedBarrierTag() {
+      return "amdgcn.named.barrier";
+    }
+    static llvm::StringRef getX86AMXTag() { return "x86.amx"; }
+  }];
+
+  let extraClassDefinition = [{
+    bool $cppClass::isSized() const {
+      return getTag() == getAArch64SVCountTag() ||
+             getTag() == getAMDGCNNamedBarrierTag();
+    }
+  }];
+
+  let assemblyFormat = [{
+    `<` $tag `>`
+  }];
+
+  let skipDefaultBuilders = 1;
+}
+
 //===----------------------------------------------------------------------===//
 // Global type constraints
 //===----------------------------------------------------------------------===//
@@ -760,7 +880,8 @@ def CIRRecordType : Type<
 def CIR_AnyType : AnyTypeOf<[
   CIR_VoidType, CIR_BoolType, CIR_ArrayType, CIR_VectorType, CIR_IntType,
   CIR_AnyFloatType, CIR_PointerType, CIR_FuncType, CIR_RecordType,
-  CIR_ComplexType, CIR_VPtrType, CIR_DataMemberType, CIR_MethodType
+  CIR_ComplexType, CIR_VPtrType, CIR_DataMemberType, CIR_MethodType,
+  CIR_OpaqueType
 ]>;
 
 #endif // CLANG_CIR_DIALECT_IR_CIRTYPES_TD

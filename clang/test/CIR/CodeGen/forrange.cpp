@@ -13,16 +13,12 @@ void for_range() {
     ;
 }
 
-// CIR: cir.func{{.*}} @_Z5beginR9Container(!cir.ptr<!rec_Container>) -> !cir.ptr<!rec_Element>
-// CIR: cir.func{{.*}} @_Z3endR9Container(!cir.ptr<!rec_Container>) -> !cir.ptr<!rec_Element
-
 // CIR: cir.func{{.*}} @_Z9for_rangev()
 // CIR:    %[[C_ADDR:.*]] = cir.alloca !rec_Container{{.*}} ["c"]
 // CIR:    cir.scope {
 // CIR:      %[[RANGE_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Container>{{.*}} ["__range1", init, const]
 // CIR:      %[[BEGIN_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["__begin1", init]
 // CIR:      %[[END_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["__end1", init]
-// CIR:      %[[E_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["e", init, const]
 // CIR:      cir.store{{.*}} %[[C_ADDR]], %[[RANGE_ADDR]]
 // CIR:      %[[C_REF:.*]] = cir.load{{.*}} %[[RANGE_ADDR]]
 // CIR:      %[[BEGIN:.*]] = cir.call @_Z5beginR9Container(%[[C_REF]])
@@ -36,13 +32,16 @@ void for_range() {
 // CIR:        %[[CMP:.*]] = cir.cmp(ne, %[[BEGIN]], %[[END]])
 // CIR:        cir.condition(%[[CMP]])
 // CIR:      } body {
-// CIR:        %[[E:.*]] = cir.load deref{{.*}} %[[BEGIN_ADDR]]
-// CIR:        cir.store{{.*}} %[[E]], %[[E_ADDR]]
+// CIR:        cir.scope {
+// CIR:          %[[E_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["e", init, const]
+// CIR:          %[[E:.*]] = cir.load deref{{.*}} %[[BEGIN_ADDR]]
+// CIR:          cir.store{{.*}} %[[E]], %[[E_ADDR]]
+// CIR:        }
 // CIR:        cir.yield
 // CIR:      } step {
 // CIR:        %[[BEGIN:.*]] = cir.load{{.*}} %[[BEGIN_ADDR]]
 // CIR:        %[[STEP:.*]] = cir.const #cir.int<1>
-// CIR:        %[[NEXT:.*]] = cir.ptr_stride %[[BEGIN]], %[[STEP]]
+// CIR:        %[[NEXT:.*]] = cir.ptr_stride inbounds|nuw %[[BEGIN]], %[[STEP]]
 // CIR:        cir.store{{.*}} %[[NEXT]], %[[BEGIN_ADDR]]
 // CIR:        cir.yield
 // CIR:      }
@@ -65,7 +64,6 @@ void for_range2() {
 // CIR:      %[[RANGE_ADDR:.*]] = cir.alloca !cir.ptr<!rec_C2>{{.*}} ["__range1", init, const]
 // CIR:      %[[BEGIN_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["__begin1", init]
 // CIR:      %[[END_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["__end1", init]
-// CIR:      %[[E_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["e", init, const]
 // CIR:      cir.store{{.*}} %[[C_ADDR]], %[[RANGE_ADDR]]
 // CIR:      %[[C_REF:.*]] = cir.load{{.*}} %[[RANGE_ADDR]]
 // CIR:      %[[BEGIN:.*]] = cir.call @_ZN2C25beginEv(%[[C_REF]])
@@ -79,13 +77,16 @@ void for_range2() {
 // CIR:        %[[CMP:.*]] = cir.cmp(ne, %[[BEGIN]], %[[END]])
 // CIR:        cir.condition(%[[CMP]])
 // CIR:      } body {
-// CIR:        %[[E:.*]] = cir.load deref{{.*}} %[[BEGIN_ADDR]]
-// CIR:        cir.store{{.*}} %[[E]], %[[E_ADDR]]
+// CIR:        cir.scope {
+// CIR:          %[[E_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["e", init, const]
+// CIR:          %[[E:.*]] = cir.load deref{{.*}} %[[BEGIN_ADDR]]
+// CIR:          cir.store{{.*}} %[[E]], %[[E_ADDR]]
+// CIR:        }
 // CIR:        cir.yield
 // CIR:      } step {
 // CIR:        %[[BEGIN:.*]] = cir.load{{.*}} %[[BEGIN_ADDR]]
 // CIR:        %[[STEP:.*]] = cir.const #cir.int<1>
-// CIR:        %[[NEXT:.*]] = cir.ptr_stride %[[BEGIN]], %[[STEP]]
+// CIR:        %[[NEXT:.*]] = cir.ptr_stride inbounds|nuw %[[BEGIN]], %[[STEP]]
 // CIR:        cir.store{{.*}} %[[NEXT]], %[[BEGIN_ADDR]]
 // CIR:        cir.yield
 // CIR:      }
@@ -117,17 +118,60 @@ void for_range3() {
 // CIR:      %[[RANGE_ADDR:.*]] = cir.alloca !cir.ptr<!rec_C3>{{.*}} ["__range1", init, const]
 // CIR:      %[[BEGIN_ADDR:.*]] = cir.alloca !rec_Iterator, !cir.ptr<!rec_Iterator>{{.*}} ["__begin1", init]
 // CIR:      %[[END_ADDR:.*]] = cir.alloca !rec_Iterator, !cir.ptr<!rec_Iterator>{{.*}} ["__end1", init]
-// CIR:      %[[E_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["e", init, const]
 // CIR:      cir.store{{.*}} %[[C_ADDR]], %[[RANGE_ADDR]]
 // CIR:      cir.for : cond {
 // CIR:        %[[ITER_NE:.*]] = cir.call @_ZNK8IteratorneERKS_(%[[BEGIN_ADDR]], %[[END_ADDR]])
 // CIR:        cir.condition(%[[ITER_NE]])
 // CIR:      } body {
-// CIR:        %[[E:.*]] = cir.call @_ZN8IteratordeEv(%[[BEGIN_ADDR]])
-// CIR:        cir.store{{.*}} %[[E]], %[[E_ADDR]]
+// CIR:        cir.scope {
+// CIR:          %[[E_ADDR:.*]] = cir.alloca !cir.ptr<!rec_Element>{{.*}} ["e", init, const]
+// CIR:          %[[E:.*]] = cir.call @_ZN8IteratordeEv(%[[BEGIN_ADDR]])
+// CIR:          cir.store{{.*}} %[[E]], %[[E_ADDR]]
+// CIR:        }
 // CIR:        cir.yield
 // CIR:      } step {
 // CIR:        %[[ITER_NEXT:.*]] = cir.call @_ZN8IteratorppEv(%[[BEGIN_ADDR]])
 // CIR:        cir.yield
 // CIR:      }
 // CIR:    }
+
+// Test that range-for with an iterator returning by value properly destroys
+// the temporary at the end of each iteration, not just at loop exit. This
+// is critical for types with non-trivial destructors.
+struct Wrapper {
+  int val;
+  ~Wrapper();
+};
+
+class ValIter {
+public:
+  Wrapper operator*();
+  ValIter& operator++();
+  bool operator!=(const ValIter& other) const;
+};
+
+class C4 {
+public:
+  ValIter begin();
+  ValIter end();
+};
+
+void for_range_val_iter() {
+  C4 c;
+  for (const auto& w : c)
+    ;
+}
+
+// Verify that the destructor for the temporary (ref.tmp) is called inside
+// the per-iteration scope, not at loop exit.
+// CIR: cir.func{{.*}} @_Z18for_range_val_iterv()
+// CIR:    cir.scope {
+// CIR:      cir.for : cond {
+// CIR:        cir.condition(
+// CIR:      } body {
+// CIR:        cir.scope {
+// CIR:          cir.call @_ZN7ValIterdeEv(
+// CIR:          cir.call @_ZN7WrapperD1Ev(
+// CIR:        }
+// CIR:        cir.yield
+// CIR:      } step {

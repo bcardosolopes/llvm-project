@@ -50,6 +50,10 @@ public:
   /// Translates the given LLVM debug metadata to MLIR.
   DINodeAttr translate(llvm::DINode *node);
 
+  /// Translates the given LLVM assignment-tracking identity. Not part of the
+  /// `DINode` dispatch above: `llvm::DIAssignID` derives from `MDNode`.
+  DIAssignIDAttr translate(llvm::DIAssignID *node);
+
   /// Infers the metadata type and translates it to MLIR.
   template <typename DINodeT>
   auto translate(DINodeT *node) {
@@ -88,6 +92,10 @@ private:
   /// null attribute otherwise.
   StringAttr getStringAttrOrNull(llvm::MDString *stringNode);
 
+  /// Translates a debug info `annotations` array. Entries that are not a
+  /// {MDString, MDString-or-constant-integer} pair are dropped.
+  SmallVector<DINodeAttr> translateAnnotations(llvm::DINodeArray annotations);
+
   /// Get the DistinctAttr used to represent `node` if one was already created
   /// for it, or create a new one if not.
   DistinctAttr getOrCreateDistinctID(llvm::DINode *node);
@@ -97,6 +105,13 @@ private:
   /// A mapping between distinct LLVM debug metadata nodes and the corresponding
   /// distinct id attribute.
   DenseMap<llvm::DINode *, DistinctAttr> nodeToDistinctAttr;
+
+  /// A mapping between assignment-tracking identities and their attribute.
+  /// `llvm::DIAssignID` is an `MDNode`, not a `DINode`, so it gets its own
+  /// cache rather than riding the one above. Sharing matters here more than it
+  /// does for the others: assignment tracking works precisely by a store and
+  /// its `#dbg_assign` naming the same identity.
+  DenseMap<llvm::DIAssignID *, DIAssignIDAttr> assignIDToAttr;
 
   /// A mapping between DINodes that are recursive, and their assigned recId.
   /// This is kept so that repeated occurrences of the same node can reuse the

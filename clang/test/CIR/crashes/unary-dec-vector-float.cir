@@ -1,0 +1,11 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: unary decrement on vector type is not supported
+// CHECK-NOT: -- not allowed on vector types
+// CHECK-NOT: Stack dump:
+
+module {
+  cir.func @f(%arg0: !cir.vector<2 x !cir.float>) -> !cir.vector<2 x !cir.float> {
+    %0 = cir.unary(dec, %arg0) : !cir.vector<2 x !cir.float>, !cir.vector<2 x !cir.float>
+    cir.return %0 : !cir.vector<2 x !cir.float>
+  }
+}

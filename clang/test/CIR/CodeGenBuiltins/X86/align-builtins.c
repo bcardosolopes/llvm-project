@@ -91,4 +91,22 @@ __v8di test_builtin_ia32_alignq512()
   __v8di vec1 = {0, 1, 2, 3, 4, 5, 6, 7};
   __v8di vec2 = {8, 9, 10, 11, 12, 13, 14, 15};
   return __builtin_ia32_alignq512(vec1, vec2, 0);
-} 
+}
+
+__v4si  test_valign_shift1()
+{
+  // Shift=1 produces indices that cross into the second operand,
+  // verifying correct operand order (ops[1], ops[0]).
+
+  // CIR-LABEL: test_valign_shift1
+  // CIR: cir.vec.shuffle({{%.*}}, {{%.*}} : !cir.vector<4 x !s32i>) [#cir.int<1> : !s32i, #cir.int<2> : !s32i, #cir.int<3> : !s32i, #cir.int<4> : !s32i] : !cir.vector<4 x !s32i>
+
+  // LLVM-LABEL: test_valign_shift1
+  // LLVM: shufflevector <4 x i32> %{{.*}}, <4 x i32> %{{.*}}, <4 x i32> <i32 1, i32 2, i32 3, i32 4>
+
+  // OGCG-LABEL: test_valign_shift1
+  // OGCG: shufflevector <4 x i32> %{{.*}}, <4 x i32> %{{.*}}, <4 x i32> <i32 1, i32 2, i32 3, i32 4>
+  __v4si  vec1 = {0, 1, 2, 3};
+  __v4si  vec2 = {4, 5, 6, 7};
+  return __builtin_ia32_alignd128(vec1, vec2, 1);
+}

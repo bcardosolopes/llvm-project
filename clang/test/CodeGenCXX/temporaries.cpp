@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -emit-llvm %s -o - -triple=x86_64-apple-darwin9 -std=c++11 | FileCheck %s -check-prefixes=CHECK,NULL-INVALID,CHECK-CXX11
 // RUN: %clang_cc1 -emit-llvm %s -o - -triple=x86_64-apple-darwin9 -std=c++17 | FileCheck %s -check-prefixes=CHECK,NULL-INVALID,CHECK-CXX17
 // RUN: %clang_cc1 -emit-llvm %s -o - -triple=x86_64-apple-darwin9 -std=c++11 -fno-delete-null-pointer-checks | FileCheck %s -check-prefixes=CHECK,NULL-VALID,CHECK-CXX11
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm %s -o - -triple=x86_64-apple-darwin9 -std=c++11 -fexceptions -fcxx-exceptions -fclangir | FileCheck %s -check-prefix=CIR-ASSIGNOP %}
 
 namespace PR16263 {
   const unsigned int n = 1234;
@@ -612,6 +613,18 @@ namespace AssignmentOp {
   struct A { ~A(); };
   struct B { A operator=(const B&); };
   struct C : B { B b1, b2; };
+  // CIR-ASSIGNOP-LABEL: define linkonce_odr {{.*}} ptr @_ZN12AssignmentOp1CaSERKS0_(
+  // CIR-ASSIGNOP: %[[TMP0:.*]] = alloca %"struct.AssignmentOp::A"
+  // CIR-ASSIGNOP: %[[TMP1:.*]] = alloca %"struct.AssignmentOp::A"
+  // CIR-ASSIGNOP: %[[TMP2:.*]] = alloca %"struct.AssignmentOp::A"
+  // CIR-ASSIGNOP: %[[THIS:.*]] = load ptr, ptr %{{.*}}, align 8
+  // CIR-ASSIGNOP: call void @_ZN12AssignmentOp1BaSERKS0_(ptr dead_on_unwind writable sret(%"struct.AssignmentOp::A") align 1 %[[TMP0]], ptr {{.*}} %[[THIS]],
+  // CIR-ASSIGNOP: call void @_ZN12AssignmentOp1AD1Ev(ptr {{.*}} %[[TMP0]]) #0
+  // CIR-ASSIGNOP: call void @_ZN12AssignmentOp1BaSERKS0_(ptr dead_on_unwind writable sret(%"struct.AssignmentOp::A") align 1 %[[TMP1]],
+  // CIR-ASSIGNOP: call void @_ZN12AssignmentOp1AD1Ev(ptr {{.*}} %[[TMP1]]) #0
+  // CIR-ASSIGNOP: call void @_ZN12AssignmentOp1BaSERKS0_(ptr dead_on_unwind writable sret(%"struct.AssignmentOp::A") align 1 %[[TMP2]],
+  // CIR-ASSIGNOP: call void @_ZN12AssignmentOp1AD1Ev(ptr {{.*}} %[[TMP2]]) #0
+  // CIR-ASSIGNOP: ret ptr %[[THIS]]
   // CHECK-LABEL: define{{.*}} void @_ZN12AssignmentOp1fE
   void f(C &c1, const C &c2) {
     // CHECK: call {{.*}} @_ZN12AssignmentOp1CaSERKS0_(

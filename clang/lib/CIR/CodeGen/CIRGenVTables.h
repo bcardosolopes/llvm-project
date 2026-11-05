@@ -30,6 +30,10 @@ class CIRGenVTables {
 
   clang::VTableContextBase *vtContext;
 
+  /// Cached special virtual function declarations.
+  cir::FuncOp pureVirtualFn;
+  cir::FuncOp deletedVirtualFn;
+
   /// Address points for a single vtable.
   using VTableAddressPointsMapTy = clang::VTableLayout::AddressPointsMapTy;
   using BaseSubobjectPairTy =
@@ -46,10 +50,25 @@ class CIRGenVTables {
   /// indices.
   SecondaryVirtualPointerIndicesMapTy secondaryVirtualPointerIndices;
 
+  /// Pending relative-vtable symbol renames (old name -> local ".local" name).
+  /// generateRelativeVTableAlias records each rename here instead of walking
+  /// the whole module per alias (which is O(aliases * module-size)); the
+  /// accumulated renames are applied in a single module walk by
+  /// applyDeferredRelativeVTableRenames() at the end of CIRGenModule::release().
+  llvm::StringMap<std::string> deferredRelativeVTableRenames;
+
   mlir::Attribute
   getVTableComponent(const VTableLayout &layout, unsigned componentIndex,
                      mlir::Attribute rtti, unsigned &nextVTableThunkIndex,
-                     unsigned vtableAddressPoint, bool vtableHasLocalLinkage);
+                     unsigned vtableIndex, unsigned componentIndexInVTable,
+                     unsigned vtableAddressPoint, bool vtableHasLocalLinkage,
+                     mlir::FlatSymbolRefAttr vtableSym,
+                     llvm::SmallVectorImpl<mlir::Attribute> *ptrauthEntries);
+
+  /// Get the address of a thunk and emit it if necessary.
+  cir::FuncOp maybeEmitThunk(clang::GlobalDecl gd,
+                             const clang::ThunkInfo &thunkAdjustments,
+                             bool forVTable);
 
   mlir::Type getVTableComponentType();
 
@@ -76,6 +95,17 @@ public:
   generateConstructionVTable(const CXXRecordDecl *rd, const BaseSubobject &base,
                              bool baseIsVirtual, cir::GlobalLinkageKind linkage,
                              VTableAddressPointsMapTy &addressPoints);
+
+  /// For relative vtables that are not dso_local or are in a COMDAT group,
+  /// localize the concrete global behind an alias to match OGCG's relocation
+  /// model.
+  void generateRelativeVTableAlias(cir::GlobalOp vtable,
+                                   llvm::StringRef aliasName);
+
+  /// Apply all relative-vtable symbol renames accumulated by
+  /// generateRelativeVTableAlias in a single module walk. Must run after all
+  /// vtables are emitted and before the module is lowered.
+  void applyDeferredRelativeVTableRenames();
 
   /// Get the address of the VTT for the given record decl.
   cir::GlobalOp getAddrOfVTT(const CXXRecordDecl *rd);

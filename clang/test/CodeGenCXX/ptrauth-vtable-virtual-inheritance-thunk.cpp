@@ -2,6 +2,8 @@
 // RUN:   -fptrauth-vtable-pointer-type-discrimination -emit-llvm -O0 -o - | FileCheck --check-prefixes=CHECK,DARWIN %s
 // RUN: %clang_cc1 %s -x c++ -std=c++11 -triple aarch64-linux-gnu -disable-llvm-passes -fptrauth-intrinsics -fptrauth-calls \
 // RUN:   -fptrauth-vtable-pointer-type-discrimination -emit-llvm -O0 -o - | FileCheck --check-prefixes=CHECK,ELF %s
+// RUN: %if cir-support %{ %clang_cc1 %s -x c++ -std=c++11 -triple aarch64-linux-gnu -disable-llvm-passes -fptrauth-intrinsics -fptrauth-calls \
+// RUN:   -fptrauth-vtable-pointer-type-discrimination -fclangir -emit-llvm -O0 -o - | FileCheck --check-prefixes=CHECK-CIR %s %}
 
 // The actual vtable construction
 
@@ -315,3 +317,26 @@ int main() {
 
 // CHECK: void @_ZTv0_n48_N1GD0EvU11__vtptrauthILj0Lb0Lj62866E(ptr noundef %this)
 // CHECK: [[TEMP:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[TEMP:%.*]], i32 2, i64 62866)
+
+// Check that ClangIR preserves ptrauth operand bundles for Linux virtual
+// indirect calls, including the blended discriminator from the vtable slot.
+// CHECK-CIR-LABEL: define dso_local noundef i32 @main()
+// CHECK-CIR: [[DTOR_AUTH:%.*]] = call i64 @llvm.ptrauth.auth(i64 {{%.*}}, i32 2, i64 62866)
+// CHECK-CIR-NEXT: [[DTOR_VTABLE:%.*]] = inttoptr i64 [[DTOR_AUTH]] to ptr
+// CHECK-CIR-NEXT: [[DTOR_SLOT:%.*]] = getelementptr inbounds ptr, ptr [[DTOR_VTABLE]], i64 4
+// CHECK-CIR-NEXT: [[DTOR_FN:%.*]] = load ptr, ptr [[DTOR_SLOT]], align 8
+// CHECK-CIR-NEXT: [[DTOR_DISC:%.*]] = ptrtoint ptr [[DTOR_SLOT]] to i64
+// CHECK-CIR-NEXT: [[DTOR_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[DTOR_DISC]], i64 63674)
+// CHECK-CIR: call void [[DTOR_FN]](ptr noundef nonnull align 8 dereferenceable(9) {{%.*}}){{.*}}[ "ptrauth"(i32 0, i64 [[DTOR_BLEND]]) ]
+// CHECK-CIR: [[F_AUTH:%.*]] = call i64 @llvm.ptrauth.auth(i64 {{%.*}}, i32 2, i64 62866)
+// CHECK-CIR-NEXT: [[F_VTABLE:%.*]] = inttoptr i64 [[F_AUTH]] to ptr
+// CHECK-CIR-NEXT: [[F_SLOT:%.*]] = getelementptr inbounds ptr, ptr [[F_VTABLE]], i64 0
+// CHECK-CIR-NEXT: [[F_FN:%.*]] = load ptr, ptr [[F_SLOT]], align 8
+// CHECK-CIR-NEXT: [[F_DISC:%.*]] = ptrtoint ptr [[F_SLOT]] to i64
+// CHECK-CIR-NEXT: [[F_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[F_DISC]], i64 55636)
+// CHECK-CIR: {{%.*}} = call noundef i32 [[F_FN]](ptr noundef nonnull align 8 dereferenceable(9) {{%.*}}) [ "ptrauth"(i32 0, i64 [[F_BLEND]]) ]
+// CHECK-CIR: [[H_SLOT:%.*]] = getelementptr inbounds ptr, ptr {{%.*}}, i64 2
+// CHECK-CIR-NEXT: [[H_FN:%.*]] = load ptr, ptr [[H_SLOT]], align 8
+// CHECK-CIR-NEXT: [[H_DISC:%.*]] = ptrtoint ptr [[H_SLOT]] to i64
+// CHECK-CIR-NEXT: [[H_BLEND:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[H_DISC]], i64 31735)
+// CHECK-CIR: {{%.*}} = call noundef i32 (ptr, ...) [[H_FN]](ptr noundef nonnull align 8 dereferenceable(9) {{%.*}}, i32 noundef 1, i32 noundef 2, i32 noundef 3) [ "ptrauth"(i32 0, i64 [[H_BLEND]]) ]

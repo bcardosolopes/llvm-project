@@ -1,0 +1,17 @@
+// RUN: cir-opt %s -verify-diagnostics
+
+// An operand with no type of its own.
+//
+// The assembly format uses qualified() on the operands so their types are
+// printed and survive a round trip, and leaves the attribute's own type to
+// MLIR. But text can still omit an operand's type, and a null there is what
+// MLIR's alias walk and bytecode numbering dereference -- so the verifier
+// refuses it rather than letting it reach either.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.global external @tgt = #cir.int<0> : !s32i
+  // expected-error @+1 {{operands must each carry a type}}
+  cir.global external @a = #cir.global_view_diff<#cir.global_view<@tgt>, #cir.global_view<@tgt>> : !s32i
+}

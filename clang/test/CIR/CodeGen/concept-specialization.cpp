@@ -19,3 +19,16 @@ void concept_specialization() { bool a = C<int>; }
 
 // OGCG: %[[A_ADDR:.*]] = alloca i8, align 1
 // OGCG: store i8 1, ptr %[[A_ADDR]], align 1
+
+// Test that ImplicitConceptSpecialization decls in constrained templates
+// are handled as no-ops (matching OGCG behavior).
+template <typename T>
+concept Addable = requires(T a, T b) { a + b; };
+
+template <Addable T>
+T add(T a, T b) { return a + b; }
+
+// CIR-LABEL: @_Z17test_concept_declv
+// LLVM-LABEL: @_Z17test_concept_declv
+// OGCG-LABEL: @_Z17test_concept_declv
+int test_concept_decl() { return add(1, 2); }

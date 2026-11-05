@@ -9,9 +9,12 @@
 // RUN: %clang_cc1 -flto -flto-unit -triple x86_64-pc-windows-msvc -fsanitize=cfi-vcall -fsanitize-trap=cfi-vcall -emit-llvm -o - %s | FileCheck --check-prefix=CFI --check-prefix=CFI-NVT-NO-RV --check-prefix=MS --check-prefix=MS-TYPEMETADATA --check-prefix=TT-MS --check-prefix=NDIAG %s
 
 // Tests for the whole-program-vtables feature:
-// RUN: %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -fvisibility=hidden -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=VTABLE-OPT --check-prefix=ITANIUM-HIDDEN --check-prefix=ITANIUM-COMMON-MD --check-prefix=ITANIUM-NO-RV-MD --check-prefix=TT-ITANIUM-HIDDEN %s
+// RUN: %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -fvisibility=hidden -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=VTABLE-OPT --check-prefix=ITANIUM-HIDDEN --check-prefix=ITANIUM-COMMON-MD --check-prefix=ITANIUM-NO-RV-MD --check-prefix=ITANIUM-WPD-HIDDEN --check-prefix=TT-ITANIUM-HIDDEN %s
 // RUN: %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=VTABLE-OPT --check-prefix=ITANIUM-DEFAULTVIS --check-prefix=TT-ITANIUM-DEFAULT %s
 // RUN: %clang_cc1 -O2 -flto -flto-unit -triple x86_64-unknown-linux -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=ITANIUM-OPT --check-prefix=ITANIUM-OPT-LAYOUT %s
+// RUN: %if cir-support %{ %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -fvisibility=hidden -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-WPD --check-prefix=CIR-WPD-HIDDEN --check-prefix=CIR-WPD-TT %s %}
+// RUN: %if cir-support %{ %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -fvisibility=hidden -fvirtual-function-elimination -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-VFE-TC %s %}
+// RUN: %if cir-support %{ %clang_cc1 -O2 -flto -flto-unit -triple x86_64-unknown-linux -fwhole-program-vtables -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CIR-WPD-OPT %s %}
 // RUN: %clang_cc1 -flto -flto-unit -triple x86_64-pc-windows-msvc -fwhole-program-vtables -emit-llvm -o - %s | FileCheck --check-prefix=VTABLE-OPT --check-prefix=MS --check-prefix=MS-TYPEMETADATA --check-prefix=TT-MS %s
 
 // Tests for cfi + whole-program-vtables:
@@ -34,7 +37,7 @@
 
 // Tests that type metadata are annotated on vtables with `-profile-instrument=llvm` (which is equivalent to clang driver option `-fprofile-generate` without `-fcs-profile-generate`):
 // - In clang driver, `-fprofile-instrument` cc1 option is set to 'llvm' iff clang driver option `-fprofile-generate{,=}` is taking effect.
-// RUN: %clang_cc1 -fprofile-instrument=llvm -fno-lto -triple x86_64-unknown-linux -emit-llvm %s -o - | FileCheck %s --check-prefix=ITANIUM-COMMON-MD
+// RUN: %clang_cc1 -fprofile-instrument=llvm -fno-lto -triple x86_64-unknown-linux -emit-llvm %s -o - | FileCheck %s --check-prefix=ITANIUM-COMMON-MD --check-prefix=ITANIUM-NO-RV-MD
 // RUN: %clang_cc1 -fprofile-instrument=llvm -fno-lto -triple x86_64-pc-windows-msvc -emit-llvm %s -o - | FileCheck %s --check-prefix=MS-TYPEMETADATA
 
 // Tests type metadata are not annotated on vtables if `-fno-lto` is specified and `-fprofile-instrument` is any of {none, clang, csllvm}.
@@ -63,7 +66,8 @@
 // ITANIUM-COMMON-MD-SAME: !type [[BF40:![0-9]+]]
 // ITANIUM-COMMON-MD-SAME: !type [[BF48:![0-9]+]]
 
-// ITANIUM-COMMON-MD: @_ZTV1C = {{[^!]*}}, !type [[A32]]
+// ITANIUM-NO-RV-MD: @_ZTV1C = {{[^!]*}}, !type [[A32]]
+// RV-MD: @_ZTV1C.local = {{[^!]*}}, !type [[A32]]
 // ITANIUM-DIAG-SAME: !type [[ALL32]]
 // ITANIUM-COMMON-MD-SAME: !type [[AF32]]
 // ITANIUM-COMMON-MD-SAME: !type [[C32:![0-9]+]]
@@ -99,6 +103,7 @@
 // ITANIUM-DIAG-SAME: !type [[ALL32]]
 // ITANIUM-COMMON-MD-SAME: !type [[B32]]
 // ITANIUM-DIAG-SAME: !type [[ALL32]]
+// ITANIUM-WPD-HIDDEN-SAME: !vcall_visibility [[WPD_VIS:![0-9]+]]
 
 // ITANIUM-COMMON-MD: @_ZTCN12_GLOBAL__N_11DE8_1C = {{[^!]*}}, !type [[A64:![0-9]+]]
 // ITANIUM-DIAG-SAME: !type [[ALL64:![0-9]+]]
@@ -106,6 +111,7 @@
 // ITANIUM-COMMON-MD-SAME: !type [[C32]]
 // ITANIUM-DIAG-SAME: !type [[ALL32]]
 // ITANIUM-COMMON-MD-SAME: !type [[CF64:![0-9]+]]
+// ITANIUM-WPD-HIDDEN-SAME: !vcall_visibility [[WPD_VIS]]
 
 // ITANIUM-COMMON-MD: @_ZTVZ3foovE2FA = {{[^!]*}}, !type [[A16]]
 // ITANIUM-DIAG-SAME: !type [[ALL16]]
@@ -120,6 +126,18 @@
 // ITANIUM-OPT-SAME: !type [[E16:![0-9]+]],
 // ITANIUM-OPT-SAME: !type [[EF16:![0-9]+]]
 // ITANIUM-OPT: @llvm.compiler.used = appending global [1 x ptr] [ptr @_ZTVN5test31EE]
+// CIR-WPD: @_ZTV1A = {{[^!]*}}, !type [[CIR_A16:![0-9]+]]
+// CIR-WPD: @_ZTV1B = {{[^!]*}}, !type [[CIR_B32:![0-9]+]]
+// CIR-WPD: @_ZTCN12_GLOBAL__N_11DE0_1B = {{[^!]*}}, !type !{{[0-9]+}}
+// CIR-WPD-SAME: !type !{{[0-9]+}}
+// CIR-WPD-HIDDEN-SAME: !vcall_visibility [[CIR_WPD_VIS:![0-9]+]]
+// CIR-WPD: @_ZTCN12_GLOBAL__N_11DE8_1C = {{[^!]*}}, !type !{{[0-9]+}}
+// CIR-WPD-SAME: !type !{{[0-9]+}}
+// CIR-WPD-SAME: !type !{{[0-9]+}}
+// CIR-WPD-SAME: !type !{{[0-9]+}}
+// CIR-WPD-HIDDEN-SAME: !vcall_visibility [[CIR_WPD_VIS]]
+// CIR-WPD-OPT: @_ZTVN5test31EE = available_externally unnamed_addr constant {{[^!]*}}, !type [[CIR_E16:![0-9]+]], !type [[CIR_EF16:![0-9]+]]
+// CIR-WPD-OPT: @llvm.compiler.used = appending global [1 x ptr] [ptr @_ZTVN5test31EE]
 
 // MS-TYPEMETADATA: comdat($"??_7A@@6B@"), !type [[A8:![0-9]+]]
 // MS-TYPEMETADATA: comdat($"??_7B@@6B0@@"), !type [[B8:![0-9]+]]
@@ -175,8 +193,14 @@ void D::h() {
 // ITANIUM-DEFAULTVIS: define{{.*}} void @_Z2afP1A
 // MS: define dso_local void @"?af@@YAXPEAUA@@@Z"
 void af(A *a) {
+  // CIR-VFE-TC-LABEL: define hidden void @_Z2afP1A
   // TT-ITANIUM-HIDDEN: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr [[VT:%[^ ]*]], metadata !"_ZTS1A")
   // TT-ITANIUM-DEFAULT: [[P:%[^ ]*]] = call i1 @llvm.public.type.test(ptr [[VT:%[^ ]*]], metadata !"_ZTS1A")
+  // CIR-WPD-TT: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr [[VT:%[^ ]*]], metadata !{{[0-9]+}})
+  // CIR-WPD-TT-NEXT: call void @llvm.assume(i1 [[P]])
+  // CIR-VFE-TC: [[PAIR:%[^ ]*]] = call { ptr, i1 } @llvm.type.checked.load(ptr [[VT:%[^ ]*]], i32 0, metadata !"_ZTS1A")
+  // CIR-VFE-TC-NEXT: [[PTR:%[^ ]*]] = extractvalue { ptr, i1 } [[PAIR]], 0
+  // CIR-VFE-TC-NEXT: [[P:%[^ ]*]] = extractvalue { ptr, i1 } [[PAIR]], 1
   // TT-MS: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr [[VT:%[^ ]*]], metadata !"?AUA@@")
   // TC-ITANIUM:    [[PAIR:%[^ ]*]] = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 0, metadata !"_ZTS1A")
   // TC-ITANIUM-RV: [[PAIR:%[^ ]*]] = call { ptr, i1 } @llvm.type.checked.load.relative(ptr {{%[^ ]*}}, i32 0, metadata !"_ZTS1A")
@@ -201,6 +225,7 @@ void af(A *a) {
   // CFI-NVT-NO-RV: [[PTR:%[^ ]*]] = load
   // CFI-NVT-RV: [[PTR:%[^ ]*]] = call ptr @llvm.load.relative.i32
   // CFI-VT: [[PTR:%[^ ]*]] = extractvalue { ptr, i1 } [[PAIR]], 0
+  // CIR-VFE-TC: call void [[PTR]]
   // CFI: call void [[PTR]]
 #line 123
   a->f();
@@ -209,6 +234,7 @@ void af(A *a) {
 // ITANIUM-HIDDEN: define internal void @_Z3df1PN12_GLOBAL__N_11DE
 // MS: define internal void @"?df1@@YAXPEAUD@?A0x{{[^@]*}}@@@Z"
 void df1(D *d) {
+  // CIR-VFE-TC-LABEL: define internal void @_Z3df1PN12_GLOBAL__N_11DE
   // TT-ITANIUM-HIDDEN: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata ![[DTYPE:[0-9]+]])
   // TT-ITANIUM-DEFAULT: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata ![[DTYPE:[0-9]+]])
   // TT-MS: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"?AUA@@")
@@ -221,9 +247,11 @@ void df1(D *d) {
 // ITANIUM-HIDDEN: define internal void @_Z3dg1PN12_GLOBAL__N_11DE
 // MS: define internal void @"?dg1@@YAXPEAUD@?A0x{{[^@]*}}@@@Z"
 void dg1(D *d) {
+  // CIR-VFE-TC-LABEL: define internal void @_Z3dg1PN12_GLOBAL__N_11DE
   // TT-ITANIUM-HIDDEN: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"_ZTS1B")
   // TT-ITANIUM-DEFAULT: {{%[^ ]*}} = call i1 @llvm.public.type.test(ptr {{%[^ ]*}}, metadata !"_ZTS1B")
   // TT-MS: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"?AUB@@")
+  // CIR-VFE-TC: {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 8, metadata !"_ZTS1B")
   // TC-ITANIUM:    {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 8, metadata !"_ZTS1B")
   // TC-ITANIUM-RV: {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load.relative(ptr {{%[^ ]*}}, i32 4, metadata !"_ZTS1B")
   // TC-MS: {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 0, metadata !"?AUB@@")
@@ -233,6 +261,7 @@ void dg1(D *d) {
 // ITANIUM-HIDDEN: define internal void @_Z3dh1PN12_GLOBAL__N_11DE
 // MS: define internal void @"?dh1@@YAXPEAUD@?A0x{{[^@]*}}@@@Z"
 void dh1(D *d) {
+  // CIR-VFE-TC-LABEL: define internal void @_Z3dh1PN12_GLOBAL__N_11DE
   // TT-ITANIUM-HIDDEN: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata ![[DTYPE]])
   // TT-ITANIUM-DEFAULT: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata ![[DTYPE]])
   // TT-MS: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata ![[DTYPE:[0-9]+]])
@@ -294,9 +323,11 @@ struct D : C {
 // ITANIUM-DEFAULTVIS: define{{.*}} void @_ZN5test21fEPNS_1DE
 // MS: define dso_local void @"?f@test2@@YAXPEAUD@1@@Z"
 void f(D *d) {
+  // CIR-VFE-TC-LABEL: define hidden void @_ZN5test21fEPNS_1DE
   // TT-ITANIUM-HIDDEN: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"_ZTSN5test21DE")
   // TT-ITANIUM-DEFAULT: {{%[^ ]*}} = call i1 @llvm.public.type.test(ptr {{%[^ ]*}}, metadata !"_ZTSN5test21DE")
   // TT-MS: {{%[^ ]*}} = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"?AUA@test2@@")
+  // CIR-VFE-TC: {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 8, metadata !"_ZTSN5test21DE")
   // TC-ITANIUM:    {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 8, metadata !"_ZTSN5test21DE")
   // TC-ITANIUM-RV: {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load.relative(ptr {{%[^ ]*}}, i32 4, metadata !"_ZTSN5test21DE")
   // TC-MS: {{%[^ ]*}} = call { ptr, i1 } @llvm.type.checked.load(ptr {{%[^ ]*}}, i32 0, metadata !"?AUA@test2@@")
@@ -355,6 +386,8 @@ void g() {
 // ITANIUM-NO-RV-MD: [[A16]] = !{i64 16, !"_ZTS1A"}
 // ITANIUM-NO-RV-MD-DIAG: [[ALL16]] = !{i64 16, !"all-vtables"}
 // ITANIUM-NO-RV-MD: [[AF16]] = !{i64 16, !"_ZTSM1AFvvE.virtual"}
+// ITANIUM-WPD-HIDDEN: [[WPD_VIS]] = !{i64 1}
+// CIR-WPD-HIDDEN: [[CIR_WPD_VIS]] = !{i64 1}
 // ITANIUM-NO-RV-MD: [[A32]] = !{i64 32, !"_ZTS1A"}
 // ITANIUM-NO-RV-MD-DIAG: [[ALL32]] = !{i64 32, !"all-vtables"}
 // ITANIUM-NO-RV-MD: [[AF32]] = !{i64 32, !"_ZTSM1AFvvE.virtual"}

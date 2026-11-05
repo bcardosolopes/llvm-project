@@ -1,0 +1,17 @@
+// Second input for ../global-type-reconcile-tls.cir. Not a test on its own.
+//
+// The referencing TU. Same disagreement as the non-tls case, except the
+// reference is thread_local.
+
+!s32i = !cir.int<s, 32>
+!rec_Base = !cir.record<struct "Base" {!s32i}>
+!rec_D = !cir.record<struct "D" {!rec_Base}>
+
+module {
+  cir.global "private" external tls_dyn @tg : !rec_D
+
+  cir.func @reader() -> !cir.ptr<!rec_D> {
+    %0 = cir.get_global thread_local @tg : !cir.ptr<!rec_D>
+    cir.return %0 : !cir.ptr<!rec_D>
+  }
+}

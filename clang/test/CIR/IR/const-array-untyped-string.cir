@@ -1,0 +1,32 @@
+// RUN: cir-opt %s -o %t.cir
+// RUN: FileCheck %s --input-file=%t.cir
+// RUN: cir-opt %t.cir -o %t2.cir
+// RUN: FileCheck %s --input-file=%t2.cir
+
+// A #cir.const_array holding a string literal has to print the array type.
+//
+// The literal's own attribute is allowed to carry no type, and the parser
+// cannot infer one for it -- the enclosing type is only consulted for the
+// ArrayAttr spelling. Printing it without the type produced text that CIR
+// could not read back, which a single cir-opt never notices; the second run
+// above is the whole point of the test. Real C hits this with any large byte
+// array, e.g. a table of weights.
+
+!u8i = !cir.int<u, 8>
+
+module {
+  // CHECK: @bytes = #cir.const_array<"\01\02\03" : !cir.array<!u8i x 3>>
+  cir.global "private" constant internal dso_local @bytes =
+      #cir.const_array<"\01\02\03" : !cir.array<!u8i x 3>> : !cir.array<!u8i x 3>
+
+  // The trailing_zeros form parses after the type, and still round-trips.
+  // CHECK: @padded = #cir.const_array<"ab" : !cir.array<!u8i x 4>, trailing_zeros>
+  cir.global "private" constant internal dso_local @padded =
+      #cir.const_array<"ab" : !cir.array<!u8i x 4>, trailing_zeros> : !cir.array<!u8i x 4>
+
+  // An ArrayAttr keeps taking its type from the enclosing attribute, with no
+  // type of its own printed.
+  // CHECK: @elems = #cir.const_array<[#cir.int<7> : !u8i]> : !cir.array<!u8i x 1>
+  cir.global "private" constant internal dso_local @elems =
+      #cir.const_array<[#cir.int<7> : !u8i]> : !cir.array<!u8i x 1>
+}

@@ -1726,6 +1726,7 @@ defm gnu_inline_asm : BoolFOption<"gnu-inline-asm",
           "Disable GNU style inline asm">,
   PosFlag<SetTrue>>;
 
+
 def fno_profile_sample_use : Flag<["-"], "fno-profile-sample-use">, Group<f_Group>,
     Visibility<[ClangOption, CLOption]>;
 def fprofile_sample_use_EQ : Joined<["-"], "fprofile-sample-use=">,
@@ -1827,6 +1828,8 @@ def fmcdc_max_test_vectors_EQ : Joined<["-"], "fmcdc-max-test-vectors=">,
   Group<f_Group>, Visibility<[CC1Option]>,
   HelpText<"Maximum number of test vectors in MC/DC coverage">,
   MarshallingInfoInt<CodeGenOpts<"MCDCMaxTVs">, "0x7FFFFFFE">;
+
+
 def fprofile_generate : Flag<["-"], "fprofile-generate">,
     Group<f_Group>, Visibility<[ClangOption, CLOption, FlangOption, FC1Option]>,
     HelpText<"Generate instrumented code to collect execution counts into default.profraw (overridden by LLVM_PROFILE_FILE env var)">;
@@ -3211,11 +3214,156 @@ def clangir_disable_verifier : Flag<["-"], "clangir-disable-verifier">,
 
 defm clangir : BoolFOption<"clangir",
   FrontendOpts<"UseClangIRPipeline">, DefaultFalse,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Use the ClangIR pipeline to compile">,
-  NegFlag<SetFalse, [], [ClangOption, CC1Option], "Use the AST -> LLVM pipeline to compile">,
+  PosFlag<SetTrue, [NoArgumentUnused], [ClangOption, CC1Option], "Use the ClangIR pipeline to compile">,
+  NegFlag<SetFalse, [NoArgumentUnused], [ClangOption, CC1Option], "Use the AST -> LLVM pipeline to compile">,
   BothFlags<[], [ClangOption, CC1Option], "">>;
+// Driver-only: it selects a different linker, and never reaches cc1.
+def fclangir_lto : Flag<["-"], "fclangir-lto">, Visibility<[ClangOption]>,
+  Flags<[NoArgumentUnused]>,
+  HelpText<"At link time, merge the ClangIR carried by the input objects, "
+           "lower it as one module and link the result in their place. Acts "
+           "only on objects built with -fclangir-fat-objects; a link whose "
+           "inputs carry no ClangIR is left exactly as it was. Implemented "
+           "for GNU-style linkers only, and ignored by every other toolchain">;
+def fno_clangir_lto : Flag<["-"], "fno-clangir-lto">,
+  Visibility<[ClangOption]>, Flags<[NoArgumentUnused]>,
+  HelpText<"Do not run the ClangIR link-time pipeline">;
+// The counterpart of --ld-path= for the wrapper that -fclangir-lto substitutes
+// for the linker. Without it the wrapper has to be a sibling of clang or on
+// PATH, which it is not under a build system that gives every binary its own
+// output directory.
+def fclangir_lto_wrapper_EQ : Joined<["-"], "fclangir-lto-wrapper=">,
+  Visibility<[ClangOption]>, Flags<[NoArgumentUnused]>,
+  MetaVarName<"<path>">,
+  HelpText<"Use <path> as the cir-link-wrapper executable that -fclangir-lto "
+           "runs in place of the linker, instead of looking it up next to "
+           "clang">;
+// -Xlinker for the wrapper. The wrapper in turn runs cir-link, cir-translate
+// and clang, and looks each up beside itself; a build system that gives every
+// binary its own output directory has to say where they are, and this is the
+// seam for saying it without the driver learning an option per tool.
+def Xclangir_lto : Separate<["-"], "Xclangir-lto">, Visibility<[ClangOption]>,
+  Flags<[NoArgumentUnused]>, MetaVarName<"<arg>">,
+  HelpText<"Pass <arg> to cir-link-wrapper">;
+
+defm clangir_fat_objects : BoolFOption<"clangir-fat-objects",
+  FrontendOpts<"ClangIRFatObjects">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Emit an object that carries its ClangIR in a .cir section as well "
+          "as native code, so it can be consumed either by an ordinary link "
+          "or by a CIR link-time pipeline">,
+  NegFlag<SetFalse>, BothFlags<[], [ClangOption, CC1Option], "">>;
 def emit_cir : Flag<["-"], "emit-cir">, Visibility<[ClangOption, CC1Option]>,
   Group<Action_Group>, HelpText<"Build ASTs and then lower to ClangIR">;
+defm clangir_call_conv_lowering : BoolFOption<"clangir-call-conv-lowering",
+  FrontendOpts<"ClangIRCallConvLowering">, DefaultTrue,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Enable CIR calling convention lowering pass">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option], "Disable CIR calling convention lowering pass">,
+  BothFlags<[], [ClangOption, CC1Option], "">>;
+defm clangir_direct_lowering : BoolFOption<"clangir-direct-lowering",
+  FrontendOpts<"ClangIRDirectLowering">, DefaultTrue,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Lower directly from CIR to LLVM">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option], "Lower through MLIR core dialects to LLVM">,
+  BothFlags<[], [ClangOption, CC1Option], "">>;
+defm clangir_analysis_only : BoolFOption<"clangir-analysis-only",
+  FrontendOpts<"ClangIRAnalysisOnly">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Only run ClangIR analysis passes">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option], "">,
+  BothFlags<[], [ClangOption, CC1Option], "">>;
+defm clangir_idiom_recognizer : BoolFOption<"clangir-idiom-recognizer",
+  FrontendOpts<"ClangIRIdiomRecognizer">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Enable CIR idiom recognizer pass">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option], "">,
+  BothFlags<[], [ClangOption, CC1Option], "">>;
+def fclangir_idiom_recognizer_EQ : Joined<["-"], "fclangir-idiom-recognizer=">,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Configure CIR idiom recognizer pass">,
+  MarshallingInfoString<FrontendOpts<"ClangIRIdiomRecognizerOpts">>;
+defm clangir_lib_opt : BoolFOption<"clangir-lib-opt",
+  FrontendOpts<"ClangIRLibOpt">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Enable CIR library optimization pass">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option], "">,
+  BothFlags<[], [ClangOption, CC1Option], "">>;
+def fclangir_lib_opt_EQ : Joined<["-"], "fclangir-lib-opt=">,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Configure CIR library optimization pass">,
+  MarshallingInfoString<FrontendOpts<"ClangIRLibOptOpts">>;
+def fclangir_lifetime_check_EQ : Joined<["-"], "fclangir-lifetime-check=">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"Run lifetime checker">,
+  MarshallingInfoString<FrontendOpts<"ClangIRLifetimeCheckOpts">>;
+def fclangir_lifetime_check : Flag<["-"], "fclangir-lifetime-check">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  Alias<fclangir_lifetime_check_EQ>, AliasArgs<["history=invalid,null"]>,
+  HelpText<"Run lifetime checker">;
+def clangir_verify_diagnostics : Flag<["-"], "clangir-verify-diagnostics">,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"ClangIR: Enable diagnostic verification in MLIR, similar to clang's -verify">,
+  MarshallingInfoFlag<FrontendOpts<"ClangIRVerifyDiags">>;
+def fcir_output : Flag<["-"], "fcir-output">,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Save CIR output alongside object file">;
+def fcir_output_EQ : Joined<["-"], "fcir-output=">,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Save CIR output to specified file">,
+  MarshallingInfoString<FrontendOpts<"ClangIROutputFile">>;
+def fclangir_build_deferred_threshold_EQ : Joined<["-"], "fclangir-build-deferred-threshold=">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"ClangIR (internal): Control the recursion level for calls to emitDeferred (defaults to 500)">,
+  MarshallingInfoInt<CodeGenOpts<"ClangIRBuildDeferredThreshold">, "500u">;
+def fclangir_skip_system_headers : Flag<["-"], "fclangir-skip-system-headers">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"ClangIR (internal): emitDeferred skip functions defined in system headers">,
+  MarshallingInfoFlag<CodeGenOpts<"ClangIRSkipFunctionsFromSystemHeaders">>;
+def emit_mlir_EQ : Joined<["-"], "emit-mlir=">,
+  Visibility<[ClangOption, CC1Option]>,
+  Group<Action_Group>, HelpText<"Build ASTs and then lower to MLIR">,
+  Values<"llvm,core,cir,cir-prepare,cir-abi,cir-flat">;
+def emit_mlir : Flag<["-"], "emit-mlir">,
+  Visibility<[ClangOption, CC1Option, FC1Option]>,
+  Group<Action_Group>, HelpText<"Emit MLIR output">;
+def fclangir_mem2reg : Flag<["-"], "fclangir-mem2reg">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"Enable mem2reg on the flat ClangIR">,
+  MarshallingInfoFlag<FrontendOpts<"ClangIREnableMem2Reg">>;
+def fno_clangir_mem2reg : Flag<["-"], "fno-clangir-mem2reg">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"Disable mem2reg on the flat ClangIR">;
+defm clangir_inline : BoolFOption<"clangir-inline",
+  FrontendOpts<"ClangIREnableInline">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Inline small and single-use functions on the flat ClangIR">,
+  NegFlag<SetFalse, [], [ClangOption], "Do not inline on the flat ClangIR">,
+  BothFlags<[], [ClangOption, CC1Option], "">>;
+def fclangir_inline_threshold_EQ : Joined<["-"], "fclangir-inline-threshold=">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>, MetaVarName<"<N>">,
+  HelpText<"Largest weighted callee size -fclangir-inline inlines at any call "
+           "site (default: the inliner's own)">,
+  MarshallingInfoInt<FrontendOpts<"ClangIRInlineThreshold">, "~0u">;
+def fclangir_move_opt : Flag<["-"], "fclangir-move-opt">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"Enable move semantic optimizations on ClangIR">,
+  MarshallingInfoFlag<FrontendOpts<"ClangIREnableMoveOpt">>;
+
+def fstd_lib_stats : Flag<["-"], "fstd-lib-stats">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>,
+  HelpText<"Enable gathering statistics about the std libary from the AST.">,
+  MarshallingInfoFlag<FrontendOpts<"StdLibStats">>;
+def fstd_lib_stats_EQ : Joined<["-"], "fstd-lib-stats=">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>, MetaVarName<"<mode>">,
+  HelpText<"Enable gathering statistics about the std libary from the AST. "
+           "<mode> is 'json' (default: write the report to stderr) or 'embed' "
+           "(embed the report in the .stdlib_stats section of the output "
+           "object).">,
+  MarshallingInfoString<FrontendOpts<"StdLibStatsMode">>;
+def fstd_lib_stats_libs_EQ : Joined<["-"], "fstd-lib-stats-libs=">,
+  Visibility<[ClangOption, CC1Option]>, Group<f_Group>, MetaVarName<"<libs>">,
+  HelpText<"Comma-separated list of additional top-level namespaces to census "
+           "alongside the std library with -fstd-lib-stats, e.g. "
+           "'folly,absl,unifex'. The std library and the C standard library "
+           "are always censused.">,
+  MarshallingInfoString<FrontendOpts<"StdLibStatsLibs">>;
+
 /// ClangIR-specific options - END
 
 def flto_EQ : Joined<["-"], "flto=">,
@@ -7545,7 +7693,8 @@ defm analyzed_objects_for_unparse : OptOutFC1FFlag<"analyzed-objects-for-unparse
 
 def emit_fir : Flag<["-"], "emit-fir">, Group<Action_Group>,
   HelpText<"Build the parse tree, then lower it to FIR">;
-def emit_mlir : Flag<["-"], "emit-mlir">, Alias<emit_fir>;
+// Note: emit-mlir was previously an Alias<emit_fir> for Flang only.
+// Now it's a separate option visible to both Clang (for CIR) and Flang.
 
 def emit_hlfir : Flag<["-"], "emit-hlfir">, Group<Action_Group>,
   HelpText<"Build the parse tree, then lower it to HLFIR">;

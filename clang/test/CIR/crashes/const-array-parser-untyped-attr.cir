@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: expected typed attribute or explicit type for constant array elements
+// CHECK-NOT: cast<Ty>() argument of incompatible type
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!arr = !cir.array<!s32i x 1>
+module {
+  cir.global external @g = #cir.const_array<unit> : !arr
+}

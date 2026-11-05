@@ -1,0 +1,40 @@
+// RUN: cir-link %s %S/Inputs/void-fn-collision-b.cir --warn-odr-divergence -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// Renaming a record must not rebuild a void function's type.
+//
+// cir.func's return is an OptionalParameter: a null return type *is* how CIR
+// spells void. Renaming a record walks every type reachable from the module
+// with an AttrTypeReplacer, and the generic rebuild reconstructs a FuncType
+// through FuncType::get -- which asks isa<VoidType>() of the return type and
+// dereferences the null.
+//
+// Any void function reachable from a renamed record was enough, so this fired
+// on the first real library it saw: merging eight objects of one
+// library segfaulted, while four merged fine.
+//
+// The replacer now handles FuncType itself and only rebuilds when a sub-type
+// actually changed, so a null return stays null.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+
+module {
+  cir.func @a_takes(%p: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+
+  // A void function is the crash; a non-void one alongside it keeps the test
+  // honest about only the void case being special.
+  cir.func @a_returns(%p: !cir.ptr<!rec_S>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// STATS: 1 records renamed
+
+// CHECK-DAG: !rec_S = !cir.record<struct "S" {!s32i}>
+// CHECK-DAG: !rec_S2Em1 = !cir.record<struct "S.m1" {!cir.float}>
+// CHECK-DAG: cir.func @a_takes(%{{.*}}: !cir.ptr<!rec_S>)
+// CHECK-DAG: cir.func @b_takes(%{{.*}}: !cir.ptr<!rec_S2Em1>)

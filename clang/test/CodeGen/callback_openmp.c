@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple i386-unknown-unknown -fopenmp %s -emit-llvm -o - -disable-llvm-optzns | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple i386-unknown-unknown -fopenmp -fclangir %s -emit-llvm -o - -disable-llvm-optzns | FileCheck %s %}
 
 // CHECK: declare !callback ![[cid:[0-9]+]] void @__kmpc_fork_call
 // CHECK: declare !callback ![[cid]] void @__kmpc_fork_teams

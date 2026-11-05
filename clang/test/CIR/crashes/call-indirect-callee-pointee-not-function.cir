@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: indirect call callee operand must point to function type, got '!cir.int<s, 32>'
+// CHECK-NOT: cast<Ty>() argument of incompatible type
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @f(%arg0: !cir.ptr<!s32i>) {
+    cir.call %arg0() : (!cir.ptr<!s32i>) -> ()
+    cir.return
+  }
+}

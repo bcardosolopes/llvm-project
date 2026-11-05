@@ -598,6 +598,14 @@ bool MLIRContext::isMultithreadingEnabled() {
   return impl->threadingIsEnabled && llvm::llvm_is_multithreaded();
 }
 
+void MLIRContext::clearThreadLocalCaches() {
+  assert(impl->multiThreadedExecutionContext == 0 &&
+         "clearing thread-local caches in a multi-threaded execution context");
+  impl->affineUniquer.clearThreadLocalCaches();
+  impl->attributeUniquer.clearThreadLocalCaches();
+  impl->typeUniquer.clearThreadLocalCaches();
+}
+
 /// Set the flag specifying if multi-threading is disabled by the context.
 void MLIRContext::disableMultithreading(bool disable) {
   // This API can be overridden by the global debugging flag

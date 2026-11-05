@@ -1,0 +1,19 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify BreakOp: must be within a loop or switch
+!s32i = !cir.int<s, 32>
+
+cir.func @break_outside_loop() {
+  // expected-error@+1 {{must be within a loop or switch}}
+  cir.break
+}
+
+// -----
+
+// Verify ContinueOp: must be within a loop
+!s32i = !cir.int<s, 32>
+
+cir.func @continue_outside_loop() {
+  // expected-error@+1 {{must be within a loop}}
+  cir.continue
+}

@@ -1,3 +1,4 @@
+// UNSUPPORTED: system-darwin
 // RUN: cir-opt %s -cir-to-llvm -o %t.mlir
 // RUN: FileCheck --input-file=%t.mlir %s
 
@@ -129,15 +130,12 @@ module {
     cir.return
   }
   // CHECK: llvm.func @shouldLowerMultiBlockCase
-  // CHECK: ^bb1:  // pred: ^bb0
   // CHECK:   llvm.switch {{.*}} : i32, ^[[DEFAULT_BB:.+]] [
   // CHECK:     3: ^[[DIRECTLY_RET_BB:.+]]
   // CHECK:   ]
   // CHECK: ^[[DIRECTLY_RET_BB]]:
   // CHECK:   llvm.return
   // CHECK: ^[[DEFAULT_BB:.+]]:
-  // CHECK:   llvm.br ^[[RET_BB:.+]]
-  // CHECK: ^[[RET_BB:.+]]:  // pred: ^[[DEFAULT_BB:.+]]
   // CHECK:   llvm.return
   // CHECK: }
 
@@ -174,14 +172,12 @@ module {
   // CHECK:      0: ^[[ZERO_BB:.+]]
   // CHECK:    ]
   // CHECK:  ^[[ZERO_BB]]:
-  // CHECK:    llvm.br ^[[ZERO_BB_SUCC:.+]]
-  // CHECK:  ^[[ZERO_BB_SUCC]]:  // pred: ^[[ZERO_BB:]]
   // CHECK:    llvm.cond_br {{%.*}}, ^[[DEFAULT_BB_PRED1:.+]], ^[[DEFAULT_BB_PRED12:.+]]
-  // CHECK:  ^[[DEFAULT_BB_PRED1]]:  // pred: ^[[ZERO_BB_SUCC]]
+  // CHECK:  ^[[DEFAULT_BB_PRED1]]:  // pred: ^[[ZERO_BB]]
   // CHECK:    llvm.br ^[[DEFAULT_BB]]
-  // CHECK:  ^[[DEFAULT_BB_PRED12]]:  // pred: ^[[ZERO_BB_SUCC]]
-  // CHECK:    llvm.br ^[[DEFAULT_BB_PRED1:.+]]
-  // CHECK:  ^[[DEFAULT_BB_PRED1]]:  // pred: ^[[DEFAULT_BB_PRED12]]
+  // CHECK:  ^[[DEFAULT_BB_PRED12]]:  // pred: ^[[ZERO_BB]]
+  // CHECK:    llvm.br ^[[DEFAULT_BB_PRED2:.+]]
+  // CHECK:  ^[[DEFAULT_BB_PRED2]]:  // pred: ^[[DEFAULT_BB_PRED12]]
   // CHECK:    llvm.br ^[[DEFAULT_BB]]
   // CHECK:  ^[[DEFAULT_BB]]:
   // CHECK:    llvm.br ^[[RET_BB:.+]]

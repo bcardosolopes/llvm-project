@@ -3,6 +3,7 @@
 // REQUIRES: x86-registered-target
 //
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 %s -O3 -S -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 -fclangir %s -emit-llvm -o - | FileCheck %s --check-prefix=CIR %}
 
 #include "Inputs/coroutine.h"
 
@@ -123,3 +124,10 @@ Task<void> Bar() { co_await Baz(); }
 // CHECK-NEXT: #
 // CHECK-NEXT: movl	$120, %esi
 // CHECK-NEXT: jmp	_ZdlPvm
+
+// CIR-LABEL: define internal fastcc void @_Z3Quxv.destroy(
+// CIR: call void @_ZdlPvm(
+// CIR-LABEL: define internal fastcc void @_Z3Bazv.destroy(
+// CIR: call void @_ZdlPvm(
+// CIR-LABEL: define internal fastcc void @_Z3Barv.destroy(
+// CIR: call void @_ZdlPvm(

@@ -1,0 +1,11 @@
+// RUN: not cir-opt %s 2>&1 | FileCheck %s
+// A second annotations array is rejected rather than left for the region
+// parser to trip over with an unrelated message.
+!s32i = !cir.int<s, 32>
+#fn_attr = #cir<extra({minsize, nothrow = #cir.nothrow, optsize})>
+module {
+  // CHECK: annotations already specified for this function
+  cir.func private @twice(!s32i) -> !s32i
+      [#cir.annotation<name = "a", args = []>] extra(#fn_attr)
+      [#cir.annotation<name = "b", args = []>]
+}

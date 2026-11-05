@@ -1,0 +1,22 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func private @"ns::leaf"() -> !s32i {
+    %0 = cir.const #cir.int<7> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @caller() -> !s32i {
+    %0 = cir.call @"ns::leaf"() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Regression: direct call symbol names that contain '::' are still
+// flat module symbol references and must resolve without nearest-scope lookup.
+// CHECK-LABEL: llvm.func @"ns::leaf"() -> i32
+// CHECK-LABEL: llvm.func @caller() -> i32
+// CHECK: %[[CALL:.*]] = llvm.call @"ns::leaf"() : () -> i32
+// CHECK: llvm.return %[[CALL]] : i32

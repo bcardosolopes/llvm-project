@@ -1,4 +1,7 @@
-// RUN: mlir-tblgen -gen-op-decls -I %S/../../include %s | FileCheck %s
+// RUN: mlir-tblgen -gen-op-decls -I %S/../../include %s -o %t.decls.1
+// RUN: FileCheck %s --input-file %t.decls.1
+// RUN: mlir-tblgen -gen-op-decls -I %S/../../include %s -o %t.decls.2
+// RUN: cmp %t.decls.1 %t.decls.2
 // RUN: mlir-tblgen -gen-op-decls -op-include-regex="test.a_op" -I %S/../../include %s | FileCheck  %s --check-prefix=REDUCE_INC
 // RUN: mlir-tblgen -gen-op-decls -op-exclude-regex="test.a_op" -I %S/../../include %s | FileCheck  %s --check-prefix=REDUCE_EXC
 

@@ -1,12 +1,12 @@
 // RUN: mlir-translate -mlir-to-llvmir -split-input-file %s | FileCheck %s
 
 #tbaa_root_0 = #llvm.tbaa_root<id = "Simple C/C++ TBAA">
-#tbaa_type_desc_1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<#tbaa_root_0, 0>}>
-#tbaa_type_desc_2 = #llvm.tbaa_type_desc<id = "long long", members = {<#tbaa_type_desc_1, 0>}>
-#tbaa_type_desc_3 = #llvm.tbaa_type_desc<id = "agg2_t", members = {<#tbaa_type_desc_2, 0>, <#tbaa_type_desc_2, 8>}>
+#tbaa_type_desc_1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<typeDesc = #tbaa_root_0, offset = 0>}>
+#tbaa_type_desc_2 = #llvm.tbaa_type_desc<id = "long long", members = {<typeDesc = #tbaa_type_desc_1, offset = 0>}>
+#tbaa_type_desc_3 = #llvm.tbaa_type_desc<id = "agg2_t", members = {<typeDesc = #tbaa_type_desc_2, offset = 0>, <typeDesc = #tbaa_type_desc_2, offset = 8>}>
 #tbaa_tag_4 = #llvm.tbaa_tag<access_type = #tbaa_type_desc_2, base_type = #tbaa_type_desc_3, offset = 8>
-#tbaa_type_desc_5 = #llvm.tbaa_type_desc<id = "int", members = {<#tbaa_type_desc_1, 0>}>
-#tbaa_type_desc_6 = #llvm.tbaa_type_desc<id = "agg1_t", members = {<#tbaa_type_desc_5, 0>, <#tbaa_type_desc_5, 4>}>
+#tbaa_type_desc_5 = #llvm.tbaa_type_desc<id = "int", members = {<typeDesc = #tbaa_type_desc_1, offset = 0>}>
+#tbaa_type_desc_6 = #llvm.tbaa_type_desc<id = "agg1_t", members = {<typeDesc = #tbaa_type_desc_5, offset = 0>, <typeDesc = #tbaa_type_desc_5, offset = 4>}>
 #tbaa_tag_7 = #llvm.tbaa_tag<access_type = #tbaa_type_desc_5, base_type = #tbaa_type_desc_6, offset = 0, constant = true>
 
 llvm.func @tbaa2(%arg0: !llvm.ptr, %arg1: !llvm.ptr) {
@@ -43,12 +43,12 @@ llvm.func @tbaa2(%arg0: !llvm.ptr, %arg1: !llvm.ptr) {
 // instead of !null's.
 
 #tbaa_root_0 = #llvm.tbaa_root<id = "Simple C/C++ TBAA">
-#tbaa_type_desc_1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<#tbaa_root_0, 0>}>
-#tbaa_type_desc_2 = #llvm.tbaa_type_desc<id = "float", members = {<#tbaa_type_desc_1, 0>}>
-#tbaa_type_desc_3 = #llvm.tbaa_type_desc<id = "agg2_t", members = {<#tbaa_type_desc_2, 0>, <#tbaa_type_desc_2, 4>}>
+#tbaa_type_desc_1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<typeDesc = #tbaa_root_0, offset = 0>}>
+#tbaa_type_desc_2 = #llvm.tbaa_type_desc<id = "float", members = {<typeDesc = #tbaa_type_desc_1, offset = 0>}>
+#tbaa_type_desc_3 = #llvm.tbaa_type_desc<id = "agg2_t", members = {<typeDesc = #tbaa_type_desc_2, offset = 0>, <typeDesc = #tbaa_type_desc_2, offset = 4>}>
 #tbaa_tag_4 = #llvm.tbaa_tag<access_type = #tbaa_type_desc_2, base_type = #tbaa_type_desc_3, offset = 0>
-#tbaa_type_desc_5 = #llvm.tbaa_type_desc<id = "int", members = {<#tbaa_type_desc_1, 0>}>
-#tbaa_type_desc_6 = #llvm.tbaa_type_desc<id = "agg1_t", members = {<#tbaa_type_desc_5, 0>, <#tbaa_type_desc_5, 4>}>
+#tbaa_type_desc_5 = #llvm.tbaa_type_desc<id = "int", members = {<typeDesc = #tbaa_type_desc_1, offset = 0>}>
+#tbaa_type_desc_6 = #llvm.tbaa_type_desc<id = "agg1_t", members = {<typeDesc = #tbaa_type_desc_5, offset = 0>, <typeDesc = #tbaa_type_desc_5, offset = 4>}>
 #tbaa_tag_7 = #llvm.tbaa_tag<access_type = #tbaa_type_desc_5, base_type = #tbaa_type_desc_6, offset = 0>
 
 
@@ -86,3 +86,23 @@ llvm.func @tbaa2(%arg0: !llvm.ptr, %arg1: !llvm.ptr) {
 // CHECK-DAG: ![[STAG]] = !{![[AGG1T:[0-9]*]], ![[I32T:[0-9]*]], i64 0}
 // CHECK-DAG: ![[AGG1T]] = !{!"agg1_t", ![[I32T]], i64 0, ![[I32T]], i64 4}
 // CHECK-DAG: ![[I32T]] = !{!"int", ![[CHART]], i64 0}
+
+// -----
+
+// An anonymous TBAA root: the `id` on `#llvm.tbaa_root` is optional, and an
+// unnamed root writes back out as the self-referencing node LLVM 22 uses for
+// it. Exporting it used to dereference the null `StringAttr` and crash.
+
+#tbaa_root = #llvm.tbaa_root
+#tbaa_type_desc = #llvm.tbaa_type_desc<id = "scalar type", members = {<typeDesc = #tbaa_root, offset = 0>}>
+#tbaa_tag = #llvm.tbaa_tag<base_type = #tbaa_type_desc, access_type = #tbaa_type_desc, offset = 0>
+
+llvm.func @nameless_root(%arg0: !llvm.ptr) {
+  // CHECK: load i32, ptr %{{.*}},{{.*}}!tbaa ![[TAG:[0-9]*]]
+  %0 = llvm.load %arg0 {tbaa = [#tbaa_tag]} : !llvm.ptr -> i32
+  llvm.return
+}
+
+// CHECK-DAG: ![[TAG]] = !{![[DESC:[0-9]*]], ![[DESC]], i64 0}
+// CHECK-DAG: ![[DESC]] = !{!"scalar type", ![[ROOT:[0-9]*]], i64 0}
+// CHECK-DAG: ![[ROOT]] = distinct !{![[ROOT]]}

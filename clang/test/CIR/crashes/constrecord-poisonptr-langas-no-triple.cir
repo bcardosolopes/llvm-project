@@ -1,0 +1,16 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: failed to lower constant record type
+// CHECK: !rec_R
+// CHECK-NOT: Stack dump:
+// CHECK-NOT: attempting to construct a TypeRange with null types
+
+!s32i = !cir.int<s, 32>
+!p = !cir.ptr<!s32i, lang_address_space(offload_global)>
+!rec_R = !cir.record<struct "R" {!p}>
+
+module {
+  cir.func private @f() {
+    %0 = cir.const #cir.const_record<{#cir.poison : !p}> : !rec_R
+    cir.return
+  }
+}

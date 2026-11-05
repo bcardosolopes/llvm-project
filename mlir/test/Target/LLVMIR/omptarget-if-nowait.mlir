@@ -20,11 +20,13 @@ module attributes {omp.is_target_device = false, omp.target_triples = ["amdgcn-a
 }
 
 // CHECK: define void @target_if_nowait{{.*}} {
+// CHECK-NOT: call ptr @__kmpc_omp_task_alloc
 // CHECK: omp_if.then:
 // CHECK:   br label %[[TARGET_TASK_BB:.*]]
 
 // CHECK: [[TARGET_TASK_BB]]:
 // CHECK:   call ptr @__kmpc_omp_target_task_alloc
+// CHECK:   call i32 @__kmpc_omp_task
 // CHECK:   br label %[[OFFLOAD_CONT:.*]]
 
 // CHECK: [[OFFLOAD_CONT]]:
@@ -34,7 +36,8 @@ module attributes {omp.is_target_device = false, omp.target_triples = ["amdgcn-a
 // CHECK:   br label %[[HOST_TASK_BB:.*]]
 
 // CHECK: [[HOST_TASK_BB]]:
-// CHECK:   call ptr @__kmpc_omp_task_alloc
+// CHECK:   call ptr @__kmpc_omp_target_task_alloc
+// CHECK:   call i32 @__kmpc_omp_task
 // CHECK:   br label %[[HOST_TASK_CONT:.*]]
 
 // CHECK: [[HOST_TASK_CONT]]:

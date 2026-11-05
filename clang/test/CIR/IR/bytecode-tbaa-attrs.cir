@@ -1,0 +1,64 @@
+// RUN: cir-opt %s -o %t.text
+// RUN: cir-opt %s --emit-bytecode -o %t.bc
+// RUN: cir-opt %t.bc -o %t.roundtrip
+// RUN: diff %t.text %t.roundtrip
+// RUN: FileCheck --input-file=%t.roundtrip %s
+// RUN: not grep -aF "cir.tbaa" %t.bc
+
+// The TBAA attribute family carries types (scalar, vptr) and nests four deep
+// (scalar's parent, tag's base and access, member's type_desc, struct's
+// members), so all six need bytecode encodings: while they fell back to
+// printing, one tag on a deep record graph printed to 886 MB and a
+// translation unit's .cir section reached 5.2 GB. Every attribute below is
+// reachable from a tag on a memory operation, so each exercises its encoding.
+//
+// Round-tripping alone does not catch the fallback -- printing back what was
+// printed out is exactly what it does. The `not grep` line is the one that
+// fails without the encodings: a print-serialized attribute leaves its own
+// mnemonic in the blob, so any `cir.tbaa` text there means some occurrence
+// dragged its whole record graph in with it.
+//
+// -F, because the pattern would otherwise be a regex whose `.` matches the NUL
+// that separates two strings in the bytecode's string section. Both halves are
+// in that section on their own -- `tbaa` is an attribute name, and `cir` is
+// both the dialect name and the tail of this file's own path -- so an ordering
+// that put one straight after the other would fail a correctly encoded module.
+
+!s16i = !cir.int<s, 16>
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s16i, !s32i}>
+
+// CHECK: #tbaa_omnipotent_char = #cir.tbaa_omnipotent_char
+// CHECK: #tbaa_struct = #cir.tbaa_struct<id = "Empty", members = {}>
+// CHECK: #tbaa_scalar = #cir.tbaa_scalar<id = "short", type = !s16i>
+// CHECK: #tbaa_scalar1 = #cir.tbaa_scalar<id = "int", type = !s32i, size = 4>
+// CHECK: #tbaa_scalar2 = #cir.tbaa_scalar<id = "child", type = !cir.ptr<!s32i>, parent = #tbaa_scalar1, size = 8>
+// CHECK: #tbaa_vptr = #cir.tbaa_vptr<type = !cir.ptr<!s32i>, size = 8>
+// CHECK: #tbaa_struct1 = #cir.tbaa_struct<id = "S", members = {<type_desc = #tbaa_scalar, offset = 0>, <type_desc = #tbaa_scalar1, offset = 4, size = 4>}, size = 8>
+// CHECK: #tbaa_tag = #cir.tbaa_tag<base = #tbaa_struct, access = #tbaa_scalar2, offset = 0>
+// CHECK: #tbaa_tag1 = #cir.tbaa_tag<base = #tbaa_omnipotent_char, access = #tbaa_vptr, offset = 0>
+// CHECK: #tbaa_tag2 = #cir.tbaa_tag<base = #tbaa_struct1, access = #tbaa_scalar, offset = 0>
+// CHECK: #tbaa_tag3 = #cir.tbaa_tag<base = #tbaa_struct1, access = #tbaa_scalar1, offset = 4, size = 4>
+#tbaa_scalar = #cir.tbaa_scalar<id = "short", type = !s16i>
+#tbaa_scalar_sized = #cir.tbaa_scalar<id = "int", type = !s32i, size = 4>
+#tbaa_scalar_child = #cir.tbaa_scalar<id = "child", type = !cir.ptr<!s32i>, parent = #tbaa_scalar_sized, size = 8>
+#tbaa_struct = #cir.tbaa_struct<id = "S", members = {<type_desc = #tbaa_scalar, offset = 0>, <type_desc = #tbaa_scalar_sized, offset = 4, size = 4>}, size = 8>
+#tbaa_empty = #cir.tbaa_struct<id = "Empty", members = {}>
+#tbaa_tag = #cir.tbaa_tag<base = #tbaa_struct, access = #tbaa_scalar, offset = 0>
+#tbaa_tag_sized = #cir.tbaa_tag<base = #tbaa_struct, access = #tbaa_scalar_sized, offset = 4, size = 4>
+#tbaa_tag_nested = #cir.tbaa_tag<base = #tbaa_empty, access = #tbaa_scalar_child, offset = 0>
+#tbaa_tag_special = #cir.tbaa_tag<base = #cir.tbaa_omnipotent_char, access = #cir.tbaa_vptr<type = !cir.ptr<!s32i>, size = 8>, offset = 0>
+
+cir.func @use(%arg: !cir.ptr<!rec_S>, %p : !cir.ptr<!cir.ptr<!s32i>>) {
+  %m0 = cir.get_member %arg[0] {name = "a"} : !cir.ptr<!rec_S> -> !cir.ptr<!s16i>
+  %v0 = cir.load align(2) %m0 : !cir.ptr<!s16i>, !s16i tbaa(#tbaa_tag)
+  cir.store align(2) %v0, %m0 : !s16i, !cir.ptr<!s16i> tbaa(#tbaa_tag)
+  %m1 = cir.get_member %arg[1] {name = "b"} : !cir.ptr<!rec_S> -> !cir.ptr<!s32i>
+  %v1 = cir.load align(4) %m1 : !cir.ptr<!s32i>, !s32i tbaa(#tbaa_tag_sized)
+  cir.store align(4) %v1, %m1 : !s32i, !cir.ptr<!s32i> tbaa(#tbaa_tag_sized)
+  %q = cir.load align(8) %p : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i> tbaa(#tbaa_tag_nested)
+  cir.store align(8) %q, %p : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>> tbaa(#tbaa_tag_nested)
+  %r = cir.load align(8) %p : !cir.ptr<!cir.ptr<!s32i>>, !cir.ptr<!s32i> tbaa(#tbaa_tag_special)
+  cir.store align(8) %r, %p : !cir.ptr<!s32i>, !cir.ptr<!cir.ptr<!s32i>> tbaa(#tbaa_tag_special)
+  cir.return
+}

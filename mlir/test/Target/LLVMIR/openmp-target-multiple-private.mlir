@@ -44,30 +44,54 @@ llvm.func @use_private_var1(!llvm.ptr) -> ()
 // The first set of checks ensure that we are calling the offloaded function
 // with the right arguments, especially the second argument which needs to
 // be a memory reference to the descriptor for the privatized allocatable
-// CHECK: define void @target_allocatable_
-// CHECK-NOT: define internal void
-// CHECK: %[[DESC_ALLOC0:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8 }, i64 1
-// CHECK: %[[DESC_ALLOC1:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8 }, i64 1
-// CHECK: call void @__omp_offloading_[[OFFLOADED_FUNCTION:.*]](ptr {{[^,]+}},
-// CHECK-SAME: ptr %[[DESC_ALLOC0]], ptr %[[DESC_ALLOC1]])
 
-// CHECK: define internal void @__omp_offloading_[[OFFLOADED_FUNCTION]]
-// CHECK-SAME: (ptr {{[^,]+}}, ptr %[[DESCRIPTOR_ARG0:[^,]+]],
-// CHECK-SAME: ptr %[[DESCRIPTOR_ARG1:.*]]) {
 
 // `var0` privatrizer `alloc`
-// CHECK: %[[PRIV_DESC0:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8 }
 
 // `var1` privatrizer  `alloc`
-// CHECK: %[[PRIV_DESC1:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8 }
-// CHECK: call void @alloc_foo_1(ptr %[[DESCRIPTOR_ARG1]])
 
 // target op body
-// CHECK: call void @use_private_var0(ptr %[[PRIV_DESC0]]
-// CHECK: call void @use_private_var1(ptr %[[PRIV_DESC1]]
 
 // `var0` privatrizer `dealloc`
-// CHECK:  call void @dealloc_foo_0(ptr %[[PRIV_DESC0]])
 
 // `var1` privatrizer `dealloc`
-// CHECK:  call void @dealloc_foo_1(ptr %[[PRIV_DESC1]])
+
+// CHECK: @0 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @1 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK: @2 = private unnamed_addr constant [{{.*}} x i8] c";{{.*}};unknown;{{.*}};{{.*}};;\00", align 1
+// CHECK-LABEL: define void @target_allocatable_(
+// CHECK:   %[[VAL_0:.*]] = alloca i64, align 8
+// CHECK:   %[[VAL_1:.*]] = alloca i32, i64 1, align 4
+// CHECK:   %[[VAL_2:.*]] = alloca {{[{]}} ptr, i64, i32, i8, i8, i8, i8 }, i64 1, align 8
+// CHECK:   %[[VAL_3:.*]] = alloca {{[{]}} ptr, i64, i32, i8, i8, i8, i8 }, i64 1, align 8
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_5:.*]] = load i32, ptr %[[VAL_1]], align 4
+// CHECK:   store i32 %[[VAL_5]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_6:.*]] = load i64, ptr %[[VAL_0]], align 4
+// CHECK:   call void @__omp_offloading_{{.*}}_{{.*}}_target_allocatable__l{{.*}}(i64 %[[VAL_6]], ptr %[[VAL_2]], ptr %[[VAL_3]])
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @__omp_offloading_{{.*}}_{{.*}}_target_allocatable__l{{.*}}(
+// CHECK: entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i64, align 8
+// CHECK:   store i64 %[[VAL_1:.*]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_2:.*]] = alloca {{[{]}} ptr, i64, i32, i8, i8, i8, i8 }, align 8
+// CHECK:   %[[VAL_3:.*]] = alloca {{[{]}} ptr, i64, i32, i8, i8, i8, i8 }, align 8
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: outlined.body:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.private.init:
+// CHECK:   call void @alloc_foo_1(ptr %[[VAL_7:.*]])
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.target:
+// CHECK:   call void @use_private_var0(ptr %[[VAL_2]])
+// CHECK:   call void @use_private_var1(ptr %[[VAL_3]])
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   call void @dealloc_foo_0(ptr %[[VAL_2]])
+// CHECK:   call void @dealloc_foo_1(ptr %[[VAL_3]])
+// CHECK:   ret void
+// CHECK: }

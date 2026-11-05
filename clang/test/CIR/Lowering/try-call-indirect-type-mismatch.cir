@@ -1,0 +1,51 @@
+// RUN: cir-opt %s -cir-to-llvm -o %t.cir
+// RUN: FileCheck --input-file=%t.cir %s
+
+// Test that cir.try_call with an indirect callee whose function pointer type
+// is erased (e.g. !cir.func<()>) but whose call-site return type is non-void
+// lowers correctly without crashing. This pattern arises when C/C++ code stores
+// typed function pointers in a struct field declared as void(*)() and calls
+// through them with the actual type.
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!void = !cir.void
+!rec_Result = !cir.record<struct "Result" {!cir.ptr<!void>}>
+
+module {
+
+cir.func private @__gxx_personality_v0(...) -> !s32i
+
+cir.func @try_call_indirect_erased(%fn : !cir.ptr<!cir.func<()>>,
+                                    %arg : !s32i)
+    -> !rec_Result personality(@__gxx_personality_v0) {
+  cir.br ^bb1
+^bb1:
+  // The function pointer type is void() but the call returns !rec_Result.
+  // This is the pattern that caused a replaceOp result count assertion.
+  %result = cir.try_call %fn(%arg) ^bb2, ^bb3
+      : (!cir.ptr<!cir.func<()>>, !s32i) -> !rec_Result
+
+^bb2:
+  cir.return %result : !rec_Result
+
+^bb3:
+  %exception_ptr, %type_id = cir.eh.inflight_exception
+  %zero = cir.const #cir.zero : !rec_Result
+  cir.return %zero : !rec_Result
+}
+
+// CHECK-LABEL: llvm.func @try_call_indirect_erased
+// CHECK: llvm.invoke %{{.*}}(%{{.*}}) to ^{{.*}} unwind ^{{.*}} : !llvm.ptr, (i32) -> !llvm.struct<"struct.Result", (ptr)>
+
+// Also test cir.call (non-invoke) with erased function pointer type.
+cir.func @call_indirect_erased(%fn : !cir.ptr<!cir.func<()>>,
+                                %arg : !s32i) -> !rec_Result {
+  %result = cir.call %fn(%arg) : (!cir.ptr<!cir.func<()>>, !s32i) -> !rec_Result
+  cir.return %result : !rec_Result
+}
+
+// CHECK-LABEL: llvm.func @call_indirect_erased
+// CHECK: llvm.call %{{.*}}(%{{.*}}) : !llvm.ptr, (i32) -> !llvm.struct<"struct.Result", (ptr)>
+
+}

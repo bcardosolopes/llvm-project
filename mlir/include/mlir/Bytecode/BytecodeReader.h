@@ -36,6 +36,13 @@ public:
       const std::shared_ptr<llvm::SourceMgr> &bufferOwnerRef = {});
   ~BytecodeReader();
 
+  /// With lazy loading, reads the location of an op whose regions are
+  /// deferred only when the op is materialized; until then the op's location
+  /// is unknown. An op that is never materialized costs its location nothing,
+  /// which matters when locations carry large attributes such as debug info.
+  /// Call it before readTopLevel.
+  void setLazyLocations(bool lazyLocations);
+
   /// Read the operations defined within the given memory buffer, containing
   /// MLIR bytecode, into the provided block. If the reader was created with
   /// `lazyLoad` enabled, isolated regions aren't loaded eagerly.

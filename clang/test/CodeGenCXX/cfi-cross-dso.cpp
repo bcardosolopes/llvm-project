@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -flto -triple x86_64-unknown-linux -fsanitize=cfi-vcall -fsanitize-cfi-cross-dso -emit-llvm -o - %s | FileCheck --check-prefix=CHECK --check-prefix=ITANIUM %s
 // RUN: %clang_cc1 -flto -triple x86_64-pc-windows-msvc -fsanitize=cfi-vcall  -fsanitize-cfi-cross-dso -emit-llvm -o - %s | FileCheck --check-prefix=CHECK --check-prefix=MS %s
+// RUN: %if cir-support %{ %clang_cc1 -flto -triple x86_64-unknown-linux -fsanitize=cfi-vcall -fsanitize-cfi-cross-dso -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CHECK --check-prefix=ITANIUM %s %}
+// RUN: %if cir-support %{ %clang_cc1 -flto -triple aarch64-unknown-linux -fsanitize=cfi-vcall -fsanitize-cfi-cross-dso -fclangir -emit-llvm -o - %s | FileCheck --check-prefix=CHECK --check-prefix=ITANIUM %s %}
 
 struct A {
   A();
@@ -30,7 +32,7 @@ void g() {
 
 // CHECK-LABEL: caller
 // CHECK:   %[[A:.*]] = load ptr, ptr
-// CHECK:   %[[VT:.*]] = load ptr, ptr %[[A]]
+// CHECK:   %[[VT:.*]] = load ptr, ptr %[[A]], align 8{{$}}
 // ITANIUM: %[[TEST:.*]] = call i1 @llvm.type.test(ptr %[[VT]], metadata !"_ZTS1A"), !nosanitize
 // MS:      %[[TEST:.*]] = call i1 @llvm.type.test(ptr %[[VT]], metadata !"?AUA@@"), !nosanitize
 // CHECK:   br i1 %[[TEST]], label %[[CONT:.*]], label %[[SLOW:.*]], {{.*}} !nosanitize
@@ -40,6 +42,9 @@ void g() {
 // CHECK:   br label %[[CONT]], !nosanitize
 // CHECK: [[CONT]]
 // CHECK:   call void %{{.*}}(ptr {{[^,]*}} %{{.*}})
+
+// ITANIUM: define weak_odr hidden void @__cfi_check_fail(ptr noundef %{{.*}}, ptr noundef %{{.*}})
+// ITANIUM: define weak void @__cfi_check(i64 noundef %{{.*}}, ptr noundef %{{.*}}, ptr noundef %{{.*}})
 
 // No hash-based bit set entry for (anonymous namespace)::B
 // ITANIUM-NOT: !{i64 {{.*}}, ptr @_ZTVN12_GLOBAL__N_11BE,

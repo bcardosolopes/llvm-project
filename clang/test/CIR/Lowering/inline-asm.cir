@@ -58,7 +58,7 @@ cir.func @f5() {
 
 cir.func @f6() -> !s32i {
   %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init] {alignment = 4 : i64}
-  // CHECK: %2 = call i32 asm sideeffect "movl $$42, $0", "=r,~{dirflag},~{fpsr},~{flags}"()
+  // CHECK: %1 = call i32 asm sideeffect "movl $$42, $0", "=r,~{dirflag},~{fpsr},~{flags}"()
   %1 = cir.asm(x86_att, 
     out = [],
     in = [],

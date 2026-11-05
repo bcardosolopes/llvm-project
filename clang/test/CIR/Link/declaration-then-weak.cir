@@ -1,0 +1,81 @@
+// A definition that replaces a declaration takes over its name with its own
+// linkage. A linkonce_odr definition arriving after a declaration is still
+// weak: a later strong definition displaces it, and a later linkonce_odr copy
+// is another weak copy. Kept as strong, the inline copy beat the out-of-line
+// definition the program is entitled to call -- the bug linkage.cir guards
+// against, reached through a declaration.
+//
+// RUN: rm -rf %t && split-file %s %t
+// RUN: cir-link %t/decl.cir %t/inline.cir %t/inline-again.cir %t/strong.cir \
+// RUN:   --odr-events=%t/events.json -o %t/merged.cir
+// RUN: FileCheck %s --input-file=%t/merged.cir --check-prefix=MERGED
+// RUN: FileCheck %s --input-file=%t/events.json
+// RUN: cir-link %t/decl.cir %t/inline.cir %t/inline-again.cir %t/strong.cir \
+// RUN:   --warn-odr-divergence -o %t/warn.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WARN
+
+// The out-of-line definition is kept.
+// MERGED:     cir.func @_Z5valuev() -> !s32i {
+// MERGED-NEXT:  cir.const #cir.int<2>
+// MERGED-NOT: cir.func {{.*}}@_Z5valuev(
+
+// The second inline copy is an equal weak copy, counted; the strong
+// definition displaces the inline one.
+// CHECK:          "symbol": "_Z5valuev",
+// CHECK-NEXT:     "op": "cir.func",
+// CHECK-NEXT:     "equal_weak_copies": 1,
+// CHECK:              "kind": "strong-over-weak",
+// CHECK-NEXT:         "kept": {
+// CHECK-NEXT:           "input": 3,
+// CHECK-NEXT:           "linkage": "external",
+// CHECK:              "dropped": {
+// CHECK-NEXT:           "input": 1,
+// CHECK-NEXT:           "linkage": "linkonce_odr",
+// CHECK:      "stats": {
+// CHECK-NEXT:   "weak_copies_equal": 1,
+// CHECK-NEXT:   "weak_copies_differ": 0,
+// CHECK-NEXT:   "weak-weak": 0,
+// CHECK-NEXT:   "strong-over-weak": 1,
+// CHECK-NEXT:   "rtti-over-nortti": 0,
+// CHECK-NEXT:   "strong-strong": 0,
+
+// WARN-NOT: defined in more than one input
+// WARN:     1 weak replaced by strong,
+// WARN-SAME: 0 ODR divergences,
+
+//--- decl.cir
+!s32i = !cir.int<s, 32>
+module {
+  cir.func private @_Z5valuev() -> !s32i
+  cir.func @use_decl() -> !s32i {
+    %0 = cir.call @_Z5valuev() : () -> !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+//--- inline.cir
+!s32i = !cir.int<s, 32>
+module {
+  cir.func linkonce_odr @_Z5valuev() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+//--- inline-again.cir
+!s32i = !cir.int<s, 32>
+module {
+  cir.func linkonce_odr @_Z5valuev() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+//--- strong.cir
+!s32i = !cir.int<s, 32>
+module {
+  cir.func @_Z5valuev() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+}

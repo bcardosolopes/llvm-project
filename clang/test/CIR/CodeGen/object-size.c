@@ -408,7 +408,25 @@ void test25(void) {
   // OGCG: store i32 0
   gi = __builtin_object_size((void*)0x1000, 3);
 
-  // Skipping (void*)0 + 0x1000 tests - void pointer arithmetic NYI in CIR
+  // CIR: cir.objsize max nullunknown {{.*}} : !cir.ptr<!void> -> !u64i
+  // LLVM: call i64 @llvm.objectsize.i64.p0(ptr inttoptr (i64 4096 to ptr), i1 false, i1 true, i1 false)
+  // OGCG: call i64 @llvm.objectsize.i64.p0(ptr getelementptr inbounds (i8, ptr null, i64 4096), i1 false, i1 true, i1 false)
+  gi = __builtin_object_size((void*)0 + 0x1000, 0);
+
+  // CIR: cir.objsize max nullunknown {{.*}} : !cir.ptr<!void> -> !u64i
+  // LLVM: call i64 @llvm.objectsize.i64.p0(ptr inttoptr (i64 4096 to ptr), i1 false, i1 true, i1 false)
+  // OGCG: call i64 @llvm.objectsize.i64.p0(ptr getelementptr inbounds (i8, ptr null, i64 4096), i1 false, i1 true, i1 false)
+  gi = __builtin_object_size((void*)0 + 0x1000, 1);
+
+  // CIR: cir.objsize min nullunknown {{.*}} : !cir.ptr<!void> -> !u64i
+  // LLVM: call i64 @llvm.objectsize.i64.p0(ptr inttoptr (i64 4096 to ptr), i1 true, i1 true, i1 false)
+  // OGCG: call i64 @llvm.objectsize.i64.p0(ptr getelementptr inbounds (i8, ptr null, i64 4096), i1 true, i1 true, i1 false)
+  gi = __builtin_object_size((void*)0 + 0x1000, 2);
+
+  // CIR: cir.const #cir.int<0>
+  // LLVM: store i32 0
+  // OGCG: store i32 0
+  gi = __builtin_object_size((void*)0 + 0x1000, 3);
 }
 
 // CIR-LABEL: @test26
@@ -736,7 +754,7 @@ static struct DynStructVar D32 = {
 };
 unsigned long test32(void) {
   // CIR: cir.const #cir.int<19>
-  // LLVM: store i64 19
+  // LLVM: ret i64 19
   // OGCG: ret i64 19
   return __builtin_object_size(&D32, 1);
 }
@@ -750,7 +768,7 @@ static struct DynStructVar D33 = {
 };
 unsigned long test33(void) {
   // CIR: cir.const #cir.int<16>
-  // LLVM: store i64 16
+  // LLVM: ret i64 16
   // OGCG: ret i64 16
   return __builtin_object_size(&D33, 1);
 }
@@ -763,7 +781,7 @@ static struct DynStructVar D34 = {
 };
 unsigned long test34(void) {
   // CIR: cir.const #cir.int<16>
-  // LLVM: store i64 16
+  // LLVM: ret i64 16
   // OGCG: ret i64 16
   return __builtin_object_size(&D34, 1);
 }
@@ -773,7 +791,7 @@ unsigned long test34(void) {
 // OGCG-LABEL: define {{.*}} i64 @test35
 unsigned long test35(void) {
   // CIR: cir.const #cir.int<16>
-  // LLVM: store i64 16
+  // LLVM: ret i64 16
   // OGCG: ret i64 16
   return __builtin_object_size(&(struct DynStructVar){}, 1);
 }
@@ -785,7 +803,7 @@ struct Z { struct A { int x, y[]; } z; int a; int b[]; };
 static struct Z my_z = { .b = {1,2,3} };
 unsigned long test37(void) {
   // CIR: cir.const #cir.int<4>
-  // LLVM: store i64 4
+  // LLVM: ret i64 4
   // OGCG: ret i64 4
   return __builtin_object_size(&my_z.z, 1);
 }

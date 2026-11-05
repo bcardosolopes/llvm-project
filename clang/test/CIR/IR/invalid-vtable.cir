@@ -60,8 +60,8 @@ module {
 !u64i = !cir.int<u, 64>
 !rec_anon_struct = !cir.record<struct  {!cir.array<!u64i x 4>}>
 module {
-  // expected-error @below {{expected GlobalViewAttr or ConstPtrAttr}}
-  cir.global external @_ZTV1S = #cir.vtable<{#cir.const_array<[#cir.int<1> : !u64i, #cir.int<1> : !u64i, #cir.int<3> : !u64i, #cir.int<4> : !u64i]> : !cir.array<!u64i x 4>}> : !rec_anon_struct {alignment = 8 : i64}
+  // expected-error @below {{expected GlobalViewAttr, GlobalViewDiffAttr, ConstPtrAttr, or IntAttr}}
+  cir.global external @_ZTV1S = #cir.vtable<{#cir.const_array<[#cir.int<1> : !u64i, #cir.undef : !u64i, #cir.int<3> : !u64i, #cir.int<4> : !u64i]> : !cir.array<!u64i x 4>}> : !rec_anon_struct {alignment = 8 : i64}
   cir.func private dso_local @_ZN1S3keyEv(%arg0: !cir.ptr<!rec_S>)
   cir.func private dso_local @_ZN1S6nonKeyEv(%arg0: !cir.ptr<!rec_S>)
 }
@@ -128,7 +128,23 @@ cir.func @reference_name_and_value(%arg0: !cir.ptr<!rec_C>, %arg1: !cir.ptr<!cir
 !rec_C = !cir.record<class "C" {!cir.vptr}>
 cir.global linkonce_odr @_ZTT1C = #cir.const_array<[#cir.global_view<@_ZTV1C, [0 : i32, 3 : i32]> : !cir.ptr<!u8i>, #cir.global_view<@_ZTC1C0_1B, [0 : i32, 3 : i32]> : !cir.ptr<!u8i>]> : !cir.array<!cir.ptr<!u8i> x 2> {alignment = 8 : i64}
 cir.func @bad_return_type_for_vtt_addrpoint() {
-  // expected-error @below {{result type must be '!cir.ptr<!cir.ptr<!cir.void>>', but provided result type is '!cir.ptr<!cir.int<u, 8>>'}}
+  // expected-error @below {{result type must be a pointer to a void pointer, but provided result type is '!cir.ptr<!cir.int<u, 8>>'}}
   %0 = cir.vtt.address_point @_ZTT1C, offset = 1 -> !cir.ptr<!u8i>
   cir.return
+}
+
+// -----
+
+!u8i = !cir.int<u, 8>
+!void = !cir.void
+
+module {
+cir.global "private" constant internal @"ns::vtable::i" = #cir.int<1> : !u8i
+
+cir.func @reference_non_vtt_scoped() {
+  // Keep this quoted `::` symbol path valid under verifier fast-path changes.
+  // expected-error @below {{'cir.vtt.address_point' op Expected constant array in initializer for global VTT 'ns::vtable::i'}}
+  %0 = cir.vtt.address_point @"ns::vtable::i", offset = 1 -> !cir.ptr<!cir.ptr<!void>>
+  cir.return
+}
 }

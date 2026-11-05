@@ -1,0 +1,124 @@
+// RUN: cir-opt -cir-tail-merge %s -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+!void = !cir.void
+!rec_S = !cir.record<struct "S" padded {!cir.int<u, 8>}>
+
+module {
+  cir.func private @__gxx_personality_v0(...) -> !s32i
+  cir.func private @_Z1fv()
+  cir.func private @_ZN1SD1Ev(!cir.ptr<!rec_S>)
+  cir.func private @_ZN1TD1Ev(!cir.ptr<!rec_S>)
+
+  // Two calls in separately generated `cir.try` scopes each get their own
+  // landing pad, even though the pads run the same cleanup. Only one is needed.
+
+  cir.func @identical_pads(%arg0: !cir.ptr<!rec_S>)
+      personality(@__gxx_personality_v0) {
+    cir.try_call @_Z1fv() ^bb1, ^bb3 : () -> ()
+  ^bb1:
+    cir.try_call @_Z1fv() ^bb2, ^bb4 : () -> ()
+  ^bb2:
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.return
+  ^bb3:
+    %e0, %t0 = cir.eh.inflight_exception cleanup
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e0, %t0
+  ^bb4:
+    %e1, %t1 = cir.eh.inflight_exception cleanup
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e1, %t1
+  }
+
+  // CHECK-LABEL: cir.func{{.*}} @identical_pads
+  // Both unwind edges land on the surviving pad, ...
+  // CHECK: cir.try_call @_Z1fv() ^bb1, ^[[PAD:.*]] :
+  // CHECK: cir.try_call @_Z1fv() ^bb2, ^[[PAD]] :
+  // ... and the duplicate is gone.
+  // CHECK: ^[[PAD]]:
+  // CHECK-NEXT: cir.eh.inflight_exception cleanup
+  // CHECK-NEXT: cir.call @_ZN1SD1Ev
+  // CHECK-NEXT: cir.resume.flat
+  // CHECK-NEXT: }
+
+  // Different objects go out of scope on the two edges, so the pads say
+  // different things and both have to stay.
+
+  cir.func @distinct_cleanups(%arg0: !cir.ptr<!rec_S>)
+      personality(@__gxx_personality_v0) {
+    cir.try_call @_Z1fv() ^bb1, ^bb3 : () -> ()
+  ^bb1:
+    cir.try_call @_Z1fv() ^bb2, ^bb4 : () -> ()
+  ^bb2:
+    cir.return
+  ^bb3:
+    %e0, %t0 = cir.eh.inflight_exception cleanup
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e0, %t0
+  ^bb4:
+    %e1, %t1 = cir.eh.inflight_exception cleanup
+    cir.call @_ZN1TD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e1, %t1
+  }
+
+  // CHECK-LABEL: cir.func{{.*}} @distinct_cleanups
+  // CHECK: cir.call @_ZN1SD1Ev
+  // CHECK: cir.call @_ZN1TD1Ev
+
+  // Same cleanup, but one pad also catches and the other only cleans up. The
+  // clause list is part of what the pad means, so these are not interchangeable.
+
+  cir.func @distinct_clauses(%arg0: !cir.ptr<!rec_S>)
+      personality(@__gxx_personality_v0) {
+    cir.try_call @_Z1fv() ^bb1, ^bb3 : () -> ()
+  ^bb1:
+    cir.try_call @_Z1fv() ^bb2, ^bb4 : () -> ()
+  ^bb2:
+    cir.return
+  ^bb3:
+    %e0, %t0 = cir.eh.inflight_exception cleanup
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e0, %t0
+  ^bb4:
+    %e1, %t1 = cir.eh.inflight_exception catch_all
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e1, %t1
+  }
+
+  // CHECK-LABEL: cir.func{{.*}} @distinct_clauses
+  // CHECK: cir.eh.inflight_exception cleanup
+  // CHECK: cir.eh.inflight_exception catch_all
+
+  // The pads forward the exception on to a shared block rather than resuming
+  // in place. Merging them keeps the surviving pad's own values flowing.
+
+  cir.func @pads_branch_to_common(%arg0: !cir.ptr<!rec_S>)
+      personality(@__gxx_personality_v0) {
+    cir.try_call @_Z1fv() ^bb1, ^bb3 : () -> ()
+  ^bb1:
+    cir.try_call @_Z1fv() ^bb2, ^bb4 : () -> ()
+  ^bb2:
+    cir.return
+  ^bb3:
+    %e0, %t0 = cir.eh.inflight_exception cleanup
+    cir.br ^bb5(%e0, %t0 : !cir.ptr<!void>, !u32i)
+  ^bb4:
+    %e1, %t1 = cir.eh.inflight_exception cleanup
+    cir.br ^bb5(%e1, %t1 : !cir.ptr<!void>, !u32i)
+  ^bb5(%e: !cir.ptr<!void>, %t: !u32i):
+    cir.call @_ZN1SD1Ev(%arg0) : (!cir.ptr<!rec_S>) -> ()
+    cir.resume.flat %e, %t
+  }
+
+  // CHECK-LABEL: cir.func{{.*}} @pads_branch_to_common
+  // CHECK: cir.try_call @_Z1fv() ^bb1, ^[[PAD2:.*]] :
+  // CHECK: cir.try_call @_Z1fv() ^bb2, ^[[PAD2]] :
+  // CHECK: ^[[PAD2]]:
+  // CHECK-NEXT: %[[EXN:.*]], %[[TID:.*]] = cir.eh.inflight_exception cleanup
+  // CHECK-NEXT: cir.br ^[[RESUME:.*]](%[[EXN]], %[[TID]] :
+  // CHECK: ^[[RESUME]](%[[ARG0:.*]]: !cir.ptr<!void>, %[[ARG1:.*]]: !u32i):
+  // CHECK-NEXT: cir.call @_ZN1SD1Ev
+  // CHECK-NEXT: cir.resume.flat %[[ARG0]], %[[ARG1]]
+}

@@ -1,0 +1,19 @@
+// RemoveRedundantBranches merges a block into its only predecessor; on flat
+// CIR after mem2reg the block can have arguments, which the branch's operands
+// replace.
+//
+// RUN: cir-opt %s --cir-canonicalize -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+module {
+  cir.func @merge_with_arg(%arg0: !s32i) -> !s32i {
+    cir.br ^bb1(%arg0 : !s32i)
+  ^bb1(%0: !s32i):
+    cir.return %0 : !s32i
+  }
+}
+
+// CHECK-LABEL: cir.func @merge_with_arg(
+// CHECK-SAME:      %[[ARG:.*]]: !s32i
+// CHECK-NEXT:    cir.return %[[ARG]] : !s32i
+// CHECK-NEXT:  }

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin11 -emit-llvm -fobjc-arc -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin11 -emit-llvm -fobjc-arc -fclangir -o - %s | FileCheck --check-prefix=CIR %s %}
 
 id makeObject1() __attribute__((ns_returns_retained));
 id makeObject2() __attribute__((ns_returns_retained));
@@ -67,3 +68,18 @@ ForwardConsumed::ForwardConsumed(__attribute__((ns_consumed)) id x) {}
 // CHECK-NEXT: store ptr null, ptr [[X]],
 // CHECK-NEXT: call void @_ZN15ForwardConsumedC2EP11objc_object({{.*}}, ptr noundef [[T0]])
 // CHECK:      call void @llvm.objc.storeStrong(ptr [[X]], ptr null)
+
+// CIR: define{{.*}} void @_ZN15ForwardConsumedC2EP11objc_object(
+// CIR-NOT:  objc_retain
+// CIR:      store ptr %{{.*}}, ptr %{{.*}}, align 8
+// CIR:      store ptr %{{.*}}, ptr [[X_ADDR:%.*]], align 8
+// CIR:      call void @llvm.objc.storeStrong(ptr [[X_ADDR]], ptr null)
+
+// CIR: define{{.*}} void @_ZN15ForwardConsumedC1EP11objc_object(
+// CIR-NOT:  objc_retain
+// CIR:      store ptr %{{.*}}, ptr %{{.*}}, align 8
+// CIR:      store ptr %{{.*}}, ptr [[X_ADDR:%.*]], align 8
+// CIR:      [[T0:%.*]] = load ptr, ptr [[X_ADDR]], align 8
+// CIR-NEXT: store ptr null, ptr [[X_ADDR]], align 8
+// CIR-NEXT: call void @_ZN15ForwardConsumedC2EP11objc_object({{.*}}, ptr noundef [[T0]])
+// CIR:      call void @llvm.objc.storeStrong(ptr [[X_ADDR]], ptr null)

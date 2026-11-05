@@ -1,0 +1,43 @@
+// RUN: cir-link %s %S/Inputs/global-type-reconcile-b.cir --warn-odr-divergence \
+// RUN:   -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// A global's definition and its references can legitimately disagree on type,
+// and the linker has to reconcile them.
+//
+// clang has always given a global's *definition* the type of its constant
+// rather than of the variable. `struct D : Base { }` becomes `{ i32 }`, a
+// bitfield record becomes `{ i8, i8, i8, i8 }` -- classical codegen emits
+// exactly the same shapes, so this is not something to "fix" in CIRGen:
+//
+//   @g  = dso_local global { i32 } zeroinitializer        (clang -emit-llvm)
+//   @bf = dso_local global { i8, i8, i8, i8 } { ... }
+//
+// It is invisible in LLVM because pointers are opaque and the IR linker maps
+// types across modules. CIR has typed pointers and checks cir.get_global's
+// result against the global, so merging a defining TU with a referencing TU
+// stopped verifying outright.
+//
+// The definition is authoritative: the get_global takes the global's own type
+// and a bitcast supplies what the uses expect, so nothing downstream has to be
+// retyped.
+
+!s32i = !cir.int<s, 32>
+!rec_anon_struct = !cir.record<struct  {!s32i}>
+
+module {
+  // The defining TU, with the flattened layout type clang produces.
+  cir.global external @g = #cir.zero : !rec_anon_struct
+}
+
+// STATS: 1 references retyped
+
+// The global keeps the definition's type...
+// CHECK: cir.global external @g = #cir.zero : !rec_anon_struct
+
+// ...the reference is retyped to match it, and a bitcast restores what the
+// caller expected, so @reader still returns !cir.ptr<!rec_D>.
+// CHECK: cir.func @reader() -> !cir.ptr<!rec_D>
+// CHECK:   %[[G:.*]] = cir.get_global @g : !cir.ptr<!rec_anon_struct>
+// CHECK:   %[[C:.*]] = cir.cast bitcast %[[G]] : !cir.ptr<!rec_anon_struct> -> !cir.ptr<!rec_D>
+// CHECK:   cir.return %[[C]] : !cir.ptr<!rec_D>

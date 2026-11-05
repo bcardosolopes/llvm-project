@@ -1,0 +1,21 @@
+// Lowering points each function alias at the end of its chain, and leaves a
+// chain that runs into a cycle as it is, for the LLVM verifier to report:
+// there is no end to point at, and nothing on the cycle is taken as resolved.
+//
+// RUN: cir-opt %s --cir-to-llvm -o - | FileCheck %s
+
+module {
+  cir.func @f() {
+    cir.return
+  }
+  // CHECK-DAG: llvm.mlir.alias external @a {aliasee = @b,
+  // CHECK-DAG: llvm.mlir.alias external @b {aliasee = @a,
+  // CHECK-DAG: llvm.mlir.alias external @c {aliasee = @a,
+  cir.func @a() alias(@b)
+  cir.func @b() alias(@a)
+  cir.func @c() alias(@a)
+  // CHECK-DAG: llvm.mlir.alias external @d {aliasee = @f,
+  // CHECK-DAG: llvm.mlir.alias external @e {aliasee = @f,
+  cir.func @d() alias(@e)
+  cir.func @e() alias(@f)
+}

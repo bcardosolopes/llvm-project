@@ -496,8 +496,14 @@ void IRNumberingState::number(Type type) {
 
   // If this type will be emitted using the bytecode format, perform a dummy
   // writing to number any nested components.
-  // TODO: We don't allow custom encodings for mutable types right now.
-  if (!type.hasTrait<TypeTrait::IsMutable>()) {
+  //
+  // Mutable types are allowed here. They used to be excluded because a
+  // self-referential type would recurse forever, but the numbering above
+  // inserts `type` into the map *before* this point, so a nested reference
+  // back to it hits the early return at the top of this function. The reader
+  // side breaks the same cycle with
+  // DialectBytecodeReader::tryStartCyclicRead.
+  {
     // Try overriding emission with callbacks.
     for (const auto &callback : config.getTypeWriterCallbacks()) {
       NumberingDialectWriter writer(*this, config.getDialectVersionMap());

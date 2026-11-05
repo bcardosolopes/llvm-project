@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s --check-prefix=CIR
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s --check-prefix=LLVM
@@ -74,21 +74,17 @@ labelD:
 // CIR:    cir.return
 
 // LLVM: define dso_local void @label_in_if{{.*}}
-// LLVM:   br label %3
-// LLVM: 3:
 // LLVM:   [[LOAD:%.*]] = load i32, ptr [[COND:%.*]], align 4
 // LLVM:   [[CMP:%.*]] = icmp ne i32 [[LOAD]], 0
-// LLVM:   br i1 [[CMP]], label %6, label %10
-// LLVM: 6:
-// LLVM:   br label %7
-// LLVM: 7:
+// LLVM:   br i1 [[CMP]], label %[[IFTHEN:.*]], label %[[IFEND:.*]]
+// LLVM: [[IFTHEN]]:
+// LLVM:   br label %[[LABEL:.*]]
+// LLVM: [[LABEL]]:
 // LLVM:   [[LOAD2:%.*]] = load i32, ptr [[COND]], align 4
 // LLVM:   [[ADD1:%.*]] = add nsw i32 [[LOAD2]], 1
 // LLVM:   store i32 [[ADD1]], ptr [[COND]], align 4
-// LLVM:   br label %10
-// LLVM: 10:
-// LLVM:   br label %11
-// LLVM: 11:
+// LLVM:   br label %[[IFEND]]
+// LLVM: [[IFEND]]:
 // LLVM:  ret void
 
 // OGCG: define dso_local void @label_in_if
@@ -183,21 +179,16 @@ void foo() {
 
 // CIR: cir.func {{.*}} @foo
 // CIR:   cir.scope {
-// CIR:     %0 = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["agg.tmp0"]
-// CIR:      cir.br ^bb1
+// CIR:     cir.br ^bb1
 // CIR:    ^bb1:
 // CIR:     cir.label "label"
+// CIR:     cir.call @get() : () -> ()
+// CIR:     cir.call @bar() : () -> ()
 
 // LLVM: define dso_local void @foo(){{.*}} {
-// LLVM:  [[ALLOC:%.*]] = alloca %struct.S, i64 1, align 1
-// LLVM:  br label %2
-// LLVM:2:
-// LLVM:  br label %3
-// LLVM:3:
-// LLVM:  [[CALL:%.*]] = call %struct.S @get()
-// LLVM:  store %struct.S [[CALL]], ptr [[ALLOC]], align 1
-// LLVM:  [[LOAD:%.*]] = load %struct.S, ptr [[ALLOC]], align 1
-// LLVM:  call void @bar(%struct.S [[LOAD]])
+// LLVM:  br label %{{.+}}
+// LLVM:  call void (...) @get()
+// LLVM:  call void @bar()
 
 // OGCG: define dso_local void @foo()
 // OGCG:   %agg.tmp = alloca %struct.S, align 1

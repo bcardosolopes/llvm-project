@@ -3,6 +3,7 @@
 // RUN: %clang_cc1 -triple x86_64-w64-windows-gnu -emit-llvm -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck -check-prefix CHECK-MINGW %s
 
 // RUN: %clang_cc1 -triple x86_64-windows-msvc -emit-llvm -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck -check-prefix CHECK-MSVC %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-windows-msvc -emit-llvm -fobjc-runtime=gnustep-2.0 -fclangir -o - %s | FileCheck -check-prefixes CHECK-MSVC,CHECK-CIR-MSVC %s %}
 
 // RUN: %clang_cc1 -triple x86_64-linux-gnu -emit-llvm -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck -check-prefix CHECK-ELF %s
 
@@ -83,3 +84,13 @@ const char * Test(void)
 // CHECK-MSVC: @e = dso_local global [2 x i8] c"i\00", align 1
 // CHECK-MINGW: @e = dso_local global [2 x i8] c"i\00", align 1
 // CHECK-ELF: @e = global [2 x i8] c"i\00", align 1
+
+// CHECK-CIR-MSVC-LABEL: define internal ptr @_i_BABugExample__property
+// CHECK-CIR-MSVC: %[[GETOFF:[0-9]+]] = load i32, ptr @"__objc_ivar_offset_BABugExample._property.@", align 4
+// CHECK-CIR-MSVC: %[[GETOFF64:[0-9]+]] = zext i32 %[[GETOFF]] to i64
+// CHECK-CIR-MSVC: %[[GETRES:[0-9]+]] = call ptr @objc_getProperty(ptr {{.*}}, ptr {{.*}}, i64 %[[GETOFF64]], i1 true)
+
+// CHECK-CIR-MSVC-LABEL: define internal void @_i_BABugExample__setProperty_
+// CHECK-CIR-MSVC: %[[SETOFF:[0-9]+]] = load i32, ptr @"__objc_ivar_offset_BABugExample._property.@", align 4
+// CHECK-CIR-MSVC: %[[SETOFF64:[0-9]+]] = zext i32 %[[SETOFF]] to i64
+// CHECK-CIR-MSVC: call void @objc_setProperty_atomic_copy(ptr {{.*}}, ptr {{.*}}, ptr {{.*}}, i64 %[[SETOFF64]])

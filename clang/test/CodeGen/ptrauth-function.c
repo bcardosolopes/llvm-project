@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-llvm %s  -o - | FileCheck -check-prefix=CHECK %s
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -emit-llvm %s  -o - | FileCheck -check-prefix=CHECK %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm %s  -o - | FileCheck -check-prefix=CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -disable-llvm-passes -fclangir -emit-llvm %s  -o - | FileCheck -check-prefix=CIR %s %}
 
 void test_call();
 
@@ -10,11 +12,16 @@ void test_direct_call() {
 }
 
 // CHECK: define {{(dso_local )?}}void @test_indirect_call(ptr noundef %[[FP:.*]])
+// CIR: define {{(dso_local )?}}void @test_indirect_call(ptr noundef %[[FP:.*]])
 void test_indirect_call(void (*fp(void))) {
   // CHECK: %[[FP_ADDR:.*]] = alloca ptr, align 8
   // CHECK: store ptr %[[FP]], ptr %[[FP_ADDR]], align 8
   // CHECK: %[[V0:.*]] = load ptr, ptr %[[FP_ADDR]], align 8
   // CHECK: %[[CALL:.*]] = call ptr %[[V0]]() [ "ptrauth"(i32 0, i64 0) ]
+  // CIR: %[[FP_ADDR:.*]] = alloca ptr
+  // CIR: store ptr %[[FP]], ptr %[[FP_ADDR]], align 8
+  // CIR: %[[V0:.*]] = load ptr, ptr %[[FP_ADDR]], align 8
+  // CIR: %[[CALL:.*]] = call ptr %[[V0]]() [ "ptrauth"(i32 0, i64 0) ]
   fp();
 }
 

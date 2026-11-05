@@ -68,6 +68,9 @@ enum ActionKind {
   /// Emit a .cir file
   EmitCIR,
 
+  /// Emit MLIR output
+  EmitMLIR,
+
   /// Emit a .ll file.
   EmitLLVM,
 
@@ -154,11 +157,7 @@ enum ActionKind {
 class InputKind {
 public:
   /// The input file format.
-  enum Format {
-    Source,
-    ModuleMap,
-    Precompiled
-  };
+  enum Format { Source, ModuleMap, Precompiled };
 
   // If we are building a header unit, what kind it is; this affects whether
   // we look for the file in the user or system include search paths before
@@ -422,6 +421,67 @@ public:
   LLVM_PREFERRED_TYPE(bool)
   unsigned ClangIRDisableCIRVerifier : 1;
 
+  /// Emit the ClangIR for this TU into a .cir section of the object, in
+  /// addition to generating native code. The analogue of
+  /// -ffat-lto-objects: one object that an ordinary link and a CIR
+  /// link-time pipeline can both consume.
+  unsigned ClangIRFatObjects : 1;
+
+  /// Enable Clang IR calling convention lowering pass
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRCallConvLowering : 1;
+
+  /// Lower directly from CIR to LLVM (vs through MLIR core dialects)
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRDirectLowering : 1;
+
+  /// Enable ClangIR analysis only mode
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRAnalysisOnly : 1;
+
+  /// Enable CIR idiom recognizer pass
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRIdiomRecognizer : 1;
+
+  /// Enable CIR library optimization pass
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRLibOpt : 1;
+
+  /// Enable diagnostic verification for CIR
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRVerifyDiags : 1;
+
+  // Enable Clang IR based lifetime check
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIRLifetimeCheck : 1;
+
+  // Enable Clang IR mem2reg pass on the flat CIR.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIREnableMem2Reg : 1;
+
+  // Enable the Clang IR inliner on the flat CIR.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned ClangIREnableInline : 1;
+
+  // -fclangir-inline-threshold=, or ~0u when not given (the inliner's own).
+  unsigned ClangIRInlineThreshold = ~0u;
+
+  // Enable Clang IR std::move optimizations.
+  unsigned ClangIREnableMoveOpt : 1;
+
+  /// Enable gather statistics about std library usage.
+  unsigned StdLibStats : 1;
+
+  /// How the std library statistics report is delivered: "json" (the default,
+  /// write it to stderr) or "embed" (park it in the .stdlib_stats section of
+  /// the output object). Only meaningful when StdLibStats is set.
+  std::string StdLibStatsMode;
+
+  /// Comma-separated list of additional top-level namespaces to census
+  /// alongside the std library, e.g. "folly,absl,unifex". Empty by default;
+  /// the std library and the C standard library are always censused.
+  std::string StdLibStatsLibs;
+
   CodeCompleteOptions CodeCompleteOpts;
 
   /// Specifies the output format of the AST.
@@ -440,6 +500,21 @@ public:
 
   /// The output file, if any.
   std::string OutputFile;
+
+  /// If given, save CIR output to this file.
+  std::string ClangIROutputFile;
+
+  /// If given, configure CIR idiom recognizer pass options.
+  std::string ClangIRIdiomRecognizerOpts;
+
+  /// If given, configure CIR lifetime check pass options.
+  std::string ClangIRLifetimeCheckOpts;
+
+  /// If given, configure CIR lib opt pass options.
+  std::string ClangIRLibOptOpts;
+
+  /// If given, the kind of MLIR to emit (llvm, core, cir, cir-flat).
+  std::string ClangIREmitMLIR;
 
   /// If given, the new suffix for fix-it rewritten files.
   std::string FixItSuffix;
@@ -552,8 +627,15 @@ public:
         EmitSymbolGraphSymbolLabelsForTesting(false),
         EmitPrettySymbolGraphs(false), GenReducedBMI(false),
         UseClangIRPipeline(false), ClangIRDisablePasses(false),
-        ClangIRDisableCIRVerifier(false), TimeTraceGranularity(500),
-        TimeTraceVerbose(false) {}
+        ClangIRDisableCIRVerifier(false), ClangIRFatObjects(false),
+        ClangIRCallConvLowering(true),
+        ClangIRDirectLowering(true), ClangIRAnalysisOnly(false),
+        ClangIRIdiomRecognizer(false), ClangIRLibOpt(false),
+        ClangIRVerifyDiags(false), ClangIRLifetimeCheck(false),
+        ClangIREnableMem2Reg(false), ClangIREnableInline(false),
+        ClangIREnableMoveOpt(false),
+        StdLibStats(false), TimeTraceGranularity(500), TimeTraceVerbose(false) {
+  }
 
   /// getInputKindForExtension - Return the appropriate input kind for a file
   /// extension. For example, "c" would return Language::C.

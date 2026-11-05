@@ -142,6 +142,10 @@ public:
   /// Set the flag specifying if multi-threading is disabled within the uniquer.
   void disableMultithreading(bool disable = true);
 
+  /// Free the lookup cache each thread keeps of the instances it has looked
+  /// up. No other thread may use the uniquer meanwhile.
+  void clearThreadLocalCaches();
+
   /// Register a new parametric storage class, this is necessary to create
   /// instances of this class type. `id` is the type identifier that will be
   /// used to identify this type when creating instances of it via 'get'.

@@ -88,3 +88,59 @@ long double floorl(long double f) {
   // LLVM: %{{.*}} = call fp128 @llvm.floor.f128(fp128 %{{.*}})
   // OGCG: %{{.*}} = call fp128 @llvm.floor.f128(fp128 %{{.*}})
 }
+
+float coshf_(float f) {
+  return __builtin_coshf(f);
+  // CIR: %{{.*}} = cir.cosh %{{.*}} : !cir.float
+  // LLVM: %{{.*}} = call float @llvm.cosh.f32(float %{{.*}})
+  // OGCG: %{{.*}} = call float @llvm.cosh.f32(float %{{.*}})
+}
+
+double cosh_(double f) {
+  return __builtin_cosh(f);
+  // CIR: %{{.*}} = cir.cosh %{{.*}} : !cir.double
+  // LLVM: %{{.*}} = call double @llvm.cosh.f64(double %{{.*}})
+  // OGCG: %{{.*}} = call double @llvm.cosh.f64(double %{{.*}})
+}
+
+float sinhf_(float f) {
+  return __builtin_sinhf(f);
+  // CIR: %{{.*}} = cir.sinh %{{.*}} : !cir.float
+  // LLVM: %{{.*}} = call float @llvm.sinh.f32(float %{{.*}})
+  // OGCG: %{{.*}} = call float @llvm.sinh.f32(float %{{.*}})
+}
+
+double sinh_(double f) {
+  return __builtin_sinh(f);
+  // CIR: %{{.*}} = cir.sinh %{{.*}} : !cir.double
+  // LLVM: %{{.*}} = call double @llvm.sinh.f64(double %{{.*}})
+  // OGCG: %{{.*}} = call double @llvm.sinh.f64(double %{{.*}})
+}
+
+float tanhf_(float f) {
+  return __builtin_tanhf(f);
+  // CIR: %{{.*}} = cir.tanh %{{.*}} : !cir.float
+  // LLVM: %{{.*}} = call float @llvm.tanh.f32(float %{{.*}})
+  // OGCG: %{{.*}} = call float @llvm.tanh.f32(float %{{.*}})
+}
+
+double tanh_(double f) {
+  return __builtin_tanh(f);
+  // CIR: %{{.*}} = cir.tanh %{{.*}} : !cir.double
+  // LLVM: %{{.*}} = call double @llvm.tanh.f64(double %{{.*}})
+  // OGCG: %{{.*}} = call double @llvm.tanh.f64(double %{{.*}})
+}
+
+float exp10f_(float f) {
+  return __builtin_exp10f(f);
+  // CIR: %{{.*}} = cir.exp10 %{{.*}} : !cir.float
+  // LLVM: %{{.*}} = call float @llvm.exp10.f32(float %{{.*}})
+  // OGCG: %{{.*}} = call float @llvm.exp10.f32(float %{{.*}})
+}
+
+double exp10_(double f) {
+  return __builtin_exp10(f);
+  // CIR: %{{.*}} = cir.exp10 %{{.*}} : !cir.double
+  // LLVM: %{{.*}} = call double @llvm.exp10.f64(double %{{.*}})
+  // OGCG: %{{.*}} = call double @llvm.exp10.f64(double %{{.*}})
+}

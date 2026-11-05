@@ -15,6 +15,7 @@
 #define CLANG_LIB_CIR_CIRGENVALUE_H
 
 #include "Address.h"
+#include "CIRGenTBAA.h"
 
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Type.h"
@@ -158,7 +159,7 @@ class LValue {
     BitField,     // This is a bitfield l-value, use getBitfield*.
     ExtVectorElt, // This is an extended vector subset, use getExtVectorComp
     GlobalReg,    // This is a register l-value, use getGlobalReg()
-    MatrixElt     // This is a matrix element, use getVector*
+    MatrixElt     // This is a matrix element, use getMatrix*
   } lvType;
   clang::QualType type;
   clang::Qualifiers quals;
@@ -170,8 +171,17 @@ class LValue {
   mlir::Value vectorIdx;      // Index for vector subscript
   mlir::Attribute vectorElts; // ExtVector element subset: V.xyx
   mlir::Type elementType;
+  mlir::StringAttr globalRegName; // For GlobalReg LValues: register name
   LValueBaseInfo baseInfo;
+  TBAAAccessInfo tbaaInfo;
   const CIRGenBitFieldInfo *bitFieldInfo{nullptr};
+
+  // This flag shows if a nontemporal load/stores should be used when accessing
+  // this lvalue.
+  bool nontemporal : 1;
+
+  // Whether the pointer is known not to be null.
+  bool knownNonNull : 1;
 
   void initialize(clang::QualType type, clang::Qualifiers quals,
                   clang::CharUnits alignment, LValueBaseInfo baseInfo) {
@@ -186,6 +196,8 @@ class LValue {
     assert(this->alignment == alignment.getQuantity() &&
            "Alignment exceeds allowed max!");
     this->baseInfo = baseInfo;
+    this->nontemporal = false;
+    this->knownNonNull = false;
   }
 
 public:
@@ -194,6 +206,7 @@ public:
   bool isBitField() const { return lvType == BitField; }
   bool isExtVectorElt() const { return lvType == ExtVectorElt; }
   bool isGlobalReg() const { return lvType == GlobalReg; }
+  bool isMatrixElt() const { return lvType == MatrixElt; }
   bool isVolatile() const { return quals.hasVolatile(); }
 
   bool isVolatileQualified() const { return quals.hasVolatile(); }
@@ -212,7 +225,7 @@ public:
   void setAlignment(clang::CharUnits a) { alignment = a.getQuantity(); }
 
   Address getAddress() const {
-    return Address(getPointer(), elementType, getAlignment());
+    return Address(getPointer(), elementType, getAlignment(), knownNonNull);
   }
 
   void setAddress(Address address) {
@@ -220,7 +233,7 @@ public:
     v = address.getPointer();
     elementType = address.getElementType();
     alignment = address.getAlignment().getQuantity();
-    assert(!cir::MissingFeatures::addressIsKnownNonNull());
+    knownNonNull = address.isKnownNonNull();
   }
 
   const clang::Qualifiers &getQuals() const { return quals; }
@@ -229,17 +242,30 @@ public:
   LValueBaseInfo getBaseInfo() const { return baseInfo; }
   void setBaseInfo(LValueBaseInfo info) { baseInfo = info; }
 
+  TBAAAccessInfo getTBAAInfo() const { return tbaaInfo; }
+  void setTBAAInfo(TBAAAccessInfo info) { tbaaInfo = info; }
+
+  bool isNontemporal() const { return nontemporal; }
+  void setNontemporal(bool value) { nontemporal = value; }
+
+  /// Whether the pointer is known not to be null.
+  bool isKnownNonNull() const { return knownNonNull; }
+  LValue setKnownNonNull() {
+    knownNonNull = true;
+    return *this;
+  }
+
   static LValue makeAddr(Address address, clang::QualType t,
                          LValueBaseInfo baseInfo) {
-    // Classic codegen sets the objc gc qualifier here. That requires an
-    // ASTContext, which is passed in from CIRGenFunction::makeAddrLValue.
-    assert(!cir::MissingFeatures::objCGC());
-
+    // Classic codegen sets ObjC GC qualifiers from ASTContext in
+    // LValue::initializeSimpleLValue. CIR currently tracks ObjC GC handling
+    // via dedicated setObjCGCLValueClass / setNonGC / objCLifetime guards.
     LValue r;
     r.lvType = Simple;
     r.v = address.getPointer();
     r.elementType = address.getElementType();
     r.initialize(t, t.getQualifiers(), address.getAlignment(), baseInfo);
+    r.knownNonNull = address.isKnownNonNull();
     return r;
   }
 
@@ -297,6 +323,36 @@ public:
     return r;
   }
 
+  Address getMatrixAddress() const {
+    assert(isMatrixElt());
+    return Address(getMatrixPointer(), elementType, getAlignment());
+  }
+
+  mlir::Value getMatrixPointer() const {
+    assert(isMatrixElt());
+    return v;
+  }
+
+  mlir::Value getMatrixIdx() const {
+    assert(isMatrixElt());
+    return vectorIdx;
+  }
+
+  static LValue makeMatrixElt(Address matrixAddress, mlir::Value index,
+                              clang::QualType matrixType,
+                              LValueBaseInfo baseInfo,
+                              TBAAAccessInfo tbaaInfo) {
+    LValue r;
+    r.lvType = MatrixElt;
+    r.v = matrixAddress.getPointer();
+    r.elementType = matrixAddress.getElementType();
+    r.vectorIdx = index;
+    r.initialize(matrixType, matrixType.getQualifiers(),
+                 matrixAddress.getAlignment(), baseInfo);
+    r.setTBAAInfo(tbaaInfo);
+    return r;
+  }
+
   // bitfield lvalue
   Address getBitFieldAddress() const {
     return Address(getBitFieldPointer(), elementType, getAlignment());
@@ -319,13 +375,30 @@ public:
   /// \param Info - The information describing how to perform the bit-field
   /// access.
   static LValue makeBitfield(Address addr, const CIRGenBitFieldInfo &info,
-                             clang::QualType type, LValueBaseInfo baseInfo) {
+                             clang::QualType type, LValueBaseInfo baseInfo,
+                             TBAAAccessInfo tbaaInfo) {
     LValue r;
     r.lvType = BitField;
     r.v = addr.getPointer();
     r.elementType = addr.getElementType();
     r.bitFieldInfo = &info;
     r.initialize(type, type.getQualifiers(), addr.getAlignment(), baseInfo);
+    r.setTBAAInfo(tbaaInfo);
+    return r;
+  }
+
+  // global register lvalue
+  mlir::StringAttr getGlobalReg() const {
+    assert(isGlobalReg());
+    return globalRegName;
+  }
+
+  static LValue makeGlobalReg(mlir::StringAttr regName, clang::QualType type) {
+    LValue r;
+    r.lvType = GlobalReg;
+    r.globalRegName = regName;
+    r.initialize(type, type.getQualifiers(), clang::CharUnits::One(),
+                 LValueBaseInfo(AlignmentSource::Decl));
     return r;
   }
 
@@ -373,11 +446,20 @@ class AggValueSlot {
   [[maybe_unused]]
   LLVM_PREFERRED_TYPE(bool) unsigned overlapFlag : 1;
 
+  /// If set, sanitizer checks are already generated for this address or are
+  /// not required. For example, objects constructed from a checked `new`
+  /// pointer should not re-emit constructor-call checks.
+  LLVM_PREFERRED_TYPE(bool) unsigned sanitizerCheckedFlag : 1;
+
 public:
   enum IsDestructed_t { IsNotDestructed, IsDestructed };
   enum IsZeroed_t { IsNotZeroed, IsZeroed };
   enum IsAliased_t { IsNotAliased, IsAliased };
-  enum Overlap_t { MayOverlap, DoesNotOverlap };
+  enum Overlap_t { DoesNotOverlap, MayOverlap };
+  enum IsSanitizerChecked_t {
+    IsNotSanitizerChecked,
+    IsSanitizerChecked
+  };
 
   /// Returns an aggregate value slot indicating that the aggregate
   /// value is being ignored.
@@ -387,24 +469,30 @@ public:
   }
 
   AggValueSlot(Address addr, clang::Qualifiers quals, bool destructedFlag,
-               bool zeroedFlag, bool aliasedFlag, bool overlapFlag)
+               bool zeroedFlag, bool aliasedFlag, bool overlapFlag,
+               bool sanitizerCheckedFlag)
       : addr(addr), quals(quals), destructedFlag(destructedFlag),
         zeroedFlag(zeroedFlag), aliasedFlag(aliasedFlag),
-        overlapFlag(overlapFlag) {}
+        overlapFlag(overlapFlag),
+        sanitizerCheckedFlag(sanitizerCheckedFlag) {}
 
   static AggValueSlot forAddr(Address addr, clang::Qualifiers quals,
                               IsDestructed_t isDestructed,
                               IsAliased_t isAliased, Overlap_t mayOverlap,
-                              IsZeroed_t isZeroed = IsNotZeroed) {
+                              IsZeroed_t isZeroed = IsNotZeroed,
+                              IsSanitizerChecked_t isChecked =
+                                  IsNotSanitizerChecked) {
     return AggValueSlot(addr, quals, isDestructed, isZeroed, isAliased,
-                        mayOverlap);
+                        mayOverlap, isChecked);
   }
 
   static AggValueSlot forLValue(const LValue &LV, IsDestructed_t isDestructed,
                                 IsAliased_t isAliased, Overlap_t mayOverlap,
-                                IsZeroed_t isZeroed = IsNotZeroed) {
+                                IsZeroed_t isZeroed = IsNotZeroed,
+                                IsSanitizerChecked_t isChecked =
+                                    IsNotSanitizerChecked) {
     return forAddr(LV.getAddress(), LV.getQuals(), isDestructed, isAliased,
-                   mayOverlap, isZeroed);
+                   mayOverlap, isZeroed, isChecked);
   }
 
   IsDestructed_t isExternallyDestructed() const {
@@ -434,14 +522,25 @@ public:
   Overlap_t mayOverlap() const { return Overlap_t(overlapFlag); }
 
   IsZeroed_t isZeroed() const { return IsZeroed_t(zeroedFlag); }
+  void setZeroed(bool zeroed = true) { zeroedFlag = zeroed; }
+
+  bool isSanitizerChecked() const { return sanitizerCheckedFlag; }
+
+  /// Return the preferred total size of the aggregate value slot, respecting
+  /// the mayOverlap flag. When the slot may overlap with another object, use
+  /// the data size (excluding trailing padding) to avoid clobbering it.
+  clang::CharUnits getPreferredSize(clang::ASTContext &ctx,
+                                    clang::QualType type) const {
+    return mayOverlap() ? ctx.getTypeInfoDataSizeInChars(type).Width
+                        : ctx.getTypeSizeInChars(type);
+  }
 
   IsAliased_t isPotentiallyAliased() const { return IsAliased_t(aliasedFlag); }
 
   RValue asRValue() const {
     if (isIgnored())
       return RValue::getIgnored();
-    assert(!cir::MissingFeatures::aggValueSlot());
-    return RValue::getAggregate(getAddress());
+    return RValue::getAggregate(getAddress(), isVolatile());
   }
 };
 

@@ -1,0 +1,25 @@
+// Second input for ../merge-modules.cir. Not a test on its own.
+//
+// Declares what A defines, defines what A declares, and redefines the symbol
+// A already defined -- so the linker has to make all three resolutions.
+// `struct "Shared"` is repeated verbatim so that type unification across
+// inputs is exercised.
+
+!s32i = !cir.int<s, 32>
+!rec_Shared = !cir.record<struct "Shared" {!s32i, !s32i}>
+
+module {
+  cir.func private @defined_in_a(!s32i) -> !s32i
+
+  cir.func @defined_in_b(%arg0: !rec_Shared) -> !s32i {
+    %0 = cir.const #cir.int<42> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @duplicated() -> !s32i {
+    %0 = cir.const #cir.int<222> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.global external @only_in_b = #cir.int<9> : !s32i
+}

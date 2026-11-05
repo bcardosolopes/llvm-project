@@ -127,6 +127,12 @@ public:
 
     virtual ~Cleanup() = default;
 
+    /// Return true if this cleanup is redundant before a return statement.
+    /// Lifetime markers and stack restores are implicitly handled by function
+    /// return and can be safely skipped. Matches OGCG's virtual method on
+    /// EHScopeStack::Cleanup (EHScopeStack.h:164).
+    virtual bool isRedundantBeforeReturn() { return false; }
+
     /// Generation flags.
     class Flags {
       enum {
@@ -134,6 +140,7 @@ public:
         F_IsNormalCleanupKind = 0x2,
         F_IsEHCleanupKind = 0x4,
         F_HasExitSwitch = 0x8,
+        F_IsForEarlyExit = 0x10,
       };
       unsigned flags = 0;
 
@@ -155,6 +162,12 @@ public:
 
       bool hasExitSwitch() const { return flags & F_HasExitSwitch; }
       void setHasExitSwitch() { flags |= F_HasExitSwitch; }
+
+      /// isForEarlyExit - true if this cleanup is being emitted inline
+      /// for an early exit (return/break/continue/goto), not as part of
+      /// normal scope cleanup.
+      bool isForEarlyExit() const { return flags & F_IsForEarlyExit; }
+      void setIsForEarlyExit() { flags |= F_IsForEarlyExit; }
     };
 
     /// Emit the cleanup.  For normal cleanups, this is run in the
@@ -231,6 +244,31 @@ public:
     [[maybe_unused]] Cleanup *obj = new (buffer) T(a...);
   }
 
+  /// Push a cleanup with non-constant storage requirements on the
+  /// stack.  The cleanup type must provide an additional static method:
+  ///   static size_t getExtraSize(size_t);
+  /// The argument to this method will be the value N, which will also
+  /// be passed as the first argument to the constructor.
+  ///
+  /// The data stored in the extra storage must obey the same
+  /// restrictions as normal cleanup member data.
+  ///
+  /// The pointer returned from this method is valid until the cleanup
+  /// stack is modified.
+  template <class T, class... As>
+  T *pushCleanupWithExtra(CleanupKind kind, size_t n, As... a) {
+    static_assert(alignof(T) <= ScopeStackAlignment,
+                  "Cleanup's alignment is too large.");
+    void *buffer = pushCleanup(kind, sizeof(T) + T::getExtraSize(n));
+    return new (buffer) T(n, a...);
+  }
+
+  /// Copy a cleanup onto the stack from raw bytes.
+  void pushCopyOfCleanup(CleanupKind kind, const void *cleanup, size_t size) {
+    void *buffer = pushCleanup(kind, size);
+    std::memcpy(buffer, cleanup, size);
+  }
+
   void setCGF(CIRGenFunction *inCGF) { cgf = inCGF; }
 
   /// Pops a cleanup scope off the stack.  This is private to CIRGenCleanup.cpp.
@@ -243,6 +281,18 @@ public:
 
   /// Pops a catch scope off the stack. This is private to CIRGenException.cpp.
   void popCatch();
+
+  /// Push an exceptions filter on the stack for dynamic exception specs.
+  class EHFilterScope *pushFilter(unsigned numFilters);
+
+  /// Pops an exceptions filter off the stack.
+  void popFilter();
+
+  /// Push a terminate handler on the stack.
+  void pushTerminate();
+
+  /// Pops a terminate handler off the stack.
+  void popTerminate();
 
   /// Determines whether the exception-scopes stack is empty.
   bool empty() const { return startOfData == endOfBuffer; }
@@ -286,6 +336,14 @@ public:
   /// Turn a stable reference to a scope depth into a unstable pointer
   /// to the EH stack.
   iterator find(stable_iterator savePoint) const;
+
+  /// Returns true if \p savePoint still refers to a scope currently present
+  /// on this EH stack. Save points captured before intervening pops may become
+  /// stale; callers that store save points across nested scope exits should
+  /// guard uses with this helper before calling find().
+  bool contains(stable_iterator savePoint) const {
+    return savePoint.isValid() && savePoint.size <= stable_begin().size;
+  }
 
   /// Add a branch fixup to the current cleanup scope.
   BranchFixup &addBranchFixup() {

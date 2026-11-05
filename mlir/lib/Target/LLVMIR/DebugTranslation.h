@@ -49,6 +49,11 @@ public:
 
   /// Translate the given LLVM debug metadata to LLVM.
   llvm::DINode *translate(DINodeAttr attr);
+  /// Translates the given assignment-tracking identity. Separate from the
+  /// `DINodeAttr` dispatch: `llvm::DIAssignID` derives from `MDNode`, not
+  /// `DINode`.
+  llvm::DIAssignID *translate(DIAssignIDAttr attr);
+
 
   /// Translate the given derived LLVM debug metadata to LLVM.
   template <typename DIAttrT>
@@ -134,6 +139,11 @@ private:
   /// This helps identify attrs that should translate into the same LLVM debug
   /// node.
   DenseMap<DistinctAttr, llvm::DINode *> distinctAttrToNode;
+
+  /// A mapping between an assignment-tracking identity and its node. One node
+  /// per identity, so a store and the `#dbg_assign` describing it come out
+  /// sharing it.
+  DenseMap<DIAssignIDAttr, llvm::DIAssignID *> assignIDToNode;
 
   /// A mapping between filename and llvm debug file.
   /// TODO: Change this to DenseMap<Identifier, ...> when we can

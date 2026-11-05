@@ -1,8 +1,12 @@
 // RUN: %clang_cc1                                                -triple arm64-apple-ios   -fptrauth-calls -fcxx-exceptions -emit-llvm %s -o - | FileCheck %s --check-prefix=CHECK
 // RUN: %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple arm64-apple-ios   -fptrauth-calls -fcxx-exceptions -emit-llvm %s -o - | FileCheck %s --check-prefix=CHECKDISC
+// RUN: %if cir-support %{ %clang_cc1                                                -triple arm64-apple-ios   -fptrauth-calls -fptrauth-intrinsics -fcxx-exceptions -fexceptions -fclangir -emit-llvm -disable-llvm-passes %s -o - | FileCheck %s --check-prefix=CHECK %}
+// RUN: %if cir-support %{ %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple arm64-apple-ios   -fptrauth-calls -fptrauth-intrinsics -fcxx-exceptions -fexceptions -fclangir -emit-llvm -disable-llvm-passes %s -o - | FileCheck %s --check-prefix=CHECKDISC %}
 
 // RUN: %clang_cc1                                                -triple aarch64-linux-gnu -fptrauth-calls -fcxx-exceptions -emit-llvm %s -o - | FileCheck %s --check-prefix=CHECK
 // RUN: %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu -fptrauth-calls -fcxx-exceptions -emit-llvm %s -o - | FileCheck %s --check-prefix=CHECKDISC
+// RUN: %if cir-support %{ %clang_cc1                                                -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -fcxx-exceptions -fexceptions -fclangir -emit-llvm -disable-llvm-passes %s -o - | FileCheck %s --check-prefix=CHECK %}
+// RUN: %if cir-support %{ %clang_cc1 -fptrauth-function-pointer-type-discrimination -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -fcxx-exceptions -fexceptions -fclangir -emit-llvm -disable-llvm-passes %s -o - | FileCheck %s --check-prefix=CHECKDISC %}
 
 class Foo {
  public:

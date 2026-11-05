@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 %s -emit-llvm -o - -triple=i686-apple-darwin9 | FileCheck %s --check-prefixes=CHECK,X86
 // RUN: %clang_cc1 %s -emit-llvm -o - -triple=s390x-linux-gnu | FileCheck %s --check-prefixes=CHECK,SYSTEMZ
+// RUN: %if cir-support %{ %clang_cc1 %s -emit-llvm -o - -triple=x86_64-unknown-linux -fclangir | FileCheck %s --check-prefix=CIR-X86 %}
 
 // CHECK: @[[NONSTATIC_GLOB_POINTER_FROM_INT:.+]] = global ptr null
 // CHECK: @[[GLOB_POINTER:.+]] = internal global ptr null
@@ -143,6 +144,8 @@ static _Atomic double glob_dbl = 0.0f;
 static _Atomic long double glob_longdbl = 0.0f;
 
 void force_global_uses(void) {
+  // CIR-X86: define dso_local void @force_global_uses()
+  // CIR-X86: call void @__atomic_load(i64 noundef 16, ptr noundef @glob_longdbl, ptr noundef %{{.+}}, i32 noundef 5)
   // X86:   %atomic-temp = alloca x86_fp80, align 16
   (void)glob_pointer;
   // CHECK: load atomic ptr, ptr @[[GLOB_POINTER]] seq_cst

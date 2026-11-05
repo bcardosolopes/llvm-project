@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple thumbv7-windows-msvc -fdeclspec -std=c++11 -fobjc-runtime=ios-6.0 -o - -emit-llvm %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple thumbv7-windows-msvc -fdeclspec -std=c++11 -fobjc-runtime=ios-6.0 -o - -emit-llvm -fclangir %s | FileCheck %s %}
 
 @class I;
 
@@ -189,4 +190,3 @@ template struct t<SEL>;
 
 template struct t<remove_pointer<SEL>::type>;
 // CHECK-LABEL: "??0?$t@Uobjc_selector@@@@QAA@XZ"
-

@@ -197,6 +197,14 @@ class CompilerInstance : public ModuleLoader {
   /// Force an output buffer.
   std::unique_ptr<llvm::raw_pwrite_stream> OutputStream;
 
+  /// The -fstd-lib-stats=embed report for this translation unit.
+  ///
+  /// The AST-side consumer (StdLibStatsConsumer) renders the report during
+  /// HandleTranslationUnit and parks it here; the code generator picks it up
+  /// afterwards and embeds it in the .stdlib_stats section of the output
+  /// object. Empty unless embed mode is on.
+  std::string StdLibStatsReport;
+
   CompilerInstance(const CompilerInstance &) = delete;
   void operator=(const CompilerInstance &) = delete;
 public:
@@ -379,6 +387,17 @@ public:
   /// Get the current stream for verbose output.
   raw_ostream &getVerboseOutputStream() {
     return *VerboseOutputStream;
+  }
+
+  /// @}
+  /// @name std library statistics
+  /// @{
+
+  /// The -fstd-lib-stats=embed report, or "" if embed mode is off.
+  StringRef getStdLibStatsReport() const { return StdLibStatsReport; }
+
+  void setStdLibStatsReport(std::string Report) {
+    StdLibStatsReport = std::move(Report);
   }
 
   /// @}

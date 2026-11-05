@@ -21,7 +21,8 @@ mlir::Value CIRGenBuilderTy::maybeBuildArrayDecay(mlir::Location loc,
   const auto arrayTy = mlir::dyn_cast<cir::ArrayType>(arrayPtrTy.getPointee());
 
   if (arrayTy) {
-    const cir::PointerType flatPtrTy = getPointerTo(arrayTy.getElementType());
+    const cir::PointerType flatPtrTy =
+        getPointerTo(arrayTy.getElementType(), arrayPtrTy.getAddrSpace());
     return cir::CastOp::create(*this, loc, flatPtrTy,
                                cir::CastKind::array_to_ptrdecay, arrayPtr);
   }
@@ -35,7 +36,8 @@ mlir::Value CIRGenBuilderTy::getArrayElement(mlir::Location arrayLocBegin,
                                              mlir::Location arrayLocEnd,
                                              mlir::Value arrayPtr,
                                              mlir::Type eltTy, mlir::Value idx,
-                                             bool shouldDecay) {
+                                             bool shouldDecay,
+                                             cir::GEPNoWrapFlags flags) {
   auto arrayPtrTy = mlir::dyn_cast<cir::PointerType>(arrayPtr.getType());
   assert(arrayPtrTy && "expected pointer type");
   // If the array pointer is not decayed, emit a GetElementOp.
@@ -44,6 +46,15 @@ mlir::Value CIRGenBuilderTy::getArrayElement(mlir::Location arrayLocBegin,
   if (shouldDecay && arrayTy && arrayTy == eltTy) {
     auto eltPtrTy =
         getPointerTo(arrayTy.getElementType(), arrayPtrTy.getAddrSpace());
+    // GetElementOp requires a fundamental integer index. Cast non-fundamental
+    // integer types (e.g. _BitInt(15)) to a standard integer type.
+    if (auto intTy = mlir::dyn_cast<cir::IntType>(idx.getType())) {
+      if (!intTy.isFundamental()) {
+        auto ptrDiffTy =
+            cir::IntType::get(getContext(), 64, /*isSigned=*/true);
+        idx = createIntCast(idx, ptrDiffTy);
+      }
+    }
     return cir::GetElementOp::create(*this, arrayLocEnd, eltPtrTy, arrayPtr,
                                      idx);
   }
@@ -53,7 +64,15 @@ mlir::Value CIRGenBuilderTy::getArrayElement(mlir::Location arrayLocBegin,
   if (shouldDecay)
     basePtr = maybeBuildArrayDecay(arrayLocBegin, arrayPtr, eltTy);
   const mlir::Type flatPtrTy = basePtr.getType();
-  return cir::PtrStrideOp::create(*this, arrayLocEnd, flatPtrTy, basePtr, idx);
+  // PtrStrideOp also requires a fundamental integer index.
+  if (auto intTy = mlir::dyn_cast<cir::IntType>(idx.getType())) {
+    if (!intTy.isFundamental()) {
+      auto ptrDiffTy = cir::IntType::get(getContext(), 64, /*isSigned=*/true);
+      idx = createIntCast(idx, ptrDiffTy);
+    }
+  }
+  return cir::PtrStrideOp::create(*this, arrayLocEnd, flatPtrTy, basePtr, idx,
+                                  flags);
 }
 
 cir::ConstantOp CIRGenBuilderTy::getConstInt(mlir::Location loc,
@@ -61,8 +80,8 @@ cir::ConstantOp CIRGenBuilderTy::getConstInt(mlir::Location loc,
   bool isSigned = intVal.isSigned();
   unsigned width = intVal.getBitWidth();
   cir::IntType t = isSigned ? getSIntNTy(width) : getUIntNTy(width);
-  return getConstInt(loc, t,
-                     isSigned ? intVal.getSExtValue() : intVal.getZExtValue());
+  return cir::ConstantOp::create(
+      *this, loc, cir::IntAttr::get(t, intVal));
 }
 
 cir::ConstantOp CIRGenBuilderTy::getConstInt(mlir::Location loc,
@@ -84,21 +103,25 @@ clang::CIRGen::CIRGenBuilderTy::getConstFP(mlir::Location loc, mlir::Type t,
   return cir::ConstantOp::create(*this, loc, cir::FPAttr::get(t, fpVal));
 }
 
-void CIRGenBuilderTy::computeGlobalViewIndicesFromFlatOffset(
+bool CIRGenBuilderTy::computeGlobalViewIndicesFromFlatOffset(
     int64_t offset, mlir::Type ty, cir::CIRDataLayout layout,
     llvm::SmallVectorImpl<int64_t> &indices) {
   if (!offset)
-    return;
+    return true;
 
   auto getIndexAndNewOffset =
       [](int64_t offset, int64_t eltSize) -> std::pair<int64_t, int64_t> {
     int64_t divRet = offset / eltSize;
-    if (divRet < 0)
-      divRet -= 1; // make sure offset is positive
-    int64_t modRet = offset - (divRet * eltSize);
+    int64_t modRet = offset % eltSize;
+    // Floor-divide: ensure the remainder is non-negative.
+    if (modRet < 0) {
+      divRet -= 1;
+      modRet += eltSize;
+    }
     return {divRet, modRet};
   };
 
+  bool found = false;
   mlir::Type subType =
       llvm::TypeSwitch<mlir::Type, mlir::Type>(ty)
           .Case<cir::ArrayType>([&](auto arrayTy) {
@@ -107,12 +130,22 @@ void CIRGenBuilderTy::computeGlobalViewIndicesFromFlatOffset(
                 getIndexAndNewOffset(offset, eltSize);
             indices.push_back(index);
             offset = newOffset;
+            found = true;
             return arrayTy.getElementType();
           })
           .Case<cir::RecordType>([&](auto recordTy) {
             ArrayRef<mlir::Type> elts = recordTy.getMembers();
             int64_t pos = 0;
             for (size_t i = 0; i < elts.size(); ++i) {
+              // An unsized member (e.g. the `!cir.vptr` of a polymorphic class)
+              // has no queryable alloc size, so member indices cannot be walked
+              // past it. Signal failure and let the caller fall back to a raw
+              // byte offset (matching classic CodeGen, which emits a byte-offset
+              // GEP into such records).
+              if (!cir::isSized(elts[i])) {
+                found = false;
+                return mlir::Type();
+              }
               int64_t eltSize =
                   (int64_t)layout.getTypeAllocSize(elts[i]).getFixedValue();
               unsigned alignMask = layout.getABITypeAlign(elts[i]).value() - 1;
@@ -124,27 +157,70 @@ void CIRGenBuilderTy::computeGlobalViewIndicesFromFlatOffset(
               // check below
               if (!recordTy.isUnion())
                 pos = (pos + alignMask) & ~alignMask;
-              assert(offset >= 0);
-              if (offset < pos + eltSize) {
+              // A negative flat offset points before this record (e.g. a global
+              // pointer constant such as `(char *)&record_global - K`). Unlike
+              // arrays, which can use a negative element index, a record offset
+              // cannot be expressed as member indices, so signal failure and let
+              // the caller fall back to a raw byte offset (matching classic
+              // CodeGen, which emits a byte-offset GEP for such pointers).
+              if (offset < 0) {
+                found = false;
+                return mlir::Type();
+              }
+              // For zero-sized elements (e.g. char data[0]), eltSize is 0 so
+              // the range [pos, pos+eltSize) is empty. Match when offset == pos
+              // to handle pointers to zero-length trailing arrays.
+              if (offset < pos + eltSize ||
+                  (eltSize == 0 && offset == pos)) {
                 indices.push_back(i);
                 offset -= pos;
+                found = true;
                 return elts[i];
               }
               // No need to update pos here, see the comment above.
               if (!recordTy.isUnion())
                 pos += eltSize;
             }
-            llvm_unreachable("offset was not found within the record");
+            // Offset was not found within the record (e.g. tail padding,
+            // virtual bases, bitfields, or alignment mismatches).
+            found = false;
+            return mlir::Type();
           })
-          .Default([](mlir::Type otherTy) {
-            llvm_unreachable("unexpected type");
-            return otherTy; // Even though this is unreachable, we need to
-                            // return a type to satisfy the return type of the
-                            // lambda.
+          .Default([&](mlir::Type otherTy) {
+            // Unexpected type — can't decompose further.
+            found = false;
+            return mlir::Type();
           });
 
+  if (!found) {
+    indices.clear();
+    return false;
+  }
+
   assert(subType);
-  computeGlobalViewIndicesFromFlatOffset(offset, subType, layout, indices);
+  return computeGlobalViewIndicesFromFlatOffset(offset, subType, layout,
+                                                indices);
+}
+
+uint64_t CIRGenBuilderTy::computeOffsetFromGlobalViewIndices(
+    const cir::CIRDataLayout &layout, mlir::Type ty,
+    llvm::ArrayRef<int64_t> indices) {
+
+  int64_t offset = 0;
+  for (int64_t idx : indices) {
+    if (auto recordTy = mlir::dyn_cast<cir::RecordType>(ty)) {
+      offset += recordTy.getElementOffset(layout.layout, idx);
+      assert(idx < (int64_t)recordTy.getMembers().size());
+      ty = recordTy.getMembers()[idx];
+    } else if (auto arrayTy = mlir::dyn_cast<cir::ArrayType>(ty)) {
+      ty = arrayTy.getElementType();
+      offset += layout.getTypeAllocSize(ty) * idx;
+    } else {
+      llvm_unreachable("unexpected type in computeOffsetFromGlobalViewIndices");
+    }
+  }
+
+  return offset;
 }
 
 cir::RecordType clang::CIRGen::CIRGenBuilderTy::getCompleteRecordType(
@@ -184,10 +260,9 @@ mlir::Attribute clang::CIRGen::CIRGenBuilderTy::getConstRecordOrZeroAttr(
 // CIRGenBuilder.h
 Address Address::withElementType(CIRGenBuilderTy &builder,
                                  mlir::Type elemTy) const {
-  assert(!cir::MissingFeatures::addressOffset());
-  assert(!cir::MissingFeatures::addressIsKnownNonNull());
-  assert(!cir::MissingFeatures::addressPointerAuthInfo());
+  // OGCG preserves Offset field when changing element type. CIR's Address
+  // doesn't track byte offsets (uses GEP-based addressing instead).
 
   return Address(builder.createPtrBitcast(getBasePointer(), elemTy), elemTy,
-                 getAlignment());
+                 getAlignment(), isKnownNonNull());
 }

@@ -1,0 +1,41 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!rec_Foo = !cir.record<struct "Foo" {!s32i}>
+
+module {
+  cir.func no_inline dso_local @_Z7to_boolM3Fooi(%arg0: !cir.data_member<!s32i in !rec_Foo>) -> !s32i {
+    // expected-error@+1 {{requires !cir.bool type for result}}
+    %0 = cir.cast member_ptr_to_bool %arg0 : !cir.data_member<!s32i in !rec_Foo> -> !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!rec_Foo = !cir.record<struct "Foo" {!s32i}>
+
+module {
+  cir.func no_inline dso_local @_Z7to_boolM3Fooi(%arg0: !s32i) -> !cir.bool {
+    // expected-error@+1 {{requires !cir.data_member or !cir.method type for source}}
+    %0 = cir.cast member_ptr_to_bool %arg0 : !s32i -> !cir.bool
+    cir.return %0 : !cir.bool
+  }
+}
+
+// -----
+
+// Verify int_complex_to_bool error message says "integer" not "floating point"
+!s32i = !cir.int<s, 32>
+!cir_complex_f32 = !cir.complex<!cir.float>
+
+module {
+  cir.func @test_int_complex_to_bool_wrong_type(%arg0: !cir_complex_f32) -> !cir.bool {
+    // expected-error@+1 {{requires integer !cir.complex type for source}}
+    %0 = cir.cast int_complex_to_bool %arg0 : !cir_complex_f32 -> !cir.bool
+    cir.return %0 : !cir.bool
+  }
+}

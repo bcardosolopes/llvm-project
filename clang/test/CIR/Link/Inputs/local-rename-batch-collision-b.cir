@@ -1,0 +1,19 @@
+!s32i = !cir.int<s, 32>
+
+module {
+  // Collides with the first input's `helper`, so it must be renamed -- and the
+  // first name it would try is already taken by its own neighbour below.
+  cir.func internal private @helper() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Collides with nothing, so it keeps its name. It is only here to occupy the
+  // name the rename above wants.
+  cir.func internal private @helper.cirlink.1() -> !s32i {
+    %0 = cir.const #cir.int<3> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.global "private" internal @data = #cir.int<2> : !s32i
+}

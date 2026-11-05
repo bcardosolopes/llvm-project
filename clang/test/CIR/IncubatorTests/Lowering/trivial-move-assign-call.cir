@@ -1,0 +1,54 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s -check-prefix=MLIR
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s -check-prefix=LLVM
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!rec_Foo = !cir.record<struct "Foo" {!s32i}>
+// Empty C++ classes are represented as 1-byte objects.
+!rec_Empty = !cir.record<struct "Empty" {!u8i}>
+
+module {
+  cir.func @Foo_move_assign(
+      %this: !cir.ptr<!rec_Foo>,
+      %other: !cir.ptr<!rec_Foo>) -> !cir.ptr<!rec_Foo>
+      special_member<#cir.cxx_assign<!rec_Foo, move, trivial true>> {
+    cir.return %this : !cir.ptr<!rec_Foo>
+  }
+
+  cir.func @caller() {
+    %dst = cir.alloca !rec_Foo, !cir.ptr<!rec_Foo>, ["dst"] {alignment = 4 : i64}
+    %src = cir.alloca !rec_Foo, !cir.ptr<!rec_Foo>, ["src"] {alignment = 4 : i64}
+    %ret = cir.call @Foo_move_assign(%dst, %src)
+        : (!cir.ptr<!rec_Foo>, !cir.ptr<!rec_Foo>) -> !cir.ptr<!rec_Foo>
+    cir.return
+  }
+
+  cir.func @Empty_move_assign(
+      %this: !cir.ptr<!rec_Empty>,
+      %other: !cir.ptr<!rec_Empty>) -> !cir.ptr<!rec_Empty>
+      special_member<#cir.cxx_assign<!rec_Empty, move, trivial true>> {
+    cir.return %this : !cir.ptr<!rec_Empty>
+  }
+
+  cir.func @caller_size1() {
+    %dst = cir.alloca !rec_Empty, !cir.ptr<!rec_Empty>, ["dst"] {alignment = 1 : i64}
+    %src = cir.alloca !rec_Empty, !cir.ptr<!rec_Empty>, ["src"] {alignment = 1 : i64}
+    %ret = cir.call @Empty_move_assign(%dst, %src)
+        : (!cir.ptr<!rec_Empty>, !cir.ptr<!rec_Empty>) -> !cir.ptr<!rec_Empty>
+    cir.return
+  }
+
+  // MLIR-LABEL: llvm.func @caller()
+  // MLIR: llvm.intr.memcpy
+  // MLIR-NOT: llvm.call @Foo_move_assign
+  // MLIR-LABEL: llvm.func @caller_size1()
+  // MLIR: llvm.call @Empty_move_assign
+  // MLIR-NOT: llvm.intr.memcpy
+
+  // LLVM-LABEL: define void @caller()
+  // LLVM: call void @llvm.memcpy
+  // LLVM-NOT: call ptr @Foo_move_assign
+  // LLVM-LABEL: define void @caller_size1()
+  // LLVM: call ptr @Empty_move_assign
+  // LLVM-NOT: call void @llvm.memcpy
+}

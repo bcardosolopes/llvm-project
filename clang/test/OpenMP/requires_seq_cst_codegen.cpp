@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -verify -fopenmp %s -triple x86_64-apple-darwin10 -x c++ -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -verify -fopenmp -fclangir %s -triple x86_64-apple-darwin10 -x c++ -emit-llvm -o - | FileCheck %s %}
 // RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -emit-pch -o %t %s -triple x86_64-apple-darwin10
 // RUN: %clang_cc1 -fopenmp -std=c++11 -include-pch %t -verify %s -triple x86_64-apple-darwin10 -x c++ -emit-llvm -o -| FileCheck %s
 

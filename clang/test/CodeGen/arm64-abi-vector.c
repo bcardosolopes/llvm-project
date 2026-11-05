@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios7 -target-abi darwinpcs -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple aarch64-linux-android -emit-llvm -o - %s | FileCheck -check-prefix=ANDROID %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-android -emit-llvm -fclangir -o - %s | FileCheck -check-prefix=ANDROID-CIR %s %}
 
 #include <stdarg.h>
 
@@ -20,6 +21,12 @@ double varargs_vec_2c(int fixed, ...) {
 // ANDROID: varargs_vec_2c
 // ANDROID: [[VAR:%.*]] = alloca <2 x i8>, align 2
 // ANDROID: [[AP_NEXT:%.*]] = getelementptr inbounds i8, ptr [[AP_CUR:%.*]], i64 8
+// ANDROID-CIR-LABEL: define dso_local double @varargs_vec_2c(
+// ANDROID-CIR: [[GR_OFFS_P:%.*]] = getelementptr inbounds nuw %struct.__va_list, ptr %{{.*}}, i32 0, i32 3
+// ANDROID-CIR-NOT: getelementptr inbounds nuw %struct.__va_list, ptr %{{.*}}, i32 0, i32 4
+// ANDROID-CIR: [[STACK_P:%.*]] = getelementptr inbounds nuw %struct.__va_list, ptr %{{.*}}, i32 0, i32 0
+// ANDROID-CIR: [[AP_CUR:%.*]] = load ptr, ptr [[STACK_P]], align 8
+// ANDROID-CIR: [[AP_NEXT:%.*]] = getelementptr inbounds i8, ptr [[AP_CUR]], i64 8
   va_list ap;
   double sum = fixed;
   va_start(ap, fixed);
@@ -30,7 +37,9 @@ double varargs_vec_2c(int fixed, ...) {
 }
 
 double test_2c(__char2 *in) {
+// ANDROID-CIR-LABEL: define dso_local double @test_2c(
 // ANDROID: call double (i32, ...) @varargs_vec_2c(i32 noundef 3, i16 noundef {{%.*}})
+// ANDROID-CIR: call double (i32, ...) @varargs_vec_2c(i32 noundef 3, i16 noundef {{%.*}})
   return varargs_vec_2c(3, *in);
 }
 
@@ -38,6 +47,12 @@ double varargs_vec_3c(int fixed, ...) {
 // CHECK: varargs_vec_3c
 // CHECK: alloca <3 x i8>, align 4
 // CHECK: [[AP_NEXT:%.*]] = getelementptr inbounds i8, ptr [[AP_CUR:%.*]], i64 8
+// ANDROID-CIR-LABEL: define dso_local double @varargs_vec_3c(
+// ANDROID-CIR: [[GR_OFFS_P:%.*]] = getelementptr inbounds nuw %struct.__va_list, ptr %{{.*}}, i32 0, i32 3
+// ANDROID-CIR-NOT: getelementptr inbounds nuw %struct.__va_list, ptr %{{.*}}, i32 0, i32 4
+// ANDROID-CIR: [[STACK_P:%.*]] = getelementptr inbounds nuw %struct.__va_list, ptr %{{.*}}, i32 0, i32 0
+// ANDROID-CIR: [[AP_CUR:%.*]] = load ptr, ptr [[STACK_P]], align 8
+// ANDROID-CIR: [[AP_NEXT:%.*]] = getelementptr inbounds i8, ptr [[AP_CUR]], i64 8
   va_list ap;
   double sum = fixed;
   va_start(ap, fixed);

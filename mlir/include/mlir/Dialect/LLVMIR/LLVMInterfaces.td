@@ -169,6 +169,47 @@ def NonNegFlagInterface : OpInterface<"NonNegFlagInterface"> {
   ];
 }
 
+def AnnotationOpInterface : OpInterface<"AnnotationOpInterface"> {
+  let description = [{
+    An interface for operations that can carry `!annotation` metadata, which
+    LLVM permits on any instruction. clang emits it for
+    `-ftrivial-auto-var-init` on both stores and the memset calls that
+    initialise, so the carriers are the memory operations and the memory
+    intrinsics rather than any single op.
+
+    The default implementations expect the operation to have an ArrayAttr named
+    `annotations`, whose elements are string attributes or arrays of them --
+    LLVM allows a tuple entry as well as a bare string.
+  }];
+
+  let cppNamespace = "::mlir::LLVM";
+
+  let methods = [
+    InterfaceMethod<
+      /*desc=*/        "Returns the annotations attribute or nullptr",
+      /*returnType=*/  "::mlir::ArrayAttr",
+      /*methodName=*/  "getAnnotationsOrNull",
+      /*args=*/        (ins),
+      /*methodBody=*/  [{}],
+      /*defaultImpl=*/ [{
+        auto op = cast<ConcreteOp>(this->getOperation());
+        return op.getAnnotationsAttr();
+      }]
+      >,
+    InterfaceMethod<
+      /*desc=*/        "Sets the annotations attribute",
+      /*returnType=*/  "void",
+      /*methodName=*/  "setAnnotations",
+      /*args=*/        (ins "const ::mlir::ArrayAttr":$attr),
+      /*methodBody=*/  [{}],
+      /*defaultImpl=*/ [{
+        auto op = cast<ConcreteOp>(this->getOperation());
+        op.setAnnotationsAttr(attr);
+      }]
+      >
+  ];
+}
+
 def AccessGroupOpInterface : OpInterface<"AccessGroupOpInterface"> {
   let description = [{
     An interface for memory operations that can carry access groups metadata.

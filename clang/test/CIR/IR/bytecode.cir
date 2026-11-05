@@ -1,0 +1,76 @@
+// RUN: cir-opt -emit-bytecode %s | cir-opt | FileCheck %s
+
+// Round-trip the CIR attributes that CIRDialectBytecode.td encodes natively.
+//
+// Without a BytecodeDialectInterface, MLIR falls back to embedding an
+// attribute's printed assembly inside the bytecode. That fallback is correct,
+// so a naive test would pass either way -- what this pins is that the *native*
+// encoding round-trips faithfully, i.e. that each entry's parameter order and
+// reader/writer pairing in CIRDialectBytecode.td actually match the attribute's
+// get(). The values below are deliberately asymmetric (size != offset, a
+// negative offset, is_signed = true) because a transposed pair of same-typed
+// parameters is exactly the bug that a symmetric test cannot see.
+
+!u8i = !cir.int<u, 8>
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+
+module attributes {
+  cir.type_size_info = #cir.type_size_info<char = 8, int = 32, size_t = 64>,
+  cir.opt_info = #cir.opt_info<level = 2, size = 1>,
+  test.bitfield = #cir.bitfield_info<name = "f", storage_type = !u8i, size = 3,
+                                     offset = 5, is_signed = true>,
+  test.blockaddr = #cir.block_addr_info<@some_func, "some_label">,
+  test.structor = #cir.structor_dedup<@base_structor>,
+  test.addrpoint = #cir.address_point<index = 1, offset = -2>,
+  test.dontcall = #cir.dontcall<"do not call me", true>,
+  test.oclversion = #cir.cl.version<3, 0>,
+
+  // Constants. These are the entries that pay for themselves: the width of an
+  // IntAttr/FPAttr payload is not stored, it is recovered from the type, so a
+  // reader that recovers the wrong width silently produces a wrong constant
+  // rather than failing. The values below are chosen so a wrong width shows:
+  // 0x7f fits in i8 but not as a *signed* i8, and the i64 value needs more
+  // than 32 bits.
+  test.i8 = #cir.int<127> : !u8i,
+  test.s32 = #cir.int<-559038737> : !s32i,
+  test.u64 = #cir.int<1099511627776> : !u64i,
+  test.f32 = #cir.fp<1.500000e+00> : !cir.float,
+  test.f64 = #cir.fp<3.141592653589793e+00> : !cir.double,
+  test.true = #cir.bool<true> : !cir.bool,
+  test.false = #cir.bool<false> : !cir.bool,
+
+  // Parameterless markers.
+  test.nothrow = #cir.nothrow,
+  test.noreturn = #cir.noreturn,
+  test.convergent = #cir.convergent,
+  test.hot = #cir.hot
+} {
+}
+
+// The bitfield attribute prints through an alias, so match its definition and
+// its use separately; CHECK-DAG because the alias block precedes the module.
+//
+// CHECK-DAG: #bfi_f = #cir.bitfield_info<name = "f", storage_type = !u8i, size = 3, offset = 5, is_signed = true>
+// CHECK-DAG: test.bitfield = #bfi_f
+// CHECK-DAG: cir.opt_info = #cir.opt_info<level = 2, size = 1>
+// CHECK-DAG: cir.type_size_info = #cir.type_size_info<char = 8, int = 32, size_t = 64>
+// CHECK-DAG: test.addrpoint = #cir.address_point<index = 1, offset = -2>
+// CHECK-DAG: test.blockaddr = #cir.block_addr_info<@some_func, "some_label">
+// CHECK-DAG: test.dontcall = #cir.dontcall<"do not call me", true>
+// CHECK-DAG: test.oclversion = #cir.cl.version<3, 0>
+// CHECK-DAG: test.structor = #cir.structor_dedup<@base_structor>
+// CHECK-DAG: test.i8 = #cir.int<127> : !u8i
+// CHECK-DAG: test.s32 = #cir.int<-559038737> : !s32i
+// CHECK-DAG: test.u64 = #cir.int<1099511627776> : !u64i
+// CHECK-DAG: test.f32 = #cir.fp<1.500000e+00> : !cir.float
+// CHECK-DAG: test.f64 = #cir.fp<3.1415926535897931> : !cir.double
+// Booleans print through aliases, so match the alias definitions too.
+// CHECK-DAG: #true = #cir.bool<true> : !cir.bool
+// CHECK-DAG: #false = #cir.bool<false> : !cir.bool
+// CHECK-DAG: test.true = #true
+// CHECK-DAG: test.false = #false
+// CHECK-DAG: test.nothrow = #cir.nothrow
+// CHECK-DAG: test.noreturn = #cir.noreturn
+// CHECK-DAG: test.convergent = #cir.convergent
+// CHECK-DAG: test.hot = #cir.hot

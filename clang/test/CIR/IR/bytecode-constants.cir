@@ -1,0 +1,46 @@
+// RUN: cir-opt -emit-bytecode %s | cir-opt | FileCheck %s
+
+// Round-trip the constant-initializer attributes.
+//
+// These all carry a self type, and under the fallback each *occurrence*
+// embeds that type's whole printed form -- so a zero-initialized record cost
+// the full record text at every use. Encoding them natively writes a reference
+// into the bytecode type table instead, which is one copy even while
+// cir.record itself is still on the fallback (MLIR refuses custom encodings
+// for mutable types; see bytecode-types.cir).
+
+!s32i = !cir.int<s, 32>
+!rec = !cir.record<struct "R" {!s32i, !s32i}>
+
+module {
+  cir.global external @z = #cir.zero : !cir.array<!s32i x 2>
+  cir.global external @u = #cir.undef : !s32i
+  cir.global external @p = #cir.poison : !s32i
+
+  // Distinct element values, so a reader that collapsed or reordered the list
+  // would not round-trip.
+  cir.global external @ca = #cir.const_array<[#cir.int<1> : !s32i,
+                                              #cir.int<2> : !s32i]> : !cir.array<!s32i x 2>
+
+  // trailing_zeros is a separate parameter from the element list: the array is
+  // 4 long but only one element is stored. A reader that dropped the count
+  // would produce a 1-element array.
+  cir.global external @caz = #cir.const_array<[#cir.int<7> : !s32i],
+                                              trailing_zeros> : !cir.array<!s32i x 4>
+
+  // A record initializer, so the self type is the mutable cir.record.
+  cir.global external @cr = #cir.const_record<{#cir.int<3> : !s32i,
+                                               #cir.int<4> : !s32i}> : !rec
+
+  // cir.func always carries #cir<extra({...})>, which is why that attribute is
+  // worth an entry even though the payload is usually empty.
+  cir.func private @f()
+}
+
+// CHECK-DAG: @z = #cir.zero : !cir.array<!s32i x 2>
+// CHECK-DAG: @u = #cir.undef : !s32i
+// CHECK-DAG: @p = #cir.poison : !s32i
+// CHECK-DAG: @ca = #cir.const_array<[#cir.int<1> : !s32i, #cir.int<2> : !s32i]> : !cir.array<!s32i x 2>
+// CHECK-DAG: @caz = #cir.const_array<[#cir.int<7> : !s32i], trailing_zeros> : !cir.array<!s32i x 4>
+// CHECK-DAG: @cr = #cir.const_record<{#cir.int<3> : !s32i, #cir.int<4> : !s32i}> : !rec_R
+// CHECK-DAG: cir.func private @f()

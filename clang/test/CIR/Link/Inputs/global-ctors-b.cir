@@ -1,0 +1,18 @@
+// Second input for ../global-ctors.cir. Not a test on its own.
+//
+// Registers its own static initializer. Both TUs' entries must survive the
+// merge; keeping only the first input's list is what silently dropped this
+// one.
+
+!s32i = !cir.int<s, 32>
+
+module attributes {
+  cir.global_ctors = [#cir.global_ctor<"_GLOBAL__sub_I_b", 65535>]
+} {
+  cir.func internal private @_GLOBAL__sub_I_b() {
+    cir.return
+  }
+  cir.func internal private @_GLOBAL__sub_D_b() {
+    cir.return
+  }
+}

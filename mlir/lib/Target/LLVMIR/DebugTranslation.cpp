@@ -9,6 +9,7 @@
 #include "DebugTranslation.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/FileSystem.h"
@@ -17,6 +18,45 @@
 using namespace mlir;
 using namespace mlir::LLVM;
 using namespace mlir::LLVM::detail;
+
+namespace {
+constexpr StringLiteral kDILocationAtomGroupKey = "llvm.di_atom_group";
+constexpr StringLiteral kDILocationAtomRankKey = "llvm.di_atom_rank";
+
+static std::pair<uint64_t, uint8_t>
+extractSourceAtomMetadata(DictionaryAttr dict) {
+  uint64_t atomGroup = 0;
+  uint8_t atomRank = 0;
+
+  if (auto atomGroupAttr =
+          dict.getAs<IntegerAttr>(kDILocationAtomGroupKey)) {
+    APInt value = atomGroupAttr.getValue();
+    if (value.isNonNegative())
+      atomGroup = value.getZExtValue();
+  }
+
+  if (auto atomRankAttr =
+          dict.getAs<IntegerAttr>(kDILocationAtomRankKey)) {
+    APInt value = atomRankAttr.getValue();
+    if (value.isNonNegative() && value.ule(7))
+      atomRank = static_cast<uint8_t>(value.getZExtValue());
+  }
+
+  return {atomGroup, atomRank};
+}
+
+static llvm::DILocation *applySourceAtomMetadata(llvm::LLVMContext &llvmCtx,
+                                                 llvm::DILocation *loc,
+                                                 uint64_t atomGroup,
+                                                 uint8_t atomRank) {
+  if (!loc || (!atomGroup && !atomRank))
+    return loc;
+
+  return llvm::DILocation::get(
+      llvmCtx, loc->getLine(), loc->getColumn(), loc->getScope(),
+      loc->getInlinedAt(), loc->isImplicitCode(), atomGroup, atomRank);
+}
+} // namespace
 
 /// A utility walker that interrupts if the operation has valid debug
 /// information.
@@ -72,6 +112,19 @@ void DebugTranslation::translate(LLVMFuncOp func, llvm::Function &llvmFunc) {
 // Attributes
 //===----------------------------------------------------------------------===//
 
+llvm::DIAssignID *DebugTranslation::translate(DIAssignIDAttr attr) {
+  if (!attr)
+    return nullptr;
+  // Cached, and always distinct. The node has no content, so uniquing would
+  // collapse every assignment in the module onto one identity; and without the
+  // cache a store and its `#dbg_assign` would each get a fresh one, which is
+  // the same breakage from the other direction.
+  llvm::DIAssignID *&node = assignIDToNode[attr];
+  if (!node)
+    node = llvm::DIAssignID::getDistinct(llvmCtx);
+  return node;
+}
+
 llvm::DIType *DebugTranslation::translateImpl(DINullTypeAttr attr) {
   // A DINullTypeAttr at the beginning of the subroutine types list models
   // a void result type. If it is at the end, it models a variadic function.
@@ -101,9 +154,16 @@ DebugTranslation::getMDTupleOrNull(ArrayRef<DINodeAttr> elements) {
   SmallVector<llvm::Metadata *> llvmElements = llvm::to_vector(
       llvm::map_range(elements, [&](DINodeAttr attr) -> llvm::Metadata * {
         if (DIAnnotationAttr annAttr = dyn_cast<DIAnnotationAttr>(attr)) {
+          // DIAnnotationAttr::verify restricts the value to these two kinds,
+          // which are also the two DwarfUnit::addAnnotation can emit.
+          llvm::Metadata *value;
+          if (auto strAttr = dyn_cast<StringAttr>(annAttr.getValue()))
+            value = llvm::MDString::get(llvmCtx, strAttr.getValue());
+          else
+            value = llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+                llvmCtx, cast<IntegerAttr>(annAttr.getValue()).getValue()));
           llvm::Metadata *ops[2] = {
-              llvm::MDString::get(llvmCtx, annAttr.getName()),
-              llvm::MDString::get(llvmCtx, annAttr.getValue())};
+              llvm::MDString::get(llvmCtx, annAttr.getName()), value};
           return llvm::MDNode::get(llvmCtx, ops);
         }
         return translate(attr);
@@ -145,14 +205,21 @@ static DINodeT *getDistinctOrUnique(bool isDistinct, Ts &&...args) {
 
 llvm::TempDICompositeType
 DebugTranslation::translateTemporaryImpl(DICompositeTypeAttr attr) {
+  auto *sizeInBits = llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+      llvm::Type::getInt64Ty(llvmCtx), attr.getSizeInBits()));
+  auto *offsetInBits = llvm::ConstantAsMetadata::get(
+      llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvmCtx), 0));
   return llvm::DICompositeType::getTemporary(
       llvmCtx, attr.getTag(), getMDStringOrNull(attr.getName()), nullptr,
-      attr.getLine(), nullptr, nullptr, attr.getSizeInBits(),
-      attr.getAlignInBits(),
-      /*OffsetInBits=*/0,
+      attr.getLine(), nullptr, nullptr, sizeInBits, attr.getAlignInBits(),
+      offsetInBits,
       /*Flags=*/static_cast<llvm::DINode::DIFlags>(attr.getFlags()),
       /*Elements=*/nullptr, /*RuntimeLang=*/0, /*EnumKind=*/std::nullopt,
-      /*VTableHolder=*/nullptr);
+      /*VTableHolder=*/nullptr, /*TemplateParams=*/nullptr,
+      /*Identifier=*/nullptr, /*Discriminator=*/nullptr,
+      /*DataLocation=*/nullptr, /*Associated=*/nullptr, /*Allocated=*/nullptr,
+      /*Rank=*/nullptr, /*Annotations=*/nullptr, /*Specification=*/nullptr,
+      /*NumExtraInhabitants=*/0, /*BitStride=*/nullptr);
 }
 
 llvm::TempDISubprogram
@@ -161,9 +228,14 @@ DebugTranslation::translateTemporaryImpl(DISubprogramAttr attr) {
       llvmCtx, /*Scope=*/nullptr, /*Name=*/{}, /*LinkageName=*/{},
       /*File=*/nullptr, attr.getLine(), /*Type=*/nullptr,
       /*ScopeLine=*/0, /*ContainingType=*/nullptr, /*VirtualIndex=*/0,
-      /*ThisAdjustment=*/0, llvm::DINode::FlagZero,
+      /*ThisAdjustment=*/0,
+      static_cast<llvm::DINode::DIFlags>(attr.getFlags()),
       static_cast<llvm::DISubprogram::DISPFlags>(attr.getSubprogramFlags()),
-      /*Unit=*/nullptr);
+      /*Unit=*/nullptr,
+      /*TemplateParams=*/nullptr, /*Declaration=*/nullptr,
+      /*RetainedNodes=*/nullptr, /*ThrownTypes=*/nullptr,
+      /*Annotations=*/nullptr, /*TargetFuncName=*/"",
+      attr.getKeyInstructions());
 }
 
 llvm::DICompositeType *
@@ -179,12 +251,16 @@ DebugTranslation::translateImpl(DICompositeTypeAttr attr) {
     isDistinct = true;
   }
 
+  auto *sizeInBits = llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+      llvm::Type::getInt64Ty(llvmCtx), attr.getSizeInBits()));
+  auto *offsetInBits = llvm::ConstantAsMetadata::get(
+      llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvmCtx), 0));
+
   return getDistinctOrUnique<llvm::DICompositeType>(
       isDistinct, llvmCtx, attr.getTag(), getMDStringOrNull(attr.getName()),
       translate(attr.getFile()), attr.getLine(), translate(attr.getScope()),
-      translate(attr.getBaseType()), attr.getSizeInBits(),
-      attr.getAlignInBits(),
-      /*OffsetInBits=*/0,
+      translate(attr.getBaseType()), sizeInBits, attr.getAlignInBits(),
+      offsetInBits,
       /*Flags=*/static_cast<llvm::DINode::DIFlags>(attr.getFlags()),
       getMDTupleOrNull(attr.getElements()),
       /*RuntimeLang=*/0, /*EnumKind*/ std::nullopt, /*VTableHolder=*/nullptr,
@@ -193,7 +269,10 @@ DebugTranslation::translateImpl(DICompositeTypeAttr attr) {
       getExpressionAttrOrNull(attr.getDataLocation()),
       getExpressionAttrOrNull(attr.getAssociated()),
       getExpressionAttrOrNull(attr.getAllocated()),
-      getExpressionAttrOrNull(attr.getRank()));
+      getExpressionAttrOrNull(attr.getRank()),
+      /*Annotations=*/getMDTupleOrNull(attr.getAnnotations()),
+      /*Specification=*/nullptr,
+      /*NumExtraInhabitants=*/0, /*BitStride=*/nullptr);
 }
 
 llvm::DIDerivedType *DebugTranslation::translateImpl(DIDerivedTypeAttr attr) {
@@ -265,7 +344,8 @@ DebugTranslation::translateImpl(DIGlobalVariableAttr attr) {
       llvmCtx, translate(attr.getScope()), getMDStringOrNull(attr.getName()),
       getMDStringOrNull(attr.getLinkageName()), translate(attr.getFile()),
       attr.getLine(), translate(attr.getType()), attr.getIsLocalToUnit(),
-      attr.getIsDefined(), nullptr, nullptr, attr.getAlignInBits(), nullptr);
+      attr.getIsDefined(), nullptr, nullptr, attr.getAlignInBits(),
+      getMDTupleOrNull(attr.getAnnotations()));
 }
 
 llvm::DINode *
@@ -332,16 +412,29 @@ llvm::DISubprogram *DebugTranslation::translateImpl(DISubprogramAttr attr) {
   bool isDefinition = static_cast<bool>(attr.getSubprogramFlags() &
                                         LLVM::DISubprogramFlags::Definition);
 
+  // A definition has to be distinct -- LLVM rejects a function definition whose
+  // `!dbg` is a uniqued subprogram. But being a definition is not the only way
+  // to be distinct: LLVM allows `distinct !DISubprogram(isDefinition: false)`,
+  // and the importer records that in `id`. Deciding on the flag alone uniqued
+  // those back, which is both a lost property and, when such a node is the
+  // `!dbg` of a function, a module the verifier refuses:
+  //   function definition may only have a distinct !dbg attachment
+  // `id` is already what `distinctAttrToNode` is keyed on below, so the two
+  // uses of it now agree.
+  bool isDistinct = isDefinition || attr.getId();
+
   llvm::DISubprogram *node = getDistinctOrUnique<llvm::DISubprogram>(
-      isDefinition, llvmCtx, scope, getMDStringOrNull(attr.getName()),
+      isDistinct, llvmCtx, scope, getMDStringOrNull(attr.getName()),
       getMDStringOrNull(attr.getLinkageName()), file, attr.getLine(), type,
       attr.getScopeLine(),
       /*ContainingType=*/nullptr, /*VirtualIndex=*/0,
-      /*ThisAdjustment=*/0, llvm::DINode::FlagZero,
+      /*ThisAdjustment=*/0,
+      static_cast<llvm::DINode::DIFlags>(attr.getFlags()),
       static_cast<llvm::DISubprogram::DISPFlags>(attr.getSubprogramFlags()),
       compileUnit, /*TemplateParams=*/nullptr, /*Declaration=*/nullptr,
       getMDTupleOrNull(attr.getRetainedNodes()), nullptr,
-      getMDTupleOrNull(attr.getAnnotations()));
+      getMDTupleOrNull(attr.getAnnotations()), /*TargetFuncName=*/nullptr,
+      attr.getKeyInstructions());
   if (attr.getId())
     distinctAttrToNode.try_emplace(attr.getId(), node);
   return node;
@@ -551,11 +644,16 @@ llvm::DILocation *DebugTranslation::translateLoc(Location loc,
 
   } else if (auto fusedLoc = dyn_cast<FusedLoc>(loc)) {
     ArrayRef<Location> locations = fusedLoc.getLocations();
+    uint64_t atomGroup = 0;
+    uint8_t atomRank = 0;
 
     // Check for a scope encoded with the location.
     if (auto scopedAttr =
             dyn_cast_or_null<LLVM::DILocalScopeAttr>(fusedLoc.getMetadata()))
       scope = translate(scopedAttr);
+    else if (auto metadata =
+                 dyn_cast_or_null<DictionaryAttr>(fusedLoc.getMetadata()))
+      std::tie(atomGroup, atomRank) = extractSourceAtomMetadata(metadata);
 
     // For fused locations, merge each of the nodes.
     llvmLoc = translateLoc(locations.front(), scope, inlinedAt);
@@ -563,6 +661,8 @@ llvm::DILocation *DebugTranslation::translateLoc(Location loc,
       llvmLoc = llvm::DILocation::getMergedLocation(
           llvmLoc, translateLoc(locIt, scope, inlinedAt));
     }
+    llvmLoc =
+        applySourceAtomMetadata(llvmCtx, llvmLoc, atomGroup, atomRank);
 
   } else if (auto nameLoc = dyn_cast<NameLoc>(loc)) {
     llvmLoc = translateLoc(nameLoc.getChildLoc(), scope, inlinedAt);

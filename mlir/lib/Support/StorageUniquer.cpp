@@ -11,7 +11,11 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/ThreadLocalCache.h"
 #include "mlir/Support/TypeID.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/RWMutex.h"
+#include "llvm/Support/Threading.h"
+
+#include <climits>
 
 using namespace mlir;
 using namespace mlir::detail;
@@ -139,8 +143,13 @@ public:
     if (!threadingIsEnabled)
       return getOrCreateUnsafe(shard, lookupKey, ctorFn);
 
-    // Check for a instance of this object in the local cache.
-    auto localIt = localCache->insert_as({hashValue}, lookupKey);
+    // Check for a instance of this object in the local cache, which is
+    // emptied when full so that it holds the instances the thread looked up
+    // recently rather than all it ever looked up.
+    StorageTypeSet &cache = *localCache;
+    if (cache.size() >= kMaxCachedInstances)
+      cache.clear();
+    auto localIt = cache.insert_as({hashValue}, lookupKey);
     BaseStorage *&localInst = localIt.first->storage;
     if (localInst)
       return localInst;
@@ -158,6 +167,10 @@ public:
     llvm::sys::SmartScopedWriter<true> typeLock(shard.mutex);
     return localInst = getOrCreateUnsafe(shard, lookupKey, ctorFn);
   }
+
+  /// Free every thread's lookup cache. No other thread may use the uniquer
+  /// meanwhile.
+  void clearThreadLocalCaches() { localCache.clear(); }
 
   /// Run a mutation function on the provided storage object in a thread-safe
   /// way.
@@ -177,8 +190,15 @@ public:
 private:
   /// Return the shard used for the given hash value.
   Shard &getShard(unsigned hashValue) {
-    // Get a shard number from the provided hashvalue.
-    unsigned shardNum = hashValue & (numShards - 1);
+    // Fibonacci hashing: the high bits of the product depend on every bit of
+    // the hash, so hashes with constant high bits still spread over the
+    // shards, and the instances in one shard do not share the low bits their
+    // set finds buckets by.
+    unsigned mixed = hashValue * 0x9E3779B9u;
+    unsigned shardNum =
+        numShards == 1
+            ? 0
+            : mixed >> (sizeof(mixed) * CHAR_BIT - llvm::Log2_64(numShards));
 
     // Try to acquire an already initialized shard.
     Shard *shard = shards[shardNum].load(std::memory_order_acquire);
@@ -198,6 +218,10 @@ private:
   /// A thread local cache for storage objects. This helps to reduce the lock
   /// contention when an object already existing in the cache.
   ThreadLocalCache<StorageTypeSet> localCache;
+
+  /// The most instances a thread's cache holds, which bounds its table to
+  /// 8192 buckets.
+  static constexpr unsigned kMaxCachedInstances = 4096;
 
   /// A set of uniquer shards to allow for further bucketing accesses for
   /// instances of this storage type. Each shard is lazily initialized to reduce
@@ -227,6 +251,9 @@ private:
     ParametricStorageUniquer::LookupKey lookupKey{hashValue, isEqual};
     return getOrCreateUnsafe(shard, lookupKey, ctorFn);
   }
+  /// There are no thread-local caches without threads.
+  void clearThreadLocalCaches() {}
+
   /// Run a mutation function on the provided storage object in a thread-safe
   /// way.
   LogicalResult
@@ -366,6 +393,11 @@ void StorageUniquer::disableMultithreading(bool disable) {
   impl->threadingIsEnabled = !disable;
 }
 
+void StorageUniquer::clearThreadLocalCaches() {
+  for (auto &it : impl->parametricUniquers)
+    it.second->clearThreadLocalCaches();
+}
+
 /// Implementation for getting/creating an instance of a derived type with
 /// parametric storage.
 auto StorageUniquer::getParametricStorageTypeImpl(
@@ -379,8 +411,14 @@ auto StorageUniquer::getParametricStorageTypeImpl(
 /// parametric storage.
 void StorageUniquer::registerParametricStorageTypeImpl(
     TypeID id, function_ref<void(BaseStorage *)> destructorFn) {
+  // Every thread of a parallel parse looks up the same few storage types, and
+  // even uncontended readers of one lock move its cache line between cores,
+  // so a type has a shard per hardware thread.
+  static const size_t numShards = std::max<size_t>(
+      8,
+      llvm::PowerOf2Ceil(llvm::hardware_concurrency().compute_thread_count()));
   impl->parametricUniquers.try_emplace(
-      id, std::make_unique<ParametricStorageUniquer>(destructorFn));
+      id, std::make_unique<ParametricStorageUniquer>(destructorFn, numShards));
 }
 
 /// Implementation for getting an instance of a derived type with default

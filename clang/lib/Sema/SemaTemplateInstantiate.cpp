@@ -1528,6 +1528,9 @@ namespace {
     ExprResult TransformTemplateParmRefExpr(DeclRefExpr *E,
                                             NonTypeTemplateParmDecl *D);
 
+    ExprResult
+    TransformSubstNonTypeTemplateParmExpr(SubstNonTypeTemplateParmExpr *E);
+
     /// Rebuild a DeclRefExpr for a VarDecl reference.
     ExprResult RebuildVarDeclRefExpr(ValueDecl *PD, SourceLocation Loc);
 
@@ -2132,6 +2135,25 @@ TemplateInstantiator::TransformTemplateParmRefExpr(DeclRefExpr *E,
   }
   return SemaRef.BuildSubstNonTypeTemplateParmExpr(
       AssociatedDecl, NTTP, E->getLocation(), Arg, PackIndex, Final);
+}
+
+ExprResult TemplateInstantiator::TransformSubstNonTypeTemplateParmExpr(
+    SubstNonTypeTemplateParmExpr *E) {
+  // A SubstNonTypeTemplateParmExpr can substitute a parameter of an *enclosing*
+  // template -- e.g. a generic lambda whose call operator we are instantiating
+  // references a non-type template parameter of the surrounding function
+  // template. If this node is already fully resolved (non-dependent) and the
+  // parameter it substitutes is not part of the substitution we are currently
+  // performing, there is nothing to do: re-running the substitution would
+  // recompute the parameter's (still-dependent) type and regress the resolved
+  // replacement back into a dependent node, which later crashes CodeGen. Mirror
+  // the early-out in TransformTemplateParmRefExpr and keep the node as-is.
+  const NonTypeTemplateParmDecl *Param = E->getParameter();
+  if (!E->isInstantiationDependent() &&
+      !TemplateArgs.hasTemplateArgument(Param->getDepth(),
+                                        Param->getPosition()))
+    return E;
+  return inherited::TransformSubstNonTypeTemplateParmExpr(E);
 }
 
 const AnnotateAttr *

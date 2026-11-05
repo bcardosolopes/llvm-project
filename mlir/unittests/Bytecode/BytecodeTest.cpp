@@ -265,3 +265,43 @@ TEST(Bytecode, DeepCallSiteLoc) {
   // Verify the location matches.
   EXPECT_EQ(module.get()->getLoc(), roundTripped->getLoc());
 }
+
+TEST(Bytecode, LazyLocations) {
+  MLIRContext context;
+  ParserConfig config(&context);
+  OwningOpRef<Operation *> module = parseSourceString(R"(
+    module {
+      module @lazy {
+        module @leaf {}
+      } loc("lazy-op")
+    }
+  )",
+                                                      config);
+  ASSERT_TRUE(module);
+  std::string bytecode;
+  llvm::raw_string_ostream os(bytecode);
+  ASSERT_TRUE(succeeded(writeBytecodeToFile(module.get(), os)));
+
+  // A deferred op's region is empty until it is materialized.
+  ParserConfig lazyConfig(&context, /*verifyAfterParse=*/false);
+  for (bool lazyLocations : {false, true}) {
+    Block block;
+    BytecodeReader reader(llvm::MemoryBufferRef(bytecode, "string-buffer"),
+                          lazyConfig, /*lazyLoad=*/true);
+    reader.setLazyLocations(lazyLocations);
+    auto isLazy = [](Operation *op) {
+      auto name = op->getAttrOfType<StringAttr>("sym_name");
+      return name && name.getValue() == "lazy";
+    };
+    ASSERT_TRUE(succeeded(reader.readTopLevel(
+        &block, [&](Operation *op) { return !isLazy(op); })));
+    Operation *lazy = &block.front().getRegion(0).front().front();
+    ASSERT_TRUE(isLazy(lazy));
+    ASSERT_TRUE(reader.isMaterializable(lazy));
+    EXPECT_EQ(isa<UnknownLoc>(lazy->getLoc()), lazyLocations);
+    ASSERT_TRUE(succeeded(reader.materialize(lazy)));
+    EXPECT_EQ(lazy->getLoc(), Location(NameLoc::get(
+                                  StringAttr::get(&context, "lazy-op"))));
+    ASSERT_TRUE(succeeded(reader.finalize()));
+  }
+}

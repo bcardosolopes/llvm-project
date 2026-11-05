@@ -1,0 +1,53 @@
+// UNSUPPORTED: system-darwin
+// RUN: cir-opt %s -cir-flatten-cfg -o %t.flat.cir
+// RUN: cir-opt %t.flat.cir -cir-to-llvm -o %t.mlir
+// RUN: FileCheck --input-file=%t.flat.cir %s --check-prefix=FLAT
+// RUN: FileCheck --input-file=%t.mlir %s --check-prefix=MLIR
+// RUN: cir-translate %t.mlir -mlir-to-llvmir | FileCheck %s --check-prefix=LLVM
+
+!i1 = !cir.bool
+!s32i = !cir.int<s, 32>
+
+module {
+  // [branch] / [flatten] on if should survive flattening and lower to
+  // !hlsl.controlflow.hint on the LLVM conditional branch.
+  cir.func @if_branch_hint(%arg0: !i1) {
+    cir.if %arg0 {
+      cir.return
+    } else {
+      cir.return
+    } {cir.hlsl.controlflow.hint = 1 : i32}
+    cir.return
+  }
+
+  // [branch] / [flatten] on switch should survive flattening and lower to
+  // !hlsl.controlflow.hint on the LLVM switch instruction.
+  cir.func @switch_flatten_hint(%arg0: !s32i) {
+    cir.switch (%arg0 : !s32i) {
+    cir.case (equal, [#cir.int<1> : !s32i]) {
+      cir.break
+    }
+    cir.case (default, []) {
+      cir.break
+    }
+    cir.yield
+    } {cir.hlsl.controlflow.hint = 2 : i32}
+    cir.return
+  }
+}
+
+// FLAT: cir.brcond {{.*}} {cir.hlsl.controlflow.hint = 1 : i32}
+// FLAT: cir.switch.flat {{.*}}
+// FLAT: ] {cir.hlsl.controlflow.hint = 2 : i32}
+
+// MLIR: llvm.cond_br
+// MLIR-SAME: {cir.hlsl.controlflow.hint = 1 : i32}
+// MLIR: llvm.switch
+// MLIR: ] {cir.hlsl.controlflow.hint = 2 : i32}
+
+// LLVM: br i1
+// LLVM-SAME: !hlsl.controlflow.hint [[IF_HINT:![0-9]+]]
+// LLVM: switch i32
+// LLVM: ], !hlsl.controlflow.hint [[SWITCH_HINT:![0-9]+]]
+// LLVM: [[IF_HINT]] = !{!"hlsl.controlflow.hint", i32 1}
+// LLVM: [[SWITCH_HINT]] = !{!"hlsl.controlflow.hint", i32 2}

@@ -1,0 +1,20 @@
+// A local with lifetime markers is promoted, and its markers go with it.
+// CIRGen marks every local at -O1 and above, so without this nothing there is
+// promoted.
+//
+// RUN: cir-opt %s --mem2reg -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // CHECK-LABEL: cir.func @marked(%arg0: !s32i) -> !s32i
+  // CHECK-NEXT:    cir.return %arg0 : !s32i
+  cir.func @marked(%arg0: !s32i) -> !s32i {
+    %0 = cir.alloca !s32i, !cir.ptr<!s32i>, ["x", init] {alignment = 4 : i64}
+    cir.lifetime.start %0 : !cir.ptr<!s32i>
+    cir.store %arg0, %0 : !s32i, !cir.ptr<!s32i>
+    %1 = cir.load %0 : !cir.ptr<!s32i>, !s32i
+    cir.lifetime.end %0 : !cir.ptr<!s32i>
+    cir.return %1 : !s32i
+  }
+}

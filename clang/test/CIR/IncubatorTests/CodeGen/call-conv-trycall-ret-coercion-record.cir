@@ -1,0 +1,74 @@
+// RUN: cir-opt -cir-call-conv-lowering %s -o %t.cir
+// RUN: FileCheck --input-file=%t.cir %s
+
+// Regression test: TryCallOp returning a record type where CC lowering
+// coerces the return value. The coercion ops (alloca, store, cast, load)
+// must be placed in the normal dest block (^bb1), NOT after the TryCallOp
+// terminator in its own block (^bb0). Before the fix, three code paths
+// in the return value coercion lambda called setInsertionPointAfter(newOp)
+// which placed ops after the terminator for TryCallOp.
+
+!s32i = !cir.int<s, 32>
+!u64i = !cir.int<u, 64>
+!u8i = !cir.int<u, 8>
+!void = !cir.void
+!rec_Small = !cir.record<struct "Small" {!s32i, !s32i}>
+!rec_Guard = !cir.record<struct "Guard" padded {!u8i}>
+#fn_attr = #cir<extra({mustprogress, "no-trapping-math" = "true", "stack-protector-buffer-size" = "8"})>
+#fn_attr1 = #cir<extra({nothrow = #cir.nothrow})>
+
+module @test attributes {
+  cir.lang = #cir.lang<cxx>,
+  cir.triple = "aarch64-unknown-linux-gnu",
+  dlti.dl_spec = #dlti.dl_spec<
+    i8 = dense<[8, 32]> : vector<2xi64>,
+    i16 = dense<[16, 32]> : vector<2xi64>,
+    i32 = dense<32> : vector<2xi64>,
+    i64 = dense<64> : vector<2xi64>,
+    i128 = dense<128> : vector<2xi64>,
+    !llvm.ptr = dense<64> : vector<4xi64>,
+    i1 = dense<8> : vector<2xi64>,
+    f16 = dense<16> : vector<2xi64>,
+    f64 = dense<64> : vector<2xi64>,
+    f128 = dense<128> : vector<2xi64>,
+    "dlti.endianness" = "little",
+    "dlti.stack_alignment" = 128 : i64
+  >
+} {
+  cir.func private @__gxx_personality_v0(...) -> i32
+  cir.func private @_ZN5GuardD1Ev(!cir.ptr<!rec_Guard>) extra(#fn_attr1)
+  cir.func private @_Z10make_smallv() -> !rec_Small extra(#fn_attr)
+
+  // CHECK-LABEL: @_Z4testv
+  cir.func @_Z4testv() -> !s32i personality(@__gxx_personality_v0) extra(#fn_attr) {
+    %0 = cir.alloca !rec_Small, !cir.ptr<!rec_Small>, ["s", init] {alignment = 4 : i64}
+    %1 = cir.alloca !rec_Guard, !cir.ptr<!rec_Guard>, ["g"] {alignment = 1 : i64}
+
+    // The try_call returns !rec_Small. CC lowering coerces this to !u64i.
+    // Coercion ops must appear in ^bb1, not after the try_call terminator.
+    %2 = cir.try_call @_Z10make_smallv() ^bb1, ^bb2 : () -> !rec_Small
+
+  // CHECK: cir.try_call @_Z10make_smallv() ^bb1, ^bb2 : () -> !u64i
+  // The try_call must remain the LAST op in its block (it's a terminator).
+  // CHECK-NEXT: ^bb1:
+  // Coercion ops appear in the normal dest block. The lowering can see that
+  // the only user of the result is the store into "s", so it coerces straight
+  // into that slot instead of routing through a temporary.
+  // CHECK-NEXT: %[[DST:.*]] = cir.cast bitcast %0 : !cir.ptr<!rec_Small> -> !cir.ptr<!u64i>
+  // CHECK-NEXT: cir.store align(4) %2, %[[DST]] : !u64i, !cir.ptr<!u64i>
+  ^bb1:
+    cir.store align(4) %2, %0 : !rec_Small, !cir.ptr<!rec_Small>
+    %4 = cir.get_member %0[0] {name = "a"} : !cir.ptr<!rec_Small> -> !cir.ptr<!s32i>
+    %5 = cir.load align(4) %4 : !cir.ptr<!s32i>, !s32i
+    %6 = cir.get_member %0[1] {name = "b"} : !cir.ptr<!rec_Small> -> !cir.ptr<!s32i>
+    %7 = cir.load align(4) %6 : !cir.ptr<!s32i>, !s32i
+    %8 = cir.binop(add, %5, %7) nsw : !s32i
+    cir.call @_ZN5GuardD1Ev(%1) nothrow : (!cir.ptr<!rec_Guard>) -> ()
+    cir.return %8 : !s32i
+
+  ^bb2:
+    %ep, %tid = cir.eh.inflight_exception cleanup
+    cir.call @_ZN5GuardD1Ev(%1) nothrow : (!cir.ptr<!rec_Guard>) -> ()
+    cir.resume.flat %ep, %tid
+  }
+}

@@ -11,3 +11,16 @@ module {
   }
 }
 
+// -----
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.global "private" external @"ns::glob" : !s32i
+
+  cir.func @ok_scoped_get_global() {
+    // Keep this quoted `::` symbol path valid under verifier fast-path changes.
+    %0 = cir.get_global @"ns::glob" : !cir.ptr<!s32i>
+    cir.return
+  }
+}

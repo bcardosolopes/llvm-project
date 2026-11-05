@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -verify -Wno-vla -fopenmp -x c++ -triple x86_64-apple-darwin10 -emit-llvm %s -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -verify -Wno-vla -fopenmp -fclangir -x c++ -triple x86_64-apple-darwin10 -emit-llvm %s -o /dev/null %}
 // RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -triple x86_64-apple-darwin10 -emit-pch -o %t %s
 // RUN: %clang_cc1 -fopenmp -x c++ -triple x86_64-apple-darwin10 -std=c++11 -include-pch %t -verify -Wno-vla %s -emit-llvm -o - | FileCheck %s
 // RUN: %clang_cc1 -verify -Wno-vla -fopenmp -x c++ -std=c++11 -DLAMBDA -triple x86_64-apple-darwin10 -emit-llvm %s -o - | FileCheck -check-prefix=LAMBDA %s
@@ -528,4 +529,3 @@ void loop() {
     ;
 }
 #endif
-

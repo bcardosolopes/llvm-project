@@ -1,0 +1,74 @@
+// Lowering happens in cir-link, not in a second process reading its output
+// back. These check that the in-process path exists, that it agrees with the
+// old two-process one, and that the merged CIR is still obtainable.
+
+// The pipeline form: LLVM bitcode out.
+// RUN: cir-link %s %S/Inputs/emit-llvm-b.cir --emit-llvm --target=x86_64-unknown-linux-gnu -o %t.bc
+// RUN: llvm-dis %t.bc -o - | FileCheck %s
+
+// The readable form, for looking at.
+// RUN: cir-link %s %S/Inputs/emit-llvm-b.cir --emit-llvm --emit-llvm-text --target=x86_64-unknown-linux-gnu -o %t.ll
+// RUN: FileCheck --input-file=%t.ll %s
+
+// Both spellings satisfy the same checks above, which is as far as the
+// comparison can go: a bitcode round trip renames the module after the file it
+// was read from and canonicalises the data layout string, so the two are the
+// same module but not the same text.
+//
+// Bitcode is the default because the consumer here is a compiler, not a
+// person: on one real library the textual form was 548 MB against 125 MB, and
+// every byte of it was parsed straight back in.
+
+// The same result as merging and lowering separately, which is the property
+// that matters: cir-translate stays the inspectable form of this pipeline, so
+// it has to still be the same pipeline.
+//
+// The intermediate has to be bytecode for this comparison to be exact, and
+// that is the point rather than a workaround. Locations are carried through
+// bytecode unchanged; a textual intermediate is re-parsed from a different
+// path, so every location -- and every DIFile built from one -- names the
+// temporary file instead of the source. That is what the pipeline used to do
+// to the whole program.
+// RUN: cir-link %s %S/Inputs/emit-llvm-b.cir --emit-bytecode -o %t.merged.cir
+// RUN: cir-translate %t.merged.cir -cir-to-llvmir --target=x86_64-unknown-linux-gnu -o %t.separate.ll
+// RUN: diff %t.ll %t.separate.ll
+
+// Splitting the merge from the lowering is the same pipeline in two processes,
+// which is what --cir-split-lowering asks the wrapper for. It exists to trade
+// wall time for peak memory, so the one thing it must not do is change the
+// answer. cir-translate is the lowering half because it parses its input once,
+// where cir-link would put a single input through the merge architecture's
+// round trip for nothing.
+// RUN: cir-link %s %S/Inputs/emit-llvm-b.cir --emit-bytecode -o %t.stage1.cir
+// RUN: cir-translate %t.stage1.cir -cir-to-llvmir --emit-llvm-bitcode \
+// RUN:     --target=x86_64-unknown-linux-gnu -o %t.stage2.bc
+// RUN: llvm-dis %t.stage2.bc -o - | FileCheck %s
+
+// ...and bitcode is a choice the caller makes, not the default: every existing
+// use of this tool writes text and must keep doing so.
+// RUN: cir-translate %t.stage1.cir -cir-to-llvmir \
+// RUN:     --target=x86_64-unknown-linux-gnu -o %t.stage2.ll
+// RUN: FileCheck --input-file=%t.stage2.ll %s
+
+// -emit-cir is a side output, not a stage: the pipeline does not read it back.
+// RUN: cir-link %s %S/Inputs/emit-llvm-b.cir --emit-llvm --target=x86_64-unknown-linux-gnu \
+// RUN:     --emit-cir=%t.side.cir -o %t.side.bc
+// RUN: cir-opt %t.side.cir | FileCheck %s --check-prefix=CIR
+// RUN: llvm-dis %t.side.bc -o - | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @from_a() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Both inputs' functions are present and lowered.
+// CHECK-DAG: define {{.*}}@from_a()
+// CHECK-DAG: define {{.*}}@from_b()
+
+// The side output is CIR, still unlowered, and still holds both.
+// CIR-DAG: cir.func @from_a()
+// CIR-DAG: cir.func @from_b()

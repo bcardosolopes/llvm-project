@@ -37,9 +37,7 @@ unsigned long long test_ptr_diff(int *a, int* b) {
   // LLVM: %[[IB:.*]] = ptrtoint ptr %{{.*}} to i64
   // LLVM: %[[SUB:.*]] = sub i64 %[[IA]], %[[IB]]
   // LLVM: %[[Q:.*]] = sdiv exact i64 %[[SUB]], 4
-  // LLVM: store i64 %[[Q]], ptr %[[RETADDR:.*]], align
-  // LLVM: %[[RETLOAD:.*]] = load i64, ptr %[[RETADDR]], align
-  // LLVM: ret i64 %[[RETLOAD]]
+  // LLVM: ret i64 %[[Q]]
 
   // OGCG-LABEL: define dso_local i64 @test_ptr_diff(
   // OGCG: %[[IA:.*]] = ptrtoint ptr %{{.*}} to i64

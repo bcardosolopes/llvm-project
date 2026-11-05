@@ -5042,8 +5042,94 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
-  if (Args.hasArg(options::OPT_fclangir))
+  const bool ClangIREnabled =
+      Args.hasFlag(options::OPT_fclangir, options::OPT_fno_clangir, false);
+  const bool UsesClangIRPipeline =
+      ClangIREnabled || JA.getType() == types::TY_CIR;
+
+  if (ClangIREnabled)
     CmdArgs.push_back("-fclangir");
+
+  Args.addOptOutFlag(CmdArgs, options::OPT_fclangir_direct_lowering,
+                     options::OPT_fno_clangir_direct_lowering);
+
+  Args.addOptOutFlag(CmdArgs, options::OPT_fclangir_call_conv_lowering,
+                     options::OPT_fno_clangir_call_conv_lowering);
+  Args.addOptInFlag(CmdArgs, options::OPT_fclangir_call_conv_lowering,
+                    options::OPT_fno_clangir_call_conv_lowering);
+
+  if (Args.hasArg(options::OPT_clangir_disable_passes))
+    CmdArgs.push_back("-clangir-disable-passes");
+
+  Args.addOptInFlag(CmdArgs, options::OPT_fclangir_analysis_only,
+                    options::OPT_fno_clangir_analysis_only);
+
+  // Fat CIR objects carry the pre-lowering CIR alongside native code. Only
+  // meaningful when CIR is what produced that code in the first place.
+  if (Args.hasFlag(options::OPT_fclangir_fat_objects,
+                   options::OPT_fno_clangir_fat_objects, false)) {
+    if (!UsesClangIRPipeline)
+      D.Diag(diag::err_drv_argument_only_allowed_with)
+          << "-fclangir-fat-objects" << "-fclangir";
+    else
+      CmdArgs.push_back("-fclangir-fat-objects");
+  }
+
+  if (Args.hasArg(options::OPT_fclangir_idiom_recognizer))
+    CmdArgs.push_back("-fclangir-idiom-recognizer");
+  if (const Arg *A =
+          Args.getLastArg(options::OPT_fclangir_idiom_recognizer_EQ)) {
+    CmdArgs.push_back(Args.MakeArgString("-fclangir-idiom-recognizer=" +
+                                         StringRef(A->getValue())));
+  }
+
+  if (Args.hasArg(options::OPT_fclangir_lib_opt)) {
+    CmdArgs.push_back("-fclangir-lib-opt");
+    // lib-opt implies idiom-recognizer
+    if (!Args.hasArg(options::OPT_fclangir_idiom_recognizer))
+      CmdArgs.push_back("-fclangir-idiom-recognizer");
+  }
+
+  // Enable mem2reg by default for optimized jobs that will actually use the CIR
+  // pipeline. Keep forwarding an explicit user request even if the current job
+  // does not lower through CIR. At -O0 do not enable it by default: like classic
+  // CodeGen's lack of promotion at -O0, keeping the source allocas preserves a
+  // memory dbg_declare location for every local/parameter, including types the
+  // -O0 backend cannot express as dbg_value (x86 long double, __int128,
+  // _Complex), which would otherwise lose their debug location entirely.
+  if (const Arg *A = Args.getLastArg(options::OPT_fclangir_mem2reg,
+                                     options::OPT_fno_clangir_mem2reg)) {
+    if (A->getOption().matches(options::OPT_fclangir_mem2reg))
+      CmdArgs.push_back("-fclangir-mem2reg");
+  } else if (UsesClangIRPipeline) {
+    const Arg *OptLevel = Args.getLastArg(options::OPT_O_Group);
+    if (OptLevel && !OptLevel->getOption().matches(options::OPT_O0))
+      CmdArgs.push_back("-fclangir-mem2reg");
+  }
+
+  Args.addOptInFlag(CmdArgs, options::OPT_fclangir_inline,
+                    options::OPT_fno_clangir_inline);
+  Args.AddLastArg(CmdArgs, options::OPT_fclangir_inline_threshold_EQ);
+
+  if (Args.hasArg(options::OPT_fclangir_move_opt))
+    CmdArgs.push_back("-fclangir-move-opt");
+
+  if (Args.hasArg(options::OPT_fstd_lib_stats))
+    CmdArgs.push_back("-fstd-lib-stats");
+
+  Args.AddLastArg(CmdArgs, options::OPT_fstd_lib_stats_EQ);
+  Args.AddLastArg(CmdArgs, options::OPT_fstd_lib_stats_libs_EQ);
+
+  // Forward -fcir-output / -fcir-output=<file>
+  if (const Arg *A = Args.getLastArg(options::OPT_fcir_output_EQ)) {
+    CmdArgs.push_back(
+        Args.MakeArgString("-fcir-output=" + StringRef(A->getValue())));
+  } else if (Args.hasArg(options::OPT_fcir_output)) {
+    // Auto-compute CIR output path from the source file.
+    SmallString<128> CIROutputPath(Inputs[0].getBaseInput());
+    llvm::sys::path::replace_extension(CIROutputPath, "cir");
+    CmdArgs.push_back(Args.MakeArgString("-fcir-output=" + CIROutputPath));
+  }
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
@@ -5217,7 +5303,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-rewrite-objc");
       rewriteKind = RK_Fragile;
     } else if (JA.getType() == types::TY_CIR) {
-      CmdArgs.push_back("-emit-cir");
+      if (const Arg *A = Args.getLastArg(options::OPT_emit_mlir_EQ)) {
+        CmdArgs.push_back(
+            Args.MakeArgString(Twine("-emit-mlir=") + A->getValue()));
+      } else if (Args.hasArg(options::OPT_emit_mlir)) {
+        // -emit-mlir without = means emit MLIR LLVM dialect by default,
+        // or core if -fno-clangir-direct-lowering is set.
+        if (Args.hasArg(options::OPT_fno_clangir_direct_lowering))
+          CmdArgs.push_back("-emit-mlir=core");
+        else
+          CmdArgs.push_back("-emit-mlir=llvm");
+      } else {
+        CmdArgs.push_back("-emit-cir");
+      }
     } else if (JA.getType() == types::TY_Image && IsAMDSPIRVForHIPDevice) {
       CmdArgs.push_back("-emit-obj");
     } else {
@@ -8077,6 +8175,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // -fpch-preprocess is used with gcc to add a special marker in the output to
   // include the PCH file.
   Args.ClaimAllArgs(options::OPT_fpch_preprocess);
+
 
   // Claim some arguments which clang doesn't support, but we don't
   // care to warn the user about.

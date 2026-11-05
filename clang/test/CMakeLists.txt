@@ -110,6 +110,7 @@ list(APPEND CLANG_TEST_DEPS
 
 if(CLANG_ENABLE_CIR)
   list(APPEND CLANG_TEST_DEPS
+    cir-link
     cir-opt
     cir-translate
     mlir-translate
@@ -225,10 +226,71 @@ add_lit_testsuite(check-clang "Running the Clang regression tests"
   ARGS ${CLANG_TEST_EXTRA_ARGS}
   )
 
+set(CLANG_CIR_TEST_DEPS
+  FileCheck
+  count
+  not
+  clang
+  clang-resource-headers
+  clang-fuzzer-dictionary
+  clang-format
+  clang-tblgen
+  clang-offload-bundler
+  clang-import-test
+  clang-diff
+  clang-installapi
+  clang-scan-deps
+  clang-linker-wrapper
+  clang-nvlink-wrapper
+  clang-sycl-linker
+  diagtool
+  hmaptool
+  apinotes-test
+  c-index-test
+  cir-link
+  cir-opt
+  cir-translate
+  mlir-translate
+  llc
+  llvm-ar
+  llvm-as
+  llvm-config
+  llvm-dis
+  llvm-dwarfdump
+  llvm-ifs
+  llvm-link
+  llvm-lto
+  llvm-lto2
+  llvm-nm
+  llvm-objdump
+  llvm-offload-binary
+  llvm-profdata
+  llvm-readtapi
+  obj2yaml
+  opt
+  split-file
+  yaml2obj
+  )
+
 add_lit_testsuites(CLANG ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS ${CLANG_TEST_DEPS}
+  SKIP "^CIR$"
   FOLDER "Clang tests/Suites"
 )
+
+# check-clang already covers clang/test, including CIR, so keep this filtered
+# convenience target out of the umbrella check-all target.
+# The check-clang-cir convenience target depends on cir-opt/cir-translate, which
+# only exist when CLANG_ENABLE_CIR is enabled. Gate it so configuring a non-CIR
+# build does not fail on the missing CIR tool targets.
+if(CLANG_ENABLE_CIR)
+  add_lit_testsuite(check-clang-cir "Running the ClangIR regression tests"
+    ${CMAKE_CURRENT_BINARY_DIR}
+    EXCLUDE_FROM_CHECK_ALL
+    DEPENDS ${CLANG_CIR_TEST_DEPS}
+    ARGS ${CLANG_TEST_EXTRA_ARGS} --filter=CIR
+  )
+endif()
 
 # Add a legacy target spelling: clang-test
 add_custom_target(clang-test)

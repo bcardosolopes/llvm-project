@@ -23,12 +23,20 @@
 #include <memory>
 
 namespace clang {
+class BackendConsumer;
+class CoverageSourceInfo;
 class DeclGroupRef;
 class DiagnosticsEngine;
+class HeaderSearchOptions;
+class PreprocessorOptions;
 namespace CIRGen {
 class CIRGenModule;
 } // namespace CIRGen
 } // namespace clang
+
+namespace llvm {
+class Module;
+} // namespace llvm
 
 namespace mlir {
 class MLIRContext;
@@ -44,6 +52,13 @@ class CIRGenerator : public clang::ASTConsumer {
   const clang::CodeGenOptions &codeGenOpts;
 
   unsigned handlingTopLevelDecls;
+  bool lowersToLLVMIR;
+  clang::CoverageSourceInfo *coverageSourceInfo;
+
+  /// Set to true after HandleTranslationUnit to prevent late-arriving decls
+  /// (e.g. from PCH/module deserialization) from being processed after codegen
+  /// is finished. Matches OGCG's IRGenFinished flag.
+  bool irGenFinished = false;
 
   /// Use this when emitting decls to block re-entrant decl emission. It will
   /// emit all deferred decls on scope exit. Set EmitDeferred to false if decl
@@ -72,7 +87,8 @@ private:
 public:
   CIRGenerator(clang::DiagnosticsEngine &diags,
                llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
-               const clang::CodeGenOptions &cgo);
+               const clang::CodeGenOptions &cgo, bool lowersToLLVMIR,
+               clang::CoverageSourceInfo *coverageSourceInfo = nullptr);
   ~CIRGenerator() override;
   void Initialize(clang::ASTContext &astContext) override;
   bool HandleTopLevelDecl(clang::DeclGroupRef group) override;
@@ -87,11 +103,26 @@ public:
   void CompleteTentativeDefinition(clang::VarDecl *d) override;
   void HandleVTable(clang::CXXRecordDecl *rd) override;
 
+  /// Pass Sema to CIRGenModule for on-demand template instantiation.
+  void setSema(clang::Sema &s);
+
   mlir::ModuleOp getModule() const;
+  /// Erase the underlying CIR module to free memory after lowering to LLVM IR.
+  void releaseModule();
   mlir::MLIRContext &getMLIRContext() { return *mlirContext; };
   const mlir::MLIRContext &getMLIRContext() const { return *mlirContext; };
 
   bool verifyModule() const;
+
+  bool emitCoverageMapping(const clang::HeaderSearchOptions &headerSearchOpts,
+                           const clang::PreprocessorOptions &preprocessorOpts,
+                           llvm::Module &llvmModule);
+  void populateFunctionSourceLocations(clang::BackendConsumer &BC) const;
+
+  /// Record on `module` where each record it lays out is defined, and where
+  /// each of its members is (cir.record_locations). For a module serialized
+  /// without its AST, which is what a link sees.
+  void addRecordLocations(mlir::ModuleOp module) const;
 
   void emitDeferredDecls();
 };

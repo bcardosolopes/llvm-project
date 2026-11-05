@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 %s -triple arm64-apple-macosx    -fsized-deallocation    -faligned-allocation -emit-llvm -fcxx-exceptions -fexceptions -std=c++23 -o - -Wno-c++26-extensions | FileCheck --check-prefixes=CHECK,CHECK_SIZED_ALIGNED  %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple arm64-apple-macosx    -fsized-deallocation    -faligned-allocation -emit-llvm -fcxx-exceptions -fexceptions -std=c++23 -o - -Wno-c++26-extensions -fclangir | FileCheck --check-prefixes=CIR-CHECK %s %}
 // RUN: %clang_cc1 %s -triple arm64-apple-macosx -fno-sized-deallocation    -faligned-allocation -emit-llvm -fcxx-exceptions -fexceptions -std=c++23 -o - -Wno-c++26-extensions | FileCheck --check-prefixes=CHECK,CHECK_NO_SIZE_ALIGNED %s
 // RUN: %clang_cc1 %s -triple arm64-apple-macosx -fno-sized-deallocation -fno-aligned-allocation -emit-llvm -fcxx-exceptions -fexceptions -std=c++23 -o - -Wno-c++26-extensions | FileCheck --check-prefixes=CHECK,CHECK_NO_SIZE_NO_ALIGN %s
 // RUN: %clang_cc1 %s -triple arm64-apple-macosx    -fsized-deallocation -fno-aligned-allocation -emit-llvm -fcxx-exceptions -fexceptions -std=c++23 -o - -Wno-c++26-extensions | FileCheck --check-prefixes=CHECK,CHECK_SIZED_NO_ALIGN %s
@@ -87,6 +88,9 @@ extern "C" void test_free_type_aware_allocator() {
   S4 *s4 = new S4;
   delete s4;
 }
+// CIR-CHECK-LABEL: define{{.*}} @test_free_type_aware_allocator
+// CIR-CHECK: call void @_ZdlI2S3EvSt13type_identityIT_EPvmSt11align_val_t(ptr noundef {{.*}}, i64 noundef 1, i64 noundef 1)
+// CIR-CHECK: declare void @_ZdlI2S3EvSt13type_identityIT_EPvmSt11align_val_t(ptr noundef, i64 noundef, i64 noundef)
 // CHECK-LABEL: test_free_type_aware_allocator
 // CHECK: [[ALLOC_RESULT:%.*]] = call {{.*}} @_ZnwI2S3EPvSt13type_identityIT_EmSt11align_val_t(
 // CHECK: @_ZN2S3C1Ev({{.*}}[[ALLOC_RESULT]])
@@ -95,11 +99,11 @@ extern "C" void test_free_type_aware_allocator() {
 // CHECK: [[ALIGNED_ALLOC_RESULT:%.*]] = call {{.*}} @_ZnwI2S4EPvSt13type_identityIT_EmSt11align_val_t(
 // CHECK: @_ZN2S4C1Ev({{.*}}[[ALIGNED_ALLOC_RESULT]])
 // CHECK-NEXT: unwind label %[[S4LPAD:.*]]
-// CHECK: @_ZdlI2S4EvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}}, {{.*}} 256, {{.*}} 128)
+// CHECK: @_ZdlI2S4EvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}} 256, {{.*}} 128)
 // CHECK: [[S3LPAD]]:
-// CHECK: @_ZdlI2S3EvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}}[[ALLOC_RESULT]], {{.*}} 1, {{.*}} 1)
+// CHECK: @_ZdlI2S3EvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}} 1, {{.*}} 1)
 // CHECK: [[S4LPAD]]:
-// CHECK: @_ZdlI2S4EvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}}[[ALIGNED_ALLOC_RESULT]], {{.*}} 256, {{.*}} 128)
+// CHECK: @_ZdlI2S4EvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}} 256, {{.*}} 128)
 
 struct S5 {
   S5();
@@ -112,13 +116,16 @@ extern "C" void test_ensure_type_aware_cleanup() {
   S5 *s5 = new S5;
   delete s5;
 }
+// CIR-CHECK-LABEL: define{{.*}} @test_ensure_type_aware_cleanup
+// CIR-CHECK: call void @_ZN2S5dlEPS_St19destroying_delete_t(ptr noundef {{.*}})
+// CIR-CHECK: declare void @_ZN2S5dlEPS_St19destroying_delete_t(ptr noundef)
 // CHECK-LABEL: test_ensure_type_aware_cleanup
 // CHECK: [[ALLOC_RESULT:%.*]] = call {{.*}} @_ZN2S5nwIS_EEPvSt13type_identityIT_EmSt11align_val_t(
 // CHECK: @_ZN2S5C1Ev({{.*}}[[ALLOC_RESULT]])
 // CHECK-NEXT: unwind label %[[S5LPAD:.*]]
 // CHECK: @_ZN2S5dlEPS_St19destroying_delete_t(
 // CHECK: [[S5LPAD]]:
-// CHECK: @_ZN2S5dlIS_EEvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}} [[ALLOC_RESULT]]
+// CHECK: @_ZN2S5dlIS_EEvSt13type_identityIT_EPvmSt11align_val_t({{.*}} [[ALLOC_RESULT]], {{.*}} 1, {{.*}} 1)
 
 struct S6 {
   S6();
@@ -176,9 +183,9 @@ extern "C" void test_ensure_type_aware_overrides() {
 // CHECK: [[S8_DFN:%.*]] = load ptr, ptr [[S8_DFN_ADDR]]
 // CHECK: call void [[S8_DFN]](
 // CHECK: [[S6LPAD]]:
-// CHECK: @_ZN2S6dlIS_EEvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}} [[S6_ALLOC]], {{.*}}, {{.*}})
+// CHECK: @_ZN2S6dlIS_EEvSt13type_identityIT_EPvmSt11align_val_t({{.*}} [[S6_ALLOC]], {{.*}} 8, {{.*}} 8)
 // CHECK: [[S7LPAD]]:
-// CHECK: @_ZN2S6dlI2S7EEvSt13type_identityIT_EPvmSt11align_val_t({{.*}}, {{.*}} [[S7_ALLOC]], {{.*}}, {{.*}})
+// CHECK: @_ZN2S6dlI2S7EEvSt13type_identityIT_EPvmSt11align_val_t({{.*}} [[S7_ALLOC]], {{.*}} 128, {{.*}} 128)
 // CHECK: [[S8LPAD]]:
 // CHECK: @_ZN2S8dlEPv({{.*}} [[S8_ALLOC]])
 
@@ -201,9 +208,12 @@ extern "C" void test_ensure_type_aware_resolution_includes_location() {
   delete s12;
 }
 
+// CIR-CHECK-LABEL: define{{.*}} @test_ensure_type_aware_resolution_includes_location
+// CIR-CHECK: call noundef ptr @_ZN3S12nwIS_EEPvSt13type_identityIT_EmSt11align_val_tj(i64 noundef 1, i64 noundef 1, i32 noundef {{[0-9]+}})
+// CIR-CHECK: declare noundef ptr @_ZN3S12nwIS_EEPvSt13type_identityIT_EmSt11align_val_tj(i64 noundef, i64 noundef, i32 noundef)
 // CHECK-LABEL: test_ensure_type_aware_resolution_includes_location
 // `180` in the next line is the line number from the test line in above
-// CHECK: %call = call noundef ptr @_ZN3S12nwIS_EEPvSt13type_identityIT_EmSt11align_val_tj({{.*}}, {{.*}}, {{.*}}, {{.*}})
+// CHECK: %call = call noundef ptr @_ZN3S12nwIS_EEPvSt13type_identityIT_EmSt11align_val_tj({{.*}}, {{.*}}, {{.*}})
 
 // CHECK-LABEL: @_ZN2S8D0Ev
 // CHECK: @_ZN2S8dlEPv(

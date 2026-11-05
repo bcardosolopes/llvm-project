@@ -62,6 +62,25 @@ class EnumClassFlag<string flag, string getter> :
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
+// AliasScopeDomainAttr
+//===----------------------------------------------------------------------===//
+
+def AliasScopeDomainAttr : DialectAttribute<(attr
+  Attr<"Attribute">:$id,
+  OptionalAttribute<"StringAttr">:$description
+)>;
+
+//===----------------------------------------------------------------------===//
+// AliasScopeAttr
+//===----------------------------------------------------------------------===//
+
+def AliasScopeAttr : DialectAttribute<(attr
+  Attr<"Attribute">:$id,
+  Attr<"AliasScopeDomainAttr">:$domain,
+  OptionalAttribute<"StringAttr">:$description
+)>;
+
+//===----------------------------------------------------------------------===//
 // DIBasicTypeAttr
 //===----------------------------------------------------------------------===//
 
@@ -156,11 +175,14 @@ def DISubprogramAttr : DialectAttribute<(attr
   OptionalAttribute<"DIFileAttr">:$file,
   VarInt:$line,
   VarInt:$scopeLine,
+  EnumClassFlag<"DIFlags", "getFlags()">:$_rawDIFlags,
+  LocalVar<"DIFlags", "(DIFlags)_rawDIFlags">:$flags,
   EnumClassFlag<"DISubprogramFlags", "getSubprogramFlags()">:$_rawflags,
   LocalVar<"DISubprogramFlags", "(DISubprogramFlags)_rawflags">:$subprogramFlags,
   OptionalAttribute<"DISubroutineTypeAttr">:$type,
   OptionalArrayRef<"DINodeAttr">:$retainedNodes,
-  OptionalArrayRef<"DINodeAttr">:$annotations
+  OptionalArrayRef<"DINodeAttr">:$annotations,
+  Bool:$keyInstructions
 )>;
 
 //===----------------------------------------------------------------------===//
@@ -184,6 +206,7 @@ def DICompositeTypeAttr : DialectAttribute<(attr
   OptionalAttribute<"DIExpressionAttr">:$rank,
   OptionalAttribute<"DIExpressionAttr">:$allocated,
   OptionalAttribute<"DIExpressionAttr">:$associated,
+  OptionalArrayRef<"DINodeAttr">:$annotations,
   OptionalArrayRef<"DINodeAttr">:$elements
 )>;
 
@@ -229,7 +252,8 @@ def DIGlobalVariableAttr : DialectAttribute<(attr
   Attr<"DITypeAttr">:$type,
   Bool:$isLocalToUnit,
   Bool:$isDefined,
-  VarInt:$alignInBits
+  VarInt:$alignInBits,
+  OptionalArrayRef<"DINodeAttr">:$annotations
 )>;
 
 def DIGlobalVariableExpressionAttr : DialectAttribute<(attr
@@ -308,9 +332,13 @@ def LoopAnnotationAttr : DialectAttribute<(attr
   OptionalAttribute<"LoopUnswitchAttr">:$unswitch,
   OptionalAttribute<"BoolAttr">:$mustProgress,
   OptionalAttribute<"BoolAttr">:$isVectorized,
-  OptionalAttribute<"FusedLoc">:$startLoc,
-  OptionalAttribute<"FusedLoc">:$endLoc,
-  OptionalArrayRef<"AccessGroupAttr">:$parallelAccesses
+  OptionalAttribute<"IntegerAttr">:$codeAlign,
+  OptionalAttribute<"LocationAttr">:$startLoc,
+  OptionalAttribute<"LocationAttr">:$endLoc,
+  OptionalArrayRef<"AccessGroupAttr">:$parallelAccesses,
+  // Appended, not prepended: these are decoded positionally, so a new field in
+  // the middle would change how every later one reads.
+  OptionalAttribute<"DistinctAttr">:$id
 )>;
 
 //===----------------------------------------------------------------------===//
@@ -320,6 +348,8 @@ def LoopAnnotationAttr : DialectAttribute<(attr
 // All the attributes with custom bytecode handling.
 def LLVMDialectAttributes : DialectAttributes<"LLVM"> {
   let elems = [
+    AliasScopeDomainAttr,
+    AliasScopeAttr,
     DIBasicTypeAttr,
     DICompileUnitAttr,
     DICompositeTypeAttr,

@@ -82,9 +82,15 @@ AggregateArgsOpt("aggregate-extracted-args", cl::Hidden,
 /// Test whether a block is valid for extraction.
 static bool isBlockValidForExtraction(const BasicBlock &BB,
                                       const SetVector<BasicBlock *> &Result,
-                                      bool AllowVarArgs, bool AllowAlloca) {
-  // taking the address of a basic block moved to another function is illegal
-  if (BB.hasAddressTaken())
+                                      bool AllowVarArgs, bool AllowAlloca,
+                                      bool AllowSelfContainedBlockAddress) {
+  // Taking the address of a basic block moved to another function is normally
+  // illegal. With AllowSelfContainedBlockAddress it is allowed: the label's
+  // blockaddress is remapped to the outlined function after the move, and the
+  // caller guarantees the address never escapes the region (an OpenMP
+  // structured block cannot be branched into/out of, and the extraction-set
+  // builder already rejects any predecessor from outside the region).
+  if (BB.hasAddressTaken() && !AllowSelfContainedBlockAddress)
     return false;
 
   // don't hoist code that uses another basicblock address, as it's likely to
@@ -96,8 +102,15 @@ static bool isBlockValidForExtraction(const BasicBlock &BB,
     User const *Curr = ToVisit.pop_back_val();
     if (!Visited.insert(Curr).second)
       continue;
-    if (isa<BlockAddress const>(Curr))
-      return false; // even a reference to self is likely to be not compatible
+    if (auto const *BA = dyn_cast<BlockAddress const>(Curr)) {
+      // A blockaddress is acceptable when self-contained extraction is enabled
+      // and it targets a block inside the extraction set; it is then remapped
+      // to the outlined function. Otherwise even a reference to self is likely
+      // to be not compatible.
+      if (AllowSelfContainedBlockAddress && Result.count(BA->getBasicBlock()))
+        continue;
+      return false;
+    }
 
     if (isa<Instruction>(Curr) && cast<Instruction>(Curr)->getParent() != &BB)
       continue;
@@ -197,7 +210,8 @@ static bool isBlockValidForExtraction(const BasicBlock &BB,
 /// Build a set of blocks to extract if the input blocks are viable.
 static SetVector<BasicBlock *>
 buildExtractionBlockSet(ArrayRef<BasicBlock *> BBs, DominatorTree *DT,
-                        bool AllowVarArgs, bool AllowAlloca) {
+                        bool AllowVarArgs, bool AllowAlloca,
+                        bool AllowSelfContainedBlockAddress) {
   assert(!BBs.empty() && "The set of blocks to extract must be non-empty");
   SetVector<BasicBlock *> Result;
 
@@ -216,7 +230,8 @@ buildExtractionBlockSet(ArrayRef<BasicBlock *> BBs, DominatorTree *DT,
                     << '\n');
 
   for (auto *BB : Result) {
-    if (!isBlockValidForExtraction(*BB, Result, AllowVarArgs, AllowAlloca))
+    if (!isBlockValidForExtraction(*BB, Result, AllowVarArgs, AllowAlloca,
+                                   AllowSelfContainedBlockAddress))
       return {};
 
     // Make sure that the first block is not a landing pad.
@@ -264,11 +279,14 @@ CodeExtractor::CodeExtractor(ArrayRef<BasicBlock *> BBs, DominatorTree *DT,
                              BranchProbabilityInfo *BPI, AssumptionCache *AC,
                              bool AllowVarArgs, bool AllowAlloca,
                              BasicBlock *AllocationBlock, std::string Suffix,
-                             bool ArgsInZeroAddressSpace)
+                             bool ArgsInZeroAddressSpace,
+                             bool AllowSelfContainedBlockAddress)
     : DT(DT), AggregateArgs(AggregateArgs || AggregateArgsOpt), BFI(BFI),
       BPI(BPI), AC(AC), AllocationBlock(AllocationBlock),
       AllowVarArgs(AllowVarArgs),
-      Blocks(buildExtractionBlockSet(BBs, DT, AllowVarArgs, AllowAlloca)),
+      AllowSelfContainedBlockAddress(AllowSelfContainedBlockAddress),
+      Blocks(buildExtractionBlockSet(BBs, DT, AllowVarArgs, AllowAlloca,
+                                     AllowSelfContainedBlockAddress)),
       Suffix(Suffix), ArgsInZeroAddressSpace(ArgsInZeroAddressSpace) {}
 
 /// definedInRegion - Return true if the specified value is defined in the

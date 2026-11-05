@@ -27,7 +27,7 @@ define i64 @block_argument(i1 %arg1, i64 %arg2) {
 entry:
   ; CHECK: llvm.cond_br %[[ARG1]]
   ; CHECK-SAME: ^[[BB1:.+]](%[[ARG2]] : i64)
-  ; CHECK-SAME: ^[[BB2:.+]]
+  ; CHECK-SAME: ^[[BB2:bb[0-9]+]] {llvm.phi_positions = array<i32: 0, -1>}
   br i1 %arg1, label %bb1, label %bb2
 bb1:
   ; CHECK: ^[[BB1]](%[[BA1:.+]]: i64):
@@ -37,7 +37,7 @@ bb1:
 bb2:
   ; CHECK: ^[[BB2]]:
   ; CHECK: %[[VAL1:.+]] = llvm.add %[[ARG2]]
-  ; CHECK: llvm.br ^[[BB1]](%[[VAL1]]
+  ; CHECK: llvm.br ^[[BB1]](%[[VAL1]] : i64) {llvm.phi_positions = array<i32: 1>}
   %1 = add i64 %arg2, 3
   br label %bb1
 }

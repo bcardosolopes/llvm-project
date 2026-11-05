@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -emit-llvm -fobjc-exceptions -triple x86_64-unknown-linux -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -fobjc-exceptions -triple x86_64-unknown-linux -fclangir -o - %s | FileCheck %s %}
 
 // Test that the nomerge attribute is applied to function calls
 // in @try, @catch and @finally

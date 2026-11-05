@@ -1,0 +1,14 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: shift value type and result type must match, got value type '!cir.int<s, 32>' and result type '!cir.int<u, 32>'
+// CHECK-NOT: inconsistent operands' types NYI
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!u32i = !cir.int<u, 32>
+
+module {
+  cir.func @f(%a: !s32i, %b: !s32i) {
+    %0 = cir.shift(left, %a : !s32i, %b : !s32i) -> !u32i
+    cir.return
+  }
+}

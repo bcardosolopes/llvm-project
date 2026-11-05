@@ -1,11 +1,16 @@
 set(LLVM_LINK_COMPONENTS
   Core
+  ProfileData
   Support
   )
 
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
+get_property(translation_libs GLOBAL PROPERTY MLIR_TRANSLATION_LIBS)
 
 add_clang_library(clangCIRLoweringDirectToLLVM
+  CIROpenMPHelpers.cpp
+  CIRToLLVMIR.cpp
+  LowerTBAAToLLVM.cpp
   LowerToLLVM.cpp
   LowerToLLVMIR.cpp
 
@@ -19,8 +24,11 @@ add_clang_library(clangCIRLoweringDirectToLLVM
   ${dialect_libs}
   MLIRCIR
   MLIRCIRTargetLowering
-  MLIRBuiltinToLLVMIRTranslation
-  MLIRLLVMToLLVMIRTranslation
+  MLIRLLVMIRTransforms
+  ${translation_libs}
+  MLIROpenMPDialect
+  MLIROpenMPTransforms
+  MLIROpenMPToLLVM
   MLIRIR
   )
 

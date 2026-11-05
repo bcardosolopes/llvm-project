@@ -63,6 +63,59 @@ module {
   // CHECK-NEXT:   cir.return
   // CHECK-NEXT: }
 
+  cir.func @preserve_bool_to_int_from_cmp(%arg0: !cir.float, %arg1: !cir.float) {
+    %0 = cir.cmp(gt, %arg0, %arg1) : !cir.float, !cir.bool
+    %1 = cir.cast bool_to_int %0 : !cir.bool -> !s32i
+    cir.return
+  }
+  // CHECK-LABEL: cir.func @preserve_bool_to_int_from_cmp
+  // CHECK:         cir.cmp(gt, %arg0, %arg1) : !cir.float, !cir.bool
+  // CHECK-NEXT:    cir.cast bool_to_int
+  // CHECK-NEXT:    cir.return
+
+  cir.func @fold_used_bool_to_int_from_cmp(%arg0: !cir.float, %arg1: !cir.float) -> !cir.bool {
+    %0 = cir.cmp(gt, %arg0, %arg1) : !cir.float, !cir.bool
+    %1 = cir.cast bool_to_int %0 : !cir.bool -> !s32i
+    %2 = cir.cast int_to_bool %1 : !s32i -> !cir.bool
+    cir.return %2 : !cir.bool
+  }
+  // CHECK-LABEL: cir.func @fold_used_bool_to_int_from_cmp
+  // CHECK:         %[[CMP:.*]] = cir.cmp(gt, %arg0, %arg1) : !cir.float, !cir.bool
+  // CHECK-NOT:     cir.cast bool_to_int
+  // CHECK-NEXT:    cir.return %[[CMP]] : !cir.bool
+
+  cir.func @preserve_bool_to_int_from_is_fp_class(%arg0: !cir.float) {
+    %0 = cir.is_fp_class %arg0, 516 : (!cir.float) -> !cir.bool
+    %1 = cir.cast bool_to_int %0 : !cir.bool -> !s32i
+    cir.return
+  }
+  // CHECK-LABEL: cir.func @preserve_bool_to_int_from_is_fp_class
+  // CHECK:         cir.is_fp_class %arg0, 516 : (!cir.float) -> !cir.bool
+  // CHECK-NEXT:    cir.cast bool_to_int
+  // CHECK-NEXT:    cir.return
+
+  cir.func @preserve_bool_to_int_from_signbit(%arg0: !cir.float) {
+    %0 = cir.signbit %arg0 : !cir.float -> !cir.bool
+    %1 = cir.cast bool_to_int %0 : !cir.bool -> !s32i
+    cir.return
+  }
+  // CHECK-LABEL: cir.func @preserve_bool_to_int_from_signbit
+  // CHECK:         cir.signbit %arg0 : !cir.float -> !cir.bool
+  // CHECK-NEXT:    cir.cast bool_to_int
+  // CHECK-NEXT:    cir.return
+
+  cir.func @preserve_discarded_select_from_fp_predicates(%arg0: !cir.float) {
+    %0 = cir.signbit %arg0 : !cir.float -> !cir.bool
+    %1 = cir.const #cir.int<-1> : !s32i
+    %2 = cir.const #cir.int<1> : !s32i
+    %3 = cir.select if %0 then %1 else %2 : (!cir.bool, !s32i, !s32i) -> !s32i
+    cir.return
+  }
+  // CHECK-LABEL: cir.func @preserve_discarded_select_from_fp_predicates
+  // CHECK:         cir.signbit %arg0 : !cir.float -> !cir.bool
+  // CHECK:         cir.select if %{{.*}} then %{{.*}} else %{{.*}} : (!cir.bool, !s32i, !s32i) -> !s32i
+  // CHECK-NEXT:    cir.return
+
   cir.func @unary_not_not(%arg0: !cir.bool) -> !cir.bool {
     %0 = cir.unary(not, %arg0) : !cir.bool, !cir.bool
     %1 = cir.unary(not, %0) : !cir.bool, !cir.bool
@@ -291,6 +344,15 @@ module {
   // CHECK-NEXT:   %[[CAST2:.*]] = cir.cast bool_to_int %[[CAST]] : !cir.bool -> !s32i
   // CHECK-NEXT:   %[[CAST3:.*]] = cir.cast integral %[[CAST2]] : !s32i -> !s64i
   // CHECK-NEXT:   cir.return %[[CAST3]] : !s64i
+
+  // Ensure same-type integral cast of a block argument (no defining op) does
+  // not crash. The cast should remain since we can't fold through a block arg.
+  cir.func @cast_integral_block_arg(%arg0: !s32i) -> !s32i {
+    %0 = cir.cast integral %arg0 : !s32i -> !s32i
+    cir.return %0 : !s32i
+  }
+  // CHECK:      cir.func{{.*}} @cast_integral_block_arg(%[[ARG:.*]]: !s32i) -> !s32i
+  // CHECK-NEXT:   cir.return %[[ARG]] : !s32i
 
   cir.func @cast_poison() -> !s64i {
     %0 = cir.const #cir.poison : !s32i

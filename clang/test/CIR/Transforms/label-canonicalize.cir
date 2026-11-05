@@ -1,0 +1,33 @@
+// Regression test: cir.label must survive dead-code elimination during
+// canonicalization. LabelOp declares a memory-write effect so that
+// wouldOpBeTriviallyDead() returns false; otherwise generic --canonicalize
+// would erase the (result-less, non-terminator) label and orphan the paired
+// cir.goto, tripping cir.func's goto/label consistency verifier.
+
+// RUN: cir-opt %s --canonicalize -o - | FileCheck %s
+// RUN: cir-opt %s -cir-canonicalize -o - | FileCheck %s
+
+module {
+  // A label paired with a goto, all in reachable blocks, must be preserved.
+  cir.func @paired() {
+    cir.br ^bb1
+  ^bb1:  // pred: ^bb0
+    cir.label "target"
+    cir.br ^bb2
+  ^bb2:  // pred: ^bb1
+    cir.goto "target"
+  }
+
+  // A label in the entry block must be preserved even without a goto.
+  cir.func @lone() {
+    cir.label "only"
+    cir.return
+  }
+}
+
+// CHECK: cir.func @paired
+// CHECK:   cir.label "target"
+// CHECK:   cir.goto "target"
+
+// CHECK: cir.func @lone
+// CHECK:   cir.label "only"

@@ -33,7 +33,7 @@ Derived *ptr_cast(Base *b) {
 // CIR-AFTER-NEXT:     %[[BASE_RTTI:.*]] = cir.const #cir.global_view<@_ZTI4Base> : !cir.ptr<!u8i>
 // CIR-AFTER-NEXT:     %[[DERIVED_RTTI:.*]] = cir.const #cir.global_view<@_ZTI7Derived> : !cir.ptr<!u8i>
 // CIR-AFTER-NEXT:     %[[HINT:.*]] = cir.const #cir.int<0> : !s64i
-// CIR-AFTER-NEXT:     %[[RT_CALL_RET:.*]] = cir.call @__dynamic_cast(%[[SRC_VOID_PTR]], %[[BASE_RTTI]], %[[DERIVED_RTTI]], %[[HINT]]) : (!cir.ptr<!void>, !cir.ptr<!u8i>, !cir.ptr<!u8i>, !s64i) -> !cir.ptr<!void>
+// CIR-AFTER-NEXT:     %[[RT_CALL_RET:.*]] = cir.call @__dynamic_cast(%[[SRC_VOID_PTR]], %[[BASE_RTTI]], %[[DERIVED_RTTI]], %[[HINT]]) nothrow : (!cir.ptr<!void>, !cir.ptr<!u8i>, !cir.ptr<!u8i>, !s64i) -> !cir.ptr<!void>
 // CIR-AFTER-NEXT:     %[[CASTED:.*]] = cir.cast bitcast %[[RT_CALL_RET]] : !cir.ptr<!void> -> !cir.ptr<!rec_Derived>
 // CIR-AFTER-NEXT:     cir.yield %[[CASTED]] : !cir.ptr<!rec_Derived>
 // CIR-AFTER-NEXT:   }, false {
@@ -42,6 +42,7 @@ Derived *ptr_cast(Base *b) {
 // CIR-AFTER-NEXT:   }) : (!cir.bool) -> !cir.ptr<!rec_Derived>
 //      CIR-AFTER: }
 
+// LLVM: declare void @__cxa_bad_cast()
 // LLVM: define {{.*}} @_Z8ptr_castP4Base
 // LLVM:   %[[IS_NOT_NULL:.*]] = icmp ne ptr %[[PTR:.*]], null
 // LLVM:   br i1 %[[IS_NOT_NULL]], label %[[NOT_NULL:.*]], label %[[NULL:.*]]
@@ -78,11 +79,11 @@ Derived &ref_cast(Base &b) {
 // CIR-AFTER-NEXT:   %[[SRC_RTTI:.*]] = cir.const #cir.global_view<@_ZTI4Base> : !cir.ptr<!u8i>
 // CIR-AFTER-NEXT:   %[[DEST_RTTI:.*]] = cir.const #cir.global_view<@_ZTI7Derived> : !cir.ptr<!u8i>
 // CIR-AFTER-NEXT:   %[[OFFSET_HINT:.*]] = cir.const #cir.int<0> : !s64i
-// CIR-AFTER-NEXT:   %[[CASTED_PTR:.*]] = cir.call @__dynamic_cast(%[[SRC_VOID_PTR]], %[[SRC_RTTI]], %[[DEST_RTTI]], %[[OFFSET_HINT]]) : (!cir.ptr<!void>, !cir.ptr<!u8i>, !cir.ptr<!u8i>, !s64i) -> !cir.ptr<!void>
+// CIR-AFTER-NEXT:   %[[CASTED_PTR:.*]] = cir.call @__dynamic_cast(%[[SRC_VOID_PTR]], %[[SRC_RTTI]], %[[DEST_RTTI]], %[[OFFSET_HINT]]) nothrow : (!cir.ptr<!void>, !cir.ptr<!u8i>, !cir.ptr<!u8i>, !s64i) -> !cir.ptr<!void>
 // CIR-AFTER-NEXT:   %[[NULL_PTR:.*]] = cir.const #cir.ptr<null> : !cir.ptr<!void>
 // CIR-AFTER-NEXT:   %[[CASTED_PTR_IS_NULL:.*]] = cir.cmp(eq, %[[CASTED_PTR]], %[[NULL_PTR]]) : !cir.ptr<!void>, !cir.bool
 // CIR-AFTER-NEXT:   cir.if %[[CASTED_PTR_IS_NULL]] {
-// CIR-AFTER-NEXT:     cir.call @__cxa_bad_cast() : () -> ()
+// CIR-AFTER-NEXT:     cir.call @__cxa_bad_cast() : () -> () extra(#fn_attr{{.*}})
 // CIR-AFTER-NEXT:     cir.unreachable
 // CIR-AFTER-NEXT:   }
 // CIR-AFTER-NEXT:   %{{.+}} = cir.cast bitcast %[[CASTED_PTR]] : !cir.ptr<!void> -> !cir.ptr<!rec_Derived>
@@ -93,7 +94,7 @@ Derived &ref_cast(Base &b) {
 // LLVM:   %[[IS_NULL:.*]] = icmp eq ptr %[[RESULT]], null
 // LLVM:   br i1 %[[IS_NULL]], label %[[BAD_CAST:.*]], label %[[DONE:.*]]
 // LLVM: [[BAD_CAST]]:
-// LLVM:   call void @__cxa_bad_cast()
+// LLVM:   call void @__cxa_bad_cast() [[BAD_CAST_ATTR:#[0-9]+]]
 
 // OGCG: define {{.*}} ptr @_Z8ref_castR4Base
 // OGCG:   %[[RESULT:.*]] = call ptr @__dynamic_cast(ptr %0, ptr @_ZTI4Base, ptr @_ZTI7Derived, i64 0)
@@ -118,10 +119,10 @@ void *ptr_cast_to_complete(Base *ptr) {
 // CIR-AFTER-NEXT:     %[[VPTR:.*]] = cir.load %[[VPTR_PTR]] : !cir.ptr<!cir.vptr>, !cir.vptr
 // CIR-AFTER-NEXT:     %[[ELEM_PTR:.*]] = cir.cast bitcast %[[VPTR]] : !cir.vptr -> !cir.ptr<!s64i>
 // CIR-AFTER-NEXT:     %[[MINUS_TWO:.*]] = cir.const #cir.int<-2> : !s64i
-// CIR-AFTER-NEXT:     %[[BASE_OFFSET_PTR:.*]] = cir.ptr_stride %[[ELEM_PTR]], %[[MINUS_TWO]] : (!cir.ptr<!s64i>, !s64i) -> !cir.ptr<!s64i>
+// CIR-AFTER-NEXT:     %[[BASE_OFFSET_PTR:.*]] = cir.ptr_stride inbounds %[[ELEM_PTR]], %[[MINUS_TWO]] : (!cir.ptr<!s64i>, !s64i) -> !cir.ptr<!s64i>
 // CIR-AFTER-NEXT:     %[[BASE_OFFSET:.*]] = cir.load{{.*}} %[[BASE_OFFSET_PTR]] : !cir.ptr<!s64i>, !s64i
 // CIR-AFTER-NEXT:     %[[SRC_BYTES_PTR:.*]] = cir.cast bitcast %[[SRC]] : !cir.ptr<!rec_Base> -> !cir.ptr<!u8i>
-// CIR-AFTER-NEXT:     %[[DST_BYTES_PTR:.*]] = cir.ptr_stride %[[SRC_BYTES_PTR]], %[[BASE_OFFSET]] : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
+// CIR-AFTER-NEXT:     %[[DST_BYTES_PTR:.*]] = cir.ptr_stride inbounds %[[SRC_BYTES_PTR]], %[[BASE_OFFSET]] : (!cir.ptr<!u8i>, !s64i) -> !cir.ptr<!u8i>
 // CIR-AFTER-NEXT:     %[[CASTED_PTR:.*]] = cir.cast bitcast %[[DST_BYTES_PTR]] : !cir.ptr<!u8i> -> !cir.ptr<!void>
 // CIR-AFTER-NEXT:     cir.yield %[[CASTED_PTR]] : !cir.ptr<!void>
 // CIR-AFTER-NEXT:   }, false {
@@ -135,14 +136,15 @@ void *ptr_cast_to_complete(Base *ptr) {
 // LLVM:   br i1 %[[IS_NOT_NULL]], label %[[NOT_NULL:.*]], label %[[NULL:.*]]
 // LLVM: [[NOT_NULL]]:
 // LLVM:   %[[VPTR:.*]] = load ptr, ptr %[[PTR]]
-// LLVM:   %[[BASE_OFFSET_PTR:.*]] = getelementptr i64, ptr %7, i64 -2
+// LLVM:   %[[BASE_OFFSET_PTR:.*]] = getelementptr inbounds i64, ptr %[[VPTR]], i64 -2
 // LLVM:   %[[BASE_OFFSET:.*]] = load i64, ptr %[[BASE_OFFSET_PTR]]
-// LLVM:   %[[RESULT:.*]] = getelementptr i8, ptr %[[PTR]], i64 %[[BASE_OFFSET]]
+// LLVM:   %[[RESULT:.*]] = getelementptr inbounds i8, ptr %[[PTR]], i64 %[[BASE_OFFSET]]
 // LLVM:   br label %[[DONE:.*]]
 // LLVM: [[NULL]]:
 // LLVM:   br label %[[DONE]]
 // LLVM: [[DONE]]:
 // LLVM:   %[[RET:.*]] = phi ptr [ null, %[[NULL]] ], [ %[[RESULT]], %[[NOT_NULL]] ]
+// LLVM: attributes [[BAD_CAST_ATTR]] = { noreturn }
 
 // OGCG: define {{.*}} @_Z20ptr_cast_to_completeP4Base
 // OGCG:   %[[IS_NULL:.*]] = icmp eq ptr %[[PTR:.*]], null

@@ -1,0 +1,31 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify ReturnOp: return type mismatch
+!s32i = !cir.int<s, 32>
+
+cir.func @ret_type_mismatch() -> !s32i {
+  %0 = cir.const #cir.bool<true> : !cir.bool
+  // expected-error@+1 {{returns '!cir.bool' but enclosing function returns '!cir.int<s, 32>'}}
+  cir.return %0 : !cir.bool
+}
+
+// -----
+
+// Verify ReturnOp: returning value from void function
+!s32i = !cir.int<s, 32>
+
+cir.func @ret_val_from_void() {
+  %0 = cir.const #cir.int<0> : !s32i
+  // expected-error@+1 {{returns '!cir.int<s, 32>' but enclosing function returns '!cir.void'}}
+  cir.return %0 : !s32i
+}
+
+// -----
+
+// Verify ReturnOp: missing return value from non-void function
+!s32i = !cir.int<s, 32>
+
+cir.func @ret_missing_val() -> !s32i {
+  // expected-error@+1 {{returns '!cir.void' but enclosing function returns '!cir.int<s, 32>'}}
+  cir.return
+}

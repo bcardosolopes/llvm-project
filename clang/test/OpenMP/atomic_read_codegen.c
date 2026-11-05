@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -verify -triple x86_64-apple-darwin10 -target-cpu core2 -fopenmp -x c -emit-llvm %s -o - | FileCheck %s
 // RUN: %clang_cc1 -fopenmp -x c -triple x86_64-apple-darwin10 -target-cpu core2 -emit-pch -o %t %s
 // RUN: %clang_cc1 -fopenmp -x c -triple x86_64-apple-darwin10 -target-cpu core2 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -verify -triple x86_64-apple-darwin10 -target-cpu core2 -fopenmp -x c -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=CIR %}
 
 // RUN: %clang_cc1 -verify -triple x86_64-apple-darwin10 -target-cpu core2 -fopenmp-simd -x c -emit-llvm %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
 // RUN: %clang_cc1 -fopenmp-simd -x c -triple x86_64-apple-darwin10 -target-cpu core2 -emit-pch -o %t %s
@@ -236,6 +237,12 @@ int main(void) {
 // CHECK: [[LD:%.+]] = load <4 x i32>, ptr [[LDTEMP]]
 // CHECK: extractelement <4 x i32> [[LD]]
 // CHECK: store i8
+// CIR: [[VEC_RAW:%.+]] = load atomic i128, ptr @int4x monotonic, align 16
+// CIR: store i128 [[VEC_RAW]], ptr [[VEC_TMP:%.+]], align 16
+// CIR: [[VEC_VAL:%.+]] = load <4 x i32>, ptr [[VEC_TMP]], align 16
+// CIR: [[VEC_ELEM:%.+]] = extractelement <4 x i32> [[VEC_VAL]], i32 0
+// CIR: %{{.+}} = icmp ne i32 [[VEC_ELEM]], 0
+// CIR: store i8 %{{.+}}, ptr @bv, align 1
 #pragma omp atomic read
   bv = int4x[0];
 // CHECK: [[LD:%.+]] = load atomic i32, ptr getelementptr (i8, ptr @{{.+}}, i64 4) monotonic, align 4
@@ -323,6 +330,12 @@ int main(void) {
 // CHECK: [[LD:%.+]] = load <2 x float>, ptr [[LDTEMP]]
 // CHECK: extractelement <2 x float> [[LD]]
 // CHECK: store i64
+// CIR: [[EXT_RAW:%.+]] = load atomic i64, ptr @float2x monotonic, align 8
+// CIR: store i64 [[EXT_RAW]], ptr [[EXT_TMP:%.+]], align 8
+// CIR: [[EXT_VAL:%.+]] = load <2 x float>, ptr [[EXT_TMP]], align 8
+// CIR: [[EXT_ELEM:%.+]] = extractelement <2 x float> [[EXT_VAL]], i64 0
+// CIR: %{{.+}} = fptoui float [[EXT_ELEM]] to i64
+// CIR: store i64 %{{.+}}, ptr @ulv, align 8
 #pragma omp atomic read
   ulv = float2x.x;
 // CHECK: call{{.*}} i{{[0-9]+}} @llvm.read_register

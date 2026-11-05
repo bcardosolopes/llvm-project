@@ -2,6 +2,9 @@
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -target-feature +neon \
 // RUN: -disable-O0-optnone -emit-llvm -o - %s | opt -S -passes=mem2reg,sroa \
 // RUN:  | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-gnu -target-feature +neon \
+// RUN: -disable-O0-optnone -fclangir -emit-llvm -o - %s | opt -S -passes=mem2reg,sroa \
+// RUN:  | FileCheck %s --check-prefix=CIR-CHECK %}
 
 // REQUIRES: aarch64-registered-target
 
@@ -11,6 +14,9 @@
 // CHECK-NEXT:  entry:
 // CHECK-NEXT:    [[TMP0:%.*]] = xor <8 x i8> [[A:%.*]], [[B:%.*]]
 // CHECK-NEXT:    ret <8 x i8> [[TMP0]]
+// CIR-CHECK-LABEL: define dso_local <8 x i8> @test_vadd_p8(
+// CIR-CHECK: xor <8 x i8>
+// CIR-CHECK: ret <8 x i8>
 //
 poly8x8_t test_vadd_p8(poly8x8_t a, poly8x8_t b) {
   return vadd_p8 (a, b);
@@ -23,6 +29,9 @@ poly8x8_t test_vadd_p8(poly8x8_t a, poly8x8_t b) {
 // CHECK-NEXT:    [[TMP2:%.*]] = xor <8 x i8> [[TMP0]], [[TMP1]]
 // CHECK-NEXT:    [[TMP3:%.*]] = bitcast <8 x i8> [[TMP2]] to <4 x i16>
 // CHECK-NEXT:    ret <4 x i16> [[TMP3]]
+// CIR-CHECK-LABEL: define dso_local <4 x i16> @test_vadd_p16(
+// CIR-CHECK: xor <8 x i8>
+// CIR-CHECK: ret <4 x i16>
 //
 poly16x4_t test_vadd_p16(poly16x4_t a, poly16x4_t b) {
   return vadd_p16 (a, b);
@@ -35,6 +44,9 @@ poly16x4_t test_vadd_p16(poly16x4_t a, poly16x4_t b) {
 // CHECK-NEXT:    [[TMP2:%.*]] = xor <8 x i8> [[TMP0]], [[TMP1]]
 // CHECK-NEXT:    [[TMP3:%.*]] = bitcast <8 x i8> [[TMP2]] to <1 x i64>
 // CHECK-NEXT:    ret <1 x i64> [[TMP3]]
+// CIR-CHECK-LABEL: define dso_local <1 x i64> @test_vadd_p64(
+// CIR-CHECK: xor <8 x i8>
+// CIR-CHECK: ret <1 x i64>
 //
 poly64x1_t test_vadd_p64(poly64x1_t a, poly64x1_t b) {
   return vadd_p64(a, b);
@@ -44,6 +56,9 @@ poly64x1_t test_vadd_p64(poly64x1_t a, poly64x1_t b) {
 // CHECK-NEXT:  entry:
 // CHECK-NEXT:    [[TMP0:%.*]] = xor <16 x i8> [[A:%.*]], [[B:%.*]]
 // CHECK-NEXT:    ret <16 x i8> [[TMP0]]
+// CIR-CHECK-LABEL: define dso_local <16 x i8> @test_vaddq_p8(
+// CIR-CHECK: xor <16 x i8>
+// CIR-CHECK: ret <16 x i8>
 //
 poly8x16_t test_vaddq_p8(poly8x16_t a, poly8x16_t b){
   return vaddq_p8(a, b);
@@ -56,6 +71,9 @@ poly8x16_t test_vaddq_p8(poly8x16_t a, poly8x16_t b){
 // CHECK-NEXT:    [[TMP2:%.*]] = xor <16 x i8> [[TMP0]], [[TMP1]]
 // CHECK-NEXT:    [[TMP3:%.*]] = bitcast <16 x i8> [[TMP2]] to <8 x i16>
 // CHECK-NEXT:    ret <8 x i16> [[TMP3]]
+// CIR-CHECK-LABEL: define dso_local <8 x i16> @test_vaddq_p16(
+// CIR-CHECK: xor <16 x i8>
+// CIR-CHECK: ret <8 x i16>
 //
 poly16x8_t test_vaddq_p16(poly16x8_t a, poly16x8_t b){
   return vaddq_p16(a, b);
@@ -68,6 +86,9 @@ poly16x8_t test_vaddq_p16(poly16x8_t a, poly16x8_t b){
 // CHECK-NEXT:    [[TMP2:%.*]] = xor <16 x i8> [[TMP0]], [[TMP1]]
 // CHECK-NEXT:    [[TMP3:%.*]] = bitcast <16 x i8> [[TMP2]] to <2 x i64>
 // CHECK-NEXT:    ret <2 x i64> [[TMP3]]
+// CIR-CHECK-LABEL: define dso_local <2 x i64> @test_vaddq_p64(
+// CIR-CHECK: xor <16 x i8>
+// CIR-CHECK: ret <2 x i64>
 //
 poly64x2_t test_vaddq_p64(poly64x2_t a, poly64x2_t b){
   return vaddq_p64(a, b);
@@ -80,6 +101,9 @@ poly64x2_t test_vaddq_p64(poly64x2_t a, poly64x2_t b){
 // CHECK-NEXT:    [[TMP2:%.*]] = xor <16 x i8> [[TMP0]], [[TMP1]]
 // CHECK-NEXT:    [[TMP3:%.*]] = bitcast <16 x i8> [[TMP2]] to i128
 // CHECK-NEXT:    ret i128 [[TMP3]]
+// CIR-CHECK-LABEL: define dso_local i128 @test_vaddq_p128(
+// CIR-CHECK: xor
+// CIR-CHECK: ret i128
 //
 poly128_t test_vaddq_p128 (poly128_t a, poly128_t b){
   return vaddq_p128(a, b);

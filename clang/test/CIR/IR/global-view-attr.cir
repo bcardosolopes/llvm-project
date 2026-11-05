@@ -1,0 +1,50 @@
+// Roundtrip test for #cir.global_view. Its optional members (indices,
+// byte_offset, addr_adjustment, inrange, no_cfi, inbounds) must be
+// independently skippable: any present/absent subset must print and reparse.
+// A declarative comma-anchored optional-group format could not skip a middle
+// group, so forms that omit a middle member but emit a later one (e.g.
+// symbol + inbounds) failed to reparse. A custom parser/printer fixes this.
+
+// RUN: cir-opt %s --verify-roundtrip | FileCheck %s
+
+!u8i = !cir.int<u, 8>
+
+module {
+  cir.global external @g = #cir.int<0> : !u8i
+
+  // symbol only
+  cir.global constant external @a = #cir.global_view<@g> : !cir.ptr<!u8i>
+  // CHECK: @a = #cir.global_view<@g> : !cir.ptr<!u8i>
+
+  // indices only
+  cir.global constant external @b = #cir.global_view<@g, [2 : i32]> : !cir.ptr<!u8i>
+  // CHECK: @b = #cir.global_view<@g, [2 : i32]> : !cir.ptr<!u8i>
+
+  // symbol + inbounds (omits every middle member)
+  cir.global constant external @c = #cir.global_view<@g, inbounds = true> : !cir.ptr<!u8i>
+  // CHECK: @c = #cir.global_view<@g, inbounds = true> : !cir.ptr<!u8i>
+
+  // indices + inbounds (omits byte_offset / addr_adjustment / inrange / no_cfi)
+  cir.global constant external @d = #cir.global_view<@g, [2 : i32], inbounds = true> : !cir.ptr<!u8i>
+  // CHECK: @d = #cir.global_view<@g, [2 : i32], inbounds = true> : !cir.ptr<!u8i>
+
+  // byte_offset only
+  cir.global constant external @e = #cir.global_view<@g, byte_offset = 5 : i64> : !cir.ptr<!u8i>
+  // CHECK: @e = #cir.global_view<@g, byte_offset = 5 : i64> : !cir.ptr<!u8i>
+
+  // addr_adjustment only (omits indices and byte_offset)
+  cir.global constant external @f = #cir.global_view<@g, addr_adjustment = -9223372036854775808 : i64> : !cir.ptr<!u8i>
+  // CHECK: @f = #cir.global_view<@g, addr_adjustment = -9223372036854775808 : i64> : !cir.ptr<!u8i>
+
+  // inrange only
+  cir.global constant external @h = #cir.global_view<@g, inrange = array<i32: -24, 16>> : !cir.ptr<!u8i>
+  // CHECK: @h = #cir.global_view<@g, inrange = array<i32: -24, 16>> : !cir.ptr<!u8i>
+
+  // no_cfi only
+  cir.global constant external @i = #cir.global_view<@g, no_cfi = true> : !cir.ptr<!u8i>
+  // CHECK: @i = #cir.global_view<@g, no_cfi = true> : !cir.ptr<!u8i>
+
+  // all members present
+  cir.global constant external @j = #cir.global_view<@g, [0 : i32, 3 : i32], byte_offset = 5 : i64, addr_adjustment = 7 : i64, inrange = array<i32: -24, 8>, no_cfi = true, inbounds = true> : !cir.ptr<!u8i>
+  // CHECK: @j = #cir.global_view<@g, [0 : i32, 3 : i32], byte_offset = 5 : i64, addr_adjustment = 7 : i64, inrange = array<i32: -24, 8>, no_cfi = true, inbounds = true> : !cir.ptr<!u8i>
+}

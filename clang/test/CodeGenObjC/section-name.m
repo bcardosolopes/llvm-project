@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple thumbv7--windows-itanium -fdeclspec -fobjc-runtime=ios -emit-llvm -o - %s -Wno-objc-root-class | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple thumbv7--windows-itanium -fdeclspec -fobjc-runtime=ios -fclangir -emit-llvm -o - %s -Wno-objc-root-class | FileCheck %s %}
 
 @protocol Protocol
 - (void) protocol_method;
@@ -28,6 +29,8 @@ __declspec(dllexport)
 }
 @end
 
+// CHECK-DAG: @"OBJC_CLASS_$_Interface" = dso_local dllexport global
+// CHECK-DAG: @"OBJC_METACLASS_$_Interface" = dso_local dllexport global
 // CHECK-NOT: @"OBJC_IVAR_$_Interface._property" = {{.*}} section "__DATA, __objc_ivar"
 // CHECK-NOT: @"OBJC_CLASS_$_Interface" = {{.*}} section "__DATA, __objc_data"
 // CHECK-NOT: @"OBJC_METACLASS_$_Interface" = {{.*}} section "__DATA, __objc_data"
@@ -42,4 +45,3 @@ __declspec(dllexport)
 // CHECK-NOT: @"_OBJC_CLASS_RO_$_Interface" = {{.*}} section "__DATA, __objc_const"
 // CHECK-NOT: @"_OBJC_$_CATEGORY_INSTANCE_METHODS_Interface_$_Category" = {{.*}} section "__DATA, __objc_const"
 // CHECK-NOT: @"_OBJC_$_CATEGORY_Interface_$_Category" = {{.*}} section "__DATA, __objc_const"
-

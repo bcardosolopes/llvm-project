@@ -1,0 +1,46 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s -check-prefix=MLIR
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering  | FileCheck %s -check-prefix=LLVM
+
+!s256i = !cir.int<s, 256>
+!u129i = !cir.int<u, 129>
+
+module {
+  cir.func @test_large_signed(%arg0: !s256i) -> !s256i {
+    cir.return %arg0 : !s256i
+  }
+
+  cir.func @test_large_unsigned(%arg0: !u129i) -> !u129i {
+    cir.return %arg0 : !u129i
+  }
+
+  cir.func @test_large_arith(%arg0: !s256i, %arg1: !s256i) -> !s256i {
+    %0 = cir.binop(add, %arg0, %arg1) nsw : !s256i
+    cir.return %0 : !s256i
+  }
+}
+
+//      MLIR: llvm.func @test_large_signed(%arg0: i256) -> i256
+// MLIR-NEXT:   llvm.return %arg0 : i256
+// MLIR-NEXT: }
+
+//      MLIR: llvm.func @test_large_unsigned(%arg0: i129) -> i129
+// MLIR-NEXT:   llvm.return %arg0 : i129
+// MLIR-NEXT: }
+
+//      MLIR: llvm.func @test_large_arith(%arg0: i256, %arg1: i256) -> i256
+// MLIR-NEXT:   %0 = llvm.add %arg0, %arg1 overflow<nsw> : i256
+// MLIR-NEXT:   llvm.return %0 : i256
+// MLIR-NEXT: }
+
+//      LLVM: define i256 @test_large_signed(i256 %0)
+// LLVM-NEXT:   ret i256 %0
+// LLVM-NEXT: }
+
+//      LLVM: define i129 @test_large_unsigned(i129 %0)
+// LLVM-NEXT:   ret i129 %0
+// LLVM-NEXT: }
+
+//      LLVM: define i256 @test_large_arith(i256 %0, i256 %1)
+// LLVM-NEXT:   %3 = add nsw i256 %0, %1
+// LLVM-NEXT:   ret i256 %3
+// LLVM-NEXT: }

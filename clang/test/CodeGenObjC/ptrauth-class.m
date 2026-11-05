@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -Wno-everything -fblocks -fptrauth-intrinsics -triple arm64-apple-ios -fobjc-runtime=ios-12.2 -emit-llvm -no-enable-noundef-analysis -fobjc-arc -O2 -disable-llvm-passes -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -Wno-everything -fblocks -fptrauth-intrinsics -triple arm64-apple-ios -fobjc-runtime=ios-12.2 -emit-llvm -no-enable-noundef-analysis -fobjc-arc -O2 -disable-llvm-passes -fclangir -o - %s | FileCheck --check-prefix=CIR %s %}
 
 #if __has_feature(ptrauth_objc_signable_class)
 struct TestStruct {
@@ -52,6 +53,17 @@ void setTestClassIsa(TestClass *t, Class c) {
   // CHECK: [[BLENDED_VALUE:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CAST_ISA_SLOT]], i64 1234)
   // CHECK: [[CAST_C_VALUE:%.*]] = ptrtoint ptr [[C_VALUE]] to i64
   // CHECK: [[SIGNED:%.*]] = call i64 @llvm.ptrauth.sign(i64 [[CAST_C_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
+
+  // CIR-LABEL: define void @setTestClassIsa(ptr %{{.*}}, ptr %{{.*}}) #0 {
+  // CIR: [[T_RETAINED:%.*]] = call ptr @llvm.objc.retain(ptr %{{.*}})
+  // CIR: [[IVAR_OFFSET32:%.*]] = load i32, ptr @"OBJC_IVAR_$_TestClass.isa", align 8
+  // CIR: [[IVAR_OFFSET64:%.*]] = sext i32 [[IVAR_OFFSET32]] to i64
+  // CIR: [[ADDED_PTR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 [[IVAR_OFFSET64]]
+  // CIR: [[CAST_ISA_SLOT:%.*]] = ptrtoint ptr [[ADDED_PTR]] to i64
+  // CIR: [[BLENDED_VALUE:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CAST_ISA_SLOT]], i64 1234)
+  // CIR: [[CAST_C_VALUE:%.*]] = ptrtoint ptr %{{.*}} to i64
+  // CIR: [[SIGNED:%.*]] = call i64 @llvm.ptrauth.sign(i64 [[CAST_C_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
+  // CIR: call void @llvm.objc.release(ptr %{{.*}}), !clang.imprecise_release !{{.*}}
 }
 
 // CHECK-LABEL: define ptr @getTestStructIsa(ptr %t) #0 {
@@ -65,6 +77,14 @@ Class getTestStructIsa(struct TestStruct *t) {
   // CHECK: [[BLENDED_VALUE:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CAST_ISA_SLOT]], i64 1234)
   // CHECK: [[CAST_ISA_VALUE:%.*]] = ptrtoint ptr [[ISA_VALUE]] to i64
   // CHECK: [[SIGNED_VALUE:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[CAST_ISA_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
+  // CHECK: [[RETAINED:%.*]] = call ptr @llvm.objc.retain(ptr {{%.*}})
+  // CHECK: [[AUTORELEASED:%.*]] = tail call ptr @llvm.objc.autoreleaseReturnValue(ptr [[RETAINED]])
+
+  // CIR-LABEL: define ptr @getTestStructIsa(ptr %{{.*}}) #0 {
+  // CIR: [[BLENDED_VALUE:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[CAST_ISA_SLOT:%.*]], i64 1234)
+  // CIR: [[SIGNED_VALUE:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[CAST_ISA_VALUE:%.*]], i32 2, i64 [[BLENDED_VALUE]])
+  // CIR: call ptr @llvm.objc.retain(ptr {{%.*}})
+  // CIR: call ptr @llvm.objc.autoreleaseReturnValue(ptr {{%.*}})
 }
 
 // CHECK-LABEL: define ptr @getTestClassIsa(ptr %t) #0 {
@@ -81,6 +101,18 @@ Class getTestClassIsa(TestClass *t) {
   // CHECK: [[NULL_CHECK:%.*]] = icmp ne ptr [[LOADED_VALUE]], null
   // CHECK: [[CAST_VALUE:%.*]] = ptrtoint ptr [[LOADED_VALUE]] to i64
   // CHECK: [[AUTHED:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[CAST_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
+
+  // CIR-LABEL: define ptr @getTestClassIsa(ptr %{{.*}}) #0 {
+  // CIR: [[T_RETAINED:%.*]] = call ptr @llvm.objc.retain(ptr %{{.*}})
+  // CIR: [[IVAR_OFFSET32:%.*]] = load i32, ptr @"OBJC_IVAR_$_TestClass.isa", align 8
+  // CIR: [[IVAR_OFFSET64:%.*]] = sext i32 [[IVAR_OFFSET32]] to i64
+  // CIR: [[ADD_PTR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 [[IVAR_OFFSET64]]
+  // CIR: [[LOADED_VALUE:%.*]] = load ptr, ptr [[ADD_PTR]], align 8
+  // CIR: [[INT_VALUE:%.*]] = ptrtoint ptr [[ADD_PTR]] to i64
+  // CIR: [[BLENDED_VALUE:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[INT_VALUE]], i64 1234)
+  // CIR: [[CAST_VALUE:%.*]] = ptrtoint ptr [[LOADED_VALUE]] to i64
+  // CIR: [[AUTHED:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[CAST_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
+  // CIR: call void @llvm.objc.release(ptr %{{.*}}), !clang.imprecise_release !{{.*}}
 }
 
 // Just enough to verify we do actually authenticate qualified Class
@@ -98,6 +130,16 @@ Class getTestConstClassIsa(TestConstClass *t) {
   // CHECK: [[NULL_CHECK:%.*]] = icmp ne ptr [[LOADED_VALUE]], null
   // CHECK: [[CAST_VALUE:%.*]] = ptrtoint ptr [[LOADED_VALUE]] to i64
   // CHECK: [[AUTHED:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[CAST_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
+
+  // CIR-LABEL: define ptr @getTestConstClassIsa(ptr %{{.*}}) #0 {
+  // CIR: [[IVAR_OFFSET32:%.*]] = load i32, ptr @"OBJC_IVAR_$_TestConstClass.isa", align 8
+  // CIR: [[IVAR_OFFSET64:%.*]] = sext i32 [[IVAR_OFFSET32]] to i64
+  // CIR: [[ADD_PTR:%.*]] = getelementptr inbounds i8, ptr %{{.*}}, i64 [[IVAR_OFFSET64]]
+  // CIR: [[LOADED_VALUE:%.*]] = load ptr, ptr [[ADD_PTR]], align 8
+  // CIR: [[INT_VALUE:%.*]] = ptrtoint ptr [[ADD_PTR]] to i64
+  // CIR: [[BLENDED_VALUE:%.*]] = call i64 @llvm.ptrauth.blend(i64 [[INT_VALUE]], i64 1234)
+  // CIR: [[CAST_VALUE:%.*]] = ptrtoint ptr [[LOADED_VALUE]] to i64
+  // CIR: [[AUTHED:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[CAST_VALUE]], i32 2, i64 [[BLENDED_VALUE]])
 }
 
 #endif

@@ -1,4 +1,5 @@
 // RUN: mlir-translate -mlir-to-llvmir -split-input-file %s | FileCheck %s
+// RUN: mlir-opt %s -split-input-file --verify-roundtrip -o /dev/null
 
 // CHECK-LABEL: @disableNonForced
 llvm.func @disableNonForced() {
@@ -35,7 +36,7 @@ llvm.func @isvectorized() {
 }
 
 // CHECK: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}}
-// CHECK-DAG: ![[VEC_NODE0:[0-9]+]] = !{!"llvm.loop.isvectorized", i32 1}
+// CHECK-DAG: ![[VEC_NODE0:[0-9]+]] = !{!"llvm.loop.isvectorized"}
 
 // -----
 
@@ -53,15 +54,14 @@ llvm.func @vectorizeOptions() {
 }
 
 // CHECK-DAG: ![[NON_FORCED:[0-9]+]] = !{!"llvm.loop.disable_nonforced"}
-// CHECK-DAG: ![[FOLLOWUP:[0-9]+]] = distinct !{![[FOLLOWUP]], ![[NON_FORCED]]}
 // CHECK-DAG: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.enable", i1 true}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.predicate.enable", i1 true}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.scalable.enable", i1 false}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.width", i32 16}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.followup_vectorized", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.followup_epilogue", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.followup_all", ![[FOLLOWUP]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.followup_vectorized", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.followup_epilogue", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.vectorize.followup_all", ![[NON_FORCED]]}
 
 // -----
 
@@ -92,14 +92,13 @@ llvm.func @unrollOptions() {
 }
 
 // CHECK-DAG: ![[NON_FORCED:[0-9]+]] = !{!"llvm.loop.disable_nonforced"}
-// CHECK-DAG: ![[FOLLOWUP:[0-9]+]] = distinct !{![[FOLLOWUP]], ![[NON_FORCED]]}
 // CHECK-DAG: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.disable"}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.count", i32 64}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.runtime.disable", i1 false}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.followup_unrolled", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.followup_remainder", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.followup_all", ![[FOLLOWUP]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.followup_unrolled", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.followup_remainder", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll.followup_all", ![[NON_FORCED]]}
 
 // -----
 
@@ -131,15 +130,14 @@ llvm.func @unrollAndJamOptions() {
 }
 
 // CHECK-DAG: ![[NON_FORCED:[0-9]+]] = !{!"llvm.loop.disable_nonforced"}
-// CHECK-DAG: ![[FOLLOWUP:[0-9]+]] = distinct !{![[FOLLOWUP]], ![[NON_FORCED]]}
 // CHECK-DAG: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.enable"}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.count", i32 8}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_outer", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_inner", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_remainder_outer", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_remainder_inner", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_all", ![[FOLLOWUP]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_outer", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_inner", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_remainder_outer", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_remainder_inner", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.unroll_and_jam.followup_all", ![[NON_FORCED]]}
 
 // -----
 
@@ -183,13 +181,12 @@ llvm.func @distributeOptions() {
 }
 
 // CHECK-DAG: ![[NON_FORCED:[0-9]+]] = !{!"llvm.loop.disable_nonforced"}
-// CHECK-DAG: ![[FOLLOWUP:[0-9]+]] = distinct !{![[FOLLOWUP]], ![[NON_FORCED]]}
 // CHECK-DAG: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}, !{{[0-9]+}}}
 // CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.enable", i1 false}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_coincident", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_sequential", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_fallback", ![[FOLLOWUP]]}
-// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_all", ![[FOLLOWUP]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_coincident", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_sequential", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_fallback", ![[NON_FORCED]]}
+// CHECK-DAG: !{{[0-9]+}} = !{!"llvm.loop.distribute.followup_all", ![[NON_FORCED]]}
 
 // -----
 
@@ -223,13 +220,14 @@ llvm.func @peeledOptions() {
 // CHECK-LABEL: @unswitchOptions
 llvm.func @unswitchOptions() {
   // CHECK: br {{.*}} !llvm.loop ![[LOOP_NODE:[0-9]+]]
-  llvm.br ^bb1 {loop_annotation = #llvm.loop_annotation<unswitch = <partialDisable = true>>}
+  llvm.br ^bb1 {loop_annotation = #llvm.loop_annotation<unswitch = <partialDisable = true, injectionDisable = true>>}
 ^bb1:
   llvm.return
 }
 
-// CHECK: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}}
+// CHECK: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], !{{[0-9]+}}, !{{[0-9]+}}}
 // CHECK-DAG: ![[VEC_NODE0:[0-9]+]] = !{!"llvm.loop.unswitch.partial.disable"}
+// CHECK-DAG: ![[VEC_NODE1:[0-9]+]] = !{!"llvm.loop.unswitch.injection.disable"}
 
 // -----
 
@@ -318,3 +316,50 @@ llvm.func @loop_annotation_with_locs() {
 // CHECK: ![[LOOP_NODE]] = distinct !{![[LOOP_NODE]], ![[START_LOC:.*]], ![[END_LOC:.*]]}
 // CHECK: ![[START_LOC]] = !DILocation(line: 42, column: 4, scope:
 // CHECK: ![[END_LOC]] = !DILocation(line: 52, column: 4, scope:
+
+// -----
+
+// The switch form of a loop latch must emit !llvm.loop again on the way out.
+
+#loop_annotation = #llvm.loop_annotation<mustProgress = true>
+
+llvm.func @a()
+
+// CHECK-LABEL: define void @switch_latch
+llvm.func @switch_latch(%arg0: i32) {
+  llvm.br ^latch
+^latch:
+  // CHECK: switch i32
+  // CHECK: ], !llvm.loop ![[LOOP:[0-9]+]]
+  llvm.switch %arg0 : i32, ^exit [
+    0: ^body
+  ] {loop_annotation = #loop_annotation}
+^body:
+  llvm.call @a() : () -> ()
+  llvm.br ^latch
+^exit:
+  llvm.return
+}
+
+// CHECK: ![[LOOP]] = distinct !{![[LOOP]], ![[MP:[0-9]+]]}
+// CHECK: ![[MP]] = !{!"llvm.loop.mustprogress"}
+
+// -----
+
+// A latch switch with only a default destination is degenerate but legal, and
+// the zero-case path returns before the usual emission point.
+
+#loop_annotation = #llvm.loop_annotation<mustProgress = true>
+
+// CHECK-LABEL: define void @switch_latch_no_cases
+llvm.func @switch_latch_no_cases(%arg0: i32) {
+  llvm.br ^latch
+^latch:
+  // CHECK: switch i32 %{{.*}}, label %{{.*}} [
+  // CHECK: ], !llvm.loop ![[LOOP:[0-9]+]]
+  llvm.switch %arg0 : i32, ^latch [
+  ] {loop_annotation = #loop_annotation}
+}
+
+// CHECK: ![[LOOP]] = distinct !{![[LOOP]], ![[MP:[0-9]+]]}
+// CHECK: ![[MP]] = !{!"llvm.loop.mustprogress"}

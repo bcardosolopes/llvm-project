@@ -1,0 +1,30 @@
+// RUN: cir-opt %s -cir-to-llvm -o - | FileCheck %s
+
+module {
+  cir.alias weak @a0 = @a1 : !cir.func<()>
+  cir.alias weak @a1 = @a2 : !cir.func<()>
+  cir.alias weak @a2 = @a3 : !cir.func<()>
+  cir.alias weak @a3 = @a4 : !cir.func<()>
+  cir.alias weak @a4 = @target : !cir.func<()>
+  cir.alias weak @b0 = @a1 : !cir.func<()>
+  cir.alias weak @b1 = @a2 : !cir.func<()>
+  cir.alias weak @b2 = @a3 : !cir.func<()>
+  cir.func private @target()
+}
+
+// CHECK: llvm.mlir.alias weak @a0 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @a1 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @a2 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @a3 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @a4 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @b0 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @b1 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr
+// CHECK: llvm.mlir.alias weak @b2 : !llvm.func<void ()> {
+// CHECK: %0 = llvm.mlir.addressof @target : !llvm.ptr

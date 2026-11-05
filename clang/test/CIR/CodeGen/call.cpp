@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s -check-prefix=CIR
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=LLVM
@@ -21,12 +21,12 @@ int f4() {
   return x;
 }
 
-// CIR-LABEL: cir.func{{.*}} @_Z2f3v() -> !s32i
-// CIR-LABEL: cir.func{{.*}} @_Z2f4v() -> !s32i
+// CIR-LABEL: cir.func{{.*}} @_Z2f3v() -> {{.*}}!s32i
+// CIR-LABEL: cir.func{{.*}} @_Z2f4v() -> {{.*}}!s32i
 // CIR:         cir.call @_Z2f3v() : () -> !s32i
 
 // LLVM-LABEL: define{{.*}} i32 @_Z2f4v(){{.*}} {
-// LLVM:         %{{.+}} = call i32 @_Z2f3v()
+// LLVM:         %{{.+}} = call noundef i32 @_Z2f3v()
 
 int f5(int a, int *b, bool c);
 int f6() {
@@ -34,14 +34,14 @@ int f6() {
   return f5(2, &b, false);
 }
 
-// CIR-LABEL: cir.func{{.*}} @_Z2f6v() -> !s32i
+// CIR-LABEL: cir.func{{.*}} @_Z2f6v() -> {{.*}}!s32i
 // CIR:         %[[#b:]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["b", init]
 // CIR:         %[[#a:]] = cir.const #cir.int<2> : !s32i
 // CIR-NEXT:    %[[#c:]] = cir.const #false
 // CIR-NEXT:    %{{.+}} = cir.call @_Z2f5iPib(%[[#a]], %[[#b:]], %[[#c]]) : (!s32i, !cir.ptr<!s32i>, !cir.bool) -> !s32i
 
 // LLVM-LABEL: define{{.*}} i32 @_Z2f6v(){{.*}} {
-// LLVM:         %{{.+}} = call i32 @_Z2f5iPib(i32 2, ptr %{{.+}}, i1 false)
+// LLVM:         %{{.+}} = call noundef i32 @_Z2f5iPib(i32 noundef 2, ptr noundef %{{.+}}, i1 noundef zeroext false)
 
 int f7(int (*ptr)(int, int)) {
   return ptr(1, 2);
@@ -51,11 +51,11 @@ int f7(int (*ptr)(int, int)) {
 // CIR:         %[[#ptr:]] = cir.load{{.*}} %{{.+}} : !cir.ptr<!cir.ptr<!cir.func<(!s32i, !s32i) -> !s32i>>>, !cir.ptr<!cir.func<(!s32i, !s32i) -> !s32i>>
 // CIR-NEXT:    %[[#a:]] = cir.const #cir.int<1> : !s32i
 // CIR-NEXT:    %[[#b:]] = cir.const #cir.int<2> : !s32i
-// CIR-NEXT:    %{{.+}} = cir.call %[[#ptr]](%[[#a]], %[[#b]]) : (!cir.ptr<!cir.func<(!s32i, !s32i) -> !s32i>>, !s32i, !s32i) -> !s32i
+// CIR-NEXT:    %{{.+}} = cir.call %[[#ptr]](%[[#a]], %[[#b]]) {cir.call_arg_attrs = [{cir.noundef}, {cir.noundef}]{{.*}} : (!cir.ptr<!cir.func<(!s32i, !s32i) -> !s32i>>, !s32i, !s32i) -> !s32i
 
 // LLVM-LABEL: define{{.*}} i32 @_Z2f7PFiiiE
 // LLVM:         %[[#ptr:]] = load ptr, ptr %{{.+}}
-// LLVM-NEXT:    %{{.+}} = call i32 %[[#ptr]](i32 1, i32 2)
+// LLVM-NEXT:    %{{.+}} = call noundef i32 %[[#ptr]](i32 noundef 1, i32 noundef 2)
 
 void f8(int a, ...);
 void f9() {
@@ -65,11 +65,11 @@ void f9() {
 
 // CIR-LABEL: cir.func{{.*}} @_Z2f9v()
 // CIR:         cir.call @_Z2f8iz(%{{.+}}) : (!s32i) -> ()
-// CIR:         cir.call @_Z2f8iz(%{{.+}}, %{{.+}}, %{{.+}}, %{{.+}}) : (!s32i, !s32i, !s32i, !s32i) -> ()
+// CIR:         cir.call @_Z2f8iz(%{{.+}}, %{{.+}}, %{{.+}}, %{{.+}}) {{.*}}: (!s32i, !s32i, !s32i, !s32i) -> ()
 
 // LLVM-LABEL: define{{.*}} void @_Z2f9v(){{.*}}
-// LLVM:         call void (i32, ...) @_Z2f8iz(i32 1)
-// LLVM:         call void (i32, ...) @_Z2f8iz(i32 1, i32 2, i32 3, i32 4)
+// LLVM:         call void (i32, ...) @_Z2f8iz(i32 noundef 1)
+// LLVM:         call void (i32, ...) @_Z2f8iz(i32 noundef 1, i32 noundef 2, i32 noundef 3, i32 noundef 4)
 
 struct S {
   int x;
@@ -82,12 +82,13 @@ void f11() {
 }
 
 // CIR-LABEL: cir.func{{.*}} @_Z3f11v()
-// CIR:         %[[#s:]] = cir.call @_Z3f10v() : () -> !rec_S
-// CIR-NEXT:    cir.store align(4) %[[#s]], %{{.+}} : !rec_S, !cir.ptr<!rec_S>
+// CIR:         %[[#s:]] = cir.call @_Z3f10v() : () -> !u64i
+// CIR-NEXT:    %{{.+}} = cir.cast bitcast %{{.+}} : !cir.ptr<!rec_S> -> !cir.ptr<!u64i>
+// CIR-NEXT:    cir.store align(4) %[[#s]], %{{.+}} : !u64i, !cir.ptr<!u64i>
 
 // LLVM-LABEL: define{{.*}} void @_Z3f11v(){{.*}}
-// LLVM:         %[[#s:]] = call %struct.S @_Z3f10v()
-// LLVM-NEXT:    store %struct.S %[[#s]], ptr %{{.+}}, align 4
+// LLVM:         %[[#s:]] = call i64 @_Z3f10v()
+// LLVM-NEXT:    store i64 %[[#s]], ptr %{{.+}}
 
 void f12() {
   f10();
@@ -95,13 +96,14 @@ void f12() {
 
 // CIR-LABEL: cir.func{{.*}} @_Z3f12v()
 // CIR:         %[[#slot:]] = cir.alloca !rec_S, !cir.ptr<!rec_S>, ["agg.tmp0"]
-// CIR-NEXT:    %[[#ret:]] = cir.call @_Z3f10v() : () -> !rec_S
-// CIR-NEXT:    cir.store align(4) %[[#ret]], %[[#slot]] : !rec_S, !cir.ptr<!rec_S>
+// CIR-NEXT:    %[[#ret:]] = cir.call @_Z3f10v() : () -> !u64i
+// CIR-NEXT:    %{{.+}} = cir.cast bitcast %[[#slot]] : !cir.ptr<!rec_S> -> !cir.ptr<!u64i>
+// CIR-NEXT:    cir.store align(4) %[[#ret]], %{{.+}} : !u64i, !cir.ptr<!u64i>
 
 // LLVM-LABEL: define{{.*}} void @_Z3f12v(){{.*}} {
 // LLVM:         %[[#slot:]] = alloca %struct.S, i64 1, align 4
-// LLVM-NEXT:    %[[#ret:]] = call %struct.S @_Z3f10v()
-// LLVM-NEXT:    store %struct.S %[[#ret]], ptr %[[#slot]], align 4
+// LLVM-NEXT:    %[[#ret:]] = call i64 @_Z3f10v()
+// LLVM-NEXT:    store i64 %[[#ret]], ptr %[[#slot]]
 
 void f13() noexcept;
 void f14() {
@@ -113,7 +115,7 @@ void f14() {
 // CIR:       }
 
 // LLVM-LABEL: define{{.+}} void @_Z3f14v(){{.*}}
-// LLVM:         call void @_Z3f13v() #[[LLVM_ATTR_0:.+]]
+// LLVM:         call void @_Z3f13v()
 // LLVM:       }
 
 int f15();
@@ -127,7 +129,7 @@ void f16() {
 // CIR:       }
 
 // LLVM-LABEL: define{{.+}} void @_Z3f16v(){{.*}} {
-// LLVM-NEXT:    %{{.+}} = call i32 @_Z3f15v()
+// LLVM-NEXT:    %{{.+}} = call noundef i32 @_Z3f15v()
 // LLVM:       }
 
-// LLVM: attributes #[[LLVM_ATTR_0]] = { nounwind }
+// LLVM: attributes #{{[0-9]+}} = { nounwind {{.*}}}

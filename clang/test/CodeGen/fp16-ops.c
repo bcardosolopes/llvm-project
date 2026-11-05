@@ -2,6 +2,7 @@
 // RUN: %clang_cc1 -emit-llvm -o - -triple arm-none-linux-gnueabi %s | FileCheck %s --check-prefix=NOTNATIVE --check-prefix=CHECK
 // RUN: %clang_cc1 -emit-llvm -o - -triple aarch64 %s | FileCheck %s --check-prefix=NOTNATIVE --check-prefix=CHECK
 // RUN: %clang_cc1 -emit-llvm -o - -triple x86_64-linux-gnu %s | FileCheck %s --check-prefix=NOTNATIVE --check-prefix=CHECK
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -o - -triple x86_64-linux-gnu -fclangir %s | FileCheck %s --check-prefix=NOTNATIVE-CIR %}
 // RUN: %clang_cc1 -emit-llvm -o - -triple arm-none-linux-gnueabi -fnative-half-type %s \
 // RUN:   | FileCheck %s --check-prefix=NATIVE-HALF
 // RUN: %clang_cc1 -emit-llvm -o - -triple aarch64 -fnative-half-type %s \
@@ -18,6 +19,7 @@ short s0;
 
 void foo(void) {
   // CHECK-LABEL: define{{.*}} void @foo()
+  // NOTNATIVE-CIR-LABEL: define{{.*}} void @foo()
 
   // Check unary ops
 
@@ -28,6 +30,9 @@ void foo(void) {
   // CHECK: uitofp i32
   // NOTNATIVE: [[F32TOF16:fptrunc float]]
   // NATIVE-HALF: uitofp i32 {{.*}} to half
+  // NOTNATIVE-CIR: [[UI:%.*]] = uitofp i32 {{.*}} to float
+  // NOTNATIVE-CIR-NEXT: [[UI_TRUNC:%.*]] = fptrunc float [[UI]] to half
+  // NOTNATIVE-CIR-NEXT: store volatile half [[UI_TRUNC]], ptr @h0
   h0 = (test);
   // CHECK: [[F16TOF32]]
   // CHECK: fcmp une float
@@ -536,6 +541,10 @@ void foo(void) {
   // NOTNATIVE: [[CONV:%.*]] = sitofp i16 [[V1]] to float
   // NOTNATIVE: [[TRUNC:%.*]] = fptrunc float [[CONV]] to half
   // NOTNATIVE: store volatile half [[TRUNC]], ptr @h0
+  // NOTNATIVE-CIR: [[V1:%.*]] = load i16, ptr @s0
+  // NOTNATIVE-CIR-NEXT: [[CONV:%.*]] = sitofp i16 [[V1]] to float
+  // NOTNATIVE-CIR-NEXT: [[TRUNC:%.*]] = fptrunc float [[CONV]] to half
+  // NOTNATIVE-CIR-NEXT: store volatile half [[TRUNC]], ptr @h0
   h0 = s0;
 }
 

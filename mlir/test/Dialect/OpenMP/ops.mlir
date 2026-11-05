@@ -73,7 +73,7 @@ func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : i
   // CHECK: omp.parallel allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>) num_threads(%{{.*}} : i32)
     "omp.parallel"(%data_var, %data_var, %num_threads) ({
       omp.terminator
-    }) {operandSegmentSizes = array<i32: 1,1,0,1,0,0>} : (memref<i32>, memref<i32>, i32) -> ()
+    }) {operandSegmentSizes = array<i32: 1,1,0,1,0,0,0>} : (memref<i32>, memref<i32>, i32) -> ()
 
   // CHECK: omp.barrier
     omp.barrier
@@ -82,22 +82,22 @@ func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : i
   // CHECK: omp.parallel allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>) if(%{{.*}})
     "omp.parallel"(%data_var, %data_var, %if_cond) ({
       omp.terminator
-    }) {operandSegmentSizes = array<i32: 1,1,1,0,0,0>} : (memref<i32>, memref<i32>, i1) -> ()
+    }) {operandSegmentSizes = array<i32: 1,1,1,0,0,0,0>} : (memref<i32>, memref<i32>, i1) -> ()
 
   // test without allocate
   // CHECK: omp.parallel if(%{{.*}}) num_threads(%{{.*}} : i32)
     "omp.parallel"(%if_cond, %num_threads) ({
       omp.terminator
-    }) {operandSegmentSizes = array<i32: 0,0,1,1,0,0>} : (i1, i32) -> ()
+    }) {operandSegmentSizes = array<i32: 0,0,1,1,0,0,0>} : (i1, i32) -> ()
 
     omp.terminator
-  }) {operandSegmentSizes = array<i32: 1,1,1,1,0,0>, proc_bind_kind = #omp<procbindkind spread>} : (memref<i32>, memref<i32>, i1, i32) -> ()
+  }) {operandSegmentSizes = array<i32: 1,1,1,1,0,0,0>, proc_bind_kind = #omp<procbindkind spread>} : (memref<i32>, memref<i32>, i1, i32) -> ()
 
   // test with multiple parameters for single variadic argument
   // CHECK: omp.parallel allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>)
   "omp.parallel" (%data_var, %data_var) ({
     omp.terminator
-  }) {operandSegmentSizes = array<i32: 1,1,0,0,0,0>} : (memref<i32>, memref<i32>) -> ()
+  }) {operandSegmentSizes = array<i32: 1,1,0,0,0,0,0>} : (memref<i32>, memref<i32>) -> ()
 
   // CHECK: omp.parallel
   omp.parallel {
@@ -137,7 +137,7 @@ func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : i
   return
 }
 
-func.func @omp_parallel_pretty(%data_var : memref<i32>, %if_cond : i1, %num_threads : i32, %allocator : si32) -> () {
+func.func @omp_parallel_pretty(%data_var : memref<i32>, %if_cond : i1, %num_threads : i32, %allocator : si32, %message : !llvm.ptr) -> () {
  // CHECK: omp.parallel
  omp.parallel {
   omp.terminator
@@ -176,6 +176,11 @@ func.func @omp_parallel_pretty(%data_var : memref<i32>, %if_cond : i1, %num_thre
 
  // CHECK: omp.parallel if(%{{.*}}) num_threads(%{{.*}} : i32) proc_bind(close)
  omp.parallel num_threads(%num_threads : i32) if(%if_cond) proc_bind(close) {
+   omp.terminator
+ }
+
+ // CHECK: omp.parallel num_threads(strict: %{{.*}} : i32) severity(fatal) message(%{{.*}} : !llvm.ptr)
+ omp.parallel num_threads(strict: %num_threads : i32) severity(fatal) message(%message : !llvm.ptr) {
    omp.terminator
  }
 
@@ -824,7 +829,7 @@ func.func @omp_target(%if_cond : i1, %device : si32,  %num_threads : i32, %devic
     "omp.target"(%device, %if_cond, %num_threads) ({
        // CHECK: omp.terminator
        omp.terminator
-    }) {nowait, operandSegmentSizes = array<i32: 0,0,0,1,0,0,1,0,0,0,0,1>} : ( si32, i1, i32 ) -> ()
+    }) {nowait, operandSegmentSizes = array<i32: 0,0,0,0,1,0,0,1,0,0,0,0,1>} : ( si32, i1, i32 ) -> ()
 
     // Test with optional map clause.
     // CHECK: %[[MAP_A:.*]] = omp.map.info var_ptr(%[[VAL_1:.*]] : memref<?xi32>, tensor<?xi32>)   map_clauses(always, to) capture(ByRef) -> memref<?xi32> {name = ""}
@@ -1313,6 +1318,13 @@ omp.critical.declare @mutex8 hint(contended, speculative)
 omp.critical.declare @mutex9 hint(none)
 // CHECK: omp.critical.declare @mutex10
 omp.critical.declare @mutex10
+// Contradictory hints are implementation-defined per OpenMP spec, not errors.
+// CHECK: omp.critical.declare @mutex11 hint(uncontended, contended)
+omp.critical.declare @mutex11 hint(uncontended, contended)
+// CHECK: omp.critical.declare @mutex12 hint(nonspeculative, speculative)
+omp.critical.declare @mutex12 hint(nonspeculative, speculative)
+// CHECK: omp.critical.declare @mutex13 hint(uncontended, contended, nonspeculative, speculative)
+omp.critical.declare @mutex13 hint(uncontended, contended, nonspeculative, speculative)
 
 
 // CHECK-LABEL: omp_critical
@@ -1394,6 +1406,12 @@ func.func @omp_atomic_read(%v: memref<i32>, %x: memref<i32>) {
   omp.atomic.read %v = %x hint(speculative, contended) memory_order(seq_cst) : memref<i32>, memref<i32>, i32
   // CHECK: omp.atomic.read %[[v]] = %[[x]] memory_order(seq_cst) : memref<i32>, memref<i32>, i32
   omp.atomic.read %v = %x hint(none) memory_order(seq_cst) : memref<i32>, memref<i32>, i32
+  // CHECK: omp.atomic.read %[[v]] = %[[x]] : memref<i32>, memref<i32>, i32 {x_volatile}
+  omp.atomic.read %v = %x : memref<i32>, memref<i32>, i32 {x_volatile}
+  // CHECK: omp.atomic.read %[[v]] = %[[x]] : memref<i32>, memref<i32>, i32 {v_volatile}
+  omp.atomic.read %v = %x : memref<i32>, memref<i32>, i32 {v_volatile}
+  // CHECK: omp.atomic.read %[[v]] = %[[x]] : memref<i32>, memref<i32>, i32 {v_volatile, x_volatile}
+  omp.atomic.read %v = %x : memref<i32>, memref<i32>, i32 {x_volatile, v_volatile}
   return
 }
 
@@ -1412,6 +1430,8 @@ func.func @omp_atomic_write(%addr : memref<i32>, %val : i32) {
   omp.atomic.write %addr = %val hint(speculative, uncontended) : memref<i32>, i32
   // CHECK: omp.atomic.write %[[ADDR]] = %[[VAL]] : memref<i32>, i32
   omp.atomic.write %addr = %val hint(none) : memref<i32>, i32
+  // CHECK: omp.atomic.write %[[ADDR]] = %[[VAL]] : memref<i32>, i32 {x_volatile}
+  omp.atomic.write %addr = %val : memref<i32>, i32 {x_volatile}
   return
 }
 
@@ -2196,6 +2216,25 @@ func.func @omp_task_depend(%arg0: memref<i32>, %arg1: memref<i32>) {
   return
 }
 
+// CHECK-LABEL: @omp_task_depend_with_sizes
+// CHECK-SAME: (%arg0: memref<i32>, %arg1: i32) {
+func.func @omp_task_depend_with_sizes(%arg0: memref<i32>, %arg1: i32) {
+  // CHECK:  omp.task   depend(taskdependin -> %arg0 : memref<i32> size(%arg1 : i32)) {
+  omp.task   depend(taskdependin -> %arg0 : memref<i32> size(%arg1 : i32)) {
+    // CHECK: omp.terminator
+    omp.terminator
+  }
+  return
+}
+
+// CHECK-LABEL: @omp_taskwait_depend_with_size
+// CHECK-SAME: (%arg0: memref<i32>, %arg1: i32) {
+func.func @omp_taskwait_depend_with_size(%arg0: memref<i32>, %arg1: i32) {
+  // CHECK:  omp.taskwait depend(taskdependin -> %arg0 : memref<i32> size(%arg1 : i32)) nowait
+  omp.taskwait depend(taskdependin -> %arg0 : memref<i32> size(%arg1 : i32)) nowait
+  return
+}
+
 
 // CHECK-LABEL: @omp_target_depend
 // CHECK-SAME: (%arg0: memref<i32>, %arg1: memref<i32>) {
@@ -2204,7 +2243,7 @@ func.func @omp_target_depend(%arg0: memref<i32>, %arg1: memref<i32>) {
   omp.target depend(taskdependin -> %arg0 : memref<i32>, taskdependin -> %arg1 : memref<i32>, taskdependinout -> %arg0 : memref<i32>) {
     // CHECK: omp.terminator
     omp.terminator
-  } {operandSegmentSizes = array<i32: 0,0,0,3,0,0,0,0>}
+  } {operandSegmentSizes = array<i32: 0,0,3,0,0,0,0,0,0,0,0,0,0>}
   return
 }
 
@@ -2890,6 +2929,15 @@ func.func @omp_target_enter_update_exit_data_depend(%a: memref<?xi32>, %b: memre
   // CHECK: omp.target_exit_data depend(taskdependin -> [[ARG2]] : memref<?xi32>) map_entries([[MAP2]] : memref<?xi32>)
   omp.target_exit_data depend(taskdependin -> %c : memref<?xi32>) map_entries(%map_c : memref<?xi32>)
 
+  return
+}
+
+// CHECK-LABEL: @omp_target_update_depend_with_size
+// CHECK-SAME: (%arg0: memref<?xi32>, %arg1: i32) {
+func.func @omp_target_update_depend_with_size(%arg0: memref<?xi32>, %arg1: i32) {
+  %map = omp.map.info var_ptr(%arg0: memref<?xi32>, tensor<?xi32>) map_clauses(to) capture(ByRef) -> memref<?xi32>
+  // CHECK: omp.target_update depend(taskdependinout -> %arg0 : memref<?xi32> size(%arg1 : i32)) map_entries([[MAP:%.*]] : memref<?xi32>) nowait
+  omp.target_update depend(taskdependinout -> %arg0 : memref<?xi32> size(%arg1 : i32)) nowait map_entries(%map : memref<?xi32>)
   return
 }
 

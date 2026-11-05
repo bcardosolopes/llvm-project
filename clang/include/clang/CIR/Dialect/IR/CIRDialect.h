@@ -41,6 +41,10 @@ using BuilderOpStateCallbackRef = llvm::function_ref<void(
 
 namespace cir {
 void buildTerminatedBody(mlir::OpBuilder &builder, mlir::Location loc);
+
+/// Drop what this thread remembers about `module`'s functions, for call
+/// verification; the lowering does so around each module it lowers.
+void forgetModuleFuncSymbolCache(mlir::Operation *module);
 } // namespace cir
 
 // TableGen'erated files for MLIR dialects require that a macro be defined when

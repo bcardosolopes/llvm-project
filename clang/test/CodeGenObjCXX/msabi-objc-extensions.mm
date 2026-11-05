@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple thumbv7-windows-msvc -fobjc-runtime=ios-6.0 -fobjc-arc -o - -emit-llvm %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple thumbv7-windows-msvc -fobjc-runtime=ios-6.0 -fobjc-arc -o - -emit-llvm -fclangir %s | FileCheck %s %}
 
 @protocol P;
 @protocol Q;

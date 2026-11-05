@@ -58,7 +58,7 @@ void modifyWithThreadFence(DataPtr d) {
   // LLVM:    %[[DATA:.*]] = alloca ptr, i64 1, align 8
   // LLVM:    fence seq_cst
   // LLVM:    %[[DATA_PTR:.*]] = load ptr, ptr %[[DATA]], align 8
-  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 0
+  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr inbounds nuw %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 0
   // LLVM:    store i32 42, ptr %[[DATA_VALUE]], align 8
   // LLVM:    ret void
 
@@ -87,7 +87,7 @@ void modifyWithSignalFence(DataPtr d) {
   // LLVM:    %[[DATA:.*]] = alloca ptr, i64 1, align 8
   // LLVM:    fence syncscope("singlethread") seq_cst
   // LLVM:    %[[DATA_PTR:.*]] = load ptr, ptr %[[DATA]], align 8
-  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 0
+  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr inbounds nuw %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 0
   // LLVM:    store i32 24, ptr %[[DATA_VALUE]], align 8
   // LLVM:    ret void
 
@@ -122,7 +122,7 @@ void loadWithThreadFence(DataPtr d) {
   // LLVM:    %[[DATA_TEMP:.*]] = alloca ptr, i64 1, align 8
   // LLVM:    fence seq_cst
   // LLVM:    %[[DATA_PTR:.*]] = load ptr, ptr %[[DATA]], align 8
-  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 1
+  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr inbounds nuw %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 1
   // LLVM:    %[[ATOMIC_LOAD:.*]] = load atomic i64, ptr %[[DATA_VALUE]] seq_cst, align 8
   // LLVM:    store i64 %[[ATOMIC_LOAD]], ptr %[[DATA_TEMP]], align 8
   // LLVM:    %[[DATA_TEMP_LOAD:.*]] = load ptr, ptr %[[DATA_TEMP]], align 8
@@ -162,7 +162,7 @@ void loadWithSignalFence(DataPtr d) {
   // LLVM:    %[[DATA_TEMP:.*]] = alloca ptr, i64 1, align 8
   // LLVM:    fence syncscope("singlethread") seq_cst
   // LLVM:    %[[DATA_PTR:.*]] = load ptr, ptr %[[DATA]], align 8
-  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 1
+  // LLVM:    %[[DATA_VALUE:.*]] = getelementptr inbounds nuw %struct.Data, ptr %[[DATA_PTR]], i32 0, i32 1
   // LLVM:    %[[ATOMIC_LOAD:.*]] = load atomic i64, ptr %[[DATA_VALUE]] seq_cst, align 8
   // LLVM:    store i64 %[[ATOMIC_LOAD]], ptr %[[DATA_TEMP]], align 8
   // LLVM:    %[[DATA_TEMP_LOAD]] = load ptr, ptr %[[DATA_TEMP]], align 8

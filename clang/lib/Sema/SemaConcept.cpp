@@ -391,10 +391,41 @@ public:
   }
 
   bool TraverseTagType(const TagType *T, bool TraverseQualifier) {
-    // T's parent can be dependent while T doesn't have any template arguments.
-    // We should have already traversed its qualifier.
-    // FIXME: Add an assert to catch cases where we failed to profile the
-    // concept.
+    // A tag type carries no template arguments of its own, but when it names a
+    // member of a class template (e.g. `C<N>::nested`) its identity still
+    // depends on the enclosing template's arguments. TraverseTypeLoc above
+    // canonicalizes the type and drops the qualifier sugar that would otherwise
+    // carry those arguments, so recover the enclosing template parameters from
+    // the decl context here and hash their substituted values (mirroring the
+    // TraverseInjectedClassNameType path for class templates). Without this, two
+    // members from different specializations (e.g. `C<1>::nested` and
+    // `C<2>::nested`) profile identically and collide in the
+    // constraint-satisfaction cache.
+    auto depthAndIndex = [](const NamedDecl *P) -> std::pair<unsigned, unsigned> {
+      if (const auto *TTP = dyn_cast<TemplateTypeParmDecl>(P))
+        return {TTP->getDepth(), TTP->getIndex()};
+      if (const auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(P))
+        return {NTTP->getDepth(), NTTP->getIndex()};
+      const auto *TTP = cast<TemplateTemplateParmDecl>(P);
+      return {TTP->getDepth(), TTP->getIndex()};
+    };
+    for (const DeclContext *DC = T->getDecl()->getDeclContext();
+         DC && !DC->isFileContext(); DC = DC->getParent()) {
+      const auto *RD = dyn_cast<CXXRecordDecl>(DC);
+      if (!RD)
+        continue;
+      const ClassTemplateDecl *CTD = RD->getDescribedClassTemplate();
+      if (!CTD)
+        continue;
+      for (const NamedDecl *Param : *CTD->getTemplateParameters()) {
+        auto [Depth, Index] = depthAndIndex(Param);
+        if (Depth < TemplateArgs.getNumLevels() &&
+            TemplateArgs.hasTemplateArgument(Depth, Index))
+          UsedTemplateArgs.push_back(
+              SemaRef.Context.getCanonicalTemplateArgument(
+                  TemplateArgs(Depth, Index)));
+      }
+    }
     return true;
   }
 

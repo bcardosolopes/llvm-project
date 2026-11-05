@@ -168,6 +168,15 @@ public:
   ValueT &operator*() { return get(); }
   ValueT *operator->() { return &get(); }
 
+  /// Replace every thread's instance with a default-constructed one, freeing
+  /// what the old instances held. No other thread may use the cache meanwhile.
+  void clear() {
+    llvm::sys::SmartScopedLock<true> threadInstanceLock(
+        perInstanceState->instanceMutex);
+    for (Owner &instance : perInstanceState->instances)
+      *instance.value = ValueT();
+  }
+
 private:
   ThreadLocalCache(ThreadLocalCache &&) = delete;
   ThreadLocalCache(const ThreadLocalCache &) = delete;

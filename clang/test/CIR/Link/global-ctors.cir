@@ -1,0 +1,38 @@
+// RUN: cir-link %s %S/Inputs/global-ctors-b.cir -o %t.cir
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// cir.global_ctors and cir.global_dtors are module attributes, but unlike the
+// triple or the data layout they are *per-TU lists*, not configuration. They
+// have to be concatenated across inputs.
+//
+// Taking only the first input's copy is silent and produces wrong answers
+// rather than errors: every other TU's static initializers remain in the
+// module as perfectly good functions that nothing ever calls. A two-TU program
+// where each TU has one global constructor ran only the first, printing 1
+// where a normal build prints 12 -- it linked, lowered, built and ran, and was
+// simply wrong.
+
+!s32i = !cir.int<s, 32>
+
+module attributes {
+  cir.global_ctors = [#cir.global_ctor<"_GLOBAL__sub_I_a", 65535>],
+  cir.global_dtors = [#cir.global_dtor<"_GLOBAL__sub_D_a", 65535>]
+} {
+  cir.func internal private @_GLOBAL__sub_I_a() {
+    cir.return
+  }
+  cir.func internal private @_GLOBAL__sub_D_a() {
+    cir.return
+  }
+}
+
+// Both constructors registered, first input's first.
+// CHECK: cir.global_ctors = [#cir.global_ctor<"_GLOBAL__sub_I_a", 65535>, #cir.global_ctor<"_GLOBAL__sub_I_b", 65535>]
+
+// The destructor list only exists in the first input, so it must survive
+// untouched rather than being clobbered by the absence of one in B.
+// CHECK: cir.global_dtors = [#cir.global_dtor<"_GLOBAL__sub_D_a", 65535>]
+
+// And the functions they name are all still present.
+// CHECK-DAG: cir.func internal private @_GLOBAL__sub_I_a
+// CHECK-DAG: cir.func internal private @_GLOBAL__sub_I_b

@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -Wno-error=return-type -triple x86_64-apple-darwin10 -emit-llvm -fexceptions -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -Wno-error=return-type -triple x86_64-apple-darwin10 -emit-llvm -fexceptions -disable-llvm-passes -fclangir -o - %s | FileCheck %s %}
 
 struct TFENode {
 void GetURL() const;

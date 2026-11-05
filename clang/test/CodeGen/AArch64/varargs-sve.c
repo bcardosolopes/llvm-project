@@ -1,6 +1,8 @@
 // REQUIRES: aarch64-registered-target
 // RUN: not %clang_cc1 -triple aarch64-linux-gnu -target-feature +sve -emit-llvm -o - %s 2>&1 | FileCheck %s
+// RUN: %if cir-support %{ not %clang_cc1 -triple aarch64-linux-gnu -target-feature +sve -fclangir -emit-llvm -o - %s 2>&1 | FileCheck %s %}
 // RUN: not %clang_cc1 -triple arm64-apple-ios7 -target-abi darwinpcs -target-feature +sve -emit-llvm -o - %s 2>&1 | FileCheck %s
+// RUN: %if cir-support %{ not %clang_cc1 -triple arm64-apple-ios7 -target-abi darwinpcs -target-feature +sve -fclangir -emit-llvm -o - %s 2>&1 | FileCheck %s %}
 
 // CHECK: Passing SVE types to variadic functions is currently not supported
 

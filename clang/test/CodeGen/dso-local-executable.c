@@ -46,6 +46,7 @@
 /// If -fno-direct-access-external-data is set, drop dso_local from global variable
 /// declarations.
 // RUN: %clang_cc1 -triple x86_64 -emit-llvm %s -mrelocation-model static -fno-direct-access-external-data -o - | FileCheck --check-prefix=STATIC-INDIRECT %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64 -emit-llvm -fclangir %s -mrelocation-model static -fno-direct-access-external-data -o - | FileCheck --check-prefix=STATIC-INDIRECT %s %}
 // STATIC-INDIRECT:      @baz = dso_local global i32 42
 // STATIC-INDIRECT-NEXT: @import_var = external global i32
 // STATIC-INDIRECT-NEXT: @weak_bar = extern_weak global i32
@@ -72,6 +73,7 @@
 // PIE-NOT:  !"direct-access-external-data"
 
 // RUN: %clang_cc1 -triple x86_64 -emit-llvm -pic-level 1 -pic-is-pie -fdirect-access-external-data %s -o - | FileCheck --check-prefix=PIE-DIRECT %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64 -emit-llvm -fclangir -pic-level 1 -pic-is-pie -fdirect-access-external-data %s -o - | FileCheck --check-prefix=PIE-DIRECT %s %}
 // PIE-DIRECT:      @baz = dso_local global i32 42
 // PIE-DIRECT-NEXT: @import_var = external dso_local global i32
 // PIE-DIRECT-NEXT: @weak_bar = extern_weak global i32
@@ -96,6 +98,7 @@
 // NOPLT-DAG: declare void @import_func()
 
 // RUN: %clang_cc1 -triple x86_64 -emit-llvm -fno-plt -pic-level 1 -pic-is-pie -fdirect-access-external-data %s -o - | FileCheck --check-prefix=PIE-DIRECT-NOPLT %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64 -emit-llvm -fclangir -fno-plt -pic-level 1 -pic-is-pie -fdirect-access-external-data %s -o - | FileCheck --check-prefix=PIE-DIRECT-NOPLT %s %}
 // PIE-DIRECT-NOPLT:      @baz = dso_local global i32 42
 // PIE-DIRECT-NOPLT-NEXT: @import_var = external dso_local global i32
 // PIE-DIRECT-NOPLT-NEXT: @weak_bar = extern_weak global i32

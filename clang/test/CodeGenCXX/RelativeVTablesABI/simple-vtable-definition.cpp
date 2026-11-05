@@ -1,6 +1,7 @@
 // Check the layout of the vtable for a normal class.
 
 // RUN: %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O1 -o - -emit-llvm -fhalf-no-semantic-interposition | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=aarch64-unknown-fuchsia -O1 -o - -emit-llvm -fhalf-no-semantic-interposition -fclangir | FileCheck %s --check-prefix=CIR %}
 
 // We should be emitting comdats for each of the virtual function RTTI proxies
 // CHECK: $_ZTI1A.rtti_proxy = comdat any
@@ -18,6 +19,10 @@
 
 // The vtable symbol is exposed through an alias.
 // @_ZTV1A = dso_local unnamed_addr alias { [3 x i32] }, ptr @_ZTV1A.local
+
+// CIR: @_ZTV1A.local = internal unnamed_addr constant { [3 x i32] }
+// CIR-SAME: ptr dso_local_equivalent @_ZN1A3fooEv
+// CIR: @_ZTV1A ={{.*}} unnamed_addr alias { [3 x i32] }, ptr @_ZTV1A.local
 
 class A {
 public:

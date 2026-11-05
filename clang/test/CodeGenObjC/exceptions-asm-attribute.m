@@ -20,6 +20,7 @@
 
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -Wno-objc-root-class -fobjc-exceptions -fvisibility=hidden -emit-llvm -o %t %s
 // RUN: FileCheck -check-prefix=CHECK-X86_64-HIDDEN < %t %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -Wno-objc-root-class -fobjc-exceptions -fvisibility=hidden -emit-llvm -fclangir -o - %s | FileCheck -check-prefix=CHECK-CIR-X86_64-HIDDEN %s %}
 
 // CHECK-X86_64-HIDDEN: @"OBJC_CLASS_$_MySecretNamespace.A" = hidden global {{.*}}, section "__DATA, __objc_data", align 8
 // CHECK-X86_64-HIDDEN: @"OBJC_METACLASS_$_MySecretNamespace.A" = hidden global {{.*}}, section "__DATA, __objc_data", align 8
@@ -28,6 +29,10 @@
 // CHECK-X86_64-HIDDEN: @"OBJC_EHTYPE_$_MySecretNamespace.EH3" = hidden global {{.*}}, section "__DATA,__objc_const", align 8
 // CHECK-X86_64-HIDDEN: define internal void @"\01-[A im0]"
 // CHECK-X86_64-HIDDEN: define internal void @"\01-[A(Cat) im1]"
+
+// CHECK-CIR-X86_64-HIDDEN: @"OBJC_EHTYPE_$_MySecretNamespace.EH1" = weak hidden global
+// CHECK-CIR-X86_64-HIDDEN: @"OBJC_EHTYPE_$_MySecretNamespace.EH2" = external global
+// CHECK-CIR-X86_64-HIDDEN: @"OBJC_EHTYPE_$_MySecretNamespace.EH3" = hidden global {{.*}}, section "__DATA,__objc_const", align 8
 
 // RUN: %clang_cc1 -triple armv6-apple-darwin10 -target-abi apcs-gnu -Wno-objc-root-class -fobjc-exceptions -emit-llvm -o %t %s
 // RUN: FileCheck -check-prefix=CHECK-ARMV6 < %t %s

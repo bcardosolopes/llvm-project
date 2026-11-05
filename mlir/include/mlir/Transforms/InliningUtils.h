@@ -83,8 +83,15 @@ public:
                              Operation *callable, Value result,
                              DictionaryAttr resultAttrs) const;
 
-  virtual void processInlinedCallBlocks(
-      Operation *call, iterator_range<Region::iterator> inlinedBlocks) const;
+  virtual Attribute mergeFeatureAttributes(OpBuilder &builder, Operation *call,
+                                           Operation *callable) const;
+
+  /// `callable` is passed explicitly rather than recovered from `call`:
+  /// recovering it costs a symbol table lookup, which is linear in the number
+  /// of symbols in the enclosing symbol table.
+  virtual void
+  processInlinedCallBlocks(Operation *call, Operation *callable,
+                           iterator_range<Region::iterator> inlinedBlocks) const;
 
   virtual bool allowSingleBlockOptimization(
       iterator_range<Region::iterator> inlinedBlocks) const;
@@ -114,7 +121,8 @@ inlineRegion(InlinerInterface &interface,
              Region *src, Operation *inlinePoint, IRMapping &mapper,
              ValueRange resultsToReplace, TypeRange regionResultTypes,
              std::optional<Location> inlineLoc = std::nullopt,
-             bool shouldCloneInlinedRegion = true);
+             bool shouldCloneInlinedRegion = true,
+             bool mergeAttributes = false);
 LogicalResult
 inlineRegion(InlinerInterface &interface,
              function_ref<InlinerInterface::CloneCallbackSigTy> cloneCallback,
@@ -122,7 +130,8 @@ inlineRegion(InlinerInterface &interface,
              IRMapping &mapper, ValueRange resultsToReplace,
              TypeRange regionResultTypes,
              std::optional<Location> inlineLoc = std::nullopt,
-             bool shouldCloneInlinedRegion = true);
+             bool shouldCloneInlinedRegion = true,
+             bool mergeAttributes = false);
 
 /// This function is an overload of the above 'inlineRegion' that allows for
 /// providing the set of operands ('inlinedOperands') that should be used
@@ -133,14 +142,16 @@ inlineRegion(InlinerInterface &interface,
              Region *src, Operation *inlinePoint, ValueRange inlinedOperands,
              ValueRange resultsToReplace,
              std::optional<Location> inlineLoc = std::nullopt,
-             bool shouldCloneInlinedRegion = true);
+             bool shouldCloneInlinedRegion = true,
+             bool mergeAttributes = false);
 LogicalResult
 inlineRegion(InlinerInterface &interface,
              function_ref<InlinerInterface::CloneCallbackSigTy> cloneCallback,
              Region *src, Block *inlineBlock, Block::iterator inlinePoint,
              ValueRange inlinedOperands, ValueRange resultsToReplace,
              std::optional<Location> inlineLoc = std::nullopt,
-             bool shouldCloneInlinedRegion = true);
+             bool shouldCloneInlinedRegion = true,
+             bool mergeAttributes = false);
 
 /// This function inlines a given region, 'src', of a callable operation,
 /// 'callable', into the location defined by the given call operation. This
@@ -152,7 +163,7 @@ LogicalResult
 inlineCall(InlinerInterface &interface,
            function_ref<InlinerInterface::CloneCallbackSigTy> cloneCallback,
            CallOpInterface call, CallableOpInterface callable, Region *src,
-           bool shouldCloneInlinedRegion = true);
+           bool shouldCloneInlinedRegion = true, bool mergeAttributes = false);
 
 } // namespace mlir
 

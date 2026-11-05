@@ -22,6 +22,30 @@ using namespace mlir;
 using namespace mlir::LLVM;
 using namespace mlir::LLVM::detail;
 
+namespace {
+constexpr StringLiteral kDILocationAtomGroupKey = "llvm.di_atom_group";
+constexpr StringLiteral kDILocationAtomRankKey = "llvm.di_atom_rank";
+
+static DictionaryAttr getSourceAtomMetadataAttr(MLIRContext *context,
+                                                uint64_t atomGroup,
+                                                uint8_t atomRank) {
+  if (!atomGroup && !atomRank)
+    return {};
+
+  Builder builder(context);
+  NamedAttrList attrs;
+  if (atomGroup) {
+    attrs.append(kDILocationAtomGroupKey,
+                 builder.getI64IntegerAttr(static_cast<int64_t>(atomGroup)));
+  }
+  if (atomRank) {
+    attrs.append(kDILocationAtomRankKey,
+                 builder.getIntegerAttr(builder.getIntegerType(8), atomRank));
+  }
+  return builder.getDictionaryAttr(attrs);
+}
+} // namespace
+
 DebugImporter::DebugImporter(ModuleOp mlirModule,
                              bool dropDICompositeTypeElements)
     : cache([&](llvm::DINode *node) { return createRecSelf(node); }),
@@ -44,6 +68,17 @@ Location DebugImporter::translateFuncLocation(llvm::Function *func) {
 // Attributes
 //===----------------------------------------------------------------------===//
 
+DIAssignIDAttr DebugImporter::translate(llvm::DIAssignID *node) {
+  if (!node)
+    return nullptr;
+  // The node holds nothing, so the cache is the whole job: a store and the
+  // `#dbg_assign` that describes it must come back naming one identity.
+  DIAssignIDAttr &attr = assignIDToAttr[node];
+  if (!attr)
+    attr = DIAssignIDAttr::get(context, DistinctAttr::create(UnitAttr::get(context)));
+  return attr;
+}
+
 DIBasicTypeAttr DebugImporter::translateImpl(llvm::DIBasicType *node) {
   return DIBasicTypeAttr::get(context, node->getTag(), node->getName(),
                               node->getSizeInBits(), node->getEncoding());
@@ -62,6 +97,43 @@ DICompileUnitAttr DebugImporter::translateImpl(llvm::DICompileUnit *node) {
       translate(node->getFile()), getStringAttrOrNull(node->getRawProducer()),
       node->isOptimized(), emissionKind.value(), nameTableKind.value(),
       getStringAttrOrNull(node->getRawSplitDebugFilename()));
+}
+
+SmallVector<DINodeAttr>
+DebugImporter::translateAnnotations(llvm::DINodeArray rawAnnotations) {
+  SmallVector<DINodeAttr> annotations;
+  if (!rawAnnotations)
+    return annotations;
+
+  for (size_t i = 0, e = rawAnnotations->getNumOperands(); i < e; ++i) {
+    auto *tuple = dyn_cast<llvm::MDTuple>(rawAnnotations->getOperand(i));
+    if (!tuple || tuple->getNumOperands() != 2)
+      continue;
+    auto *name = dyn_cast<llvm::MDString>(tuple->getOperand(0));
+    if (!name)
+      continue;
+
+    // The two value kinds DwarfUnit::addAnnotation can emit. Integers matter
+    // as much as strings here: IRPGO debug info profile correlation stores a
+    // CFG hash and a counter count alongside the function name, and losing
+    // either of them makes the emitted DWARF useless to llvm-profdata.
+    Attribute value;
+    if (auto *str = dyn_cast<llvm::MDString>(tuple->getOperand(1))) {
+      value = StringAttr::get(context, str->getString());
+    } else if (auto *constant =
+                   dyn_cast<llvm::ConstantAsMetadata>(tuple->getOperand(1))) {
+      if (auto *integer = dyn_cast<llvm::ConstantInt>(constant->getValue()))
+        value =
+            IntegerAttr::get(IntegerType::get(context, integer->getBitWidth()),
+                             integer->getValue());
+    }
+    if (!value)
+      continue;
+
+    annotations.push_back(DIAnnotationAttr::get(
+        context, StringAttr::get(context, name->getString()), value));
+  }
+  return annotations;
 }
 
 DICompositeTypeAttr DebugImporter::translateImpl(llvm::DICompositeType *node) {
@@ -84,14 +156,18 @@ DICompositeTypeAttr DebugImporter::translateImpl(llvm::DICompositeType *node) {
   // be malformed.
   if (node->getTag() == llvm::dwarf::DW_TAG_array_type && !baseType)
     return nullptr;
+  SmallVector<DINodeAttr> annotations =
+      translateAnnotations(node->getAnnotations());
   return DICompositeTypeAttr::get(
-      context, node->getTag(), getStringAttrOrNull(node->getRawName()),
-      translate(node->getFile()), node->getLine(), translate(node->getScope()),
-      baseType, flags.value_or(DIFlags::Zero), node->getSizeInBits(),
+      context,
+      /*recId=*/{}, /*isRecSelf=*/false, node->getTag(),
+      getStringAttrOrNull(node->getRawName()), translate(node->getFile()),
+      node->getLine(), translate(node->getScope()), baseType,
+      flags.value_or(DIFlags::Zero), node->getSizeInBits(),
       node->getAlignInBits(), translateExpression(node->getDataLocationExp()),
       translateExpression(node->getRankExp()),
       translateExpression(node->getAllocatedExp()),
-      translateExpression(node->getAssociatedExp()), elements);
+      translateExpression(node->getAssociatedExp()), annotations, elements);
 }
 
 DIDerivedTypeAttr DebugImporter::translateImpl(llvm::DIDerivedType *node) {
@@ -158,12 +234,14 @@ DebugImporter::translateImpl(llvm::DIGlobalVariable *node) {
       return {};
     return StringAttr::get(context, node->getName());
   };
+  SmallVector<DINodeAttr> annotations =
+      translateAnnotations(node->getAnnotations());
   return DIGlobalVariableAttr::get(
       context, translate(node->getScope()),
       convertToStringAttr(node->getName()),
       convertToStringAttr(node->getLinkageName()), translate(node->getFile()),
       node->getLine(), translate(node->getType()), node->isLocalToUnit(),
-      node->isDefinition(), node->getAlignInBits());
+      node->isDefinition(), node->getAlignInBits(), annotations);
 }
 
 DILocalVariableAttr DebugImporter::translateImpl(llvm::DILocalVariable *node) {
@@ -240,32 +318,19 @@ DISubprogramAttr DebugImporter::translateImpl(llvm::DISubprogram *node) {
   if (llvm::is_contained(retainedNodes, nullptr))
     retainedNodes.clear();
 
-  SmallVector<DINodeAttr> annotations;
-  // We currently only support `string` values for annotations on the MLIR side.
-  // Theoretically we could support other primitives, but LLVM is not using
-  // other types in practice.
-  if (llvm::DINodeArray rawAnns = node->getAnnotations(); rawAnns) {
-    for (size_t i = 0, e = rawAnns->getNumOperands(); i < e; ++i) {
-      const llvm::MDTuple *tuple = cast<llvm::MDTuple>(rawAnns->getOperand(i));
-      if (tuple->getNumOperands() != 2)
-        continue;
-      const llvm::MDString *name = cast<llvm::MDString>(tuple->getOperand(0));
-      const llvm::MDString *value =
-          dyn_cast<llvm::MDString>(tuple->getOperand(1));
-      if (name && value) {
-        annotations.push_back(DIAnnotationAttr::get(
-            context, StringAttr::get(context, name->getString()),
-            StringAttr::get(context, value->getString())));
-      }
-    }
-  }
+  SmallVector<DINodeAttr> annotations =
+      translateAnnotations(node->getAnnotations());
 
   return DISubprogramAttr::get(context, id, translate(node->getUnit()), scope,
                                getStringAttrOrNull(node->getRawName()),
                                getStringAttrOrNull(node->getRawLinkageName()),
                                translate(node->getFile()), node->getLine(),
-                               node->getScopeLine(), *subprogramFlags, type,
-                               retainedNodes, annotations);
+                               node->getScopeLine(),
+                               symbolizeDIFlags(node->getFlags())
+                                   .value_or(DIFlags::Zero),
+                               *subprogramFlags, type, retainedNodes,
+                               annotations,
+                               node->getKeyInstructionsEnabled());
 }
 
 DISubrangeAttr DebugImporter::translateImpl(llvm::DISubrange *node) {
@@ -474,6 +539,10 @@ Location DebugImporter::translateLoc(llvm::DILocation *loc) {
   // Add call site information, if available.
   if (llvm::DILocation *inlinedAt = loc->getInlinedAt())
     result = CallSiteLoc::get(result, translateLoc(inlinedAt));
+
+  if (DictionaryAttr sourceAtomMetadata = getSourceAtomMetadataAttr(
+          context, loc->getAtomGroup(), loc->getAtomRank()))
+    result = FusedLoc::get({result}, sourceAtomMetadata, context);
 
   return result;
 }

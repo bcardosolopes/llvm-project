@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++17 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o %t.cir
+// RUN: %clang_cc1 -std=c++17 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-abi %s -o %t.cir
 // RUN: FileCheck --input-file=%t.cir %s -check-prefix=CIR
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -Wno-unused-value -fclangir -emit-llvm %s -o %t-cir.ll
 // RUN: FileCheck --input-file=%t-cir.ll %s -check-prefix=LLVM
@@ -9,21 +9,16 @@ unsigned char cxxstaticcast_0(unsigned int x) {
 
 // CIR: cir.func{{.*}} @_Z15cxxstaticcast_0j
 // CIR:    %[[XPTR:[0-9]+]] = cir.alloca !u32i, !cir.ptr<!u32i>, ["x", init] {alignment = 4 : i64}
-// CIR:    %[[RV:[0-9]+]] = cir.alloca !u8i, !cir.ptr<!u8i>, ["__retval"] {alignment = 1 : i64}
 // CIR:    cir.store %arg0, %[[XPTR]] : !u32i, !cir.ptr<!u32i>
 // CIR:    %[[XVAL:[0-9]+]] = cir.load{{.*}} %[[XPTR]] : !cir.ptr<!u32i>, !u32i
 // CIR:    %[[CASTED:[0-9]+]] = cir.cast integral %[[XVAL]] : !u32i -> !u8i
-// CIR:    cir.store %[[CASTED]], %[[RV]] : !u8i, !cir.ptr<!u8i>
-// CIR:    %[[R:[0-9]+]] = cir.load{{.*}} %1 : !cir.ptr<!u8i>, !u8i
-// CIR:    cir.return %[[R]] : !u8i
+// CIR:    cir.return %[[CASTED]] : !u8i
 // CIR:  }
 
-// LLVM: define{{.*}} i8 @_Z15cxxstaticcast_0j(i32 %{{[0-9]+}})
+// LLVM: define{{.*}} i8 @_Z15cxxstaticcast_0j(i32 noundef %{{[0-9]+}})
 // LLVM: %[[LOAD:[0-9]+]] = load i32, ptr %{{[0-9]+}}, align 4
 // LLVM: %[[TRUNC:[0-9]+]] = trunc i32 %[[LOAD]] to i8
-// LLVM: store i8 %[[TRUNC]], ptr %[[RV:[0-9]+]], align 1
-// LLVM: %[[R:[0-9]+]] = load i8, ptr %[[RV]], align 1
-// LLVM: ret i8 %[[R]]
+// LLVM: ret i8 %[[TRUNC]]
 
 int cStyleCasts_0(unsigned x1, int x2, float x3, short x4, double x5) {
 // CIR: cir.func{{.*}} @_Z13cStyleCasts_0jifsd
@@ -95,14 +90,17 @@ bool cptr(void *d) {
 // CIR:   %[[DVAL:[0-9]+]] = cir.load{{.*}} %[[DPTR]] : !cir.ptr<!cir.ptr<!void>>, !cir.ptr<!void>
 // CIR:   %{{[0-9]+}} = cir.cast ptr_to_bool %[[DVAL]] : !cir.ptr<!void> -> !cir.bool
 
-// LLVM-LABEL: define{{.*}} i1 @_Z4cptrPv(ptr %0)
+// LLVM-LABEL: define{{.*}} i1 @_Z4cptrPv(ptr noundef %0)
 // LLVM:         %[[ARG_STORAGE:.*]] = alloca ptr, i64 1
-// LLVM:         %[[RETVAL:.*]] = alloca i8, i64 1
-// LLVM:         %[[X_STORAGE:.*]] = alloca i8, i64 1
+// LLVM:         %[[BOOL_STORAGE:.*]] = alloca i8, i64 1
 // LLVM:         store ptr %0, ptr %[[ARG_STORAGE]]
 // LLVM:         %[[LOADED_PTR:.*]] = load ptr, ptr %[[ARG_STORAGE]]
 // LLVM:         %[[NULL_CHECK:.*]] = icmp ne ptr %[[LOADED_PTR]], null
-// LLVM:         ret i1
+// LLVM:         %[[BOOL_EXT:.*]] = zext i1 %[[NULL_CHECK]] to i8
+// LLVM:         store i8 %[[BOOL_EXT]], ptr %[[BOOL_STORAGE]]
+// LLVM:         %[[BOOL_LOADED:.*]] = load i8, ptr %[[BOOL_STORAGE]]
+// LLVM:         %[[BOOL_TRUNC:.*]] = trunc i8 %[[BOOL_LOADED]] to i1
+// LLVM:         ret i1 %[[BOOL_TRUNC]]
 
 void should_not_cast() {
   unsigned x1;
@@ -139,7 +137,7 @@ void f(long int start) {
 // CIR: %[[MID:.*]] = cir.cast integral %[[L]] : !s64i -> !u64i
 // CIR:          cir.cast int_to_ptr %[[MID]] : !u64i -> !cir.ptr<!void>
 
-// LLVM-LABEL: define{{.*}} void @_Z1fl(i64 %0)
+// LLVM-LABEL: define{{.*}} void @_Z1fl(i64 noundef %0)
 // LLVM: %[[ADDR:.*]] = alloca i64, i64 1, align 8
 // LLVM: %[[PADDR:.*]] = alloca ptr, i64 1, align 8
 // LLVM: store i64 %0, ptr %[[ADDR]], align 8

@@ -1,0 +1,39 @@
+// A call whose record result differs from the callee's only in name goes
+// through the definition's address cast to the caller's function type, not
+// through a record-to-record bitcast of the value.
+//
+// Lowering such a bitcast goes through memory: the callee builds its object in
+// a temporary of its own type, and a bitwise copy puts it in the caller's
+// slot. A class with a non-trivial copy constructor does not survive that: an app
+// crashed at startup on a record returned this way, its std::set root still
+// pointing into the callee's dead frame (the merge had two copies of the record
+// because two TUs' libc++ set bodies differed). Through
+// the cast, the caller's own return slot is the callee's.
+//
+// RUN: cir-link %s %S/Inputs/call-record-result-reconcile-b.cir \
+// RUN:     --warn-odr-divergence -o %t.cir 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+//
+// What it lowers to is checked from C++, where the ABI lowering runs:
+// call-record-result-sret.cpp.
+
+!s64i = !cir.int<s, 64>
+!rec_T = !cir.record<struct "T" {!cir.ptr<!cir.void>, !s64i, !s64i, !s64i}>
+
+module {
+  cir.func private @make() -> !rec_T
+
+  cir.func @wrap() -> !rec_T {
+    %0 = cir.call @make() : () -> !rec_T
+    cir.return %0 : !rec_T
+  }
+}
+
+// STATS: 0 call results retyped, 1 calls through a cast
+
+// CHECK:      cir.func @wrap() -> !rec_T
+// CHECK:        %[[ADDR:.*]] = cir.get_global @make : !cir.ptr<!cir.func<() -> !rec_impl3A3AT>>
+// CHECK-NEXT:   %[[FN:.*]] = cir.cast bitcast %[[ADDR]] : !cir.ptr<!cir.func<() -> !rec_impl3A3AT>> -> !cir.ptr<!cir.func<() -> !rec_T>>
+// CHECK-NEXT:   cir.call %[[FN]]() : (!cir.ptr<!cir.func<() -> !rec_T>>) -> !rec_T
+// CHECK-NOT:    cir.cast bitcast {{.*}} : !rec_

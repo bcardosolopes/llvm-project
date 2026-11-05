@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -std=c++1z -fobjc-arc -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-darwin10 -emit-llvm -disable-llvm-passes -std=c++1z -fobjc-arc -fclangir -o - %s | FileCheck %s --check-prefix=CIR %}
 
 struct S0 {
   ~S0();
@@ -39,3 +40,12 @@ void test0(C *c) {
 void test1(C *c) {
   c.f = S1();
 }
+
+// CIR-LABEL: define void @_Z5test0P1C(
+// CIR: call void @_ZN2S0C1Ev(
+// CIR: call void @_ZN2S1C1E2S0(
+// CIR: call void @objc_msgSend(ptr noundef %{{.*}}, ptr noundef %{{.*}}, ptr noundef %{{.*}})
+
+// CIR-LABEL: define void @_Z5test1P1C(
+// CIR: call void @_ZN2S1C1Ev(
+// CIR: call void @objc_msgSend(ptr noundef %{{.*}}, ptr noundef %{{.*}}, ptr noundef %{{.*}})

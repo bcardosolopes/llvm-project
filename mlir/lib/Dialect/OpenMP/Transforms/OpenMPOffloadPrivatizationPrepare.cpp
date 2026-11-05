@@ -332,6 +332,12 @@ class PrepareForOMPOffloadPrivatizationPass
         ArrayAttr newDependKindsAttr =
             ArrayAttr::get(rewriter.getContext(), newDependKinds);
         targetOp.getDependVarsMutable().append(fakeDependVar);
+        if (!targetOp.getDependSizes().empty()) {
+          Value fakeDependSize = LLVM::ConstantOp::create(
+              rewriter, targetOp.getLoc(), rewriter.getI64Type(),
+              getSizeInBytes(DataLayout(mod), fakeDependVar.getType()));
+          targetOp.getDependSizesMutable().append(fakeDependSize);
+        }
         targetOp.setDependKindsAttr(newDependKindsAttr);
       }
       rewriter.setInsertionPoint(targetOp);

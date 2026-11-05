@@ -1,0 +1,26 @@
+// RUN: cir-opt %s -o %t.text
+// RUN: cir-opt %s --emit-bytecode -o %t.bc
+// RUN: cir-opt %t.bc -o %t.roundtrip
+// RUN: diff %t.text %t.roundtrip
+// RUN: FileCheck --input-file=%t.roundtrip %s
+
+// R's member graph crosses the reader's eager-nesting limit, so resolving it
+// publishes a partial for S, resolves the get_member consumer around it, and
+// only then discovers more deferred dependencies while completing it. The
+// completion step used to drop that deferred work and exit silently, leaving
+// S incomplete so the consumer failed verification with
+// "member index out of bounds". The round trip must preserve every record.
+
+// CHECK: !rec_S = !cir.record<struct "S" {!cir.ptr<!u8i>, !cir.ptr<!cir.ptr<!rec_M>>}>
+// CHECK: !rec_R = !cir.record<struct "R" {!cir.ptr<!rec_S>, !cir.ptr<!rec_C1>}>
+
+
+!u8 = !cir.int<u, 8>
+!s = !cir.record<struct "S" {!cir.ptr<!u8>, !cir.ptr<!cir.ptr<!cir.record<struct "M" {!cir.ptr<!cir.record<struct "K" {!cir.ptr<!cir.record<struct "K">>}>>}>>>}>
+!r = !cir.record<struct "R" {!cir.ptr<!s>, !cir.ptr<!cir.record<struct "C1" {!cir.record<struct "C2" {!cir.record<struct "C3" {!cir.record<struct "C4" {!cir.ptr<!cir.record<struct "I" incomplete>>}>}>}>}>>}>
+module {
+  cir.func @f0(%arg0: !cir.ptr<!r>) {
+    %m = cir.get_member %arg0[0] {name = ""} : !cir.ptr<!r> -> !cir.ptr<!cir.ptr<!s>>
+    cir.return
+  }
+}

@@ -1,0 +1,51 @@
+// RUN: cir-opt -cir-flatten-cfg %s -o - | FileCheck %s
+
+// Verify that cir.cleanup.scope lowers to a SINGLE shared landing pad: every
+// `cir.call exception` in the body becomes a cir.try_call whose unwind edge
+// targets the one cleanup block (eh.inflight cleanup -> cleanup ops ->
+// resume.flat), instead of each throwing call materializing its own cleanup.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
+module {
+  cir.func private @_ZN1SC1Ei(!cir.ptr<!rec_S>, !s32i)
+  cir.func private @_ZN1SD1Ev(!cir.ptr<!rec_S>)
+  cir.func @test(%b: !cir.ptr<!rec_S>, %e: !cir.ptr<!rec_S>) {
+    %eoi = cir.alloca !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>, ["eoi"] {alignment = 8 : i64}
+    cir.store %b, %eoi : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
+    cir.cleanup.scope {
+      %c0 = cir.const #cir.int<0> : !s32i
+      cir.call exception @_ZN1SC1Ei(%b, %c0) : (!cir.ptr<!rec_S>, !s32i) -> ()
+      cir.store %e, %eoi : !cir.ptr<!rec_S>, !cir.ptr<!cir.ptr<!rec_S>>
+      %c1 = cir.const #cir.int<1> : !s32i
+      cir.call exception @_ZN1SC1Ei(%e, %c1) : (!cir.ptr<!rec_S>, !s32i) -> ()
+      cir.yield
+    } cleanup {
+      cir.call @_ZN1SD1Ev(%b) : (!cir.ptr<!rec_S>) -> ()
+      cir.yield
+    }
+    cir.return
+  }
+}
+
+// CHECK-LABEL: cir.func @test
+// The cir.cleanup.scope op is fully flattened away.
+// CHECK-NOT: cir.cleanup.scope
+//
+// First throwing call: normal edge to the second call's block, unwind edge to
+// the shared cleanup block.
+// CHECK: cir.try_call @_ZN1SC1Ei(%arg0, %{{.*}}) [[CONT1:\^bb[0-9]+]], [[LP:\^bb[0-9]+]]
+// CHECK: [[CONT1]]:
+// Second throwing call shares the SAME unwind block [[LP]].
+// CHECK: cir.try_call @_ZN1SC1Ei(%arg1, %{{.*}}) ^bb{{[0-9]+}}, [[LP]]
+//
+// One shared landing pad, split into an eh.inflight HEADER and a cleanupBody
+// that takes the exception token as block arguments (so nested scopes can chain
+// into it). Header: eh.inflight -> br cleanupBody(token).
+// CHECK: [[LP]]:
+// CHECK-NEXT: %[[EXC:.*]], %[[SEL:.*]] = cir.eh.inflight_exception cleanup
+// CHECK-NEXT: cir.br [[BODY:\^bb[0-9]+]](%[[EXC]], %[[SEL]] :
+// cleanupBody: run this scope's destructors, then resume the threaded token.
+// CHECK: [[BODY]](%[[P:.*]]: !cir.ptr<!void>, %[[I:.*]]: !u32i):
+// CHECK-NEXT: cir.call @_ZN1SD1Ev
+// CHECK-NEXT: cir.resume.flat %[[P]], %[[I]]

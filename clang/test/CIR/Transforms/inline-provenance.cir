@@ -1,0 +1,34 @@
+// The CIR inliner records where inlined code came from in CIR terms: the
+// callee frame of each inlined location names the callee and its location.
+// Lowering builds the debug info from that; the record round-trips.
+//
+// RUN: cir-opt %s --cir-inline --mlir-print-debuginfo -o %t.cir
+// RUN: FileCheck --input-file=%t.cir %s
+// RUN: cir-opt %t.cir --mlir-print-debuginfo | FileCheck %s
+
+!s32i = !cir.int<s, 32>
+module {
+  cir.func private @callee(%arg0: !s32i) -> !s32i {
+    %0 = cir.binop(add, %arg0, %arg0) : !s32i loc(#add)
+    cir.return %0 : !s32i loc(#ret)
+  } loc(#callee)
+  cir.func @caller(%arg0: !s32i) -> !s32i {
+    %0 = cir.call @callee(%arg0) : (!s32i) -> !s32i loc(#call)
+    cir.return %0 : !s32i loc(#ret2)
+  } loc(#caller)
+}
+#callee = loc("a.h":2:1)
+#add = loc("a.h":3:10)
+#ret = loc("a.h":3:3)
+#caller = loc("a.cpp":5:1)
+#call = loc("a.cpp":6:10)
+#ret2 = loc("a.cpp":6:3)
+
+// CHECK-NOT: cir.func private @callee
+// CHECK:     cir.func @caller(
+// CHECK:       cir.binop(add, {{.*}}) : !s32i loc(#[[IN_CALLEE:loc[0-9]+]])
+// CHECK-DAG: #[[CALLEE_DEF:loc[0-9]+]] = loc("a.h":2:1)
+// CHECK-DAG: #[[ADD:loc[0-9]+]] = loc("a.h":3:10)
+// CHECK-DAG: #[[CALL:loc[0-9]+]] = loc("a.cpp":6:10)
+// CHECK-DAG: #[[FRAME:loc[0-9]+]] = loc(fused<#cir.inlined_function<@callee, #[[CALLEE_DEF]]>>[#[[ADD]]])
+// CHECK-DAG: #[[IN_CALLEE]] = loc(callsite(#[[FRAME]] at #[[CALL]]))

@@ -3,6 +3,7 @@
 // REQUIRES: x86-registered-target
 //
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 %s -O1 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++20 %s -O1 -fclangir -emit-llvm -o - | FileCheck %s --check-prefix=CHECK-CIR %}
 
 #include "Inputs/coroutine.h"
 
@@ -86,3 +87,10 @@ int foo() {
 // CHECK: define{{.*}}_Z3foov(
 // CHECK: store i32 42, ptr %{{.*}}
 // CHECK: }
+
+// CHECK-CIR-LABEL: define internal fastcc void @_ZL1av.destroy(ptr noundef nonnull align 8 dereferenceable(48) %0)
+// CHECK-CIR: {{(tail )?}}call void @_ZdlPvm(ptr noundef nonnull %0, i64 noundef 48)
+
+// CHECK-CIR-LABEL: define internal fastcc void @_ZL4testv.destroy(ptr noundef nonnull align 8 dereferenceable(56) %0)
+// CHECK-CIR: %index.addr = getelementptr inbounds nuw i8, ptr %0, i64 48
+// CHECK-CIR: {{(tail )?}}call void @_ZdlPvm(ptr noundef nonnull %0, i64 noundef 56)

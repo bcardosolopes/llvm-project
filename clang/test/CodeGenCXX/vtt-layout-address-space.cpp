@@ -1,4 +1,7 @@
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=amdgcn-amd-amdhsa -std=c++11 -fclangir -emit-cir -o - | FileCheck %s --check-prefix=CIR %}
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=spirv64-amd-amdhsa -std=c++11 -fclangir -emit-cir -o - | FileCheck %s --check-prefix=CIR %}
 // RUN: %clang_cc1 %s -triple=amdgcn-amd-amdhsa -std=c++11 -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 %s -triple=spirv64-amd-amdhsa -std=c++11 -fclangir -emit-llvm -o - | FileCheck %s --check-prefix=CIR-WITH-NONZERO-DEFAULT-AS %}
 
 // Test1::B should just have a single entry in its VTT, which points to the vtable.
 namespace Test1 {
@@ -78,6 +81,9 @@ namespace Test6 {
   }
 }
 
+// CIR: cir.vtt.address_point @_ZTTN5Test31DE, offset = 11 -> !cir.ptr<!cir.ptr<!void, target_address_space(1)>>
+// CIR: cir.vtt.address_point @_ZTTN5Test41DE, offset = 14 -> !cir.ptr<!cir.ptr<!void, target_address_space(1)>>
+// CIR-WITH-NONZERO-DEFAULT-AS: @llvm.global_ctors = appending global [1 x { i32, ptr addrspace(4), ptr addrspace(4) }]
 // CHECK: @_ZTTN5Test11BE ={{.*}} unnamed_addr addrspace(1) constant [1 x ptr addrspace(1)] [ptr addrspace(1) getelementptr inbounds inrange(-24, 8) ({ [4 x ptr addrspace(1)] }, ptr addrspace(1) @_ZTVN5Test11BE, i32 0, i32 0, i32 3)]
 // CHECK: @_ZTVN5Test51AE ={{.*}} unnamed_addr addrspace(1) constant { [4 x ptr addrspace(1)] } { [4 x ptr addrspace(1)] [ptr addrspace(1) null, ptr addrspace(1) @_ZTIN5Test51AE, ptr addrspace(1) addrspacecast (ptr @__cxa_pure_virtual to ptr addrspace(1)), ptr addrspace(1) addrspacecast (ptr @_ZN5Test51A6anchorEv to ptr addrspace(1))] }
 // CHECK: @_ZTVN5Test61AE ={{.*}} unnamed_addr addrspace(1) constant { [4 x ptr addrspace(1)] } { [4 x ptr addrspace(1)] [ptr addrspace(1) null, ptr addrspace(1) @_ZTIN5Test61AE, ptr addrspace(1) addrspacecast (ptr @__cxa_deleted_virtual to ptr addrspace(1)), ptr addrspace(1) addrspacecast (ptr @_ZN5Test61A6anchorEv to ptr addrspace(1))] }

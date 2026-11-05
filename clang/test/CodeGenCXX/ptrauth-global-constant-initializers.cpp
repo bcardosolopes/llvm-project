@@ -2,6 +2,10 @@
 // RUN:   -fptrauth-vtable-pointer-address-discrimination -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,DARWIN
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fno-rtti -fptrauth-vtable-pointer-type-discrimination \
 // RUN:   -fptrauth-vtable-pointer-address-discrimination -emit-llvm -o - %s | FileCheck %s --check-prefixes=CHECK,ELF
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios   -fptrauth-calls -fno-rtti -fptrauth-vtable-pointer-type-discrimination \
+// RUN:   -fptrauth-vtable-pointer-address-discrimination -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefixes=CIR,DARWIN %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fno-rtti -fptrauth-vtable-pointer-type-discrimination \
+// RUN:   -fptrauth-vtable-pointer-address-discrimination -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefixes=CIR,ELF %}
 
 // CHECK: %struct.Base1 = type { ptr }
 // CHECK: %struct.Base2 = type { ptr }
@@ -30,6 +34,12 @@
 // CHECK: @_ZTT8Derived4 = linkonce_odr unnamed_addr constant [7 x ptr] [ptr ptrauth (ptr getelementptr inbounds inrange(-32, 24) ({ [7 x ptr], [5 x ptr] }, ptr @_ZTV8Derived4, i32 0, i32 0, i32 4), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-32, 16) ({ [6 x ptr] }, ptr @_ZTC8Derived40_12VirtualBase1, i32 0, i32 0, i32 4), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-32, 16) ({ [6 x ptr] }, ptr @_ZTC8Derived40_12VirtualBase1, i32 0, i32 0, i32 4), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-24, 16) ({ [5 x ptr], [4 x ptr] }, ptr @_ZTC8Derived48_12VirtualBase2, i32 0, i32 0, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-24, 8) ({ [5 x ptr], [4 x ptr] }, ptr @_ZTC8Derived48_12VirtualBase2, i32 0, i32 1, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-32, 24) ({ [7 x ptr], [5 x ptr] }, ptr @_ZTV8Derived4, i32 0, i32 0, i32 4), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-24, 16) ({ [7 x ptr], [5 x ptr] }, ptr @_ZTV8Derived4, i32 0, i32 1, i32 3), i32 2)],{{.*}} align 8
 // CHECK: @_ZTC8Derived40_12VirtualBase1 = linkonce_odr unnamed_addr constant { [6 x ptr] } { [6 x ptr] [ptr null, ptr null, ptr null, ptr null, ptr ptrauth (ptr @_ZN5Base11aEv, i32 0, i64 [[BASE1_A_DISC]], ptr getelementptr inbounds ({ [6 x ptr] }, ptr @_ZTC8Derived40_12VirtualBase1, i32 0, i32 0, i32 4)), ptr ptrauth (ptr @_ZN12VirtualBase11fEv, i32 0, i64 [[VIRTUALBASE1_F_DISC]], ptr getelementptr inbounds ({ [6 x ptr] }, ptr @_ZTC8Derived40_12VirtualBase1, i32 0, i32 0, i32 5))] },{{.*}} align 8
 // CHECK: @_ZTC8Derived48_12VirtualBase2 = linkonce_odr unnamed_addr constant { [5 x ptr], [4 x ptr] } { [5 x ptr] [ptr inttoptr (i64 -8 to ptr), ptr null, ptr null, ptr ptrauth (ptr @_ZN5Base21bEv, i32 0, i64 [[BASE2_B_DISC]], ptr getelementptr inbounds ({ [5 x ptr], [4 x ptr] }, ptr @_ZTC8Derived48_12VirtualBase2, i32 0, i32 0, i32 3)), ptr ptrauth (ptr @_ZN12VirtualBase21gEv, i32 0, i64 [[VIRTUALBASE2_G_DISC]], ptr getelementptr inbounds ({ [5 x ptr], [4 x ptr] }, ptr @_ZTC8Derived48_12VirtualBase2, i32 0, i32 0, i32 4))], [4 x ptr] [ptr null, ptr inttoptr (i64 8 to ptr), ptr null, ptr ptrauth (ptr @_ZN5Base11aEv, i32 0, i64 [[BASE1_A_DISC]], ptr getelementptr inbounds ({ [5 x ptr], [4 x ptr] }, ptr @_ZTC8Derived48_12VirtualBase2, i32 0, i32 1, i32 3))] },{{.*}} align 8
+
+// CIR: @_ZTV5Base1 ={{.*}}ptr ptrauth (ptr @_ZN5Base11aEv, i32 0, i64 [[CIR_BASE1_A_DISC:38871]], ptr getelementptr inbounds {{.*}} @_ZTV5Base1{{.*}}){{.*}}align 8
+// CIR: @g_b1 ={{.*}}ptr ptrauth (ptr getelementptr inbounds inrange(-16, 8) {{.*}} @_ZTV5Base1{{.*}}, i32 2, i64 [[CIR_BASE1_VTABLE_DISC:6511]], ptr @g_b1){{.*}}align 8
+// CIR: @g_d1 ={{.*}}ptr ptrauth (ptr getelementptr inbounds inrange(-16, 24) {{.*}} @_ZTV8Derived1{{.*}}, i32 2, i64 [[CIR_BASE1_VTABLE_DISC]], ptr @g_d1), ptr ptrauth (ptr getelementptr inbounds inrange(-16, 8) {{.*}} @_ZTV8Derived1{{.*}}, i32 2, i64 [[CIR_BASE2_VTABLE_DISC:63631]], ptr getelementptr inbounds {{.*}} @g_d1{{.*}}){{.*}}align 8
+// CIR: @_ZTT12VirtualBase1 ={{.*}}[ptr ptrauth (ptr getelementptr inbounds inrange(-32, 16) {{.*}} @_ZTV12VirtualBase1{{.*}}, i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-32, 16) {{.*}} @_ZTV12VirtualBase1{{.*}}, i32 2)]{{.*}}align 8
+// CIR: @_ZTC8Derived40_12VirtualBase1 ={{.*}}ptr ptrauth (ptr @_ZN12VirtualBase11fEv, i32 0, i64 [[CIR_VIRTUALBASE1_F_DISC:7987]], ptr getelementptr inbounds {{.*}} @_ZTC8Derived40_12VirtualBase1{{.*}}){{.*}}align 8
 
 struct Base1 { virtual void a() {} };
 struct Base2 { virtual void b() {} };

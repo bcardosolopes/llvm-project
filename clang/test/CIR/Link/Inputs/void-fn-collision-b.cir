@@ -1,0 +1,13 @@
+// Second input for ../void-fn-collision.cir. Not a test on its own.
+//
+// Same record name, different body, so S is renamed here -- which is what
+// drives the type replacer over this module's void function.
+
+!s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!cir.float}>
+
+module {
+  cir.func @b_takes(%p: !cir.ptr<!rec_S>) {
+    cir.return
+  }
+}

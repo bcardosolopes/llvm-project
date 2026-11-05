@@ -9,6 +9,8 @@
 
 // RUN: %clang_cc1 -O3 -triple x86_64-unknown-linux                             -fsanitize=cfi-mfcall -fsanitize-trap=cfi-mfcall -fvisibility=hidden -emit-llvm -o - %s | FileCheck %s --check-prefixes=NO-MERGE
 // RUN: %clang_cc1 -O3 -triple x86_64-unknown-linux -fsanitize-merge=cfi-mfcall -fsanitize=cfi-mfcall -fsanitize-trap=cfi-mfcall -fvisibility=hidden -emit-llvm -o - %s | FileCheck %s --check-prefixes=MERGE
+// RUN: %if cir-support %{ %clang_cc1 -O3 -triple x86_64-unknown-linux                             -fsanitize=cfi-mfcall -fsanitize-trap=cfi-mfcall -fvisibility=hidden -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefixes=NO-MERGE-CIR %}
+// RUN: %if cir-support %{ %clang_cc1 -O3 -triple x86_64-unknown-linux -fsanitize-merge=cfi-mfcall -fsanitize=cfi-mfcall -fsanitize-trap=cfi-mfcall -fvisibility=hidden -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefixes=MERGE-CIR %}
 
 struct B1 {};
 struct B2 {};
@@ -137,3 +139,8 @@ void f(S *s, void (S::*p)()) {
 // MERGE: [[META8]] = !{}
 // MERGE: [[PROF9]] = !{!"branch_weights", i32 1048575, i32 1}
 //.
+// NO-MERGE-CIR: tail call void @llvm.ubsantrap(i8 2) #[[NO_MERGE_CIR_TRAP_ATTR:[0-9]+]], !nosanitize
+// NO-MERGE-CIR: attributes #[[NO_MERGE_CIR_TRAP_ATTR]] = { {{.*}}nomerge{{.*}} }
+// MERGE-CIR: [[MERGE_CIR_TRAP:[a-zA-Z0-9._]+]]:{{.*}}; preds = %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}
+// MERGE-CIR-NEXT: tail call void @llvm.ubsantrap(i8 2){{( #[0-9]+)?}}, !nosanitize
+// MERGE-CIR-NOT: attributes #{{[0-9]+}} = { {{.*}}nomerge{{.*}} }

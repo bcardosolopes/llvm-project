@@ -1308,6 +1308,14 @@ public:
   /// Add a global to a list to be added to the llvm.compiler.used metadata.
   void addUsedOrCompilerUsedGlobal(llvm::GlobalValue *GV);
 
+  /// Materialize llvm.used / llvm.compiler.used from the currently queued
+  /// globals. This is used by direct-CIR's post-lowering coverage bridge.
+  ///
+  /// Used by CIR's `emitCIRCoverageMapping`, which
+  /// needs to flush the `llvm.used` queue at a CIR-pipeline-specific point
+  /// (after MLIR-to-LLVM lowering finishes adding coverage globals).
+  void emitQueuedLLVMUsed() { emitLLVMUsed(); }
+
   /// Add a destructor and object to add to the C++ global destructor function.
   void AddCXXDtorEntry(llvm::FunctionCallee DtorFn, llvm::Constant *Object) {
     CXXGlobalDtorsOrStermFinalizers.emplace_back(DtorFn.getFunctionType(),

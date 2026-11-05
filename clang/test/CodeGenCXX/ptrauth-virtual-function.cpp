@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios   -fptrauth-calls -emit-llvm -std=c++11 %s -o - | FileCheck --check-prefixes=CHECK,DARWIN %s
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -emit-llvm -std=c++11 %s -o - | FileCheck --check-prefixes=CHECK,ELF    %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios   -fptrauth-calls -fptrauth-intrinsics -emit-llvm -O1 -disable-llvm-passes -std=c++11 -fclangir %s -o - | FileCheck --check-prefix=CIR %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-gnu -fptrauth-calls -fptrauth-intrinsics -emit-llvm -O1 -disable-llvm-passes -std=c++11 -fclangir %s -o - | FileCheck --check-prefix=CIR %s %}
 
 // Check virtual function pointers in vtables are signed.
 
@@ -89,6 +91,10 @@
 // CHECK-SAME: ptr ptrauth (ptr @_ZN2B02m2Ev, i32 0, i64 43073, ptr getelementptr inbounds ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D316_2V1, i32 0, i32 1, i32 8)),
 // CHECK-SAME: ptr ptrauth (ptr @_ZTv0_n48_N2V1D1Ev, i32 0, i64 25525, ptr getelementptr inbounds ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D316_2V1, i32 0, i32 1, i32 9)),
 // CHECK-SAME: ptr ptrauth (ptr @_ZTv0_n48_N2V1D0Ev, i32 0, i64 21295, ptr getelementptr inbounds ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D316_2V1, i32 0, i32 1, i32 10))] }, align 8
+
+// CIR-DAG: @_ZTT2V1 = available_externally unnamed_addr constant [2 x ptr] [ptr ptrauth (ptr getelementptr inbounds inrange(-24, 32) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTV2V1, i32 0, i32 0, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-48, 40) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTV2V1, i32 0, i32 1, i32 6), i32 2)], align 8
+// CIR-DAG: @_ZTT2D3 = unnamed_addr constant [7 x ptr] [ptr ptrauth (ptr getelementptr inbounds inrange(-24, 32) ({ [7 x ptr], [7 x ptr], [11 x ptr] }, ptr @_ZTV2D3, i32 0, i32 0, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-24, 32) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D30_2V0, i32 0, i32 0, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-48, 40) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D30_2V0, i32 0, i32 1, i32 6), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-24, 32) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D316_2V1, i32 0, i32 0, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-48, 40) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTC2D316_2V1, i32 0, i32 1, i32 6), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-48, 40) ({ [7 x ptr], [7 x ptr], [11 x ptr] }, ptr @_ZTV2D3, i32 0, i32 2, i32 6), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-24, 32) ({ [7 x ptr], [7 x ptr], [11 x ptr] }, ptr @_ZTV2D3, i32 0, i32 1, i32 3), i32 2)], align 8
+// CIR-DAG: @_ZTT2V0 = available_externally unnamed_addr constant [2 x ptr] [ptr ptrauth (ptr getelementptr inbounds inrange(-24, 32) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTV2V0, i32 0, i32 0, i32 3), i32 2), ptr ptrauth (ptr getelementptr inbounds inrange(-48, 40) ({ [7 x ptr], [11 x ptr] }, ptr @_ZTV2V0, i32 0, i32 1, i32 6), i32 2)], align 8
 
 
 struct S0 {
@@ -194,6 +200,30 @@ V1::~V1() {
 // CHECK: %[[T7:[0-9]+]] = call i64 @llvm.ptrauth.sign(i64 %[[T6]], i32 2, i64 0)
 // CHECK: %[[SIGNED_VTADDR:[0-9]+]] = inttoptr i64 %[[T7]] to ptr
 // CHECK: store ptr %[[SIGNED_VTADDR]], ptr %[[THIS1]]
+// CIR-LABEL: define{{.*}} @_ZN2V1D2Ev(
+// CIR: %[[THIS_ADDR:.*]] = alloca ptr, i64 1, align 8
+// CIR: %[[VTT_ADDR:.*]] = alloca ptr, i64 1, align 8
+// CIR: store ptr %0, ptr %[[THIS_ADDR]], align 8
+// CIR: store ptr %1, ptr %[[VTT_ADDR]], align 8
+// CIR: %[[THIS1:.*]] = load ptr, ptr %[[THIS_ADDR]], align 8
+// CIR: %[[VTT1:.*]] = load ptr, ptr %[[VTT_ADDR]], align 8
+// CIR: %[[VTT_ENTRY0:.*]] = load ptr, ptr %[[VTT1]], align 8
+// CIR: %[[VTT_ENTRY0_I:.*]] = ptrtoint ptr %[[VTT_ENTRY0]] to i64
+// CIR: %[[VTT_ENTRY0_AUTH_I:.*]] = call i64 @llvm.ptrauth.auth(i64 %[[VTT_ENTRY0_I]], i32 2, i64 0)
+// CIR: %[[VTT_ENTRY0_AUTH_P:.*]] = inttoptr i64 %[[VTT_ENTRY0_AUTH_I]] to ptr
+// CIR: %[[VTT_ENTRY0_SIGN_I:.*]] = ptrtoint ptr %[[VTT_ENTRY0_AUTH_P]] to i64
+// CIR: %[[VTT_ENTRY0_SIGNED_I:.*]] = call i64 @llvm.ptrauth.sign(i64 %[[VTT_ENTRY0_SIGN_I]], i32 2, i64 0)
+// CIR: %[[VTT_ENTRY0_SIGNED_P:.*]] = inttoptr i64 %[[VTT_ENTRY0_SIGNED_I]] to ptr
+// CIR: store ptr %[[VTT_ENTRY0_SIGNED_P]], ptr %[[THIS1]], align 8
+// CIR: %[[VTT_ENTRY1_PTR:.*]] = getelementptr inbounds ptr, ptr %[[VTT1]], i64 1
+// CIR: %[[VTT_ENTRY1:.*]] = load ptr, ptr %[[VTT_ENTRY1_PTR]], align 8
+// CIR: %[[VTT_ENTRY1_I:.*]] = ptrtoint ptr %[[VTT_ENTRY1]] to i64
+// CIR: %[[VTT_ENTRY1_AUTH_I:.*]] = call i64 @llvm.ptrauth.auth(i64 %[[VTT_ENTRY1_I]], i32 2, i64 0)
+// CIR: %[[VTT_ENTRY1_AUTH_P:.*]] = inttoptr i64 %[[VTT_ENTRY1_AUTH_I]] to ptr
+// CIR: %[[VTT_ENTRY1_SIGN_I:.*]] = ptrtoint ptr %[[VTT_ENTRY1_AUTH_P]] to i64
+// CIR: %[[VTT_ENTRY1_SIGNED_I:.*]] = call i64 @llvm.ptrauth.sign(i64 %[[VTT_ENTRY1_SIGN_I]], i32 2, i64 0)
+// CIR: %[[VTT_ENTRY1_SIGNED_P:.*]] = inttoptr i64 %[[VTT_ENTRY1_SIGNED_I]] to ptr
+// CIR: store ptr %[[VTT_ENTRY1_SIGNED_P]], ptr %{{.*}}, align 8
 
 // CHECK-LABEL: define{{.*}} void @_Z8testB0m0P2B0(
 // CHECK: %[[VTABLE:[a-z]+]] = load ptr, ptr %{{.*}}
@@ -205,6 +235,18 @@ V1::~V1() {
 // CHECK: %[[T6:[0-9]+]] = ptrtoint ptr %[[VFN]] to i64
 // CHECK: %[[T7:[0-9]+]] = call i64 @llvm.ptrauth.blend(i64 %[[T6]], i64 53119)
 // CHECK: call void %[[T5]](ptr noundef nonnull align {{[0-9]+}} dereferenceable(12) %{{.*}}) [ "ptrauth"(i32 0, i64 %[[T7]]) ]
+
+// CIR-LABEL: define{{.*}} void @_Z8testB0m0P2B0(
+// CIR: %[[THIS:.*]] = load ptr, ptr %{{.*}}
+// CIR: %[[VTABLE:.*]] = load ptr, ptr %[[THIS]]
+// CIR: %[[VTABLE_I:.*]] = ptrtoint ptr %[[VTABLE]] to i64
+// CIR: %[[AUTH_I:.*]] = call i64 @llvm.ptrauth.auth(i64 %[[VTABLE_I]], i32 2, i64 0)
+// CIR: %[[AUTH_P:.*]] = inttoptr i64 %[[AUTH_I]] to ptr
+// CIR: %[[SLOT:.*]] = getelementptr inbounds ptr, ptr %[[AUTH_P]], i64 0
+// CIR: %[[VFN:.*]] = load ptr, ptr %[[SLOT]]
+// CIR: %[[SLOT_I:.*]] = ptrtoint ptr %[[SLOT]] to i64
+// CIR: %[[BLEND:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[SLOT_I]], i64 53119)
+// CIR: call void %[[VFN]](ptr noundef nonnull align {{[0-9]+}} dereferenceable(12) %[[THIS]]) [ "ptrauth"(i32 0, i64 %[[BLEND]]) ]
 
 void testB0m0(B0 *a) {
   a->m0();

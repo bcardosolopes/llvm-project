@@ -41,6 +41,15 @@ func.func @op_with_passthrough_region_args() {
   return
 }
 
+// An isolated op whose region is empty has nothing to load lazily.
+func.func private @declaration()
+
+// An isolated op is deferred if any of its regions is not empty.
+test.isolated_regions {
+}, {
+  "test.unknown_op"() : () -> ()
+}
+
 // Before version 2, we can't support lazy loading.
 // OLD-BYTECODE-NOT: Has 1 ops to materialize
 // OLD-BYTECODE-NOT: Materializing
@@ -56,7 +65,10 @@ func.func @op_with_passthrough_region_args() {
 // CHECK: "builtin.module"() ({
 // CHECK: "func.func"() <{function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
 // CHECK-NOT: arith
-// CHECK: Has 1 ops to materialize
+// CHECK: "func.func"() <{function_type = () -> (), sym_name = "declaration", sym_visibility = "private"}> ({
+// CHECK: "test.isolated_regions"() ({
+// CHECK-NOT: test.unknown_op
+// CHECK: Has 2 ops to materialize
 
 // CHECK: Before Materializing...
 // CHECK: "func.func"() <{function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
@@ -73,6 +85,14 @@ func.func @op_with_passthrough_region_args() {
 // CHECK: test.two_region_op
 // CHECK: test.unknown_op
 // CHECK: test.consumer
+// CHECK: Has 5 ops to materialize
+
+// CHECK: Before Materializing...
+// CHECK: test.isolated_regions
+// CHECK-NOT: test.unknown_op
+// CHECK: Materializing...
+// CHECK: test.isolated_regions
+// CHECK: test.unknown_op
 // CHECK: Has 4 ops to materialize
 
 // CHECK: Before Materializing...

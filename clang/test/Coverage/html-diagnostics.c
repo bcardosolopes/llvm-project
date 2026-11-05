@@ -1,10 +1,10 @@
 // RUN: rm -rf %t
 // RUN: %clang_cc1 -analyze -analyzer-output=html -analyzer-checker=core -o %t %s
-// RUN: find %t -name "*.html" -exec cat "{}" ";" | FileCheck %s
+// RUN: find %t -name "*.html" | xargs -I{} cat "{}" | FileCheck %s
 //
 // RUN: rm -rf %t
 // RUN: %clang_cc1 -analyze -analyzer-output=html-single-file -analyzer-checker=core -o %t %s
-// RUN: find %t -name "*.html" -exec cat "{}" ";" | FileCheck %s
+// RUN: find %t -name "*.html" | xargs -I{} cat "{}" | FileCheck %s
 
 // REQUIRES: staticanalyzer
 
@@ -27,5 +27,4 @@ void f0(int x) {
 
   *p = 10;
 }
-
 

@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -emit-llvm -triple arm64-- -fexperimental-max-bitint-width=1024  -o - %s -O0 | FileCheck %s --check-prefix=CHECK-O0
 // RUN: %clang_cc1 -emit-llvm -disable-llvm-optzns -fexperimental-max-bitint-width=1024  -triple arm64-- -o - %s -O3 | FileCheck %s --check-prefix=CHECK-O3
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -triple arm64-- -fexperimental-max-bitint-width=1024 -fclangir -disable-llvm-passes -o - %s -O0 | FileCheck %s --check-prefix=CIR-CHECK-O0 %}
+// RUN: %if cir-support %{ %clang_cc1 -emit-llvm -disable-llvm-optzns -fexperimental-max-bitint-width=1024 -triple arm64-- -fclangir -disable-llvm-passes -o - %s -O3 | FileCheck %s --check-prefix=CIR-CHECK-O3 %}
 
 struct large {
     void* pointers[8];
@@ -35,6 +37,17 @@ void example(void) {
 // CHECK-O0-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 8 %[[byvaltemp1]], ptr align 8 %[[l]], i64 64, i1 false)
 // CHECK-O0-NEXT: call void @pass_large(ptr dead_on_return noundef %[[byvaltemp1]])
 // CHECK-O0-NEXT: ret void
+//
+// CIR-CHECK-O0-LABEL: define{{.*}} void @example(
+// CIR-CHECK-O0: %[[TEMP1:[0-9A-Za-z-]+]] = alloca %struct.large, i64 1, align 8
+// CIR-CHECK-O0-NEXT: %[[TEMP0:[0-9A-Za-z-]+]] = alloca %struct.large, i64 1, align 8
+// CIR-CHECK-O0-NEXT: %[[L:[0-9A-Za-z-]+]] = alloca %struct.large, i64 1, align 8
+// CIR-CHECK-O0-NEXT: call void @llvm.memset.p0.i64(ptr align 8 %[[L]], i8 0, i64 64, i1 false)
+// CIR-CHECK-O0-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 8 %[[TEMP0]], ptr align 8 %[[L]], i64 64, i1 false)
+// CIR-CHECK-O0-NEXT: call void @pass_large(ptr dead_on_return noundef %[[TEMP0]])
+// CIR-CHECK-O0-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 8 %[[TEMP1]], ptr align 8 %[[L]], i64 64, i1 false)
+// CIR-CHECK-O0-NEXT: call void @pass_large(ptr dead_on_return noundef %[[TEMP1]])
+// CIR-CHECK-O0-NEXT: ret void
 //
 // At O3, we should have lifetime markers to help the optimizer re-use the temporary allocas.
 //
@@ -72,6 +85,23 @@ void example(void) {
 // Mark the end of the lifetime of `l`.
 // CHECK-O3-NEXT: call void @llvm.lifetime.end.p0(ptr %l)
 // CHECK-O3-NEXT: ret void
+//
+// CIR-CHECK-O3-LABEL: define{{.*}} void @example(
+// CIR-CHECK-O3: %[[TEMP1:[0-9A-Za-z-]+]] = alloca %struct.large, i64 1, align 8
+// CIR-CHECK-O3-NEXT: %[[TEMP0:[0-9A-Za-z-]+]] = alloca %struct.large, i64 1, align 8
+// CIR-CHECK-O3-NEXT: %[[L:[0-9A-Za-z-]+]] = alloca %struct.large, i64 1, align 8
+// CIR-CHECK-O3-NEXT: call void @llvm.lifetime.start.p0(ptr %[[L]])
+// CIR-CHECK-O3-NEXT: call void @llvm.memset.p0.i64(ptr align 8 %[[L]], i8 0, i64 64, i1 false)
+// CIR-CHECK-O3-NEXT: call void @llvm.lifetime.start.p0(ptr %[[TEMP0]])
+// CIR-CHECK-O3-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 8 %[[TEMP0]], ptr align 8 %[[L]], i64 64, i1 false), !tbaa.struct [[TBAA_STRUCT:![0-9]+]]
+// CIR-CHECK-O3-NEXT: call void @pass_large(ptr dead_on_return noundef %[[TEMP0]])
+// CIR-CHECK-O3-NEXT: call void @llvm.lifetime.end.p0(ptr %[[TEMP0]])
+// CIR-CHECK-O3-NEXT: call void @llvm.lifetime.start.p0(ptr %[[TEMP1]])
+// CIR-CHECK-O3-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 8 %[[TEMP1]], ptr align 8 %[[L]], i64 64, i1 false), !tbaa.struct [[TBAA_STRUCT]]
+// CIR-CHECK-O3-NEXT: call void @pass_large(ptr dead_on_return noundef %[[TEMP1]])
+// CIR-CHECK-O3-NEXT: call void @llvm.lifetime.end.p0(ptr %[[TEMP1]])
+// CIR-CHECK-O3-NEXT: call void @llvm.lifetime.end.p0(ptr %[[L]])
+// CIR-CHECK-O3-NEXT: ret void
 
 void example_BitInt(void) {
     _BitInt(129) l = {0};
@@ -96,6 +126,23 @@ void example_BitInt(void) {
 // CHECK-O0-NEXT:    call void @pass_large_BitInt(ptr dead_on_return noundef [[INDIRECT_ARG_TEMP1]])
 // CHECK-O0-NEXT:    ret void
 //
+// CIR-CHECK-O0-LABEL: define dso_local void @example_BitInt(
+// CIR-CHECK-O0:  %[[INDIRECT_ARG_TEMP1:[0-9A-Za-z-]+]] = alloca i256, i64 1, align 16
+// CIR-CHECK-O0-NEXT:  %[[INDIRECT_ARG_TEMP:[0-9A-Za-z-]+]] = alloca i256, i64 1, align 16
+// CIR-CHECK-O0-NEXT:  %[[L:[0-9A-Za-z-]+]] = alloca i256, i64 1, align 16
+// CIR-CHECK-O0-NEXT:  store i256 0, ptr %[[L]], align 16
+// CIR-CHECK-O0-NEXT:  %[[TMP0:[0-9A-Za-z-]+]] = load i256, ptr %[[L]], align 16
+// CIR-CHECK-O0-NEXT:  %[[LOADEDV:[0-9A-Za-z-]+]] = trunc i256 %[[TMP0]] to i129
+// CIR-CHECK-O0-NEXT:  %[[STOREDV:[0-9A-Za-z-]+]] = sext i129 %[[LOADEDV]] to i256
+// CIR-CHECK-O0-NEXT:  store i256 %[[STOREDV]], ptr %[[INDIRECT_ARG_TEMP]], align 16
+// CIR-CHECK-O0-NEXT:  call void @pass_large_BitInt(ptr dead_on_return noundef %[[INDIRECT_ARG_TEMP]])
+// CIR-CHECK-O0-NEXT:  %[[TMP1:[0-9A-Za-z-]+]] = load i256, ptr %[[L]], align 16
+// CIR-CHECK-O0-NEXT:  %[[LOADEDV1:[0-9A-Za-z-]+]] = trunc i256 %[[TMP1]] to i129
+// CIR-CHECK-O0-NEXT:  %[[STOREDV1:[0-9A-Za-z-]+]] = sext i129 %[[LOADEDV1]] to i256
+// CIR-CHECK-O0-NEXT:  store i256 %[[STOREDV1]], ptr %[[INDIRECT_ARG_TEMP1]], align 16
+// CIR-CHECK-O0-NEXT:  call void @pass_large_BitInt(ptr dead_on_return noundef %[[INDIRECT_ARG_TEMP1]])
+// CIR-CHECK-O0-NEXT:  ret void
+//
 // CHECK-O3-LABEL: define dso_local void @example_BitInt(
 // CHECK-O3-NEXT:  entry:
 // CHECK-O3-NEXT:    [[L:%.*]] = alloca i256, align 16
@@ -118,3 +165,29 @@ void example_BitInt(void) {
 // CHECK-O3-NEXT:    call void @pass_large_BitInt(ptr dead_on_return noundef [[INDIRECT_ARG_TEMP1]])
 // CHECK-O3-NEXT:    call void @llvm.lifetime.end.p0(ptr [[INDIRECT_ARG_TEMP1]]) 
 // CHECK-O3-NEXT:    call void @llvm.lifetime.end.p0(ptr [[L]]) 
+//
+// CIR-CHECK-O3-LABEL: define dso_local void @example_BitInt(
+// CIR-CHECK-O3:  %[[INDIRECT_ARG_TEMP1:[0-9A-Za-z-]+]] = alloca i256, i64 1, align 16
+// CIR-CHECK-O3-NEXT:  %[[INDIRECT_ARG_TEMP:[0-9A-Za-z-]+]] = alloca i256, i64 1, align 16
+// CIR-CHECK-O3-NEXT:  %[[L:[0-9A-Za-z-]+]] = alloca i256, i64 1, align 16
+// CIR-CHECK-O3-NEXT:  call void @llvm.lifetime.start.p0(ptr %[[L]])
+// CIR-CHECK-O3-NEXT:  store i256 0, ptr %[[L]], align 16, !tbaa [[TBAA6:![0-9]+]]
+// CIR-CHECK-O3-NEXT:  %[[TMP0:[0-9A-Za-z-]+]] = load i256, ptr %[[L]], align 16, !tbaa [[TBAA6]]
+// CIR-CHECK-O3-NEXT:  %[[LOADEDV:[0-9A-Za-z-]+]] = trunc i256 %[[TMP0]] to i129
+// CIR-CHECK-O3-NEXT:  call void @llvm.lifetime.start.p0(ptr %[[INDIRECT_ARG_TEMP]])
+// CIR-CHECK-O3-NEXT:  %[[STOREDV:[0-9A-Za-z-]+]] = sext i129 %[[LOADEDV]] to i256
+// CIR-CHECK-O3-NEXT:  store i256 %[[STOREDV]], ptr %[[INDIRECT_ARG_TEMP]], align 16, !tbaa [[TBAA6]]
+// CIR-CHECK-O3-NEXT:  call void @pass_large_BitInt(ptr dead_on_return noundef %[[INDIRECT_ARG_TEMP]])
+// CIR-CHECK-O3-NEXT:  call void @llvm.lifetime.end.p0(ptr %[[INDIRECT_ARG_TEMP]])
+// CIR-CHECK-O3-NEXT:  %[[TMP1:[0-9A-Za-z-]+]] = load i256, ptr %[[L]], align 16, !tbaa [[TBAA6]]
+// CIR-CHECK-O3-NEXT:  %[[LOADEDV1:[0-9A-Za-z-]+]] = trunc i256 %[[TMP1]] to i129
+// CIR-CHECK-O3-NEXT:  call void @llvm.lifetime.start.p0(ptr %[[INDIRECT_ARG_TEMP1]])
+// CIR-CHECK-O3-NEXT:  %[[STOREDV1:[0-9A-Za-z-]+]] = sext i129 %[[LOADEDV1]] to i256
+// CIR-CHECK-O3-NEXT:  store i256 %[[STOREDV1]], ptr %[[INDIRECT_ARG_TEMP1]], align 16, !tbaa [[TBAA6]]
+// CIR-CHECK-O3-NEXT:  call void @pass_large_BitInt(ptr dead_on_return noundef %[[INDIRECT_ARG_TEMP1]])
+// CIR-CHECK-O3-NEXT:  call void @llvm.lifetime.end.p0(ptr %[[INDIRECT_ARG_TEMP1]])
+// CIR-CHECK-O3-NEXT:  call void @llvm.lifetime.end.p0(ptr %[[L]])
+// CIR-CHECK-O3-DAG: ![[EXAMPLE_TBAA_STRUCT:[0-9]+]] = !{i64 0, i64 64, ![[EXAMPLE_TBAA_TAG:[0-9]+]]}
+// CIR-CHECK-O3-DAG: ![[EXAMPLE_TBAA_TAG]] = !{![[CHAR:[0-9]+]], ![[CHAR]], i64 0}
+// CIR-CHECK-O3-DAG: ![[CHAR]] = !{!"omnipotent char", ![[ROOT:[0-9]+]], i64 0}
+// CIR-CHECK-O3-DAG: ![[ROOT]] = !{!"Simple C/C++ TBAA"}

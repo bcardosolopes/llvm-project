@@ -1,0 +1,10 @@
+// RUN: cir-opt %s -cir-flatten-cfg -verify-roundtrip -o - | FileCheck %s
+
+module {
+  cir.func @already_flat() {
+    cir.return
+  }
+}
+
+// CHECK: cir.func @already_flat()
+// CHECK-NEXT:   cir.return

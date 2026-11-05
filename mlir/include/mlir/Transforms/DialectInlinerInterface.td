@@ -163,7 +163,7 @@ def DialectInlinerInterface : DialectInterface<"DialectInlinerInterface"> {
         results. NOTE: This hook is invoked after inlining the `callable` region.
       }],
       "::mlir::Value", "handleResult",
-      (ins "::mlir::OpBuilder &":$builder, "::mlir::Operation *":$call, 
+      (ins "::mlir::OpBuilder &":$builder, "::mlir::Operation *":$call,
            "::mlir::Operation *":$callable, "::mlir::Value":$result,
            "::mlir::DictionaryAttr":$resultAttrs),
       [{
@@ -171,11 +171,31 @@ def DialectInlinerInterface : DialectInterface<"DialectInlinerInterface"> {
       }]
     >,
     InterfaceMethod<[{
+        Merge the relevant feature attributes (e.g. target_features) of the
+        callee into the caller when inlining the `callable` into `call`. The
+        returned attribute is attached to the caller's parent operation. This
+        hook is only invoked when attribute merging is requested.
+      }],
+      "::mlir::Attribute", "mergeFeatureAttributes",
+      (ins "::mlir::OpBuilder &":$builder, "::mlir::Operation *":$call,
+           "::mlir::Operation *":$callable),
+      [{
+        llvm_unreachable("must implement mergeFeatureAttributes in the case of "
+                         "one inlined block");
+      }]
+    >,
+    InterfaceMethod<[{
         Process a set of blocks that have been inlined for a call. This callback
         is invoked before inlined terminator operations have been processed.
+
+        `callable` is the operation the inlined blocks came from, passed
+        explicitly rather than recovered from `call`: recovering it costs a
+        symbol table lookup, which is linear in the number of symbols in the
+        enclosing symbol table, and it is wrong when the call names a private
+        alias rather than the aliasee that was actually inlined.
       }],
       "void", "processInlinedCallBlocks",
-      (ins "::mlir::Operation *":$call, 
+      (ins "::mlir::Operation *":$call, "::mlir::Operation *":$callable,
            "::mlir::iterator_range<::mlir::Region::iterator>":$inlinedBlocks),
       [{}]
     >,

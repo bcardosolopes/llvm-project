@@ -14,3 +14,18 @@ cir.func private @exception_handling_type_id() {
 
 }
 
+// -----
+
+!u8i = !cir.int<u, 8>
+
+module {
+
+cir.global "private" constant external @"ns::typeinfo::i" : !cir.ptr<!u8i>
+
+cir.func private @exception_handling_type_id_scoped() {
+  // Keep this quoted `::` symbol path valid under verifier fast-path changes.
+  %type_id = cir.eh.typeid @"ns::typeinfo::i"
+  cir.return
+}
+
+}

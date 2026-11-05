@@ -28,15 +28,13 @@ err:
 // CIR:    cir.store [[MINUS_ONE]], [[RETVAL]] : !s32i, !cir.ptr<!s32i>
 // CIR:    cir.br ^bb1
 
-// LLVM: define dso_local i32 @_Z21shouldNotGenBranchReti
+// LLVM: define dso_local noundef i32 @_Z21shouldNotGenBranchReti
 // LLVM:   [[COND:%.*]] = load i32, ptr {{.*}}, align 4
 // LLVM:   [[CMP:%.*]] = icmp sgt i32 [[COND]], 5
 // LLVM:   br i1 [[CMP]], label %[[IFTHEN:.*]], label %[[IFEND:.*]]
 // LLVM: [[IFTHEN]]:
 // LLVM:   br label %[[ERR:.*]]
 // LLVM: [[IFEND]]:
-// LLVM:   br label %[[BB9:.*]]
-// LLVM: [[BB9]]:
 // LLVM:   store i32 0, ptr %[[RETVAL:.*]], align 4
 // LLVM:   br label %[[BBRET:.*]]
 // LLVM: [[BBRET]]:
@@ -44,7 +42,7 @@ err:
 // LLVM:   ret i32 [[RET]]
 // LLVM: [[ERR]]:
 // LLVM:   store i32 -1, ptr %[[RETVAL]], align 4
-// LLVM:   br label %10
+// LLVM:   br label %[[BBRET]]
 
 // OGCG: define dso_local noundef i32 @_Z21shouldNotGenBranchReti
 // OGCG: if.then:
@@ -70,16 +68,14 @@ err:
 // CIR:  ^bb1:
 // CIR:    cir.label "err"
 
-// LLVM: define dso_local i32 @_Z15shouldGenBranchi
+// LLVM: define dso_local noundef i32 @_Z15shouldGenBranchi
 // LLVM:   br i1 [[CMP:%.*]], label %[[IFTHEN:.*]], label %[[IFEND:.*]]
 // LLVM: [[IFTHEN]]:
 // LLVM:   br label %[[ERR:.*]]
 // LLVM: [[IFEND]]:
-// LLVM:   br label %[[BB9:.*]]
-// LLVM: [[BB9]]:
 // LLVM:   br label %[[ERR]]
 // LLVM: [[ERR]]:
-// LLVM:   ret i32 [[RET:%.*]]
+// LLVM:   ret i32 -1
 
 // OGCG: define dso_local noundef i32 @_Z15shouldGenBranchi
 // OGCG: if.then:
@@ -100,20 +96,16 @@ end2:
 }
 // CIR:  cir.func {{.*}} @_Z19severalLabelsInARowi
 // CIR:    cir.goto "end1"
-// CIR:  ^bb[[#BLK1:]]
-// CIR:    cir.goto "end2"
-// CIR:  ^bb[[#BLK2:]]:
+// CIR:  ^bb[[#BLK1:]]:
 // CIR:    cir.label "end1"
-// CIR:    cir.br ^bb[[#BLK3:]]
-// CIR:  ^bb[[#BLK3]]:
+// CIR:    cir.br ^bb[[#BLK2:]]
+// CIR:  ^bb[[#BLK2]]:
 // CIR:    cir.label "end2"
 
-// LLVM: define dso_local void @_Z19severalLabelsInARowi
+// LLVM: define dso_local void @_Z19severalLabelsInARowi(i32 noundef
 // LLVM:   br label %[[END1:.*]]
-// LLVM: [[UNRE:.*]]:                                                ; No predecessors!
-// LLVM:   br label %[[END2:.*]]
 // LLVM: [[END1]]:
-// LLVM:   br label %[[END2]]
+// LLVM:   br label %[[END2:.*]]
 // LLVM: [[END2]]:
 // LLVM:   ret
 
@@ -134,14 +126,10 @@ end:
 // CIR:  cir.func {{.*}} @_Z18severalGotosInARowi
 // CIR:    cir.goto "end"
 // CIR:  ^bb[[#BLK1:]]:
-// CIR:    cir.goto "end"
-// CIR:  ^bb[[#BLK2:]]:
 // CIR:    cir.label "end"
 
 // LLVM: define dso_local void @_Z18severalGotosInARowi
 // LLVM:   br label %[[END:.*]]
-// LLVM: [[UNRE:.*]]:                                                ; No predecessors!
-// LLVM:   br label %[[END]]
 // LLVM: [[END]]:
 // LLVM:   ret void
 
@@ -232,8 +220,6 @@ extern "C" void case_follow_label(int v) {
 // LLVM:   call void @action2()
 // LLVM:   br label %[[LABEL]]
 // LLVM: [[END]]:
-// LLVM:   br label %[[RET:.*]]
-// LLVM: [[RET]]:
 // LLVM:   ret void
 
 // OGCG: define dso_local void @case_follow_label
@@ -265,9 +251,7 @@ extern "C" void default_follow_label(int v) {
 
 // CIR: cir.func {{.*}} @default_follow_label
 // CIR: cir.switch
-// CIR: cir.case(equal, [#cir.int<1> : !s32i]) {
-// CIR:   cir.yield
-// CIR: cir.case(equal, [#cir.int<2> : !s32i]) {
+// CIR: cir.case(anyof, [#cir.int<1> : !s32i, #cir.int<2> : !s32i]) {
 // CIR:   cir.call @action1()
 // CIR:   cir.break
 // CIR:   cir.label "label"
@@ -276,23 +260,15 @@ extern "C" void default_follow_label(int v) {
 // CIR:   cir.goto "label"
 
 // LLVM: define dso_local void @default_follow_label
-// LLVM: [[CASE1:.*]]:
-// LLVM:   br label %[[BB8:.*]]
-// LLVM: [[BB8]]:
-// LLVM:   br label %[[CASE2:.*]]
-// LLVM: [[CASE2]]:
+// LLVM: [[CASE12:.*]]:
 // LLVM:   call void @action1()
 // LLVM:   br label %[[BREAK:.*]]
 // LLVM: [[LABEL:.*]]:
 // LLVM:   br label %[[SWDEFAULT:.*]]
 // LLVM: [[SWDEFAULT]]:
 // LLVM:   call void @action2()
-// LLVM:   br label %[[BB9:.*]]
-// LLVM: [[BB9]]:
 // LLVM:   br label %[[LABEL]]
 // LLVM: [[BREAK]]:
-// LLVM:   br label %[[RET:.*]]
-// LLVM: [[RET]]:
 // LLVM:   ret void
 
 // OGCG: define dso_local void @default_follow_label
@@ -327,3 +303,48 @@ label:
 // OGCG:   br label %label
 // OGCG: label:
 // OGCG:   br label %label
+
+// Test goto to labeled compound statement containing return.
+// Previously crashed: the compound stmt's cleanup-only scope captured the
+// retBlock but never processed it, leaving an empty unterminated block.
+void labeledCompoundReturn(int x) {
+  if (x > 0)
+    goto target;
+  return;
+target:
+  {
+    x++;
+    return;
+  }
+}
+// CIR: cir.func {{.*}} @_Z21labeledCompoundReturni
+// CIR:   cir.if {{.*}} {
+// CIR:     cir.goto "target"
+// CIR:   }
+// CIR:   cir.br [[RETBB:\^bb[0-9]+]]
+// CIR: [[RETBB]]:
+// CIR:   cir.return
+// CIR:   cir.label "target"
+// CIR:   cir.br [[RETBB]]
+
+// LLVM: define dso_local void @_Z21labeledCompoundReturni
+// LLVM:   br i1 {{.*}}, label %[[IFTHEN:.*]], label %[[IFEND:.*]]
+// LLVM: [[IFTHEN]]:
+// LLVM:   br label %[[TARGET:.*]]
+// LLVM: [[IFEND]]:
+// LLVM:   br label %[[RET:.*]]
+// LLVM: [[RET]]:
+// LLVM:   ret void
+// LLVM: [[TARGET]]:
+// LLVM:   add nsw
+// LLVM:   br label %[[RET]]
+
+// OGCG: define dso_local void @_Z21labeledCompoundReturni
+// OGCG: if.then:
+// OGCG:   br label %target
+// OGCG: if.end:
+// OGCG:   br label %return
+// OGCG: target:
+// OGCG:   br label %return
+// OGCG: return:
+// OGCG:   ret void

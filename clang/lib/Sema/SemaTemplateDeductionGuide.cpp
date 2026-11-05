@@ -525,17 +525,21 @@ struct ConvertConstructorToDeductionGuideTransform {
     // requires-clause, if any.
     AssociatedConstraint FunctionTrailingRC;
     if (const AssociatedConstraint &RC = CD->getTrailingRequiresClause()) {
-      MultiLevelTemplateArgumentList Args;
-      Args.setKind(TemplateSubstitutionKind::Rewrite);
-      Args.addOuterTemplateArguments(Depth1Args);
-      Args.addOuterRetainedLevel();
-      if (NestedPattern)
-        Args.addOuterRetainedLevels(NestedPattern->getTemplateDepth());
-      ExprResult E = SemaRef.SubstConstraintExprWithoutSatisfaction(
-          const_cast<Expr *>(RC.ConstraintExpr), Args);
-      if (!E.isUsable())
-        return nullptr;
-      FunctionTrailingRC = AssociatedConstraint(E.get(), RC.ArgPackSubstIndex);
+      if (FTD) {
+        MultiLevelTemplateArgumentList Args;
+        Args.setKind(TemplateSubstitutionKind::Rewrite);
+        Args.addOuterTemplateArguments(Depth1Args);
+        Args.addOuterRetainedLevel();
+        if (NestedPattern)
+          Args.addOuterRetainedLevels(NestedPattern->getTemplateDepth());
+        ExprResult E = SemaRef.SubstConstraintExprWithoutSatisfaction(
+            const_cast<Expr *>(RC.ConstraintExpr), Args);
+        if (!E.isUsable())
+          return nullptr;
+        FunctionTrailingRC = AssociatedConstraint(E.get(), RC.ArgPackSubstIndex);
+      } else {
+        FunctionTrailingRC = RC; // non-template ctor: do not substitute
+      }
     }
 
     // C++ [over.match.class.deduct]p1:

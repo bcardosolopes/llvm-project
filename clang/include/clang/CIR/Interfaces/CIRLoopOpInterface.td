@@ -88,6 +88,10 @@ def LoopOpInterface : OpInterface<"LoopOpInterface", [
     static void getLoopOpSuccessorRegions(
         ::cir::LoopOpInterface op, ::mlir::RegionBranchPoint point,
         ::mlir::SmallVectorImpl<::mlir::RegionSuccessor> &regions);
+    /// Generic method to retrieve the successor inputs of a LoopOpInterface
+    /// operation.
+    static ::mlir::ValueRange getLoopOpSuccessorInputs(
+        ::cir::LoopOpInterface op, ::mlir::RegionSuccessor successor);
   }];
 
   let verify = [{

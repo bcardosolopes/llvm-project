@@ -1,0 +1,38 @@
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir -mmlir --mlir-print-ir-after-all %s -o %t.cir 2>&1 | FileCheck %s -check-prefix=CIR
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-flat -mmlir --mlir-print-ir-after-all %s -o %t.cir 2>&1 | FileCheck %s -check-prefix=CIRFLAT
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fno-clangir-direct-lowering -emit-mlir=core -mmlir --mlir-print-ir-after-all %s -o %t.cir 2>&1 | FileCheck %s -check-prefix=CIRMLIR
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm -mmlir --mlir-print-ir-after-all -mllvm -print-after-all  %s -o %t.ll 2>&1 | FileCheck %s -check-prefix=CIR -check-prefix=LLVM
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir -mmlir --mlir-print-ir-after=cir-lowering-prepare %s -o %t.cir 2>&1 | FileCheck %s -check-prefix=CIRPASS
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-mlir=cir-flat -mmlir --mlir-print-ir-before=cir-flatten-cfg %s -o %t.cir 2>&1 | FileCheck %s -check-prefix=CFGPASS
+
+int foo(void) {
+  int i = 3;
+  return i;
+}
+
+
+// CIR:  IR Dump After CIRCanonicalize (cir-canonicalize)
+// CIR:  cir.func {{.*}} @foo() -> !s32i extra(#fn_attr{{.*}})
+// CIR:  IR Dump After CXXABILowering (cir-cxxabi-lowering)
+// CIR:  cir.func {{.*}} @foo() -> !s32i extra(#fn_attr{{.*}})
+// CIR:  IR Dump After LoweringPrepare (cir-lowering-prepare)
+// CIR:  cir.func {{.*}} @foo() -> !s32i extra(#fn_attr{{.*}})
+// CIRFLAT:  IR Dump After CIRCanonicalize (cir-canonicalize)
+// CIRFLAT:  cir.func {{.*}} @foo() -> !s32i extra(#fn_attr{{.*}})
+// CIRFLAT:  IR Dump After CXXABILowering (cir-cxxabi-lowering)
+// CIRFLAT:  cir.func {{.*}} @foo() -> !s32i extra(#fn_attr{{.*}})
+// CIRFLAT:  IR Dump After LoweringPrepare (cir-lowering-prepare)
+// CIRFLAT:  cir.func {{.*}} @foo() -> !s32i extra(#fn_attr{{.*}})
+// CIRMLIR:  IR Dump After CIRCanonicalize (cir-canonicalize)
+// CIRMLIR:  IR Dump After LoweringPrepare (cir-lowering-prepare)
+// CIRMLIR:  IR Dump After SCFPrepare (cir-mlir-scf-prepare)
+// CIRMLIR:  IR Dump After cir::ConvertCIRToMLIRPass (cir-to-mlir)
+// LLVM: IR Dump After cir::direct::ConvertCIRToLLVMPass (cir-flat-to-llvm)
+// LLVM: llvm.func @foo() -> i32
+// LLVM: IR Dump After
+// LLVM: define dso_local i32 @foo()
+
+// CIRPASS-NOT:  IR Dump After CIRCanonicalize
+// CIRPASS:      IR Dump After LoweringPrepare
+
+// CFGPASS: IR Dump Before CIRFlattenCFG (cir-flatten-cfg)

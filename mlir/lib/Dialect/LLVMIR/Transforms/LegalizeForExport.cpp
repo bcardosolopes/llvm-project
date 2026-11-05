@@ -58,8 +58,13 @@ static void ensureDistinctSuccessors(Block &bb) {
       terminator->setSuccessor(dummyBlock, position);
       for (BlockArgument arg : successor.first->getArguments())
         dummyBlock->addArgument(arg.getType(), arg.getLoc());
-      LLVM::BrOp::create(builder, terminator->getLoc(),
-                         dummyBlock->getArguments(), successor.first);
+      auto forward =
+          LLVM::BrOp::create(builder, terminator->getLoc(),
+                             dummyBlock->getArguments(), successor.first);
+      // LLVM IR repeats the edge instead; let an exporter's consumer fold this
+      // block back (see ModuleImport's invoke forwarding block).
+      forward->setDiscardableAttr("llvm_forwarding_branch",
+                                  builder.getUnitAttr());
     }
   }
 }

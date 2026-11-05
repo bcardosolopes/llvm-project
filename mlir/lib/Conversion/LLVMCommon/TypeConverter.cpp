@@ -151,6 +151,20 @@ LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
       return success();
     }
 
+    // A frozen struct is never part of a cycle, and the converted struct is
+    // frozen too. Two frozen structs with the same name but different bodies
+    // then convert to two different structs instead of clashing on one name.
+    if (type.isFrozen()) {
+      SmallVector<Type> convertedElemTypes;
+      convertedElemTypes.reserve(type.getBody().size());
+      if (failed(convertTypes(type.getBody(), convertedElemTypes)))
+        return std::nullopt;
+      results.push_back(LLVM::LLVMStructType::getFrozenIdentified(
+          type.getContext(), ("_Converted." + type.getName()).str(),
+          convertedElemTypes, type.isPacked()));
+      return success();
+    }
+
     if (type.isIdentified()) {
       auto convertedType = LLVM::LLVMStructType::getIdentified(
           type.getContext(), ("_Converted." + type.getName()).str());

@@ -1,0 +1,27 @@
+// Second input for ../local-rename-order.cir. Not a test on its own.
+//
+// The declaration ORDER here is the whole point: @caller sits *between* the
+// two local helpers it calls. Renaming while moving ops one at a time updates
+// @early (seen first) but not @late, because @caller has already left this
+// module by the time @late is renamed.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func internal private @early() -> !s32i {
+    %0 = cir.const #cir.int<20> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  cir.func @caller_b() -> !s32i {
+    %0 = cir.call @early() : () -> !s32i
+    %1 = cir.call @late() : () -> !s32i
+    %2 = cir.binop(add, %0, %1) : !s32i
+    cir.return %2 : !s32i
+  }
+
+  cir.func internal private @late() -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+}

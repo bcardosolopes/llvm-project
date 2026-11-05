@@ -1,0 +1,50 @@
+// RUN: cir-link %s %S/Inputs/llvm-used-b.cir -o %t.cir
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// cir.llvm_used and cir.llvm_compiler_used become @llvm.used and
+// @llvm.compiler.used, the lists that keep a symbol alive through DCE when
+// nothing in the module refers to it. Like cir.global_ctors they are per-TU
+// and have to be merged across inputs, but they cannot be merged the same way:
+// their entries are symbol references, and they repeat.
+//
+// Keeping only the first input's copy is silent and the damage lands a long
+// way from the cause. Merging the 69 translation units of one real Android
+// library produced a one-entry @llvm.used where llvm-link over the same units
+// produced twelve, and no @llvm.compiler.used at all where llvm-link produced
+// 134 entries. What that dropped was the somerge JNI registration object -- an
+// internal global whose only purpose is to be retained -- so -O2 deleted it and
+// the JNI_OnLoad wrapper it pointed at went with it. The sibling library built
+// the same way shipped at 0.32 MB against 16.16 MB, with 2 JNI-related symbols
+// against 20, while still exporting the same ten symbols and building clean:
+// nothing fails until System.loadLibrary, at runtime.
+
+!s32i = !cir.int<s, 32>
+
+module attributes {
+  cir.llvm_used = [@a_only, @shared_local, @in_both]
+} {
+  cir.global "private" internal @shared_local = #cir.int<1> : !s32i
+  cir.global external @a_only = #cir.int<1> : !s32i
+  cir.global external @in_both = #cir.int<1> : !s32i
+}
+
+// Only the second input has a compiler-used list. It still has to appear:
+// "absent from the first input" is not "absent from the program", which is the
+// direction this gets wrong when the first input's attributes are taken as the
+// merged module's.
+// CHECK: cir.llvm_compiler_used = [@cu_b]
+
+// The second input's local collides and is renamed, and the retention entry
+// has to follow it. An entry copied across verbatim would name the *first*
+// input's object instead -- retaining the wrong one, while reading exactly
+// like it worked.
+//
+// @in_both is listed by both inputs and appears once: these lists repeat
+// heavily across a real TU set, so they are deduplicated rather than
+// concatenated.
+// CHECK-SAME: cir.llvm_used = [@a_only, @shared_local, @in_both, @b_only, @shared_local.cirlink.1]
+
+// Both locals survive as distinct objects, which is what the renamed entry
+// above has to be pointing at.
+// CHECK-DAG: cir.global "private"  internal  @shared_local = #cir.int<1>
+// CHECK-DAG: cir.global "private"  internal  @shared_local.cirlink.1 = #cir.int<2>

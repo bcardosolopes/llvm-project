@@ -1,0 +1,12 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: vector constant element must lower as int or float, got #cir.ptr<null> : !cir.ptr<!cir.int<u, 8>>
+// CHECK-NOT: LLVM ERROR:
+// CHECK-NOT: Stack dump:
+
+!u8 = !cir.int<u, 8>
+!p8 = !cir.ptr<!u8>
+!vecp = !cir.vector<1 x !p8>
+!s32i = !cir.int<s, 32>
+module attributes {cir.global_annotations = #cir<global_annotations [["a", #cir.annotation<name = "bad", args = [#cir.const_vector<[#cir.ptr<null> : !p8]> : !vecp]>]]>} {
+  cir.global external @a = #cir.int<0> : !s32i
+}

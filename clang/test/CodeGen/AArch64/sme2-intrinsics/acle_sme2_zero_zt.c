@@ -4,6 +4,8 @@
 
 // RUN: %clang_cc1 -triple aarch64 -target-feature +sme -target-feature +sme2 -disable-O0-optnone -Werror -Wall -emit-llvm -o - %s | opt -S -p mem2reg,instcombine,tailcallelim | FileCheck %s
 // RUN: %clang_cc1 -triple aarch64 -target-feature +sme -target-feature +sme2 -disable-O0-optnone -Werror -Wall -emit-llvm -o - -x c++ %s | opt -S -p mem2reg,instcombine,tailcallelim | FileCheck %s -check-prefix=CPP-CHECK
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64 -target-feature +sme -target-feature +sme2 -disable-O0-optnone -Werror -Wall -emit-llvm -fclangir -o - %s | opt -S -p mem2reg,instcombine,tailcallelim | FileCheck %s -check-prefix=CIR-CHECK %}
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64 -target-feature +sme -target-feature +sme2 -disable-O0-optnone -Werror -Wall -emit-llvm -fclangir -o - -x c++ %s | opt -S -p mem2reg,instcombine,tailcallelim | FileCheck %s -check-prefix=CIR-CPP-CHECK %}
 // RUN: %clang_cc1 -triple aarch64 -target-feature +sme -target-feature +sme2 -S -disable-O0-optnone -Werror -Wall -o /dev/null %s
 
 #include <arm_sme.h>
@@ -13,10 +15,18 @@
 // CHECK-NEXT:    tail call void @llvm.aarch64.sme.zero.zt(i32 0)
 // CHECK-NEXT:    ret void
 //
+// CIR-CHECK-LABEL: @test_svzero_zt(
+// CIR-CHECK-NEXT:    tail call void @llvm.aarch64.sme.zero.zt(i32 0)
+// CIR-CHECK-NEXT:    ret void
+//
 // CPP-CHECK-LABEL: @_Z14test_svzero_ztv(
 // CPP-CHECK-NEXT:  entry:
 // CPP-CHECK-NEXT:    tail call void @llvm.aarch64.sme.zero.zt(i32 0)
 // CPP-CHECK-NEXT:    ret void
+//
+// CIR-CPP-CHECK-LABEL: @_Z14test_svzero_ztv(
+// CIR-CPP-CHECK-NEXT:    tail call void @llvm.aarch64.sme.zero.zt(i32 0)
+// CIR-CPP-CHECK-NEXT:    ret void
 //
 void test_svzero_zt(void) __arm_streaming_compatible __arm_out("zt0") {
   svzero_zt(0);

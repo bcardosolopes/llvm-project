@@ -192,6 +192,12 @@ def CIR_AnyComplexOrIntOrBoolOrFloatType
 def CIR_AnyRecordType : CIR_TypeBase<"::cir::RecordType", "record type">;
 
 //===----------------------------------------------------------------------===//
+// Function Type predicates
+//===----------------------------------------------------------------------===//
+
+def CIR_AnyFuncType : CIR_TypeBase<"::cir::FuncType", "function type">;
+
+//===----------------------------------------------------------------------===//
 // Array Type predicates
 //===----------------------------------------------------------------------===//
 
@@ -253,6 +259,8 @@ def CIR_PtrToComplexType : CIR_PtrToType<CIR_AnyComplexType>;
 
 def CIR_PtrToRecordType : CIR_PtrToType<CIR_AnyRecordType>;
 
+def CIR_PtrToFunc : CIR_PtrToType<CIR_AnyFuncType>;
+
 def CIR_PtrToArray : CIR_PtrToType<CIR_AnyArrayType>;
 
 //===----------------------------------------------------------------------===//
@@ -294,6 +302,9 @@ def IntegerVector : Type<
 
 // Vector of type constraints
 def CIR_VectorOfIntType : CIR_VectorTypeOf<[CIR_AnyIntType]>;
+def CIR_VectorOfIntOrBoolType
+    : CIR_VectorTypeOf<[CIR_AnyIntType, CIR_AnyBoolType],
+        "vector of integer or boolean type">;
 def CIR_VectorOfUIntType : CIR_VectorTypeOf<[CIR_AnyUIntType]>;
 def CIR_VectorOfSIntType : CIR_VectorTypeOf<[CIR_AnySIntType]>;
 def CIR_VectorOfFloatType : CIR_VectorTypeOf<[CIR_AnyFloatType]>;
@@ -331,16 +342,18 @@ def CIR_AnyDataMemberType : CIR_TypeBase<"::cir::DataMemberType",
     "data member type">;
 
 //===----------------------------------------------------------------------===//
+// C null-terminated string types.
+//===----------------------------------------------------------------------===//
+def CIR_StringType : CIR_PtrToType<CIR_SInt8>;
+
+//===----------------------------------------------------------------------===//
 // VPtr type predicates
 //===----------------------------------------------------------------------===//
 
 def CIR_AnyVPtrType : CIR_TypeBase<"::cir::VPtrType", "vptr type">,
       BuildableType<"$_builder.getType<" # cppType # ">()">;
 
-def CIR_PtrToVPtr : CIR_PtrToType<CIR_AnyVPtrType>,
-      BuildableType<"$_builder.getType<" # cppType # ">("
-        "$_builder.getType<::cir::VPtrType>())">;
-
+def CIR_PtrToVPtr : CIR_PtrToType<CIR_AnyVPtrType>;
 //===----------------------------------------------------------------------===//
 // Scalar Type predicates
 //===----------------------------------------------------------------------===//

@@ -21,6 +21,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/MemoryBufferRef.h"
 #include "llvm/Support/SourceMgr.h"
@@ -32,8 +33,10 @@
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <thread>
 
 #define DEBUG_TYPE "mlir-bytecode-reader"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "] ")
 
 using namespace mlir;
 
@@ -465,6 +468,10 @@ LogicalResult StringSectionReader::initialize(Location fileLoc,
   // Parse each of the strings. The sizes of the strings are encoded in reverse
   // order, so that's the order we populate the table.
   size_t stringDataEndOffset = sectionData.size();
+  LLVM_DEBUG(
+      { DBGS() << "string section, parsing " << numStrings << " strings\n"; });
+  LLVM_DEBUG(
+      { DBGS() << "string section, size: " << stringDataEndOffset << "\n"; });
   for (StringRef &string : llvm::reverse(strings)) {
     uint64_t stringSize;
     if (failed(stringReader.parseVarInt(stringSize)))
@@ -886,8 +893,13 @@ public:
     return readEntry(attributes, index, result, "attribute", depth);
   }
 
-  LogicalResult readType(uint64_t index, Type &result, uint64_t depth = 0) {
-    return readEntry(types, index, result, "type", depth);
+  /// `allowPartial` controls whether an in-flight partial (published by a
+  /// mutable type to break a cycle) may satisfy this read. Nested reads want
+  /// that; the worklist does not, because a partial is not a resolved entry
+  /// and the entry still has to be parsed to completion.
+  LogicalResult readType(uint64_t index, Type &result, uint64_t depth = 0,
+                         bool allowPartial = true) {
+    return readEntry(types, index, result, "type", depth, allowPartial);
   }
 
   /// Resolve the attribute or type at the given index. Returns nullptr on
@@ -960,6 +972,27 @@ public:
   /// Whether currently resolving.
   bool isResolving() const { return resolving; }
 
+  /// Register `type` as the partial result of the type entry at `index`, for
+  /// the duration of the current parse attempt. See
+  /// DialectBytecodeReader::tryStartCyclicRead.
+  void setPartialType(uint64_t index, Type type) {
+    if (partialTypes.try_emplace(index, type).second)
+      partialOrder.push_back(index);
+  }
+  void clearPartialType(uint64_t index) { partialTypes.erase(index); }
+
+  /// A partial may answer any read. That is safe precisely because the type is
+  /// mutable: completing it mutates the same instance the consumer is holding,
+  /// so a consumer that took the partial ends up with the finished type. What
+  /// it must not do is let the *entry* stay unparsed -- see the fixpoint pass
+  /// at the end of resolveEntry.
+  Type getPartialType(uint64_t index) const {
+    return partialTypes.lookup(index);
+  }
+
+  /// Indices that were handed out as a partial and may still need parsing.
+  ArrayRef<uint64_t> getPartialIndices() const { return partialOrder; }
+
 private:
   /// Resolve the given entry at `index`.
   template <typename T>
@@ -970,7 +1003,8 @@ private:
   /// yet resolved.
   template <typename T>
   LogicalResult readEntry(SmallVectorImpl<Entry<T>> &entries, uint64_t index,
-                          T &result, StringRef entryType, uint64_t depth);
+                          T &result, StringRef entryType, uint64_t depth,
+                          bool allowPartial = true);
 
   /// Parse an entry using the given reader that was encoded using a custom
   /// bytecode format.
@@ -1001,6 +1035,12 @@ private:
   SmallVector<AttrEntry> attributes;
   SmallVector<TypeEntry> types;
 
+  /// Type entries that have published an incomplete value so a self-reference
+  /// can resolve, and the set of entries whose parse is currently on the
+  /// stack. A partial is only honoured for an entry in the latter set.
+  DenseMap<uint64_t, Type> partialTypes;
+  SmallVector<uint64_t> partialOrder;
+
   /// A location used for error emission.
   Location fileLoc;
 
@@ -1027,10 +1067,21 @@ public:
                 const ResourceSectionReader &resourceReader,
                 const llvm::StringMap<BytecodeDialect *> &dialectsMap,
                 EncodingReader &reader, uint64_t &bytecodeVersion,
-                uint64_t depth = 0)
+                uint64_t depth = 0,
+                std::optional<uint64_t> cyclicTypeIndex = std::nullopt)
       : attrTypeReader(attrTypeReader), stringReader(stringReader),
         resourceReader(resourceReader), dialectsMap(dialectsMap),
-        reader(reader), bytecodeVersion(bytecodeVersion), depth(depth) {}
+        reader(reader), bytecodeVersion(bytecodeVersion), depth(depth),
+        cyclicTypeIndex(cyclicTypeIndex) {}
+
+  /// See DialectBytecodeReader::tryStartCyclicRead.
+  ///
+  /// The partial is registered against the entry index for the duration of
+  /// this parse attempt only -- deliberately *not* stored into the entry
+  /// itself. An attempt can be abandoned and retried by the deferred
+  /// worklist, and an incomplete type left behind in the entry would be
+  /// handed out as if it were fully resolved.
+  LogicalResult tryStartCyclicRead(Type type) override;
 
   InFlightDiagnostic emitError(const Twine &msg) const override {
     return reader.emitError(msg);
@@ -1215,6 +1266,10 @@ private:
   EncodingReader &reader;
   uint64_t &bytecodeVersion;
   uint64_t depth;
+
+  /// Index of the type entry being parsed, when this reader is parsing one.
+  /// Only then can a cyclic read be published.
+  std::optional<uint64_t> cyclicTypeIndex;
 };
 
 /// Wraps the properties section and handles reading properties out of it.
@@ -1246,6 +1301,10 @@ public:
     if (!offsetsReader.empty())
       return offsetsReader.emitError()
              << "Broken properties section: didn't exhaust the offsets table";
+
+    LLVM_DEBUG({
+      DBGS() << "properties section, size: " << sectionData.size() << "\n";
+    });
     return success();
   }
 
@@ -1353,7 +1412,17 @@ LogicalResult AttrTypeReader::initialize(
     return offsetReader.emitError(
         "unexpected trailing data in the Attribute/Type offset section");
   }
-
+  LLVM_DEBUG({
+    DBGS() << "type and attribute data, number of types: " << types.size()
+           << "\n";
+  });
+  LLVM_DEBUG({
+    DBGS() << "type and attribute data, number of attrs: " << attributes.size()
+           << "\n";
+  });
+  LLVM_DEBUG({
+    DBGS() << "type and attribute data, size: " << sectionData.size() << "\n";
+  });
   return success();
 }
 
@@ -1363,7 +1432,16 @@ T AttrTypeReader::resolveEntry(SmallVectorImpl<Entry<T>> &entries,
                                uint64_t depth) {
   bool oldResolving = resolving;
   resolving = true;
-  llvm::scope_exit restoreResolving([&]() { resolving = oldResolving; });
+  llvm::scope_exit restoreResolving([&]() {
+    resolving = oldResolving;
+    // Partials published to break cycles are scoped to one top-level resolve.
+    // Past that point every entry is either fully resolved or the resolve
+    // failed, so keeping them would risk handing out an incomplete type.
+    if (!oldResolving) {
+      partialTypes.clear();
+      partialOrder.clear();
+    }
+  });
 
   if (index >= entries.size()) {
     emitError(fileLoc) << "invalid " << entryType << " index: " << index;
@@ -1374,7 +1452,8 @@ T AttrTypeReader::resolveEntry(SmallVectorImpl<Entry<T>> &entries,
   // common case where there are no deferred dependencies.
   assert(deferredWorklist.empty());
   T result;
-  if (succeeded(readEntry(entries, index, result, entryType, depth))) {
+  if (succeeded(readEntry(entries, index, result, entryType, depth,
+                          /*allowPartial=*/false))) {
     assert(deferredWorklist.empty());
     return result;
   }
@@ -1408,49 +1487,89 @@ T AttrTypeReader::resolveEntry(SmallVectorImpl<Entry<T>> &entries,
   for (auto entry : llvm::reverse(deferredWorklist))
     addToWorklistFront(entry);
 
-  while (!worklist.empty()) {
-    auto [currentIndex, entryKind] = worklist.front();
-    worklist.pop_front();
+  // An entry that was answered with a partial has not necessarily been parsed:
+  // a nested read inside the depth limit takes the partial and returns without
+  // scheduling anything. Those entries must still be completed. Drive them
+  // through the same worklist: a re-read can defer again -- a sibling subtree
+  // first reached here was never scheduled -- and that work must be processed
+  // rather than dropped, or the partial stays incomplete while its consumers
+  // already resolved around it. Consumers do not need revisiting -- they hold
+  // the same mutable instance that completing mutates.
+  //
+  // Each outer iteration either resolves at least one entry or fails loudly:
+  // the inner loop only exits with every queued entry resolved, and a re-read
+  // that fails with no deferred entries returns failure immediately.
+  for (;;) {
+    while (!worklist.empty()) {
+      auto [currentIndex, entryKind] = worklist.front();
+      worklist.pop_front();
 
-    // Clear the deferred worklist before parsing to capture any new entries.
-    deferredWorklist.clear();
+      // Clear the deferred worklist before parsing to capture any new entries.
+      deferredWorklist.clear();
 
-    if (entryKind == EntryKind::Type) {
-      Type result;
-      if (succeeded(readType(currentIndex, result, depth))) {
-        inWorklist.erase({currentIndex, entryKind});
-        continue;
+      if (entryKind == EntryKind::Type) {
+        Type result;
+        if (succeeded(readType(currentIndex, result, depth,
+                               /*allowPartial=*/false))) {
+          inWorklist.erase({currentIndex, entryKind});
+          continue;
+        }
+      } else {
+        assert(entryKind == EntryKind::Attribute && "Unexpected entry kind");
+        Attribute result;
+        if (succeeded(readAttribute(currentIndex, result, depth))) {
+          inWorklist.erase({currentIndex, entryKind});
+          continue;
+        }
       }
-    } else {
-      assert(entryKind == EntryKind::Attribute && "Unexpected entry kind");
-      Attribute result;
-      if (succeeded(readAttribute(currentIndex, result, depth))) {
-        inWorklist.erase({currentIndex, entryKind});
-        continue;
+
+      if (deferredWorklist.empty()) {
+        // Parsing failed with no deferred entries which implies an error.
+        return T();
       }
+
+      // Move this entry to the back to retry after dependencies.
+      worklist.emplace_back(currentIndex, entryKind);
+
+      // Add dependencies to the front (in reverse so they maintain order).
+      for (auto entry : llvm::reverse(deferredWorklist))
+        addToWorklistFront(entry);
+
+      deferredWorklist.clear();
     }
 
-    if (deferredWorklist.empty()) {
-      // Parsing failed with no deferred entries which implies an error.
-      return T();
+    // Re-seed entries that published a partial but never completed. Erase
+    // first: addToWorklistFront skips keys already in the set.
+    bool seeded = false;
+    SmallVector<uint64_t> pending(getPartialIndices());
+    for (uint64_t partialIndex : pending) {
+      if (types[partialIndex].entry)
+        continue;
+      std::pair<uint64_t, EntryKind> key(partialIndex, EntryKind::Type);
+      inWorklist.erase(key);
+      worklist.emplace_back(key);
+      inWorklist.insert(key);
+      seeded = true;
     }
-
-    // Move this entry to the back to retry after dependencies.
-    worklist.emplace_back(currentIndex, entryKind);
-
-    // Add dependencies to the front (in reverse so they maintain order).
-    for (auto entry : llvm::reverse(deferredWorklist))
-      addToWorklistFront(entry);
-
-    deferredWorklist.clear();
+    if (!seeded)
+      break;
   }
+
   return entries[index].entry;
+}
+
+LogicalResult DialectReader::tryStartCyclicRead(Type type) {
+  if (!cyclicTypeIndex || !type)
+    return failure();
+  attrTypeReader.setPartialType(*cyclicTypeIndex, type);
+  return success();
 }
 
 template <typename T>
 LogicalResult AttrTypeReader::readEntry(SmallVectorImpl<Entry<T>> &entries,
                                         uint64_t index, T &result,
-                                        StringRef entryType, uint64_t depth) {
+                                        StringRef entryType, uint64_t depth,
+                                        bool allowPartial) {
   if (index >= entries.size())
     return emitError(fileLoc) << "invalid " << entryType << " index: " << index;
 
@@ -1459,6 +1578,17 @@ LogicalResult AttrTypeReader::readEntry(SmallVectorImpl<Entry<T>> &entries,
   if (entry.entry) {
     result = entry.entry;
     return success();
+  }
+
+  // A mutable type that is mid-parse may have published an incomplete value so
+  // that a reference back to it -- which is how a self-referential record is
+  // encoded -- resolves instead of re-entering this entry.
+  if constexpr (std::is_same_v<T, Type>) {
+    if (allowPartial)
+      if (Type partial = getPartialType(index)) {
+        result = partial;
+        return success();
+      }
   }
 
   // If the entry hasn't been resolved, try to parse it.
@@ -1483,8 +1613,11 @@ LogicalResult AttrTypeReader::parseCustomEntry(Entry<T> &entry,
                                                EncodingReader &reader,
                                                StringRef entryType,
                                                uint64_t index, uint64_t depth) {
+  std::optional<uint64_t> cyclicTypeIndex;
+  if constexpr (std::is_same_v<T, Type>)
+    cyclicTypeIndex = index;
   DialectReader dialectReader(*this, stringReader, resourceReader, dialectsMap,
-                              reader, bytecodeVersion, depth);
+                              reader, bytecodeVersion, depth, cyclicTypeIndex);
   if (failed(entry.dialect->load(dialectReader, fileLoc.getContext())))
     return failure();
 
@@ -1594,6 +1727,10 @@ public:
   /// Return the number of ops that haven't been materialized yet.
   int64_t getNumOpsToMaterialize() const { return lazyLoadableOpsMap.size(); }
 
+  void setLazyLocations(bool lazyLocations) {
+    this->lazyLocations = lazyLocations;
+  }
+
   bool isMaterializable(Operation *op) { return lazyLoadableOpsMap.count(op); }
 
   /// Materialize the provided operation, invoke the lazyOpsCallback on every
@@ -1648,6 +1785,10 @@ private:
     regionStack.push_back(std::move(it->getSecond()->second));
     lazyLoadableOps.erase(it->getSecond());
     lazyLoadableOpsMap.erase(it);
+    if (std::optional<uint64_t> location = regionStack.back().deferredLocation)
+      if (failed(resolveLocation(*location,
+                                 regionStack.back().curRegion->getParentOp())))
+        return failure();
 
     while (!regionStack.empty())
       if (failed(parseRegions(regionStack, regionStack.back())))
@@ -1680,6 +1821,18 @@ private:
 
   /// Return the context for this config.
   MLIRContext *getContext() const { return config.getContext(); }
+
+  /// Return true if the section of an isolated op with `numRegions` regions
+  /// encodes only empty regions. This only probes the section and never emits
+  /// a diagnostic: the writer encodes each zero block count as the single byte
+  /// 0x01, and any other bytes leave the op deferred, so a malformed section is
+  /// diagnosed only if the op is materialized.
+  bool hasOnlyEmptyRegions(ArrayRef<uint8_t> sectionData,
+                           unsigned numRegions) const {
+    return sectionData.size() >= numRegions &&
+           llvm::all_of(sectionData.take_front(numRegions),
+                        [](uint8_t byte) { return byte == 0x01; });
+  }
 
   /// Parse the bytecode version.
   LogicalResult parseVersion(EncodingReader &reader);
@@ -1751,14 +1904,31 @@ private:
 
     /// A flag indicating if the regions being read are isolated from above.
     bool isIsolatedFromAbove = false;
+
+    /// For a deferred op read with lazy locations, the index of its location
+    /// attribute, which materializing the op resolves.
+    std::optional<uint64_t> deferredLocation;
   };
 
   LogicalResult parseIRSection(ArrayRef<uint8_t> sectionData, Block *block);
   LogicalResult parseRegions(std::vector<RegionReadState> &regionStack,
                              RegionReadState &readState);
-  FailureOr<Operation *> parseOpWithoutRegions(EncodingReader &reader,
-                                               RegionReadState &readState,
-                                               bool &isIsolatedFromAbove);
+  FailureOr<Operation *>
+  parseOpWithoutRegions(EncodingReader &reader, RegionReadState &readState,
+                        bool &isIsolatedFromAbove,
+                        std::optional<uint64_t> &deferredLocation);
+
+  /// Gives `op` the location attribute at `index`.
+  LogicalResult resolveLocation(uint64_t index, Operation *op) {
+    Attribute attr = attrTypeReader.resolveAttribute(index);
+    if (!attr)
+      return failure();
+    auto location = dyn_cast<LocationAttr>(attr);
+    if (!location)
+      return emitError(fileLoc, "expected a location, but got: ") << attr;
+    op->setLoc(location);
+    return success();
+  }
 
   LogicalResult parseRegion(RegionReadState &readState);
   LogicalResult parseBlockHeader(EncodingReader &reader,
@@ -1850,6 +2020,7 @@ private:
 
   /// Flag that indicates if lazyloading is enabled.
   bool lazyLoading;
+  bool lazyLocations = false;
 
   /// Keep track of operations that have been lazy loaded (their regions haven't
   /// been materialized), along with the `RegionReadState` that allows to
@@ -1926,10 +2097,13 @@ LogicalResult BytecodeReader::Impl::read(
     return failure();
 
   // Add a diagnostic handler that attaches a note that includes the original
-  // producer of the bytecode.
+  // producer of the bytecode. Readers running on other threads share the
+  // context's handlers, so only this thread's diagnostics get the note.
+  std::thread::id readerThread = std::this_thread::get_id();
   ScopedDiagnosticHandler diagHandler(getContext(), [&](Diagnostic &diag) {
-    diag.attachNote() << "in bytecode version " << version
-                      << " produced by: " << producer;
+    if (std::this_thread::get_id() == readerThread)
+      diag.attachNote() << "in bytecode version " << version
+                        << " produced by: " << producer;
     return failure();
   });
 
@@ -1948,6 +2122,10 @@ LogicalResult BytecodeReader::Impl::read(
     if (failed(
             reader.parseSection(sectionID, checkSectionAlignment, sectionData)))
       return failure();
+    LLVM_DEBUG({
+      DBGS() << "section: " << (int)sectionID
+             << ", size: " << sectionData.size() << "\n";
+    });
 
     // Check for duplicate sections, we only expect one instance of each.
     if (sectionDatas[sectionID]) {
@@ -2188,6 +2366,9 @@ LogicalResult BytecodeReader::Impl::parseResourceSection(
   if (!resourceData)
     return success();
 
+  LLVM_DEBUG(
+      { DBGS() << "resources data, size: " << resourceData->size() << "\n"; });
+
   // Initialize the resource reader with the resource sections.
   DialectReader dialectReader(attrTypeReader, stringReader, resourceReader,
                               dialectsMap, reader, version);
@@ -2409,6 +2590,8 @@ BytecodeReader::Impl::parseIRSection(ArrayRef<uint8_t> sectionData,
   auto &parsedOps = moduleOp->getBody()->getOperations();
   auto &destOps = block->getOperations();
   destOps.splice(destOps.end(), parsedOps, parsedOps.begin(), parsedOps.end());
+
+  LLVM_DEBUG({ DBGS() << "IR data, size: " << sectionData.size() << "\n"; });
   return success();
 }
 
@@ -2444,8 +2627,9 @@ BytecodeReader::Impl::parseRegions(std::vector<RegionReadState> &regionStack,
         // Read in the next operation. We don't read its regions directly, we
         // handle those afterwards as necessary.
         bool isIsolatedFromAbove = false;
-        FailureOr<Operation *> op =
-            parseOpWithoutRegions(reader, readState, isIsolatedFromAbove);
+        std::optional<uint64_t> deferredLocation;
+        FailureOr<Operation *> op = parseOpWithoutRegions(
+            reader, readState, isIsolatedFromAbove, deferredLocation);
         if (failed(op))
           return failure();
 
@@ -2469,15 +2653,22 @@ BytecodeReader::Impl::parseRegions(std::vector<RegionReadState> &regionStack,
                 std::make_unique<EncodingReader>(sectionData, fileLoc);
             childState.reader = childState.owningReader.get();
 
-            // If the user has a callback set, they have the opportunity to
-            // control lazyloading as we go.
-            if (lazyLoading && (!lazyOpsCallback || !lazyOpsCallback(*op))) {
+            // An op whose regions are all empty has nothing to load later.
+            // Otherwise, if the user has a callback set, they have the
+            // opportunity to control lazyloading as we go.
+            if (lazyLoading &&
+                !hasOnlyEmptyRegions(sectionData, (*op)->getNumRegions()) &&
+                (!lazyOpsCallback || !lazyOpsCallback(*op))) {
+              childState.deferredLocation = deferredLocation;
               lazyLoadableOps.emplace_back(*op, std::move(childState));
               lazyLoadableOpsMap.try_emplace(*op,
                                              std::prev(lazyLoadableOps.end()));
               continue;
             }
           }
+          if (deferredLocation &&
+              failed(resolveLocation(*deferredLocation, *op)))
+            return failure();
           regionStack.push_back(std::move(childState));
 
           // If the op is isolated from above, push a new value scope.
@@ -2511,9 +2702,9 @@ BytecodeReader::Impl::parseRegions(std::vector<RegionReadState> &regionStack,
 }
 
 FailureOr<Operation *>
-BytecodeReader::Impl::parseOpWithoutRegions(EncodingReader &reader,
-                                            RegionReadState &readState,
-                                            bool &isIsolatedFromAbove) {
+BytecodeReader::Impl::parseOpWithoutRegions(
+    EncodingReader &reader, RegionReadState &readState,
+    bool &isIsolatedFromAbove, std::optional<uint64_t> &deferredLocation) {
   // Parse the name of the operation.
   std::optional<bool> wasRegistered;
   FailureOr<OperationName> opName = parseOpName(reader, wasRegistered);
@@ -2526,10 +2717,19 @@ BytecodeReader::Impl::parseOpWithoutRegions(EncodingReader &reader,
   if (failed(reader.parseByte(opMask)))
     return failure();
 
-  /// Parse the location.
+  /// Parse the location. With lazy locations, an op with regions, which may
+  /// be deferred, gets it once that is decided.
   LocationAttr opLoc;
-  if (failed(parseAttribute(reader, opLoc)))
+  if (lazyLoading && lazyLocations &&
+      (opMask & bytecode::OpEncodingMask::kHasInlineRegions)) {
+    uint64_t index;
+    if (failed(reader.parseVarInt(index)))
+      return failure();
+    deferredLocation = index;
+    opLoc = UnknownLoc::get(getContext());
+  } else if (failed(parseAttribute(reader, opLoc))) {
     return failure();
+  }
 
   // With the location and name resolved, we can start building the operation
   // state.
@@ -2624,6 +2824,16 @@ BytecodeReader::Impl::parseOpWithoutRegions(EncodingReader &reader,
     opState.regions.reserve(numRegions);
     for (int i = 0, e = numRegions; i < e; ++i)
       opState.regions.push_back(std::make_unique<Region>());
+  }
+  if (deferredLocation && opState.regions.empty()) {
+    Attribute location = attrTypeReader.resolveAttribute(*deferredLocation);
+    if (!location)
+      return failure();
+    auto locationAttr = dyn_cast<LocationAttr>(location);
+    if (!locationAttr)
+      return emitError(fileLoc, "expected a location, but got: ") << location;
+    opState.location = locationAttr;
+    deferredLocation.reset();
   }
 
   // Create the operation at the back of the current block.
@@ -2838,6 +3048,10 @@ BytecodeReader::BytecodeReader(
                           /*line=*/0, /*column=*/0);
   impl = std::make_unique<Impl>(sourceFileLoc, config, lazyLoading, buffer,
                                 bufferOwnerRef);
+}
+
+void BytecodeReader::setLazyLocations(bool lazyLocations) {
+  impl->setLazyLocations(lazyLocations);
 }
 
 LogicalResult BytecodeReader::readTopLevel(

@@ -1,0 +1,11 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: unary not on vector mask is not supported
+// CHECK-NOT: NYI: op! on vector mask
+// CHECK-NOT: Stack dump:
+
+module {
+  cir.func @f(%arg0: !cir.vector<4 x !cir.bool>) -> !cir.vector<4 x !cir.bool> {
+    %0 = cir.unary(not, %arg0) : !cir.vector<4 x !cir.bool>, !cir.vector<4 x !cir.bool>
+    cir.return %0 : !cir.vector<4 x !cir.bool>
+  }
+}

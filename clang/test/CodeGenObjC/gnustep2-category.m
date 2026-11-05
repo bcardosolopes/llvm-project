@@ -14,6 +14,7 @@
 
 // CHECK: @.objc_category_XCat = internal global { ptr, ptr, ptr, ptr, ptr, ptr, ptr }
 // CHECK-SAME: section "__objc_cats", align 8
+// CHECK-DAG: @llvm.used = appending global {{.*}}ptr @.objc_category_XCat{{.*}}
 
 @interface X @end
 

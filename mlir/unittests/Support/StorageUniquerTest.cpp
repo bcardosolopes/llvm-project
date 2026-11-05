@@ -7,7 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Support/StorageUniquer.h"
+#include "mlir/Support/ThreadLocalCache.h"
 #include "gmock/gmock.h"
+
+#include <future>
+#include <thread>
 
 using namespace mlir;
 
@@ -57,4 +61,40 @@ TEST(StorageUniquerTest, NonTrivialDestructor) {
   }
 
   EXPECT_TRUE(wasDestructed);
+}
+
+TEST(StorageUniquerTest, ClearThreadLocalCaches) {
+  struct IntStorage : public SimpleStorage<IntStorage, int> {
+    using Base::Base;
+  };
+  StorageUniquer uniquer;
+  uniquer.registerParametricStorageType<IntStorage>();
+  IntStorage *one = IntStorage::get(uniquer, 1);
+  std::thread([&] { EXPECT_EQ(IntStorage::get(uniquer, 1), one); }).join();
+
+  // Instances outlive the caches that found them.
+  uniquer.clearThreadLocalCaches();
+  EXPECT_EQ(IntStorage::get(uniquer, 1), one);
+  EXPECT_NE(IntStorage::get(uniquer, 2), one);
+}
+
+TEST(ThreadLocalCacheTest, ClearResetsLiveThreadValue) {
+  ThreadLocalCache<int> cache;
+  std::promise<void> written;
+  std::future<void> writtenFuture = written.get_future();
+  std::promise<void> cleared;
+  std::future<void> clearedFuture = cleared.get_future();
+  std::thread worker([&] {
+    int &value = cache.get();
+    value = 42;
+    written.set_value();
+    clearedFuture.wait();
+    // The thread keeps its instance; only the value is reset.
+    EXPECT_EQ(&cache.get(), &value);
+    EXPECT_EQ(cache.get(), 0);
+  });
+  writtenFuture.wait();
+  cache.clear();
+  cleared.set_value();
+  worker.join();
 }

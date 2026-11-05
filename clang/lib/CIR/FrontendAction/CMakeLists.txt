@@ -1,6 +1,9 @@
 set(LLVM_LINK_COMPONENTS
+  BitReader
   Core
+  Linker
   Support
+  TransformUtils
   )
 
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
@@ -20,7 +23,9 @@ add_clang_library(clangCIRFrontendAction
   clangCIR
   clangCIRLoweringCommon
   clangCIRLoweringDirectToLLVM
+  clangCIRLoweringThroughMLIR
   clangCodeGen
+  MLIRBytecodeWriter
   MLIRCIR
   MLIRIR
   )

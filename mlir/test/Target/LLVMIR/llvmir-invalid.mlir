@@ -49,6 +49,137 @@ llvm.mlir.global external @target_specific_attrs_wrong_type() {target_specific_a
 
 // -----
 
+// The same encoding is checked on a call site, which has its own writer.
+llvm.func @callee()
+llvm.func @call_passthrough_wrong_type() {
+  // expected-error @below{{expected 'passthrough' to contain string or array attributes}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = [42]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @callee()
+llvm.func @call_passthrough_wrong_pair() {
+  // expected-error @below{{expected the first element of a 'passthrough' pair to be a string}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = [[42, 42]]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// A wrong-length array is a wrong pair, not a wrong kind of element, so it
+// gets the pair diagnostic rather than the one about element kinds.
+llvm.func @callee()
+llvm.func @call_passthrough_wrong_arity() {
+  // expected-error @below{{expected the first element of a 'passthrough' pair to be a string}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = [["a", "b", "c"]]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// A name with its own slot on the op must not also sit in the bag: the export
+// would write the same fact twice. The import never produces this.
+llvm.func @callee()
+llvm.func @call_passthrough_duplicates_a_slot() {
+  // expected-error @below{{'cold' has its own attribute on this operation and cannot also appear in 'passthrough'}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = ["cold"]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// The same holds for a string-valued slot with no LLVM enum of its name:
+// `target-features` is what its slot models, so the bag must not carry it too.
+llvm.func @callee()
+llvm.func @call_passthrough_duplicates_a_string_slot() {
+  // expected-error @below{{'target-features' has its own attribute on this operation and cannot also appear in 'passthrough'}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = [["target-features", "+neon"]]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// A bare name is the enum form, so an integer attribute written that way is
+// rejected rather than guessed at.
+llvm.func @callee()
+llvm.func @call_passthrough_int_as_bare_name() {
+  // expected-error @below{{'alignstack' is not an enum function attribute}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = ["alignstack"]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// LLVM's integer attributes are 64-bit and `getZExtValue` asserts rather than
+// truncating, so a wider value is rejected here instead of aborting.
+llvm.func @callee()
+llvm.func @call_passthrough_int_too_wide() {
+  // expected-error @below{{'alignstack' expects a value that fits in 64 bits in 'passthrough'}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {
+    passthrough = [["alignstack", 18446744073709551616 : i128]]
+  } : () -> ()
+  llvm.return
+}
+
+// -----
+
+// Paired with an integer means the integer form, so an enum name there is
+// rejected too.
+llvm.func @callee()
+llvm.func @call_passthrough_flag_as_int() {
+  // expected-error @below{{'nobuiltin' is not an integer function attribute}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = [["nobuiltin", 1]]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// Paired with a *string*, the same name is a string attribute and is written
+// as one -- which is how `"noreturn"` survives next to the enum `noreturn`.
+llvm.func @callee()
+llvm.func @call_passthrough_wrong_second_element() {
+  // expected-error @below{{expected the second element of a 'passthrough' pair to be a string or an integer}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = [["nobuiltin", 1.0]]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// `byval` is a *type* attribute, so a bare name -- which means the enum form
+// -- cannot be it.
+llvm.func @callee()
+llvm.func @call_passthrough_not_an_enum_kind() {
+  // expected-error @below{{'byval' is not an enum function attribute}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = ["byval"]} : () -> ()
+  llvm.return
+}
+
+// -----
+
+// `noalias` is an enum attribute, but a parameter and return one: at the
+// function index it is not something LLVM can express.
+llvm.func @callee()
+llvm.func @call_passthrough_not_a_function_attr() {
+  // expected-error @below{{'noalias' is not a function attribute}}
+  // expected-error @below{{LLVM Translation failed for operation: llvm.call}}
+  llvm.call @callee() {passthrough = ["noalias"]} : () -> ()
+  llvm.return
+}
+
+// -----
+
 llvm.func @unary_float_intr_wrong_type(%arg0 : i32) -> i32 {
   // expected-error @below{{op operand #0 must be floating point LLVM type or LLVM dialect-compatible vector of floating point LLVM type}}
   %0 = "llvm.intr.exp"(%arg0) : (i32) -> i32

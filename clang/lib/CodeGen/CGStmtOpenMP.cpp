@@ -1854,9 +1854,21 @@ void CodeGenFunction::EmitOMPParallelDirective(const OMPParallelDirective &S) {
                               /*IgnoreResultAssign=*/true);
 
     llvm::Value *NumThreads = nullptr;
-    if (const auto *NumThreadsClause = S.getSingleClause<OMPNumThreadsClause>())
+    NumThreadsType NumThreadsModifier = OMP_NUMTHREADS_Unknown;
+    llvm::Value *Severity = nullptr;
+    llvm::Value *Message = nullptr;
+    if (const auto *NumThreadsClause = S.getSingleClause<OMPNumThreadsClause>()) {
       NumThreads = EmitScalarExpr(NumThreadsClause->getNumThreads(),
                                   /*IgnoreResultAssign=*/true);
+      if (NumThreadsClause->getModifier() == OMPC_NUMTHREADS_strict)
+        NumThreadsModifier = OMP_NUMTHREADS_Strict;
+      if (const auto *MessageClause = S.getSingleClause<OMPMessageClause>())
+        Message = EmitScalarExpr(MessageClause->getMessageString(),
+                                 /*IgnoreResultAssign=*/true);
+      if (const auto *SeverityClause = S.getSingleClause<OMPSeverityClause>())
+        Severity = Builder.getInt32(
+            SeverityClause->getSeverityKind() == OMPC_SEVERITY_warning ? 1 : 2);
+    }
 
     ProcBindKind ProcBind = OMP_PROC_BIND_default;
     if (const auto *ProcBindClause = S.getSingleClause<OMPProcBindClause>())
@@ -1900,7 +1912,8 @@ void CodeGenFunction::EmitOMPParallelDirective(const OMPParallelDirective &S) {
         AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
     llvm::OpenMPIRBuilder::InsertPointTy AfterIP = cantFail(
         OMPBuilder.createParallel(Builder, AllocaIP, BodyGenCB, PrivCB, FiniCB,
-                                  IfCond, NumThreads, ProcBind, S.hasCancel()));
+                                  IfCond, NumThreads, ProcBind, S.hasCancel(),
+                                  NumThreadsModifier, Severity, Message));
     Builder.restoreIP(AfterIP);
     return;
   }
@@ -4181,7 +4194,9 @@ static void emitOMPForDirective(const OMPLoopDirective &S, CodeGenFunction &CGF,
           CGF.Builder.getCurrentDebugLocation(), CLI, AllocaIP, NeedsBarrier,
           SchedKind, ChunkSize, /*HasSimdModifier=*/false,
           /*HasMonotonicModifier=*/false, /*HasNonmonotonicModifier=*/false,
-          /*HasOrderedClause=*/false));
+          /*HasOrderedClause=*/false,
+          llvm::omp::WorksharingLoopType::ForStaticLoop, /*NoLoop=*/false,
+          /*HasDistSchedule=*/false, /*DistScheduleChunkSize=*/nullptr));
       return;
     }
 

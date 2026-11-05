@@ -1,0 +1,41 @@
+// cir-link reads cir.record_locations -- where CIRGen says each record and
+// each of its members is defined -- and leaves it out of the merged module.
+// A member CIRGen gave no location of its own is at its record.
+//
+// RUN: rm -rf %t && split-file %s %t
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning --diagnostic-style=source \
+// RUN:     -o %t/merged.cir 2>&1 | FileCheck %s --check-prefix=SOURCE
+// RUN: FileCheck %s --check-prefix=MERGED --input-file=%t/merged.cir
+// RUN: cir-link %t/a.cir %t/b.cir --odr=warning -o %t/cir.cir 2>&1 \
+// RUN:     | FileCheck %s --check-prefix=CIR
+
+// SOURCE:      shape.h:1:8: warning: 'Shape' is defined differently than in an earlier input
+// SOURCE-NEXT: shape.h:3:9: note: a member differs here: a double
+// SOURCE-NEXT: shape.h:2:7: note: the earlier definition has: a 32-bit signed integer
+// SOURCE-NOT:  {{warning|note}}:
+
+// Without the source, the positions are the inputs'.
+// CIR:      b.cir:0:0: warning: record 'Shape' has a different body than in an earlier input; renamed to 'Shape.m1'
+// CIR-NEXT: a.cir:0:0: note: the earlier definition is here
+// CIR-NEXT: b.cir:0:0: note: member 2 differs here: '!cir.double'
+// CIR-NEXT: a.cir:0:0: note: the earlier definition has: '!cir.int<s, 32>'
+
+// MERGED-NOT: cir.record_locations
+
+//--- a.cir
+!s32i = !cir.int<s, 32>
+!rec_Shape = !cir.record<struct "Shape" {!s32i, !s32i}>
+module attributes {cir.record_locations = {Shape = [loc("shape.h":1:8), loc("shape.h":2:7), loc("shape.h":2:7)]}} {
+  cir.func linkonce_odr @use_a(%arg0: !cir.ptr<!rec_Shape>) {
+    cir.return
+  }
+}
+
+//--- b.cir
+!s32i = !cir.int<s, 32>
+!rec_Shape = !cir.record<struct "Shape" {!s32i, !cir.double}>
+module attributes {cir.record_locations = {Shape = [loc("shape.h":1:8), loc("shape.h":2:7), loc("shape.h":3:9)]}} {
+  cir.func linkonce_odr @use_b(%arg0: !cir.ptr<!rec_Shape>) {
+    cir.return
+  }
+}

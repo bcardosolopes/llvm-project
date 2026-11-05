@@ -52,3 +52,16 @@ void *test_AddressOfReturnAddress(void) {
   // OGCG: call ptr @llvm.addressofreturnaddress.p0()
 }
 #endif
+
+int test_noop_expr(void) {
+  return __noop(1);
+  // CIR-LABEL: test_noop_expr
+  // CIR: cir.const #cir.int<0> : !s32i
+  // CIR: cir.return {{%.*}} : !s32i
+
+  // LLVM-LABEL: test_noop_expr
+  // LLVM: ret i32 {{.*}}
+
+  // OGCG-LABEL: test_noop_expr
+  // OGCG: ret i32 {{.*}}
+}

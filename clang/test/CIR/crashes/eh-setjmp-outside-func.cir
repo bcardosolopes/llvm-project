@@ -1,0 +1,16 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: operation must be inside a function when lowering call to '_setjmp'
+// CHECK-NOT: expected parent LLVM function
+// CHECK-NOT: Stack dump:
+
+!s32i = !cir.int<s, 32>
+!u8i = !cir.int<u, 8>
+!arr = !cir.array<!u8i x 1>
+!p32 = !cir.ptr<!s32i>
+
+module {
+  cir.global "private" external @buf : !arr
+  %0 = cir.get_global @buf : !cir.ptr<!arr>
+  %1 = cir.cast bitcast %0 : !cir.ptr<!arr> -> !p32
+  %2 = cir.eh.setjmp %1 : (!p32) -> !s32i
+}

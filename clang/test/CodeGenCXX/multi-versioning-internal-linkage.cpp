@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -std=c++11 -triple x86_64-linux-gnu -emit-llvm %s -o - | FileCheck %s --check-prefix=LINUX
+// RUN: %if cir-support %{ %clang_cc1 -std=c++11 -triple x86_64-linux-gnu -fclangir -emit-llvm %s -o - | FileCheck %s --check-prefix=LINUX %}
 // RUN: %clang_cc1 -std=c++11 -triple x86_64-windows-pc -emit-llvm %s -o - | FileCheck %s --check-prefix=WINDOWS
 
 __attribute__((target("default"))) static int static_target() {
@@ -28,6 +29,7 @@ int usage() {
 
 // Ensure that these are all 'internal'. Windows doesn't have ifuncs or aliases,
 // since Windows doesn't support ifuncs.
+// LINUX: @__cpu_model = external dso_local global { i32, i32, i32, [1 x i32] }
 // aliases:
 // LINUX: @_ZL15static_dispatchv = internal alias i32 (), ptr @_ZL15static_dispatchv.ifunc
 // LINUX: @_ZN12_GLOBAL__N_113anon_dispatchEv = internal alias i32 (), ptr @_ZN12_GLOBAL__N_113anon_dispatchEv.ifunc

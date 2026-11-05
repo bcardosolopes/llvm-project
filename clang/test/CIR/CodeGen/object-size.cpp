@@ -73,16 +73,20 @@ void test2() {
   // OGCG: store i32 16
   gi = __builtin_object_size(&c->bs[0], 3);
 
-  // NYI: DerivedToBase cast
-  // gi = __builtin_object_size((A*)&c->bs[0], 0);
+  // CIR: cir.objsize max nullunknown %{{.+}} : !cir.ptr<!void> -> !u64i
+  // LLVM: call i64 @llvm.objectsize.i64.p0(ptr %{{.*}}, i1 false, i1 true, i1 false)
+  // OGCG: call i64 @llvm.objectsize.i64.p0(ptr %{{.*}}, i1 false, i1 true, i1 false)
+  gi = __builtin_object_size((A*)&c->bs[0], 0);
 
   // CIR: cir.const #cir.int<16>
   // LLVM: store i32 16
   // OGCG: store i32 16
   gi = __builtin_object_size((A*)&c->bs[0], 1);
 
-  // NYI: DerivedToBase cast 
-  // gi = __builtin_object_size((A*)&c->bs[0], 2);
+  // CIR: cir.objsize min nullunknown %{{.+}} : !cir.ptr<!void> -> !u64i
+  // LLVM: call i64 @llvm.objectsize.i64.p0(ptr %{{.*}}, i1 true, i1 true, i1 false)
+  // OGCG: call i64 @llvm.objectsize.i64.p0(ptr %{{.*}}, i1 true, i1 true, i1 false)
+  gi = __builtin_object_size((A*)&c->bs[0], 2);
 
   // CIR: cir.const #cir.int<16>
   // LLVM: store i32 16

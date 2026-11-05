@@ -1,8 +1,8 @@
 // RUN: mlir-translate -mlir-to-llvmir -split-input-file %s | FileCheck %s
 
 #tbaa_root_0 = #llvm.tbaa_root<>
-#tbaa_type_desc_1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<#tbaa_root_0, 0>}>
-#tbaa_type_desc_2 = #llvm.tbaa_type_desc<id = "long long", members = {<#tbaa_type_desc_1, 0>}>
+#tbaa_type_desc_1 = #llvm.tbaa_type_desc<id = "omnipotent char", members = {<typeDesc = #tbaa_root_0, offset = 0>}>
+#tbaa_type_desc_2 = #llvm.tbaa_type_desc<id = "long long", members = {<typeDesc = #tbaa_type_desc_1, offset = 0>}>
 #tbaa_tag_3 = #llvm.tbaa_tag<access_type = #tbaa_type_desc_2, base_type = #tbaa_type_desc_2, offset = 0>
 
 // CHECK: define void @tbaa_anonymous_root(ptr %{{.*}}) {

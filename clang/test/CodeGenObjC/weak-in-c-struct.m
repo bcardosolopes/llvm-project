@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple arm64-apple-ios11 -fobjc-arc -fblocks -fobjc-runtime=ios-11.0 -emit-llvm -o - %s | FileCheck -check-prefix=ARM64 -check-prefix=COMMON %s
+// RUN: %if cir-support %{ %clang_cc1 -triple arm64-apple-ios11 -fobjc-arc -fblocks -fobjc-runtime=ios-11.0 -emit-llvm -disable-llvm-passes -fclangir -o - %s | FileCheck -check-prefix=ARM64-CIR %s %}
 // RUN: %clang_cc1 -triple thumbv7-apple-ios10 -fobjc-arc -fblocks -fobjc-runtime=ios-10.0 -emit-llvm -o - %s | FileCheck -check-prefix=COMMON %s
 // RUN: %clang_cc1 -triple x86_64-apple-macosx10.13 -fobjc-arc -fblocks -fobjc-runtime=macosx-10.13.0 -emit-llvm -o - %s | FileCheck -check-prefix=COMMON %s
 // RUN: %clang_cc1 -triple i386-apple-macosx10.13.0 -fobjc-arc -fblocks -fobjc-runtime=macosx-fragile-10.13.0 -emit-llvm -o - %s | FileCheck -check-prefix=COMMON %s
@@ -82,6 +83,11 @@ void test_copy_constructor_Weak(Weak *s) {
 // ARM64: %[[V12:.*]] = call ptr @llvm.objc.storeWeak(ptr %[[V6]], ptr %[[V11]])
 // ARM64: call void @llvm.objc.release(ptr %[[V11]])
 
+// ARM64-CIR-LABEL: define{{.*}} void @test_copy_assignment_Weak(
+// ARM64-CIR: call ptr @llvm.objc.loadWeakRetained(
+// ARM64-CIR: call ptr @llvm.objc.storeWeak(
+// ARM64-CIR: call void @llvm.objc.release(
+
 void test_copy_assignment_Weak(Weak *d, Weak *s) {
   *d = *s;
 }
@@ -125,6 +131,18 @@ void test_move_constructor_Weak(void) {
 // ARM64: %[[V12:.*]] = call ptr @llvm.objc.storeWeak(ptr %[[V6]], ptr %[[V11]])
 // ARM64: call void @llvm.objc.destroyWeak(ptr %[[V9]])
 // ARM64: call void @llvm.objc.release(ptr %[[V11]])
+
+// ARM64-CIR-LABEL: define internal void @__Block_byref_object_copy_(
+// ARM64-CIR: call void @__move_constructor_8_8_t0w4_w8(
+
+// ARM64-CIR-LABEL: define linkonce_odr hidden void @__move_constructor_8_8_t0w4_w8(
+// ARM64-CIR: call void @llvm.objc.moveWeak(
+
+// ARM64-CIR-LABEL: define{{.*}} void @test_move_assignment_Weak(
+// ARM64-CIR: call ptr @llvm.objc.loadWeakRetained(
+// ARM64-CIR: call ptr @llvm.objc.storeWeak(
+// ARM64-CIR: call void @llvm.objc.destroyWeak(
+// ARM64-CIR: call void @llvm.objc.release(
 
 void test_move_assignment_Weak(Weak *p) {
   *p = getWeak();

@@ -936,6 +936,10 @@ __OMP_RTL_ATTRS(__kmpc_omp_task_with_deps, DefaultAttrs, SExt,
 __OMP_RTL_ATTRS(__kmpc_taskloop, DefaultAttrs, AttributeSet(),
                 ParamAttrs(ReadOnlyPtrAttrs, SExt, AttributeSet(), SExt,
                            ArgPtrAttrs, ArgPtrAttrs, AttributeSet(), SExt, SExt))
+__OMP_RTL_ATTRS(__kmpc_taskloop_5, DefaultAttrs, AttributeSet(),
+                ParamAttrs(ReadOnlyPtrAttrs, SExt, AttributeSet(), SExt,
+                           ArgPtrAttrs, ArgPtrAttrs, AttributeSet(), SExt, SExt,
+                           SExt))
 __OMP_RTL_ATTRS(__kmpc_omp_target_task_alloc, DefaultAttrs, ReturnPtrAttrs,
                 ParamAttrs(ReadOnlyPtrAttrs, SExt, SExt, SizeTyExt, SizeTyExt,
                            ReadOnlyPtrAttrs, AttributeSet()))
@@ -1135,6 +1139,9 @@ __OMP_IDENT_FLAG(BARRIER_IMPL_FOR, 0x0040)
 __OMP_IDENT_FLAG(BARRIER_IMPL_SECTIONS, 0x00C0)
 __OMP_IDENT_FLAG(BARRIER_IMPL_SINGLE, 0x0140)
 __OMP_IDENT_FLAG(BARRIER_IMPL_WORKSHARE, 0x01C0)
+__OMP_IDENT_FLAG(WORK_LOOP, 0x0200)
+__OMP_IDENT_FLAG(WORK_SECTIONS, 0x0400)
+__OMP_IDENT_FLAG(WORK_DISTRIBUTE, 0x0800)
 
 #undef __OMP_IDENT_FLAG
 #undef OMP_IDENT_FLAG

@@ -21,6 +21,7 @@
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/FoldInterfaces.h"
 
 #include "llvm/ADT/ArrayRef.h"
@@ -664,6 +665,45 @@ static void printScheduleClause(OpAsmPrinter &p, Operation *op,
     p << ", " << stringifyScheduleModifier(scheduleMod.getValue());
   if (scheduleSimd)
     p << ", simd";
+}
+
+//===----------------------------------------------------------------------===//
+// Parser and printer for NumThreads Clause
+//===----------------------------------------------------------------------===//
+
+// num_threads ::= `num_threads` `(` [strict `:`] ssa-id-and-type `)`
+static ParseResult
+parseNumThreadsClause(OpAsmParser &parser,
+                      NumThreadsModifierAttr &numThreadsModifier,
+                      std::optional<OpAsmParser::UnresolvedOperand> &numThreads,
+                      Type &numThreadsType) {
+  StringRef enumStr;
+  SMLoc loc = parser.getCurrentLocation();
+  if (succeeded(parser.parseOptionalKeyword(&enumStr))) {
+    std::optional<NumThreadsModifier> enumValue =
+        symbolizeNumThreadsModifier(enumStr);
+    if (!enumValue)
+      return parser.emitError(loc, "invalid num_threads modifier: '")
+             << enumStr << "'";
+    numThreadsModifier =
+        NumThreadsModifierAttr::get(parser.getContext(), *enumValue);
+    if (parser.parseColon())
+      return failure();
+  }
+
+  OpAsmParser::UnresolvedOperand operand;
+  if (parser.parseOperand(operand) || parser.parseColonType(numThreadsType))
+    return failure();
+  numThreads = operand;
+  return success();
+}
+
+static void printNumThreadsClause(OpAsmPrinter &p, Operation *op,
+                                  NumThreadsModifierAttr numThreadsModifier,
+                                  Value numThreads, Type numThreadsType) {
+  if (numThreadsModifier)
+    p << stringifyNumThreadsModifier(numThreadsModifier.getValue()) << ": ";
+  p << numThreads << " : " << numThreadsType;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1536,36 +1576,19 @@ verifyCopyprivateVarList(Operation *op, OperandRange copyprivateVars,
        llvm::zip(copyprivateVars, *copyprivateSyms)) {
     auto symbolRef =
         llvm::cast<SymbolRefAttr>(std::get<1>(copyprivateVarAndSym));
-    std::optional<std::variant<mlir::func::FuncOp, mlir::LLVM::LLVMFuncOp>>
-        funcOp;
-    if (mlir::func::FuncOp mlirFuncOp =
-            SymbolTable::lookupNearestSymbolFrom<mlir::func::FuncOp>(op,
-                                                                     symbolRef))
-      funcOp = mlirFuncOp;
-    else if (mlir::LLVM::LLVMFuncOp llvmFuncOp =
-                 SymbolTable::lookupNearestSymbolFrom<mlir::LLVM::LLVMFuncOp>(
-                     op, symbolRef))
-      funcOp = llvmFuncOp;
+    auto *funcSymbol = SymbolTable::lookupNearestSymbolFrom(op, symbolRef);
+    auto functionOp = dyn_cast_if_present<FunctionOpInterface>(funcSymbol);
 
-    auto getNumArguments = [&] {
-      return std::visit([](auto &f) { return f.getNumArguments(); }, *funcOp);
-    };
-
-    auto getArgumentType = [&](unsigned i) {
-      return std::visit([i](auto &f) { return f.getArgumentTypes()[i]; },
-                        *funcOp);
-    };
-
-    if (!funcOp)
+    if (!functionOp)
       return op->emitOpError() << "expected symbol reference " << symbolRef
                                << " to point to a copy function";
 
-    if (getNumArguments() != 2)
+    if (functionOp.getNumArguments() != 2)
       return op->emitOpError()
              << "expected copy function " << symbolRef << " to have 2 operands";
 
-    Type argTy = getArgumentType(0);
-    if (argTy != getArgumentType(1))
+    Type argTy = functionOp.getArgumentTypes()[0];
+    if (argTy != functionOp.getArgumentTypes()[1])
       return op->emitOpError() << "expected copy function " << symbolRef
                                << " arguments to have the same type";
 
@@ -1590,8 +1613,12 @@ verifyCopyprivateVarList(Operation *op, OperandRange copyprivateVars,
 static ParseResult
 parseDependVarList(OpAsmParser &parser,
                    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dependVars,
-                   SmallVectorImpl<Type> &dependTypes, ArrayAttr &dependKinds) {
+                   SmallVectorImpl<Type> &dependTypes, ArrayAttr &dependKinds,
+                   SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dependSizes,
+                   SmallVectorImpl<Type> &dependSizeTypes) {
   SmallVector<ClauseTaskDependAttr> kindsVec;
+  bool sawSizedEntry = false;
+  bool sawUnsizedEntry = false;
   if (failed(parser.parseCommaSeparatedList([&]() {
         StringRef keyword;
         if (parser.parseKeyword(&keyword) || parser.parseArrow() ||
@@ -1604,6 +1631,29 @@ parseDependVarList(OpAsmParser &parser,
               ClauseTaskDependAttr::get(parser.getContext(), *keywordDepend));
         else
           return failure();
+
+        if (succeeded(parser.parseOptionalKeyword("size"))) {
+          sawSizedEntry = true;
+          if (sawUnsizedEntry) {
+            parser.emitError(parser.getCurrentLocation(),
+                             "depend size must be specified for all entries in "
+                             "the clause");
+            return failure();
+          }
+          if (parser.parseLParen() ||
+              parser.parseOperand(dependSizes.emplace_back()) ||
+              parser.parseColonType(dependSizeTypes.emplace_back()) ||
+              parser.parseRParen())
+            return failure();
+        } else {
+          sawUnsizedEntry = true;
+          if (sawSizedEntry) {
+            parser.emitError(parser.getCurrentLocation(),
+                             "depend size must be specified for all entries in "
+                             "the clause");
+            return failure();
+          }
+        }
         return success();
       })))
     return failure();
@@ -1615,7 +1665,11 @@ parseDependVarList(OpAsmParser &parser,
 /// Print Depend clause
 static void printDependVarList(OpAsmPrinter &p, Operation *op,
                                OperandRange dependVars, TypeRange dependTypes,
-                               std::optional<ArrayAttr> dependKinds) {
+                               std::optional<ArrayAttr> dependKinds,
+                               OperandRange dependSizes,
+                               TypeRange dependSizeTypes) {
+  assert((dependSizes.empty() || dependSizes.size() == dependVars.size()) &&
+         "depend sizes must be empty or match depend vars");
 
   for (unsigned i = 0, e = dependKinds->size(); i < e; ++i) {
     if (i != 0)
@@ -1624,20 +1678,41 @@ static void printDependVarList(OpAsmPrinter &p, Operation *op,
              llvm::cast<mlir::omp::ClauseTaskDependAttr>((*dependKinds)[i])
                  .getValue())
       << " -> " << dependVars[i] << " : " << dependTypes[i];
+    if (!dependSizes.empty())
+      p << " size(" << dependSizes[i] << " : " << dependSizeTypes[i] << ")";
   }
 }
 
 /// Verifies Depend clause
 static LogicalResult verifyDependVarList(Operation *op,
                                          std::optional<ArrayAttr> dependKinds,
-                                         OperandRange dependVars) {
+                                         OperandRange dependVars,
+                                         OperandRange dependSizes) {
   if (!dependVars.empty()) {
     if (!dependKinds || dependKinds->size() != dependVars.size())
       return op->emitOpError() << "expected as many depend values"
                                   " as depend variables";
+    auto isDependPayload = [](Attribute attr) {
+      return cast<ClauseTaskDependAttr>(attr).getValue() ==
+             ClauseTaskDepend::taskdependlist;
+    };
+    if (llvm::any_of(dependKinds->getValue(), isDependPayload)) {
+      if (dependKinds->size() != 1 || dependVars.size() != 1)
+        return op->emitOpError()
+               << "depend payload cannot be mixed with regular depend entries";
+      if (dependSizes.size() != 1)
+        return op->emitOpError()
+               << "depend payload requires exactly one dependence count";
+      return success();
+    }
+    if (!dependSizes.empty() && dependSizes.size() != dependVars.size())
+      return op->emitOpError()
+             << "expected as many depend sizes as depend variables";
   } else {
     if (dependKinds && !dependKinds->empty())
       return op->emitOpError() << "unexpected depend values";
+    if (!dependSizes.empty())
+      return op->emitOpError() << "unexpected depend sizes";
     return success();
   }
 
@@ -1715,21 +1790,13 @@ static void printSynchronizationHint(OpAsmPrinter &p, Operation *op,
 
 /// Verifies a synchronization hint clause
 static LogicalResult verifySynchronizationHint(Operation *op, uint64_t hint) {
-
-  // Helper function to get n-th bit from the right end of `value`
-  auto bitn = [](int value, int n) -> bool { return value & (1 << n); };
-
-  bool uncontended = bitn(hint, 0);
-  bool contended = bitn(hint, 1);
-  bool nonspeculative = bitn(hint, 2);
-  bool speculative = bitn(hint, 3);
-
-  if (uncontended && contended)
-    return op->emitOpError() << "the hints omp_sync_hint_uncontended and "
-                                "omp_sync_hint_contended cannot be combined";
-  if (nonspeculative && speculative)
-    return op->emitOpError() << "the hints omp_sync_hint_nonspeculative and "
-                                "omp_sync_hint_speculative cannot be combined.";
+  // The OpenMP specification says that contradictory hint combinations (e.g.
+  // omp_sync_hint_uncontended | omp_sync_hint_contended) result in
+  // implementation-defined behavior, not an error.  Accept any hint value to
+  // match the permissive semantics of Clang/OGCG, which passes the raw hint
+  // through to the runtime.
+  (void)op;
+  (void)hint;
   return success();
 }
 
@@ -2143,13 +2210,15 @@ void TargetEnterDataOp::build(
   MLIRContext *ctx = builder.getContext();
   TargetEnterDataOp::build(builder, state,
                            makeArrayAttr(ctx, clauses.dependKinds),
-                           clauses.dependVars, clauses.device, clauses.ifExpr,
-                           clauses.mapVars, clauses.nowait);
+                           clauses.dependVars, clauses.dependSizes,
+                           clauses.device, clauses.ifExpr, clauses.mapVars,
+                           clauses.nowait);
 }
 
 LogicalResult TargetEnterDataOp::verify() {
   LogicalResult verifyDependVars =
-      verifyDependVarList(*this, getDependKinds(), getDependVars());
+      verifyDependVarList(*this, getDependKinds(), getDependVars(),
+                          getDependSizes());
   return failed(verifyDependVars) ? verifyDependVars
                                   : verifyMapClause(*this, getMapVars());
 }
@@ -2163,13 +2232,15 @@ void TargetExitDataOp::build(OpBuilder &builder, OperationState &state,
   MLIRContext *ctx = builder.getContext();
   TargetExitDataOp::build(builder, state,
                           makeArrayAttr(ctx, clauses.dependKinds),
-                          clauses.dependVars, clauses.device, clauses.ifExpr,
-                          clauses.mapVars, clauses.nowait);
+                          clauses.dependVars, clauses.dependSizes,
+                          clauses.device, clauses.ifExpr, clauses.mapVars,
+                          clauses.nowait);
 }
 
 LogicalResult TargetExitDataOp::verify() {
   LogicalResult verifyDependVars =
-      verifyDependVarList(*this, getDependKinds(), getDependVars());
+      verifyDependVarList(*this, getDependKinds(), getDependVars(),
+                          getDependSizes());
   return failed(verifyDependVars) ? verifyDependVars
                                   : verifyMapClause(*this, getMapVars());
 }
@@ -2182,13 +2253,15 @@ void TargetUpdateOp::build(OpBuilder &builder, OperationState &state,
                            const TargetEnterExitUpdateDataOperands &clauses) {
   MLIRContext *ctx = builder.getContext();
   TargetUpdateOp::build(builder, state, makeArrayAttr(ctx, clauses.dependKinds),
-                        clauses.dependVars, clauses.device, clauses.ifExpr,
-                        clauses.mapVars, clauses.nowait);
+                        clauses.dependVars, clauses.dependSizes,
+                        clauses.device, clauses.ifExpr, clauses.mapVars,
+                        clauses.nowait);
 }
 
 LogicalResult TargetUpdateOp::verify() {
   LogicalResult verifyDependVars =
-      verifyDependVarList(*this, getDependKinds(), getDependVars());
+      verifyDependVarList(*this, getDependKinds(), getDependVars(),
+                          getDependSizes());
   return failed(verifyDependVars) ? verifyDependVars
                                   : verifyMapClause(*this, getMapVars());
 }
@@ -2204,8 +2277,8 @@ void TargetOp::build(OpBuilder &builder, OperationState &state,
   // inReductionByref, inReductionSyms.
   TargetOp::build(builder, state, /*allocate_vars=*/{}, /*allocator_vars=*/{},
                   clauses.bare, makeArrayAttr(ctx, clauses.dependKinds),
-                  clauses.dependVars, clauses.device, clauses.hasDeviceAddrVars,
-                  clauses.hostEvalVars, clauses.ifExpr,
+                  clauses.dependVars, clauses.dependSizes, clauses.device,
+                  clauses.hasDeviceAddrVars, clauses.hostEvalVars, clauses.ifExpr,
                   /*in_reduction_vars=*/{}, /*in_reduction_byref=*/nullptr,
                   /*in_reduction_syms=*/nullptr, clauses.isDevicePtrVars,
                   clauses.mapVars, clauses.nowait, clauses.privateVars,
@@ -2215,7 +2288,8 @@ void TargetOp::build(OpBuilder &builder, OperationState &state,
 }
 
 LogicalResult TargetOp::verify() {
-  if (failed(verifyDependVarList(*this, getDependKinds(), getDependVars())))
+  if (failed(verifyDependVarList(*this, getDependKinds(), getDependVars(),
+                                 getDependSizes())))
     return failure();
 
   if (failed(verifyMapInfoDefinedArgs(*this, "has_device_addr",
@@ -2250,14 +2324,14 @@ LogicalResult TargetOp::verifyRegions() {
                                 "and 'thread_limit' in 'omp.teams'";
       }
       if (auto parallelOp = dyn_cast<ParallelOp>(user)) {
-        if (bitEnumContainsAny(execFlags, TargetRegionFlags::spmd) &&
-            parallelOp->isAncestor(capturedOp) &&
-            hostEvalArg == parallelOp.getNumThreads())
+        if (parallelOp->getParentOfType<TargetOp>() == *this &&
+            (hostEvalArg == parallelOp.getIfExpr() ||
+             hostEvalArg == parallelOp.getNumThreads()))
           continue;
 
         return emitOpError()
-               << "host_eval argument only legal as 'num_threads' in "
-                  "'omp.parallel' when representing target SPMD";
+               << "host_eval argument only legal as 'if' and 'num_threads' in "
+                  "'omp.parallel'";
       }
       if (auto loopNestOp = dyn_cast<LoopNestOp>(user)) {
         if (bitEnumContainsAny(execFlags, TargetRegionFlags::trip_count) &&
@@ -2504,8 +2578,10 @@ void ParallelOp::build(OpBuilder &builder, OperationState &state,
                        ArrayRef<NamedAttribute> attributes) {
   ParallelOp::build(builder, state, /*allocate_vars=*/ValueRange(),
                     /*allocator_vars=*/ValueRange(), /*if_expr=*/nullptr,
-                    /*num_threads=*/nullptr, /*private_vars=*/ValueRange(),
-                    /*private_syms=*/nullptr, /*private_needs_barrier=*/nullptr,
+                    /*num_threads_modifier=*/nullptr, /*num_threads=*/nullptr,
+                    /*severity_kind=*/nullptr, /*message_var=*/nullptr,
+                    /*private_vars=*/ValueRange(), /*private_syms=*/nullptr,
+                    /*private_needs_barrier=*/nullptr,
                     /*proc_bind_kind=*/nullptr,
                     /*reduction_mod =*/nullptr, /*reduction_vars=*/ValueRange(),
                     /*reduction_byref=*/nullptr, /*reduction_syms=*/nullptr);
@@ -2516,7 +2592,9 @@ void ParallelOp::build(OpBuilder &builder, OperationState &state,
                        const ParallelOperands &clauses) {
   MLIRContext *ctx = builder.getContext();
   ParallelOp::build(builder, state, clauses.allocateVars, clauses.allocatorVars,
-                    clauses.ifExpr, clauses.numThreads, clauses.privateVars,
+                    clauses.ifExpr, clauses.numThreadsModifier,
+                    clauses.numThreads, clauses.severityKind,
+                    clauses.messageVar, clauses.privateVars,
                     makeArrayAttr(ctx, clauses.privateSyms),
                     clauses.privateNeedsBarrier, clauses.procBindKind,
                     clauses.reductionMod, clauses.reductionVars,
@@ -2571,6 +2649,13 @@ LogicalResult ParallelOp::verify() {
   if (getAllocateVars().size() != getAllocatorVars().size())
     return emitError(
         "expected equal sizes for allocate and allocator variables");
+
+  bool isStrictNumThreads =
+      getNumThreadsModifier() &&
+      *getNumThreadsModifier() == NumThreadsModifier::strict;
+  if ((getSeverityKind() || getMessageVar()) && !isStrictNumThreads)
+    return emitError()
+           << "severity/message clauses require num_threads(strict: ...)";
 
   if (failed(verifyPrivateVarList(*this)))
     return failure();
@@ -3126,7 +3211,8 @@ void TaskOp::build(OpBuilder &builder, OperationState &state,
   MLIRContext *ctx = builder.getContext();
   TaskOp::build(builder, state, clauses.allocateVars, clauses.allocatorVars,
                 makeArrayAttr(ctx, clauses.dependKinds), clauses.dependVars,
-                clauses.final, clauses.ifExpr, clauses.inReductionVars,
+                clauses.dependSizes, clauses.final, clauses.ifExpr,
+                clauses.inReductionVars,
                 makeDenseBoolArrayAttr(ctx, clauses.inReductionByref),
                 makeArrayAttr(ctx, clauses.inReductionSyms), clauses.mergeable,
                 clauses.priority, /*private_vars=*/clauses.privateVars,
@@ -3137,7 +3223,8 @@ void TaskOp::build(OpBuilder &builder, OperationState &state,
 
 LogicalResult TaskOp::verify() {
   LogicalResult verifyDependVars =
-      verifyDependVarList(*this, getDependKinds(), getDependVars());
+      verifyDependVarList(*this, getDependKinds(), getDependVars(),
+                          getDependSizes());
   return failed(verifyDependVars)
              ? verifyDependVars
              : verifyReductionVarList(*this, getInReductionSyms(),
@@ -3912,9 +3999,14 @@ LogicalResult OrderedRegionOp::verify() { return verifyOrderedParent(**this); }
 
 void TaskwaitOp::build(OpBuilder &builder, OperationState &state,
                        const TaskwaitOperands &clauses) {
-  // TODO Store clauses in op: dependKinds, dependVars, nowait.
-  TaskwaitOp::build(builder, state, /*depend_kinds=*/nullptr,
-                    /*depend_vars=*/{}, /*nowait=*/nullptr);
+  MLIRContext *ctx = builder.getContext();
+  TaskwaitOp::build(builder, state, makeArrayAttr(ctx, clauses.dependKinds),
+                    clauses.dependVars, clauses.dependSizes, clauses.nowait);
+}
+
+LogicalResult TaskwaitOp::verify() {
+  return verifyDependVarList(*this, getDependKinds(), getDependVars(),
+                             getDependSizes());
 }
 
 //===----------------------------------------------------------------------===//
@@ -3964,8 +4056,9 @@ LogicalResult AtomicUpdateOp::canonicalize(AtomicUpdateOp op,
     return success();
   }
   if (Value writeVal = op.getWriteOpVal()) {
-    rewriter.replaceOpWithNewOp<AtomicWriteOp>(
-        op, op.getX(), writeVal, op.getHintAttr(), op.getMemoryOrderAttr());
+    rewriter.replaceOpWithNewOp<AtomicWriteOp>(op, op.getX(), writeVal,
+                                               op.getHintAttr(),
+                                               op.getMemoryOrderAttr());
     return success();
   }
   return failure();

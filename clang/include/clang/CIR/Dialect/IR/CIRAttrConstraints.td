@@ -82,4 +82,16 @@ def CIR_IntOrGlobalViewArrayAttr : TypedArrayAttrBase<CIR_AnyIntOrGlobalViewAttr
 def CIR_TryHandlerArrayAttr : TypedArrayAttrBase<CIR_TryHandlerAttr,
                          "catch all or unwind or global view array attribute">;
 
+//===----------------------------------------------------------------------===//
+// TBAAAttr constraints
+//===----------------------------------------------------------------------===//
+
+def CIR_AnyTBAAAttr
+  : CIR_AttrConstraint<"::cir::TBAAAttr", "any TBAA attribute"> {
+  string cppType = "::cir::TBAAAttr";
+  let storageType = "::cir::TBAAAttr";
+  let returnType = "::cir::TBAAAttr";
+  let convertFromStorage = "$_self";
+}
+
 #endif // CLANG_CIR_DIALECT_IR_CIRATTRCONSTRAINTS_TD

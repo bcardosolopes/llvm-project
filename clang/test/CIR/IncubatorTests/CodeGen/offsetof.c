@@ -1,0 +1,14 @@
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -emit-cir %s -o - | FileCheck %s
+
+typedef struct {
+  int a;
+  int b;
+} A;
+
+unsigned long foo() {
+  return __builtin_offsetof(A, a) + __builtin_offsetof(A, b);
+}
+
+// CHECK:  cir.func {{.*}} @foo()
+// CHECK:    {{.*}} = cir.const #cir.int<0> : !u64i
+// CHECK:    {{.*}} = cir.const #cir.int<4> : !u64i

@@ -1,0 +1,53 @@
+// RUN: cir-opt %s -o %t.text
+// RUN: cir-opt %s --emit-bytecode -o %t.bc
+// RUN: cir-opt %t.bc -o %t.roundtrip
+// RUN: diff %t.text %t.roundtrip
+// RUN: FileCheck --input-file=%t.roundtrip %s
+// RUN: grep -ao Marker %t.bc | count 1
+
+// The C++ special-member attributes must have a bytecode encoding, because the
+// thing they carry is a record type.
+//
+// Each attribute is tiny -- a type and a flag -- but an attribute with no
+// encoding is serialized by *printing* it, and printing a record type prints
+// its members, and theirs, down to the leaves. So the cost of the fallback is
+// not the size of the attribute, it is the size of the type's printed form,
+// which is exponential in the depth of the record graph (see the note on
+// !cir.record in CIRTypes.td).
+//
+// In an arfx scene translation unit one `cxx_ctor` on a shared_ptr control
+// block printed to 131 MB by itself, and the .cir section of that one object
+// reached 958 MB. Under -ffat-lto-objects the bitcode writer then tried to
+// grow its buffer past 4 GB and the compile died in std::length_error. With an
+// encoding the same section is 0.9 MB, which is what every other object in
+// that library costs.
+//
+// The grep guards the property that actually matters. Encoded, the record is
+// written once into the type table and each attribute refers to it by index,
+// so the name appears once in the file. Printed, every attribute carries its
+// own expanded copy -- so a count above one means the fallback is back,
+// whatever the roundtrip above says about correctness.
+
+!s32i = !cir.int<s, 32>
+!rec_Marker = !cir.record<struct "Marker" {!s32i}>
+
+module {
+  cir.func private @ctor_default(!cir.ptr<!rec_Marker>) special_member<#cir.cxx_ctor<!rec_Marker, default>>
+  cir.func private @ctor_copy(!cir.ptr<!rec_Marker>, !cir.ptr<!rec_Marker>) special_member<#cir.cxx_ctor<!rec_Marker, copy>>
+  cir.func private @ctor_move_trivial(!cir.ptr<!rec_Marker>, !cir.ptr<!rec_Marker>) special_member<#cir.cxx_ctor<!rec_Marker, move, trivial true>>
+  cir.func private @dtor(!cir.ptr<!rec_Marker>) special_member<#cir.cxx_dtor<!rec_Marker>>
+  cir.func private @dtor_trivial(!cir.ptr<!rec_Marker>) special_member<#cir.cxx_dtor<!rec_Marker, trivial true>>
+  cir.func private @assign_copy(!cir.ptr<!rec_Marker>, !cir.ptr<!rec_Marker>) special_member<#cir.cxx_assign<!rec_Marker, copy>>
+  cir.func private @assign_move_trivial(!cir.ptr<!rec_Marker>, !cir.ptr<!rec_Marker>) special_member<#cir.cxx_assign<!rec_Marker, move, trivial true>>
+}
+
+// The kinds are what the cast on the write side is there to preserve: a scoped
+// enum widened to the varint the reader casts back. Getting that wrong turns a
+// copy constructor into a default one silently, so each kind appears here.
+// CHECK: cir.func private @ctor_default({{.*}}) special_member<#cir.cxx_ctor<!rec_Marker, default>>
+// CHECK: cir.func private @ctor_copy({{.*}}) special_member<#cir.cxx_ctor<!rec_Marker, copy>>
+// CHECK: cir.func private @ctor_move_trivial({{.*}}) special_member<#cir.cxx_ctor<!rec_Marker, move, trivial true>>
+// CHECK: cir.func private @dtor({{.*}}) special_member<#cir.cxx_dtor<!rec_Marker>>
+// CHECK: cir.func private @dtor_trivial({{.*}}) special_member<#cir.cxx_dtor<!rec_Marker, trivial true>>
+// CHECK: cir.func private @assign_copy({{.*}}) special_member<#cir.cxx_assign<!rec_Marker, copy>>
+// CHECK: cir.func private @assign_move_trivial({{.*}}) special_member<#cir.cxx_assign<!rec_Marker, move, trivial true>>

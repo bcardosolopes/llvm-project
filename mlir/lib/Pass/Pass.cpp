@@ -679,7 +679,7 @@ LogicalResult OpToOpPassAdaptor::runPipeline(
   });
 
   // Run the pipeline over the provided operation.
-  if (instrumentor) {
+  if (instrumentor && !pm.empty()) {
     instrumentor->runBeforePipeline(pm.getOpName(*op->getContext()),
                                     *parentInfo);
   }
@@ -693,7 +693,7 @@ LogicalResult OpToOpPassAdaptor::runPipeline(
     }
   }
 
-  if (instrumentor) {
+  if (instrumentor && !pm.empty()) {
     instrumentor->runAfterPipeline(pm.getOpName(*op->getContext()),
                                    *parentInfo);
   }

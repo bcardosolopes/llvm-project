@@ -2,12 +2,22 @@
 // RUN:   -include %S/Inputs/sanitizer-extra-source.cpp \
 // RUN:   -fsanitize-ignorelist=%S/Inputs/sanitizer-ignorelist-global.txt \
 // RUN:   -fsanitize=memtag-globals -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-android34 \
+// RUN:   -include %S/Inputs/sanitizer-extra-source.cpp \
+// RUN:   -fsanitize-ignorelist=%S/Inputs/sanitizer-ignorelist-global.txt \
+// RUN:   -fsanitize=memtag-globals -emit-llvm -fclangir -o - %s | \
+// RUN:   FileCheck %s --check-prefix=CIR-CHECK %}
 
 // RUN: %clang_cc1 -triple aarch64-linux-android34 \
 // RUN:    -include %S/Inputs/sanitizer-extra-source.cpp \
 // RUN:   -fsanitize-ignorelist=%S/Inputs/sanitizer-ignorelist-src.txt \
 // RUN:   -fsanitize=memtag-globals -emit-llvm -o - %s | \
 // RUN:   FileCheck %s --check-prefix=IGNORELIST
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-linux-android34 \
+// RUN:    -include %S/Inputs/sanitizer-extra-source.cpp \
+// RUN:   -fsanitize-ignorelist=%S/Inputs/sanitizer-ignorelist-src.txt \
+// RUN:   -fsanitize=memtag-globals -emit-llvm -fclangir -o - %s | \
+// RUN:   FileCheck %s --check-prefix=CIR-IGNORELIST %}
 
 int global;
 int __attribute__((__section__("my_section"))) section_global;
@@ -55,3 +65,23 @@ void func() {
 // IGNORELIST-NOT: sanitize_memtag
 // IGNORELIST:     @{{.*}}external_global{{.*}} =
 // IGNORELIST-NOT: sanitize_memtag
+
+// CIR-CHECK-DAG: @{{.*}}extra_global{{.*}} ={{.*}} sanitize_memtag
+// CIR-CHECK-DAG: @{{.*}}global{{.*}} ={{.*}} sanitize_memtag
+// CIR-CHECK-DAG: @{{.*}}section_global{{.*}} ={{.*}} sanitize_memtag
+// CIR-CHECK-DAG: @{{.*}}attributed_global{{.*}} = global i32 0, align 4
+// CIR-CHECK-DAG: @{{.*}}disable_instrumentation_global{{.*}} = global i32 0, align 4
+// CIR-CHECK-DAG: @{{.*}}ignorelisted_globa{{.*}} = global i32 0, align 4
+// CIR-CHECK-DAG: @{{.*}}static_var{{.*}} ={{.*}} sanitize_memtag
+// CIR-CHECK-DAG: @{{.*}} = {{.*}} c"Hello, world!\00"{{.*}} sanitize_memtag
+// CIR-CHECK-DAG: @{{.*}}external_global{{.*}} ={{.*}} sanitize_memtag
+
+// CIR-IGNORELIST-DAG: @{{.*}}extra_global{{.*}} ={{.*}} sanitize_memtag
+// CIR-IGNORELIST-DAG: @{{.*}}global{{.*}} = global i32 0, align 4
+// CIR-IGNORELIST-DAG: @{{.*}}section_global{{.*}} = global i32 0, section "my_section", align 4
+// CIR-IGNORELIST-DAG: @{{.*}}attributed_global{{.*}} = global i32 0, align 4
+// CIR-IGNORELIST-DAG: @{{.*}}disable_instrumentation_global{{.*}} = global i32 0, align 4
+// CIR-IGNORELIST-DAG: @{{.*}}ignorelisted_globa{{.*}} = global i32 0, align 4
+// CIR-IGNORELIST-DAG: @{{.*}}static_var{{.*}} = internal global i32 0, align 4
+// CIR-IGNORELIST-DAG: @{{.*}} = {{.*}} c"Hello, world!\00"{{.*}} align 1
+// CIR-IGNORELIST-DAG: @{{.*}}external_global{{.*}} = external global i32, align 4

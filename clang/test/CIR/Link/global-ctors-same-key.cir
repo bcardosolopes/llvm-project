@@ -1,0 +1,27 @@
+// All of one input's constructor entries on a comdat key are kept.
+//
+// cir-link keeps one TU's initializers per comdat key, as the linker keeps one
+// comdat. But a TU may key several entries on one global, and all of the
+// selected comdat's run: dropping every entry after the first for the key,
+// regardless of which input it came from, lost a.cir's second initializer even
+// when a.cir was linked alone.
+//
+// RUN: cir-link %S/Inputs/global-ctors-same-key-a.cir -o %t.a.cir
+// RUN: FileCheck --input-file=%t.a.cir %s --check-prefix=ALONE
+// RUN: cir-link %S/Inputs/global-ctors-same-key-a.cir \
+// RUN:     %S/Inputs/global-ctors-same-key-b.cir -o %t.ab.cir
+// RUN: FileCheck --input-file=%t.ab.cir %s --check-prefix=ALONE
+// RUN: cir-link %S/Inputs/global-ctors-same-key-b.cir \
+// RUN:     %S/Inputs/global-ctors-same-key-a.cir -o %t.ba.cir
+// RUN: FileCheck --input-file=%t.ba.cir %s --check-prefix=BFIRST
+//
+// And the kept input is the one whose definition of the key survives: a strong
+// definition in a later input displaces the weak one, and its entries go with
+// it, as the linker drops a comdat it did not select with its entries.
+// RUN: cir-link %S/Inputs/global-ctors-same-key-a.cir \
+// RUN:     %S/Inputs/global-ctors-same-key-c.cir -o %t.ac.cir
+// RUN: FileCheck --input-file=%t.ac.cir %s --check-prefix=STRONG
+// STRONG: cir.global_ctors = [#cir.global_ctor<"init_c", 65535, "g">]
+//
+// ALONE: cir.global_ctors = [#cir.global_ctor<"init_a1", 65535, "g">, #cir.global_ctor<"init_a2", 65535, "g">]
+// BFIRST: cir.global_ctors = [#cir.global_ctor<"init_b", 65535, "g">]

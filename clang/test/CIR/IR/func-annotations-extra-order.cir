@@ -1,0 +1,93 @@
+// RUN: cir-opt %s -o %t.1
+// RUN: cir-opt %t.1 -o %t.2
+// RUN: diff %t.1 %t.2
+// RUN: FileCheck --input-file=%t.2 %s
+
+// cir.func must parse what it prints when it carries BOTH an annotations list
+// and extra().
+//
+// The parser read extra() first and the annotations second; the printer emits
+// them the other way round. A function with only one of the two round-trips
+// either way, which is why this went unnoticed -- it takes both on the same
+// function to produce text CIR cannot read back:
+//
+//   cir.func private @f(...) -> !s64i [#cir.annotation<...>] extra(#fn_attr)
+//   error: custom op 'extra' is unknown
+//
+// Found merging a real library: the declarations libc contributes carry an
+// availability annotation and an extra() alike, so the merged module could not
+// be re-read at all.
+//
+// The same mismatch reaches every clause the printer emits *after* the
+// annotations -- alias, section, align, cc, the global ctor/dtor priorities --
+// because the parser consumed those before it looked for the annotations:
+//
+//   cir.func private @f(...) -> !s32i [#cir.annotation<...>] align(4)
+//   error: custom op 'align' is unknown
+//
+// So the annotations array is read where the printer puts it, right after the
+// signature, and again after cc(...) so the extra()-first spelling above keeps
+// working. Nothing needs reprinting either way.
+
+!s32i = !cir.int<s, 32>
+
+#fn_attr = #cir<extra({minsize, nothrow = #cir.nothrow, optsize})>
+
+module {
+  // Both, in the order the printer emits.
+  cir.func private @annotated_and_extra(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>] extra(#fn_attr)
+
+  // Both, in the order the parser used to require. Accepted too, so no
+  // existing text stops parsing.
+  cir.func private @extra_then_annotated(!s32i) -> !s32i
+      extra(#fn_attr) [#cir.annotation<name = "introduced_in=21", args = []>]
+
+  // One of each, which always worked.
+  cir.func private @only_annotated(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>]
+  cir.func private @only_extra(!s32i) -> !s32i extra(#fn_attr)
+
+  // Annotations followed by the clauses the printer emits after them. Each of
+  // these was unreadable while the annotations were parsed last: the clause
+  // keyword was still unconsumed when the array was reached.
+  cir.func private @annotated_align(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>] align(4)
+  cir.func private @annotated_section(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>] section(".text.f")
+  cir.func private @annotated_cc(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>] cc(spir_kernel)
+
+  // The remaining clauses the printer emits after the annotations. Each was
+  // unreadable for the same reason, so each is pinned here.
+  cir.func private @annotated_alias(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>]
+      alias(@only_extra)
+  cir.func private @annotated_personality(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>]
+      personality(@only_extra)
+  cir.func private @annotated_global_ctor(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>] global_ctor(100)
+  cir.func private @annotated_global_dtor(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>] global_dtor(100)
+
+  // ...and all of it at once, which is the shape a real library produces.
+  cir.func private @annotated_align_extra(!s32i) -> !s32i
+      [#cir.annotation<name = "introduced_in=21", args = []>]
+      section(".text.f") align(4) extra(#fn_attr)
+}
+
+// Whatever order they came in, they print in one canonical order -- which is
+// what makes the diff above meaningful.
+// CHECK-DAG: cir.func private @annotated_and_extra{{.*}}#cir.annotation{{.*}}extra(
+// CHECK-DAG: cir.func private @extra_then_annotated{{.*}}#cir.annotation{{.*}}extra(
+// CHECK-DAG: cir.func private @only_annotated{{.*}}#cir.annotation
+// CHECK-DAG: cir.func private @only_extra{{.*}}extra(
+// CHECK-DAG: cir.func private @annotated_align{{.*}}#cir.annotation{{.*}}align(4)
+// CHECK-DAG: cir.func private @annotated_section{{.*}}#cir.annotation{{.*}}section(".text.f")
+// CHECK-DAG: cir.func private @annotated_cc{{.*}}#cir.annotation{{.*}}cc(spir_kernel)
+// CHECK-DAG: cir.func private @annotated_alias{{.*}}#cir.annotation{{.*}}alias(@only_extra)
+// CHECK-DAG: cir.func private @annotated_personality{{.*}}#cir.annotation{{.*}}personality(@only_extra)
+// CHECK-DAG: cir.func private @annotated_global_ctor{{.*}}#cir.annotation{{.*}}global_ctor(100)
+// CHECK-DAG: cir.func private @annotated_global_dtor{{.*}}#cir.annotation{{.*}}global_dtor(100)
+// CHECK-DAG: cir.func private @annotated_align_extra{{.*}}#cir.annotation{{.*}}section(".text.f"){{.*}}align(4){{.*}}extra(

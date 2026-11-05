@@ -1,4 +1,6 @@
 add_mlir_unittest(MLIRLLVMIRTests
+  CallIntrinsicOpTest.cpp
+  LLVMDebugRebuildTest.cpp
   LLVMTypeTest.cpp
 )
 mlir_target_link_libraries(MLIRLLVMIRTests

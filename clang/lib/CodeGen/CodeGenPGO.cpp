@@ -17,6 +17,7 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/DiagnosticFrontend.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/CommandLine.h"
@@ -36,6 +37,28 @@ static llvm::cl::opt<bool>
 using namespace clang;
 using namespace CodeGen;
 
+// Used by:
+//   1. `setFuncName(Function *)` below — when CIR's pre-MLIR-lowering
+//      step has already stamped `!llvm.PGOFuncName` metadata on a
+//      function, prefer the metadata value over the function's IR name
+//      (the IR name reflects post-lowering symbol mangling, not the
+//      original AST mangling that PGO indices need).
+//   2. `emitCIRCoverageMapping` (~line 1647) — the CIR-only coverage
+//      bridge that emits coverage globals after MLIR-to-LLVM lowering.
+// On the OG path, `!llvm.PGOFuncName` is never pre-stamped before
+// `setFuncName` runs, so the new branch is a no-op for OG codegen.
+// No OG path stamps the metadata that early, so this is benign there.
+static std::optional<StringRef>
+getPGOFuncNameMetadataValue(const llvm::Function &Fn) {
+  llvm::MDNode *MD = llvm::getPGOFuncNameMetadata(Fn);
+  if (!MD || MD->getNumOperands() != 1)
+    return std::nullopt;
+  auto *Name = dyn_cast<llvm::MDString>(MD->getOperand(0));
+  if (!Name)
+    return std::nullopt;
+  return Name->getString();
+}
+
 void CodeGenPGO::setFuncName(StringRef Name,
                              llvm::GlobalValue::LinkageTypes Linkage) {
   llvm::IndexedInstrProfReader *PGOReader = CGM.getPGOReader();
@@ -49,7 +72,15 @@ void CodeGenPGO::setFuncName(StringRef Name,
 }
 
 void CodeGenPGO::setFuncName(llvm::Function *Fn) {
-  setFuncName(Fn->getName(), Fn->getLinkage());
+  if (auto MetadataName = getPGOFuncNameMetadataValue(*Fn)) {
+    FuncName = MetadataName->str();
+    if (CGM.getCodeGenOpts().hasProfileClangInstr())
+      FuncNameVar =
+          llvm::createPGOFuncNameVar(CGM.getModule(), Fn->getLinkage(),
+                                     FuncName);
+  } else {
+    setFuncName(Fn->getName(), Fn->getLinkage());
+  }
   // Create PGOFuncName meta data.
   llvm::createPGOFuncNameMetadata(*Fn, FuncName);
 }
@@ -1596,3 +1627,128 @@ void CodeGenFunction::setCurrentProfileCount(uint64_t Count) {
 uint64_t CodeGenFunction::getCurrentProfileCount() {
   return PGO->getCurrentRegionCount();
 }
+
+namespace {
+
+static std::optional<GlobalDecl> getCoverageMappingGlobalDecl(Decl *D) {
+  if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+    if (auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
+      return GlobalDecl(Ctor, Ctor_Base);
+    if (auto *Dtor = dyn_cast<CXXDestructorDecl>(FD))
+      return GlobalDecl(Dtor, Dtor_Base);
+    return GlobalDecl(FD);
+  }
+
+  if (auto *OMD = dyn_cast<ObjCMethodDecl>(D))
+    return GlobalDecl(OMD);
+  if (auto *BD = dyn_cast<BlockDecl>(D))
+    return GlobalDecl(BD);
+  if (auto *CD = dyn_cast<CapturedDecl>(D))
+    return GlobalDecl(CD);
+
+  return std::nullopt;
+}
+
+static llvm::Function *findCIRCoverageMappingFunction(
+    CodeGenModule &CGM, llvm::Module &M, Decl *D,
+    const llvm::DenseMap<const Decl *, std::string> &CoverageDeclPGONames,
+    const llvm::DenseMap<const Decl *, std::string> &CoverageDeclSymbolNames) {
+  if (auto It = CoverageDeclPGONames.find(D); It != CoverageDeclPGONames.end()) {
+    for (llvm::Function &F : M) {
+      auto PGOFuncName = getPGOFuncNameMetadataValue(F);
+      if (!PGOFuncName || *PGOFuncName != It->second)
+        continue;
+      if (!F.isDeclaration())
+        return &F;
+    }
+  }
+
+  if (auto It = CoverageDeclSymbolNames.find(D);
+      It != CoverageDeclSymbolNames.end()) {
+    if (llvm::Function *Fn = M.getFunction(It->second))
+      if (!Fn->isDeclaration())
+        return Fn;
+  }
+
+  if (auto GD = getCoverageMappingGlobalDecl(D)) {
+    if (isa<FunctionDecl>(D) || isa<ObjCMethodDecl>(D)) {
+      llvm::Function *Fn = M.getFunction(CGM.getMangledName(*GD));
+      if (Fn && !Fn->isDeclaration())
+        return Fn;
+    }
+  }
+
+  return nullptr;
+}
+
+template <typename AddFn>
+static void transferUsedGlobals(llvm::GlobalVariable *GV, AddFn &&Add) {
+  if (!GV)
+    return;
+
+  if (auto *Init = dyn_cast<llvm::ConstantArray>(GV->getInitializer())) {
+    for (llvm::Value *Op : Init->operands()) {
+      auto *UsedGV = dyn_cast<llvm::GlobalValue>(
+          cast<llvm::Constant>(Op)->stripPointerCasts());
+      if (UsedGV)
+        Add(UsedGV);
+    }
+  }
+
+  GV->eraseFromParent();
+}
+
+static void mergeExistingUsedGlobals(CodeGenModule &CGM, llvm::Module &M) {
+  transferUsedGlobals(M.getGlobalVariable("llvm.used", /*AllowInternal=*/true),
+                      [&](llvm::GlobalValue *GV) { CGM.addUsedGlobal(GV); });
+  transferUsedGlobals(
+      M.getGlobalVariable("llvm.compiler.used", /*AllowInternal=*/true),
+      [&](llvm::GlobalValue *GV) { CGM.addCompilerUsedGlobal(GV); });
+}
+
+} // namespace
+
+namespace clang {
+namespace CodeGen {
+
+bool emitCIRCoverageMapping(
+    ASTContext &ASTCtx, DiagnosticsEngine &Diags,
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS,
+    const HeaderSearchOptions &HeaderSearchOpts,
+    const PreprocessorOptions &PreprocessorOpts,
+    const CodeGenOptions &CodeGenOpts, CoverageSourceInfo &CoverageInfo,
+    llvm::Module &LLVMModule, llvm::ArrayRef<Decl *> CoverageDecls,
+    const llvm::DenseMap<const Decl *, std::string> &CoverageDeclPGONames,
+    const llvm::DenseMap<const Decl *, std::string> &CoverageDeclSymbolNames) {
+  CodeGenModule CGM(ASTCtx, std::move(FS), HeaderSearchOpts, PreprocessorOpts,
+                    CodeGenOpts, LLVMModule, Diags, &CoverageInfo);
+  mergeExistingUsedGlobals(CGM, LLVMModule);
+
+  for (Decl *D : CoverageDecls)
+    CGM.AddDeferredUnusedCoverageMapping(D);
+
+  for (Decl *D : CoverageDecls) {
+    std::optional<GlobalDecl> GD = getCoverageMappingGlobalDecl(D);
+    if (!GD)
+      continue;
+
+    llvm::Function *Fn =
+        findCIRCoverageMappingFunction(CGM, LLVMModule, D,
+                                       CoverageDeclPGONames,
+                                       CoverageDeclSymbolNames);
+    if (!Fn || Fn->isDeclaration())
+      continue;
+
+    CodeGenPGO PGO(CGM);
+    PGO.assignRegionCounters(*GD, Fn);
+  }
+
+  CGM.EmitDeferredUnusedCoverageMappings();
+  if (auto *Coverage = CGM.getCoverageMapping())
+    Coverage->emit();
+  CGM.emitQueuedLLVMUsed();
+  return !Diags.hasErrorOccurred();
+}
+
+} // namespace CodeGen
+} // namespace clang

@@ -1,10 +1,20 @@
 // RUN: cir-opt %s --verify-roundtrip | FileCheck %s
 
 !s32i = !cir.int<s, 32>
+!rec_S = !cir.record<struct "S" {!s32i}>
 module {
   cir.func @shouldParseCopyOp(%arg0 : !cir.ptr<!s32i>, %arg1 : !cir.ptr<!s32i>) {
     cir.copy %arg0 to %arg1 : !cir.ptr<!s32i>
     // CHECK: cir.copy %arg0 to %arg1 : !cir.ptr<!s32i>
+    cir.return
+  }
+
+  // CHECK-LABEL: @shouldParseCrossAddrSpaceCopyOp
+  cir.func @shouldParseCrossAddrSpaceCopyOp(
+      %arg0 : !cir.ptr<!rec_S, target_address_space(2)>,
+      %arg1 : !cir.ptr<!rec_S>) {
+    cir.copy %arg0 to %arg1 : !cir.ptr<!rec_S, target_address_space(2)>, !cir.ptr<!rec_S>
+    // CHECK: cir.copy %arg0 to %arg1 : !cir.ptr<!rec_S, target_address_space(2)>, !cir.ptr<!rec_S>
     cir.return
   }
 }

@@ -1,4 +1,5 @@
-// RUN: %clang_cc1 -triple aarch64-none-linux-gnu -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple aarch64-none-linux-gnu -emit-llvm -disable-llvm-passes -o - %s | FileCheck %s --check-prefixes=CHECK,OGCG
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64-none-linux-gnu -fclangir -emit-llvm -disable-llvm-passes -o - %s | FileCheck %s --check-prefixes=CHECK,CIR %}
 
 // CHECK: @_Z23used_before_default_defv = weak_odr ifunc void (), ptr @_Z23used_before_default_defv.resolver
 // CHECK: @_Z22used_after_default_defv = weak_odr ifunc void (), ptr @_Z22used_after_default_defv.resolver
@@ -46,13 +47,15 @@ void call_after_def(void) { used_after_default_def(); }
 //
 __attribute__((target_version("aes"))) void used_before_default_decl(void) {}
 // CHECK-LABEL: define dso_local void @_Z24used_before_default_declv._Maes(
+// CIR: declare void @_Z24used_before_default_declv() #[[USED_BEFORE_DECL_ATTR:[0-9]+]]
 //
 void call_before_decl(void) { used_before_default_decl(); }
 // CHECK-LABEL: define dso_local void @_Z16call_before_declv(
-// CHECK: call void @_Z24used_before_default_declv()
+// OGCG: call void @_Z24used_before_default_declv()
+// CIR: call void @_Z24used_before_default_declv()
 //
 __attribute__((target_version("default"))) void used_before_default_decl(void);
-// CHECK: declare void @_Z24used_before_default_declv()
+// OGCG: declare void @_Z24used_before_default_declv() #[[USED_BEFORE_DECL_ATTR:[0-9]+]]
 
 
 // Test that an unmagled declaration is generated and used when the
@@ -62,7 +65,7 @@ __attribute__((target_version("aes"))) void used_after_default_decl(void) {}
 // CHECK-LABEL: define dso_local void @_Z23used_after_default_declv._Maes(
 //
 __attribute__((target_version("default"))) void used_after_default_decl(void);
-// CHECK: declare void @_Z23used_after_default_declv()
+// CHECK: declare void @_Z23used_after_default_declv() #[[USED_AFTER_DECL_ATTR:[0-9]+]]
 //
 void call_after_decl(void) { used_after_default_decl(); }
 // CHECK-LABEL: define dso_local void @_Z15call_after_declv(
@@ -74,12 +77,13 @@ void call_after_decl(void) { used_after_default_decl(); }
 //
 __attribute__((target_version("aes"))) void used_no_default(void) {}
 // CHECK-LABEL: define dso_local void @_Z15used_no_defaultv._Maes(
+// CIR: declare void @_Z15used_no_defaultv() #[[USED_BEFORE_DECL_ATTR]]
 //
 void call_no_default(void) { used_no_default(); }
 // CHECK-LABEL: define dso_local void @_Z15call_no_defaultv(
-// CHECK: call void @_Z15used_no_defaultv()
-//
-// CHECK: declare void @_Z15used_no_defaultv()
+// OGCG: call void @_Z15used_no_defaultv()
+// CIR: call void @_Z15used_no_defaultv()
+// OGCG: declare void @_Z15used_no_defaultv() #[[USED_BEFORE_DECL_ATTR]]
 
 
 // Test that neither an ifunc nor a declaration is generated if the default
@@ -109,3 +113,8 @@ __attribute__((target_version("default"))) void not_used_with_default(void) {}
 // CHECK-NOT: define weak_odr ptr @_Z15used_no_defaultv.resolver(
 // CHECK-NOT: define weak_odr ptr @_Z19not_used_no_defaultv.resolver(
 // CHECK: define weak_odr ptr @_Z21not_used_with_defaultv.resolver()
+
+// OGCG-DAG: attributes #[[USED_BEFORE_DECL_ATTR]] = { "fmv-features"="aes" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-features"="+aes,+fp-armv8,+neon" }
+// OGCG-DAG: attributes #[[USED_AFTER_DECL_ATTR]] = { "fmv-features" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+// CIR-DAG: attributes #[[USED_BEFORE_DECL_ATTR]] = { "fmv-features"="aes" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-features"="+aes,+fp-armv8,+neon" }
+// CIR-DAG: attributes #[[USED_AFTER_DECL_ATTR]] = { "fmv-features" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }

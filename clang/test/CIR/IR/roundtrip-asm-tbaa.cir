@@ -1,0 +1,67 @@
+// RUN: cir-opt %s | cir-opt | FileCheck %s
+
+// Two printer/parser asymmetries that only bite when CIR is written to a file
+// and read back -- which is exactly what the link-time path does, and which
+// ordinary compilation never does.
+
+!s32i = !cir.int<s, 32>
+
+// An abstract base has no data members, so its TBAA struct prints with an
+// empty member list. The parser used to demand at least one member and
+// reported "expected '<'" on something the printer produces routinely.
+// CHECK: #tbaa_struct = #cir.tbaa_struct<id = "_ZTS1B", members = {}>
+#tbaa_struct = #cir.tbaa_struct<id = "_ZTS1B", members = {}>
+
+module {
+  // The attribute has to be *used* or the printer drops the alias and the
+  // round trip proves nothing.
+  cir.func @uses_tbaa(%p: !cir.ptr<!s32i>, %v: !s32i) {
+    // CHECK: cir.store{{.*}}tbaa(#tbaa_struct)
+    cir.store %v, %p : !s32i, !cir.ptr<!s32i> tbaa(#tbaa_struct)
+    cir.return
+  }
+
+  // cir.asm prints its discardable attribute dictionary *before* the result
+  // type. The parser read them the other way round, so the arrow never
+  // matched, the result type was dropped, and an op printed as
+  // `%0 = cir.asm ... -> !s32i` came back with no results at all:
+  //
+  //   error: cannot name an operation with no results
+  //
+  // cir.asm_readnone and cir.asm_nounwind are attached routinely, so this hit
+  // essentially all real inline asm.
+  cir.func @asm_with_attr(%arg0: !s32i, %arg1: !s32i) -> !s32i {
+    // CHECK: cir.asm(x86_att,
+    // CHECK: {cir.asm_readnone} -> !s32i
+    %0 = cir.asm(x86_att,
+      out = [],
+      in = [%arg0 : !s32i, %arg1 : !s32i],
+      in_out = [],
+      {"addl $1, $0" "=r,r,0,~{dirflag},~{fpsr},~{flags}"}) {cir.asm_readnone} -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  // No attribute dictionary: the previously working shape must keep working.
+  cir.func @asm_plain(%arg0: !s32i) -> !s32i {
+    // CHECK: cir.asm(x86_att,
+    // CHECK: -> !s32i
+    %0 = cir.asm(x86_att,
+      out = [],
+      in = [%arg0 : !s32i],
+      in_out = [],
+      {"movl $1, $0" "=r,r,~{dirflag},~{fpsr},~{flags}"}) -> !s32i
+    cir.return %0 : !s32i
+  }
+
+  // And an asm with no result at all, which must not grow one.
+  cir.func @asm_void() {
+    // CHECK: cir.asm(x86_att,
+    // CHECK-NOT: ->
+    cir.asm(x86_att,
+      out = [],
+      in = [],
+      in_out = [],
+      {"nop" "~{dirflag},~{fpsr},~{flags}"}) {cir.asm_nounwind}
+    cir.return
+  }
+}

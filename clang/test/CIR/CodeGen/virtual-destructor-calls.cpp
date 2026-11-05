@@ -27,9 +27,8 @@ struct B : A {
 B::~B() { }
 
 // Aliases are inserted before the function definitions in LLVM IR
-// FIXME: These should have unnamed_addr set.
-// LLVM: @_ZN1BD1Ev = alias void (ptr), ptr @_ZN1BD2Ev
-// LLVM: @_ZN1CD1Ev = alias void (ptr), ptr @_ZN1CD2Ev
+// LLVM: @_ZN1BD1Ev = unnamed_addr alias void (ptr), ptr @_ZN1BD2Ev
+// LLVM: @_ZN1CD1Ev = unnamed_addr alias void (ptr), ptr @_ZN1CD2Ev
 
 // OGCG: @_ZN1BD1Ev = unnamed_addr alias void (ptr), ptr @_ZN1BD2Ev
 // OGCG: @_ZN1CD1Ev = unnamed_addr alias void (ptr), ptr @_ZN1CD2Ev
@@ -41,7 +40,7 @@ B::~B() { }
 // CIR:   cir.call @_ZN6MemberD1Ev
 // CIR:   cir.call @_ZN1AD2Ev
 
-// LLVM: define{{.*}} void @_ZN1BD2Ev
+// LLVM: define{{.*}} void @_ZN1BD2Ev(ptr noundef
 // LLVM:   call void @_ZN6MemberD1Ev
 // LLVM:   call void @_ZN1AD2Ev
 
@@ -51,7 +50,7 @@ B::~B() { }
 
 // Complete (D1) dtor for B: just an alias because there are no virtual bases.
 
-// CIR: cir.func{{.*}} @_ZN1BD1Ev(!cir.ptr<!rec_B>) alias(@_ZN1BD2Ev)
+// CIR: cir.func{{.*}} @_ZN1BD1Ev(!cir.ptr<!rec_B>{{.*}}) alias(@_ZN1BD2Ev)
 // This is defined above for LLVM and OGCG.
 
 // Deleting (D0) dtor for B: defers to the complete dtor but also calls operator delete.
@@ -62,9 +61,9 @@ B::~B() { }
 // CIR:   %[[SIZE:.*]] = cir.const #cir.int<16>
 // CIR:   cir.call @_ZdlPvm(%[[THIS_VOID]], %[[SIZE]])
 
-// LLVM: define{{.*}} void @_ZN1BD0Ev
-// LLVM:   call void @_ZN1BD1Ev(ptr %[[THIS:.*]])
-// LLVM:   call void @_ZdlPvm(ptr %[[THIS]], i64 16)
+// LLVM: define{{.*}} void @_ZN1BD0Ev(ptr noundef
+// LLVM:   call void @_ZN1BD1Ev(ptr{{.*}} %[[THIS:.*]])
+// LLVM:   call void @_ZdlPvm(ptr noundef %[[THIS]], i64 noundef 16)
 
 // OGCG: define{{.*}} @_ZN1BD0Ev
 // OGCG:   call void @_ZN1BD1Ev(ptr{{.*}} %[[THIS:.*]])
@@ -82,7 +81,7 @@ C::~C() { }
 // CIR:   %[[B:.*]] = cir.base_class_addr %[[THIS:.*]] : !cir.ptr<!rec_C> nonnull [0] -> !cir.ptr<!rec_B>
 // CIR:   cir.call @_ZN1BD2Ev(%[[B]])
 
-// LLVM: define{{.*}} void @_ZN1CD2Ev
+// LLVM: define{{.*}} void @_ZN1CD2Ev(ptr noundef
 // LLVM:   call void @_ZN1BD2Ev
 
 // OGCG: define{{.*}} @_ZN1CD2Ev
@@ -90,7 +89,7 @@ C::~C() { }
 
 // Complete (D1) dtor for C: just an alias because there are no virtual bases.
 
-// CIR: cir.func{{.*}} @_ZN1CD1Ev(!cir.ptr<!rec_C>) alias(@_ZN1CD2Ev)
+// CIR: cir.func{{.*}} @_ZN1CD1Ev(!cir.ptr<!rec_C>{{.*}}) alias(@_ZN1CD2Ev)
 // This is defined above for LLVM and OGCG.
 
 
@@ -102,9 +101,9 @@ C::~C() { }
 // CIR:   %[[SIZE:.*]] = cir.const #cir.int<16>
 // CIR:   cir.call @_ZdlPvm(%[[THIS_VOID]], %[[SIZE]])
 
-// LLVM: define{{.*}} void @_ZN1CD0Ev
-// LLVM:   call void @_ZN1CD1Ev(ptr %[[THIS:.*]])
-// LLVM:   call void @_ZdlPvm(ptr %[[THIS]], i64 16)
+// LLVM: define{{.*}} void @_ZN1CD0Ev(ptr noundef
+// LLVM:   call void @_ZN1CD1Ev(ptr{{.*}} %[[THIS:.*]])
+// LLVM:   call void @_ZdlPvm(ptr noundef %[[THIS]], i64 noundef 16)
 
 // OGCG: define{{.*}} @_ZN1CD0Ev
 // OGCG:   call void @_ZN1CD1Ev(ptr{{.*}} %[[THIS:.*]])
@@ -119,7 +118,7 @@ namespace PR12798 {
   // CIR: cir.func{{.*}} @_ZN7PR127981fINS_1AEEEvPT_
   // CIR:   cir.call @_ZN7PR127981AD1Ev
 
-  // LLVM: define{{.*}} @_ZN7PR127981fINS_1AEEEvPT_
+  // LLVM: define{{.*}} @_ZN7PR127981fINS_1AEEEvPT_(ptr noundef
   // LLVM:   call void @_ZN7PR127981AD1Ev
 
   // OGCG: define{{.*}} @_ZN7PR127981fINS_1AEEEvPT_

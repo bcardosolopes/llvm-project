@@ -18,31 +18,14 @@ omp.private {type = firstprivate} @x.privatizer : f32 copy {
   omp.yield(%arg1 : !llvm.ptr)
 }
 
-// CHECK-LABEL: @parallel_op_firstprivate
-// CHECK-SAME: (ptr %[[ORIG:.*]]) {
-// CHECK: %[[OMP_PAR_ARG:.*]] = alloca { ptr }, align 8
-// CHECK: %[[ORIG_GEP:.*]] = getelementptr { ptr }, ptr %[[OMP_PAR_ARG]], i32 0, i32 0
-// CHECK: store ptr %[[ORIG]], ptr %[[ORIG_GEP]], align 8
-// CHECK: call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @1, i32 1, ptr @parallel_op_firstprivate..omp_par, ptr %[[OMP_PAR_ARG]])
-// CHECK: }
 
-// CHECK-LABEL: void @parallel_op_firstprivate..omp_par
-// CHECK-SAME: (ptr noalias %{{.*}}, ptr noalias %{{.*}}, ptr %[[ARG:.*]])
-// CHECK: %[[ORIG_PTR_PTR:.*]] = getelementptr { ptr }, ptr %[[ARG]], i32 0, i32 0
-// CHECK: %[[ORIG_PTR:.*]] = load ptr, ptr %[[ORIG_PTR_PTR]], align 8
 
 // Check that the privatizer alloc region was inlined properly.
-// CHECK: %[[PRIV_ALLOC:.*]] = alloca float, align 4
 
 // Check that the privatizer copy region was inlined properly.
 
-// CHECK: %[[ORIG_VAL:.*]] = load float, ptr %[[ORIG_PTR]], align 4
-// CHECK: store float %[[ORIG_VAL]], ptr %[[PRIV_ALLOC]], align 4
-// CHECK-NEXT: br
 
 // Check that the privatized value is used (rather than the original one).
-// CHECK: load float, ptr %[[PRIV_ALLOC]], align 4
-// CHECK: }
 
 // -----
 
@@ -54,55 +37,20 @@ llvm.func @parallel_op_firstprivate_multi_block(%arg0: !llvm.ptr) {
   llvm.return
 }
 
-// CHECK-LABEL: define internal void @parallel_op_firstprivate_multi_block..omp_par
-// CHECK: omp.par.entry:
-// CHECK:  %[[ORIG_PTR_PTR:.*]] = getelementptr { ptr }, ptr %{{.*}}, i32 0, i32 0
-// CHECK:  %[[ORIG_PTR:.*]] = load ptr, ptr %[[ORIG_PTR_PTR]], align 8
-// CHECK:  %[[PRIV_ALLOC:.*]] = alloca float, align 4
-// CHECK-NEXT: br label %omp.region.after_alloca
 
-// CHECK: omp.region.after_alloca:
-// CHECK-NEXT:   br label %[[PAR_REG:.*]]
 
 // Check that the body of the parallel region loads from the private clone.
-// CHECK: [[PAR_REG]]:
-// CHECK:   br label %[[PRIV_BB1:.*]]
 
-// CHECK: [[PRIV_BB1]]:
 // The 1st `alloc` block directly branches to the 2nd `alloc` block since the
 // only insruction is `llvm.mlir.constant` which gets translated to compile-time
 // constant in LLVM IR.
-// CHECK-NEXT: br label %[[PRIV_BB2:.*]]
 
-// CHECK: [[PRIV_BB2]]:
-// CHECK-NEXT: br label %[[PRIV_BB3:.*]]
 
-// CHECK: [[PRIV_BB3]]:
-// CHECK-NEXT: br label %omp.region.cont
 
-// CHECK: omp.region.cont:
-// CHECK-NEXT: %[[PRIV_ALLOC2:.*]] = phi ptr [ %[[PRIV_ALLOC]], %[[PRIV_BB3]] ]
-// CHECK-NEXT: br label %omp.private.copy
 
-// CHECK: omp.private.copy:
-// CHECK-NEXT: br label %omp.private.copy4
 
-// CHECK: omp.private.copy4:
-// CHECK-NEXT: %[[ORIG_VAL:.*]] = load float, ptr %[[ORIG_PTR]], align 4
-// CHECK-NEXT: br label %[[PRIV_BB3:.*]]
-
-// Check contents of the 2nd block in the `copy` region.
-// CHECK: [[PRIV_BB3]]:
-// CHECK-NEXT: %[[ORIG_VAL2:.*]] = phi float [ %[[ORIG_VAL]], %omp.private.copy4 ]
-// CHECK-NEXT: %[[PRIV_ALLOC3:.*]] = phi ptr [ %[[PRIV_ALLOC2]], %omp.private.copy4 ]
-// CHECK-NEXT: store float %[[ORIG_VAL2]], ptr %[[PRIV_ALLOC3]], align 4
-// CHECK-NEXT: br label %[[PRIV_CONT:.*]]
-
-// Check that the privatizer's continuation block yileds the private clone's
-// address.
-// CHECK: [[PRIV_CONT]]:
-// CHECK-NEXT:   %[[PRIV_ALLOC4:.*]] = phi ptr [ %[[PRIV_ALLOC3]], %[[PRIV_BB3]] ]
-// CHECK:        %{{.*}} = load float, ptr %[[PRIV_ALLOC2]], align 4
+// Check that the init region still threads the private allocation through the
+// multi-block control flow, while the copy step uses the by-value capture.
 
 omp.private {type = firstprivate} @multi_block.privatizer : f32 init {
 ^bb0(%arg0: !llvm.ptr, %arg1: !llvm.ptr):
@@ -155,13 +103,8 @@ omp.private {type = firstprivate} @non_const_len_char : !llvm.struct<(ptr, i64)>
 
 llvm.func @foo()
 
-// CHECK-LABEL: @non_const_len_char_test..omp_par({{.*}})
-// CHECK-NEXT:    omp.par.entry:
 // Verify that we found the privatizer by checking that we properly inlined the
 // bodies of the alloc and copy regions.
-// CHECK:         %[[STR_LEN:.*]] = extractvalue { ptr, i64 } %{{.*}}, 1
-// CHECK:         %{{.*}} = alloca i8, i64 %[[STR_LEN]], align 1
-// CHECK:         call void @foo()
 
 // -----
 
@@ -196,10 +139,199 @@ llvm.mlir.global internal @global() {addr_space = 0 : i32} : f32 {
   llvm.return %0 : f32
 }
 
-// CHECK-LABEL: @global_accessor..omp_par({{.*}})
-// CHECK-NEXT:  omp.par.entry:
 // Verify that we found the privatizer by checking that we properly inlined the
 // bodies of the alloc and copy regions.
-// CHECK:         %[[PRIV_ALLOC:.*]] = alloca float, align 4
-// CHECK:         %[[GLOB_VAL:.*]] = load float, ptr @global, align 4
-// CHECK:         store float %[[GLOB_VAL]], ptr %[[PRIV_ALLOC]], align 4
+
+// CHECK: @0 = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00", align 1
+// CHECK: @1 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 2, i32 0, i32 22, ptr @0 }, align 8
+// CHECK-LABEL: define void @parallel_op_firstprivate(
+// CHECK:   %[[VAL_0:.*]] = load float, ptr %[[VAL_1:.*]], align 4
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_3:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp_parallel:
+// CHECK:   call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @1, i32 1, ptr @parallel_op_firstprivate..omp_par, float %[[VAL_0]])
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.par.exit:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @parallel_op_firstprivate..omp_par(
+// CHECK: omp.par.entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = load i32, ptr %[[VAL_2:.*]], align 4
+// CHECK:   store i32 %[[VAL_1]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_3:.*]] = load i32, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_4:.*]] = alloca float, align 4
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.par.region:
+// CHECK:   br label %[[VAL_7:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.private.copy:
+// CHECK:   store float %[[VAL_9:.*]], ptr %[[VAL_4]], align 4
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.par.region1:
+// CHECK:   %[[VAL_11:.*]] = load float, ptr %[[VAL_4]], align 4
+// CHECK:   br label %[[VAL_12:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   br label %[[VAL_13:.*]]
+// CHECK: omp.par.pre_finalize:
+// CHECK:   br label %[[VAL_14:.*]]
+// CHECK: .fini:
+// CHECK:   br label %[[VAL_15:.*]]
+// CHECK: omp.par.exit.exitStub:
+// CHECK:   ret void
+// CHECK: }
+// CHECK: @0 = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00", align 1
+// CHECK: @1 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 2, i32 0, i32 22, ptr @0 }, align 8
+// CHECK-LABEL: define void @parallel_op_firstprivate_multi_block(
+// CHECK:   %[[VAL_0:.*]] = load float, ptr %[[VAL_1:.*]], align 4
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_3:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp_parallel:
+// CHECK:   call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @1, i32 1, ptr @parallel_op_firstprivate_multi_block..omp_par, float %[[VAL_0]])
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.par.exit:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @parallel_op_firstprivate_multi_block..omp_par(
+// CHECK: omp.par.entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = load i32, ptr %[[VAL_2:.*]], align 4
+// CHECK:   store i32 %[[VAL_1]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_3:.*]] = load i32, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_4:.*]] = alloca float, align 4
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.par.region:
+// CHECK:   br label %[[VAL_7:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.private.init1:
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.private.init2:
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   %[[VAL_11:.*]] = phi ptr [ %[[VAL_4]], %[[VAL_9]] ]
+// CHECK:   br label %[[VAL_12:.*]]
+// CHECK: omp.private.copy:
+// CHECK:   store float %[[VAL_13:.*]], ptr %[[VAL_11]], align 4
+// CHECK:   br label %[[VAL_14:.*]]
+// CHECK: omp.par.region4:
+// CHECK:   %[[VAL_15:.*]] = load float, ptr %[[VAL_11]], align 4
+// CHECK:   br label %[[VAL_16:.*]]
+// CHECK: omp.region.cont3:
+// CHECK:   br label %[[VAL_17:.*]]
+// CHECK: omp.par.pre_finalize:
+// CHECK:   br label %[[VAL_18:.*]]
+// CHECK: .fini:
+// CHECK:   br label %[[VAL_19:.*]]
+// CHECK: omp.par.exit.exitStub:
+// CHECK:   ret void
+// CHECK: }
+// CHECK: @0 = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00", align 1
+// CHECK: @1 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 2, i32 0, i32 22, ptr @0 }, align 8
+// CHECK-LABEL: define void @non_const_len_char_test(
+// CHECK:   %[[VAL_0:.*]] = alloca {{[{]}} ptr }, align 8
+// CHECK:   %[[VAL_1:.*]] = alloca {{[{]}} ptr, i64 }, align 8
+// CHECK:   %[[VAL_2:.*]] = load i64, ptr %[[VAL_3:.*]], align 4
+// CHECK:   %[[VAL_4:.*]] = alloca i8, i64 %[[VAL_2]], align 1
+// CHECK:   %[[VAL_5:.*]] = insertvalue {{[{]}} ptr, i64 } undef, ptr %[[VAL_4]], 0
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_7:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   store {{[{]}} ptr, i64 } %[[VAL_5]], ptr %[[VAL_1]], align 8
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp_parallel:
+// CHECK:   %[[VAL_9:.*]] = getelementptr {{[{]}} ptr }, ptr %[[VAL_0]], i32 0, i32 0
+// CHECK:   store ptr %[[VAL_1]], ptr %[[VAL_9]], align 8
+// CHECK:   call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @1, i32 1, ptr @non_const_len_char_test..omp_par, ptr %[[VAL_0]])
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.par.exit:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @non_const_len_char_test..omp_par(
+// CHECK: omp.par.entry:
+// CHECK:   %[[VAL_0:.*]] = getelementptr {{[{]}} ptr }, ptr %[[VAL_1:.*]], i32 0, i32 0
+// CHECK:   %[[VAL_2:.*]] = load ptr, ptr %[[VAL_0]], align 8, !align !1
+// CHECK:   %[[VAL_3:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_4:.*]] = load i32, ptr %[[VAL_5:.*]], align 4
+// CHECK:   store i32 %[[VAL_4]], ptr %[[VAL_3]], align 4
+// CHECK:   %[[VAL_6:.*]] = load i32, ptr %[[VAL_3]], align 4
+// CHECK:   %[[VAL_7:.*]] = load {{[{]}} ptr, i64 }, ptr %[[VAL_2]], align 8
+// CHECK:   %[[VAL_8:.*]] = alloca {{[{]}} ptr, i64 }, align 8
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.par.region:
+// CHECK:   br label %[[VAL_11:.*]]
+// CHECK: omp.private.init:
+// CHECK:   %[[VAL_12:.*]] = extractvalue {{[{]}} ptr, i64 } %[[VAL_7]], 1
+// CHECK:   %[[VAL_13:.*]] = alloca i8, i64 %[[VAL_12]], align 1
+// CHECK:   %[[VAL_14:.*]] = insertvalue {{[{]}} ptr, i64 } undef, ptr %[[VAL_13]], 0
+// CHECK:   br label %[[VAL_15:.*]]
+// CHECK: omp.private.copy:
+// CHECK:   call void @foo()
+// CHECK:   br label %[[VAL_16:.*]]
+// CHECK: omp.par.region1:
+// CHECK:   %[[VAL_17:.*]] = extractvalue {{[{]}} ptr, i64 } %[[VAL_14]], 0
+// CHECK:   br label %[[VAL_18:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   br label %[[VAL_19:.*]]
+// CHECK: omp.par.pre_finalize:
+// CHECK:   br label %[[VAL_20:.*]]
+// CHECK: .fini:
+// CHECK:   br label %[[VAL_21:.*]]
+// CHECK: omp.par.exit.exitStub:
+// CHECK:   ret void
+// CHECK: }
+// CHECK: @global = internal global float 0.000000e+00
+// CHECK: @0 = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00", align 1
+// CHECK: @1 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 2, i32 0, i32 22, ptr @0 }, align 8
+// CHECK-LABEL: define void @global_accessor(
+// CHECK:   %[[VAL_0:.*]] = load float, ptr @global, align 4
+// CHECK:   br label %[[VAL_1:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_2:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: omp_parallel:
+// CHECK:   call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @1, i32 1, ptr @global_accessor..omp_par, float %[[VAL_0]])
+// CHECK:   br label %[[VAL_4:.*]]
+// CHECK: omp.par.exit:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @global_accessor..omp_par(
+// CHECK: omp.par.entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = load i32, ptr %[[VAL_2:.*]], align 4
+// CHECK:   store i32 %[[VAL_1]], ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_3:.*]] = load i32, ptr %[[VAL_0]], align 4
+// CHECK:   %[[VAL_4:.*]] = alloca float, align 4
+// CHECK:   br label %[[VAL_5:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_6:.*]]
+// CHECK: omp.par.region:
+// CHECK:   br label %[[VAL_7:.*]]
+// CHECK: omp.private.init:
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.private.copy:
+// CHECK:   store float %[[VAL_9:.*]], ptr %[[VAL_4]], align 4
+// CHECK:   br label %[[VAL_10:.*]]
+// CHECK: omp.par.region1:
+// CHECK:   store float 0x40091EB860000000, ptr %[[VAL_4]], align 4
+// CHECK:   br label %[[VAL_11:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   br label %[[VAL_12:.*]]
+// CHECK: omp.par.pre_finalize:
+// CHECK:   br label %[[VAL_13:.*]]
+// CHECK: .fini:
+// CHECK:   br label %[[VAL_14:.*]]
+// CHECK: omp.par.exit.exitStub:
+// CHECK:   ret void
+// CHECK: }

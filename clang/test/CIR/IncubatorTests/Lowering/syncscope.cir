@@ -1,0 +1,58 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering -o -  | FileCheck %s -check-prefix=LLVM
+
+!s32i = !cir.int<s, 32>
+!s8i = !cir.int<s, 8>
+#fn_attr = #cir<extra({nothrow = #cir.nothrow})>
+module {
+  cir.func no_inline optnone @test(%ptr: !cir.ptr<!s32i>, %expected: !s32i, %desired: !s32i) -> !cir.bool extra(#fn_attr) {
+    %old, %cmp = cir.atomic.cmpxchg success(acquire) failure(acquire) %ptr, %expected, %desired align(4) syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i, !s32i) -> (!s32i, !cir.bool)
+    cir.return %cmp: !cir.bool
+  }
+
+  cir.func no_inline @load(%ptr: !cir.ptr<!s32i>) -> !s32i extra(#fn_attr) {
+    %val = cir.load syncscope(single_thread) atomic(relaxed) %ptr : !cir.ptr<!s32i>, !s32i
+    cir.return %val : !s32i
+  }
+
+
+  // System scope should not materialize a syncscope attribute.
+  cir.func no_inline @system_load(%ptr: !cir.ptr<!s32i>) -> !s32i extra(#fn_attr) {
+    %val = cir.load atomic(seq_cst) %ptr : !cir.ptr<!s32i>, !s32i
+    cir.return %val : !s32i
+  }
+
+  cir.func no_inline @xchg_syncscope(%ptr: !cir.ptr<!s32i>, %val: !s32i) -> !s32i extra(#fn_attr) {
+    %res = cir.atomic.xchg seq_cst %ptr, %val syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+    cir.return %res : !s32i
+  }
+
+  cir.func no_inline @fetch_add_syncscope(%ptr: !cir.ptr<!s32i>, %val: !s32i) -> !s32i extra(#fn_attr) {
+    %res = cir.atomic.fetch add seq_cst fetch_first %ptr, %val syncscope(single_thread) : (!cir.ptr<!s32i>, !s32i) -> !s32i
+    cir.return %res : !s32i
+  }
+
+  cir.func no_inline @test_and_set_syncscope(%ptr: !cir.ptr<!s8i>) -> !cir.bool extra(#fn_attr) {
+    %res = cir.atomic.test_and_set seq_cst %ptr syncscope(single_thread) : !cir.ptr<!s8i> -> !cir.bool {alignment = 1 : i64}
+    cir.return %res : !cir.bool
+  }
+
+  cir.func no_inline @clear_syncscope(%ptr: !cir.ptr<!s8i>) extra(#fn_attr) {
+    cir.atomic.clear seq_cst %ptr syncscope(single_thread) : !cir.ptr<!s8i> {alignment = 1 : i64}
+    cir.return
+  }
+
+}
+
+// LLVM: {{%.*}} = cmpxchg ptr {{%.*}}, i32 {{%.*}}, i32 {{%.*}} syncscope("singlethread") acquire acquire, align 4
+// LLVM: load atomic i32, ptr {{%.*}} syncscope("singlethread") monotonic, align 4
+// LLVM-LABEL: @system_load
+// LLVM: load atomic i32, ptr {{%.*}} seq_cst, align 4
+// LLVM-NOT: syncscope(
+// LLVM-LABEL: @xchg_syncscope
+// LLVM: atomicrmw xchg ptr {{%.*}}, i32 {{%.*}} syncscope("singlethread") seq_cst
+// LLVM-LABEL: @fetch_add_syncscope
+// LLVM: atomicrmw add ptr {{%.*}}, i32 {{%.*}} syncscope("singlethread") seq_cst
+// LLVM-LABEL: @test_and_set_syncscope
+// LLVM: atomicrmw xchg ptr {{%.*}}, i8 1 syncscope("singlethread") seq_cst
+// LLVM-LABEL: @clear_syncscope
+// LLVM: store atomic i8 0, ptr {{%.*}} syncscope("singlethread") seq_cst

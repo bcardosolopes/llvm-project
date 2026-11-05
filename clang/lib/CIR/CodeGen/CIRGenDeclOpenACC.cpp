@@ -368,7 +368,7 @@ public:
   void VisitBindClause(const OpenACCBindClause &clause) {
     if (clause.isStringArgument()) {
       mlir::StringAttr value =
-          builder.getStringAttr(clause.getStringArgument()->getString());
+          cgm.getStringAttrCached(clause.getStringArgument()->getString());
 
       routineOp.addBindStrName(builder.getContext(), lastDeviceTypeValues,
                                value);

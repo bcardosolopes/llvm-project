@@ -1,0 +1,21 @@
+// Second input for ../type-collision-nested.cir. Not a test on its own.
+//
+// Same three names as the first input, and all three disagree: `Inner`
+// directly, `Outer` because it contains a different Inner, and `Node`
+// because its own recursive member chain hangs off a different Inner.
+
+!s32i = !cir.int<s, 32>
+!rec_Inner = !cir.record<struct "Inner" {!cir.float}>
+!rec_Outer = !cir.record<struct "Outer" {!rec_Inner, !s32i}>
+!rec_Node = !cir.record<struct "Node" {!cir.ptr<!cir.record<struct "Node">>, !rec_Inner}>
+
+module {
+  cir.func @b_outer(%arg0: !cir.ptr<!rec_Outer>) -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+  cir.func @b_node(%arg0: !cir.ptr<!rec_Node>) -> !s32i {
+    %0 = cir.const #cir.int<2> : !s32i
+    cir.return %0 : !s32i
+  }
+}

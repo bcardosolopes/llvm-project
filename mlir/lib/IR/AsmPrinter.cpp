@@ -201,6 +201,10 @@ struct AsmPrinterOptions {
   llvm::cl::opt<bool> useNameLocAsPrefix{
       "mlir-use-nameloc-as-prefix", llvm::cl::init(false),
       llvm::cl::desc("Print SSA IDs using NameLocs as prefixes")};
+
+  llvm::cl::opt<bool> alwaysUseAliasesOpt{
+      "mlir-print-always-use-aliases", llvm::cl::init(false),
+      llvm::cl::desc("Always use aliases even for non top-level ops")};
 };
 } // namespace
 
@@ -217,9 +221,9 @@ void mlir::registerAsmPrinterCLOptions() {
 OpPrintingFlags::OpPrintingFlags()
     : printDebugInfoFlag(false), printDebugInfoPrettyFormFlag(false),
       printGenericOpFormFlag(false), skipRegionsFlag(false),
-      assumeVerifiedFlag(false), printLocalScope(false),
-      printValueUsersFlag(false), printUniqueSSAIDsFlag(false),
-      useNameLocAsPrefix(false) {
+      assumeVerifiedFlag(false), alwaysUseAliasesFlag(false),
+      printLocalScope(false), printValueUsersFlag(false),
+      printUniqueSSAIDsFlag(false), useNameLocAsPrefix(false) {
   // Initialize based upon command line options, if they are available.
   if (!clOptions.isConstructed())
     return;
@@ -239,6 +243,7 @@ OpPrintingFlags::OpPrintingFlags()
   printValueUsersFlag = clOptions->printValueUsers;
   printUniqueSSAIDsFlag = clOptions->printUniqueSSAIDs;
   useNameLocAsPrefix = clOptions->useNameLocAsPrefix;
+  alwaysUseAliasesFlag = clOptions->alwaysUseAliasesOpt;
 }
 
 /// Enable the elision of large elements attributes, by printing a '...'
@@ -287,6 +292,11 @@ OpPrintingFlags &OpPrintingFlags::skipRegions(bool skip) {
 /// Do not verify the operation when using custom operation printers.
 OpPrintingFlags &OpPrintingFlags::assumeVerified(bool enable) {
   assumeVerifiedFlag = enable;
+  return *this;
+}
+
+OpPrintingFlags &OpPrintingFlags::alwaysUseAliases(bool enable) {
+  alwaysUseAliasesFlag = enable;
   return *this;
 }
 
@@ -367,6 +377,10 @@ bool OpPrintingFlags::shouldSkipRegions() const { return skipRegionsFlag; }
 /// Return if operation verification should be skipped.
 bool OpPrintingFlags::shouldAssumeVerified() const {
   return assumeVerifiedFlag;
+}
+
+bool OpPrintingFlags::shouldAlwaysUseAliases() const {
+  return alwaysUseAliasesFlag;
 }
 
 /// Return if the printer should use local scope when dumping the IR.
@@ -4159,7 +4173,8 @@ void Operation::print(raw_ostream &os, const OpPrintingFlags &printerFlags) {
 }
 void Operation::print(raw_ostream &os, AsmState &state) {
   OperationPrinter printer(os, state.getImpl());
-  if (!getParent() && !state.getPrinterFlags().shouldUseLocalScope()) {
+  if (state.getPrinterFlags().shouldAlwaysUseAliases() ||
+      (!getParent() && !state.getPrinterFlags().shouldUseLocalScope())) {
     state.getImpl().initializeAliases(this);
     printer.printTopLevelOperation(this);
   } else {

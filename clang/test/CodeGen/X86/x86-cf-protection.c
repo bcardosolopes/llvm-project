@@ -7,6 +7,10 @@
 // RUN: %clang_cc1 -triple=x86_64 -o - -fcf-protection=branch %s -emit-llvm | FileCheck %s --check-prefixes=CFPROTB,CFPROTNONE
 // RUN: %clang_cc1 -triple=x86_64 -o - -fcf-protection=full %s -emit-llvm | FileCheck %s --check-prefixes=CFPROTR,CFPROTB,CFPROTNONE
 // RUN: %clang_cc1 -triple=x86_64 -o - -fcf-protection=none %s -emit-llvm | FileCheck %s --check-prefixes=CFPROTNONE
+// RUN: %if cir-support %{ %clang_cc1 -triple=x86_64 -fclangir -o - -fcf-protection=return %s -emit-llvm | FileCheck %s --check-prefixes=CIR-CFPROTR,CIR-CFPROTNONE %}
+// RUN: %if cir-support %{ %clang_cc1 -triple=x86_64 -fclangir -o - -fcf-protection=branch %s -emit-llvm | FileCheck %s --check-prefixes=CIR-CFPROTB,CIR-CFPROTNONE %}
+// RUN: %if cir-support %{ %clang_cc1 -triple=x86_64 -fclangir -o - -fcf-protection=full %s -emit-llvm | FileCheck %s --check-prefixes=CIR-CFPROTR,CIR-CFPROTB,CIR-CFPROTNONE %}
+// RUN: %if cir-support %{ %clang_cc1 -triple=x86_64 -fclangir -o - -fcf-protection=none %s -emit-llvm | FileCheck %s --check-prefixes=CIR-CFPROTNONE %}
 
 // RETURN: #define __CET__ 2
 // BRANCH: #define __CET__ 1
@@ -16,5 +20,8 @@
 // CFPROTR: !{i32 8, !"cf-protection-return", i32 1}
 // CFPROTB: !{i32 8, !"cf-protection-branch", i32 1}
 // CFPROTNONE-NOT: cf-protection-
+// CIR-CFPROTR-DAG: !{i32 8, !"cf-protection-return", i32 1}
+// CIR-CFPROTB-DAG: !{i32 8, !"cf-protection-branch", i32 1}
+// CIR-CFPROTNONE-NOT: cf-protection-
 
 void foo() {}

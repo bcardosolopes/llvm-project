@@ -1,0 +1,176 @@
+// RUN: cir-opt %s -cir-flatten-cfg -o - | FileCheck %s
+
+// Test that the phi-of-constant pattern from short-circuit && and || operators
+// is eliminated after FlattenCFG. The ternary ops that yield constant
+// true/false on one branch should be folded into direct branches.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func private @foo()
+  cir.func private @bar()
+
+  // Basic && with else: if (a && b) foo(); else bar();
+  // The TernaryOp(a, {yield b}, {yield false}) should flatten to:
+  //   brcond %a, ^eval_b, ^else
+  //   ^eval_b: brcond %b, ^then, ^else
+  // instead of going through a phi merge block.
+  cir.func @test_and(%arg0: !cir.bool, %arg1: !cir.bool) {
+    %0 = cir.ternary(%arg0, true {
+      cir.yield %arg1 : !cir.bool
+    }, false {
+      %f = cir.const #cir.bool<false> : !cir.bool
+      cir.yield %f : !cir.bool
+    }) : (!cir.bool) -> !cir.bool
+    cir.if %0 {
+      cir.call @foo() : () -> ()
+      cir.yield
+    } else {
+      cir.call @bar() : () -> ()
+      cir.yield
+    }
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @test_and
+  // CHECK:         cir.brcond %arg0 ^[[EVAL_B:bb[0-9]+]], ^[[ELSE:bb[0-9]+]]
+  // CHECK:       ^[[EVAL_B]]:
+  // CHECK:         cir.brcond %arg1 ^[[THEN:bb[0-9]+]], ^[[ELSE]]
+  // CHECK:       ^[[THEN]]:
+  // CHECK:         cir.call @foo
+  // CHECK:       ^[[ELSE]]:
+  // CHECK:         cir.call @bar
+  // No phi block arguments should remain.
+  // CHECK-NOT:   ^{{.*}}(%{{.*}}: !cir.bool)
+
+  // Basic || with else: if (a || b) foo(); else bar();
+  // The TernaryOp(a, {yield true}, {yield b}) should flatten to:
+  //   brcond %a, ^then, ^eval_b
+  //   ^eval_b: brcond %b, ^then, ^else
+  cir.func @test_or(%arg0: !cir.bool, %arg1: !cir.bool) {
+    %0 = cir.ternary(%arg0, true {
+      %t = cir.const #cir.bool<true> : !cir.bool
+      cir.yield %t : !cir.bool
+    }, false {
+      cir.yield %arg1 : !cir.bool
+    }) : (!cir.bool) -> !cir.bool
+    cir.if %0 {
+      cir.call @foo() : () -> ()
+      cir.yield
+    } else {
+      cir.call @bar() : () -> ()
+      cir.yield
+    }
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @test_or
+  // CHECK:         cir.brcond %arg0 ^[[THEN:bb[0-9]+]], ^[[EVAL_B:bb[0-9]+]]
+  // CHECK:       ^[[EVAL_B]]:
+  // CHECK:         cir.brcond %arg1 ^[[THEN]], ^[[ELSE:bb[0-9]+]]
+  // CHECK:       ^[[THEN]]:
+  // CHECK:         cir.call @foo
+  // CHECK:       ^[[ELSE]]:
+  // CHECK:         cir.call @bar
+  // CHECK-NOT:   ^{{.*}}(%{{.*}}: !cir.bool)
+
+  // Chained &&: if (a && b && c) foo(); else bar();
+  // AST is (a && b) && c, producing nested ternary ops.
+  // After elimination: brcond %a -> eval_b; brcond %b -> eval_c; brcond %c -> then/else
+  cir.func @test_chain_and(%arg0: !cir.bool, %arg1: !cir.bool, %arg2: !cir.bool) {
+    %inner = cir.ternary(%arg0, true {
+      cir.yield %arg1 : !cir.bool
+    }, false {
+      %f = cir.const #cir.bool<false> : !cir.bool
+      cir.yield %f : !cir.bool
+    }) : (!cir.bool) -> !cir.bool
+    %outer = cir.ternary(%inner, true {
+      cir.yield %arg2 : !cir.bool
+    }, false {
+      %f2 = cir.const #cir.bool<false> : !cir.bool
+      cir.yield %f2 : !cir.bool
+    }) : (!cir.bool) -> !cir.bool
+    cir.if %outer {
+      cir.call @foo() : () -> ()
+      cir.yield
+    } else {
+      cir.call @bar() : () -> ()
+      cir.yield
+    }
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @test_chain_and
+  // CHECK:         cir.brcond %arg0 ^[[B1:bb[0-9]+]], ^[[ELSE:bb[0-9]+]]
+  // CHECK:       ^[[B1]]:
+  // CHECK:         cir.brcond %arg1 ^[[B2:bb[0-9]+]], ^[[ELSE]]
+  // CHECK:       ^[[B2]]:
+  // CHECK:         cir.brcond %arg2 ^[[THEN:bb[0-9]+]], ^[[ELSE]]
+  // CHECK:       ^[[THEN]]:
+  // CHECK:         cir.call @foo
+  // CHECK:       ^[[ELSE]]:
+  // CHECK:         cir.call @bar
+  // CHECK-NOT:   ^{{.*}}(%{{.*}}: !cir.bool)
+
+  // No-else case: peephole also applies, false path goes directly to cont.
+  cir.func @test_no_else(%arg0: !cir.bool, %arg1: !cir.bool) {
+    %0 = cir.ternary(%arg0, true {
+      cir.yield %arg1 : !cir.bool
+    }, false {
+      %f = cir.const #cir.bool<false> : !cir.bool
+      cir.yield %f : !cir.bool
+    }) : (!cir.bool) -> !cir.bool
+    cir.if %0 {
+      cir.call @foo() : () -> ()
+      cir.yield
+    }
+    cir.return
+  }
+
+  // CHECK-LABEL: cir.func @test_no_else
+  // CHECK:         cir.brcond %arg0 ^[[EVAL:bb[0-9]+]], ^[[CONT:bb[0-9]+]]
+  // CHECK:       ^[[EVAL]]:
+  // CHECK:         cir.brcond %arg1 ^[[THEN:bb[0-9]+]], ^[[CONT]]
+  // CHECK:       ^[[THEN]]:
+  // CHECK:         cir.call @foo
+  // CHECK:       ^[[CONT]]:
+  // CHECK:         cir.return
+  // CHECK-NOT:   ^{{.*}}(%{{.*}}: !cir.bool)
+
+  // Side-effecting merge block: if the merge block from a short-circuit
+  // operator contains operations beyond the brcond (e.g. a cleanup flag
+  // store), the phi elimination must preserve the merge block so that
+  // those side effects are not lost.
+  cir.func @test_and_with_store(%arg0: !cir.bool, %arg1: !cir.bool) {
+    %flag = cir.alloca !cir.bool, !cir.ptr<!cir.bool>, ["cleanup.cond"] {alignment = 1 : i64}
+    %0 = cir.ternary(%arg0, true {
+      cir.yield %arg1 : !cir.bool
+    }, false {
+      %f = cir.const #cir.bool<false> : !cir.bool
+      cir.yield %f : !cir.bool
+    }) : (!cir.bool) -> !cir.bool
+    %init = cir.const #cir.bool<false> : !cir.bool
+    cir.store %init, %flag : !cir.bool, !cir.ptr<!cir.bool>
+    cir.if %0 {
+      %t = cir.const #cir.bool<true> : !cir.bool
+      cir.store %t, %flag : !cir.bool, !cir.ptr<!cir.bool>
+      cir.call @foo() : () -> ()
+      cir.yield
+    } else {
+      cir.call @bar() : () -> ()
+      cir.yield
+    }
+    cir.return
+  }
+
+  // The merge block must be preserved because it contains the store.
+  // CHECK-LABEL: cir.func @test_and_with_store
+  // CHECK:         cir.brcond %arg0 ^[[EVAL_B:bb[0-9]+]], ^[[FALSE:bb[0-9]+]]
+  // CHECK:       ^[[EVAL_B]]:
+  // CHECK:         cir.br ^[[MERGE:bb[0-9]+]](%arg1 : !cir.bool)
+  // CHECK:       ^[[FALSE]]:
+  // CHECK:         cir.br ^[[MERGE]](
+  // CHECK:       ^[[MERGE]](%[[PHI:.*]]: !cir.bool):
+  // CHECK:         cir.store
+  // CHECK:         cir.brcond %[[PHI]]
+}

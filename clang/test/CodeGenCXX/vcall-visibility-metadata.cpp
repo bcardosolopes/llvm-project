@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -emit-llvm -fvirtual-function-elimination -fwhole-program-vtables -o - %s | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-VFE
 // RUN: %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -emit-llvm -fwhole-program-vtables -o - %s | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-NOVFE
+// RUN: %if cir-support %{ %clang_cc1 -flto -flto-unit -triple x86_64-unknown-linux -emit-llvm -fwhole-program-vtables -fclangir -o - %s | FileCheck %s --check-prefix=CIR %}
 // RUN: %clang_cc1 -flto -flto-unit -triple x86_64-pc-windows-msvc -emit-llvm -fwhole-program-vtables -o - %s | FileCheck %s --check-prefix=CHECK-MS --check-prefix=CHECK-NOVFE
 
 // Check that in ThinLTO we also get vcall_visibility summary entries in the bitcode
@@ -9,6 +10,7 @@
 // Anonymous namespace.
 namespace {
 // CHECK: @_ZTVN12_GLOBAL__N_11AE = {{.*}} !vcall_visibility [[VIS_TU:![0-9]+]]
+// CIR: @_ZTVN12_GLOBAL__N_11AE = {{.*}} !vcall_visibility [[CIR_VIS_TU:![0-9]+]]
 // CHECK-MS: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4A@?A{{.*}}@@6B@"{{.*}} !vcall_visibility [[VIS_TU:![0-9]+]]
 struct A {
   A() {}
@@ -22,6 +24,7 @@ void *construct_A() {
 
 // Hidden visibility.
 // CHECK: @_ZTV1B = {{.*}} !vcall_visibility [[VIS_DSO:![0-9]+]]
+// CIR: @_ZTV1B = {{.*}} !vcall_visibility [[CIR_VIS_DSO:![0-9]+]]
 // CHECK-MS: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4B@@6B@"{{.*}} !vcall_visibility [[VIS_DSO:![0-9]+]]
 struct __attribute__((visibility("hidden"))) B {
   B() {}
@@ -34,6 +37,7 @@ B *construct_B() {
 
 // Default visibility.
 // CHECK-NOT: @_ZTV1C = {{.*}} !vcall_visibility
+// CIR-NOT: @_ZTV1C = {{.*}} !vcall_visibility
 // On MS default is hidden
 // CHECK-MS: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4C@@6B@"{{.*}} !vcall_visibility [[VIS_DSO]]
 struct __attribute__((visibility("default"))) C {
@@ -47,6 +51,7 @@ C *construct_C() {
 
 // Hidden visibility, public LTO visibility.
 // CHECK-NOT: @_ZTV1D = {{.*}} !vcall_visibility
+// CIR-NOT: @_ZTV1D = {{.*}} !vcall_visibility
 // CHECK-MS-NOT: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4D@@6B@"{{.*}} !vcall_visibility
 struct __attribute__((visibility("hidden"))) [[clang::lto_visibility_public]] D {
   D() {}
@@ -59,6 +64,7 @@ D *construct_D() {
 
 // Hidden visibility, but inherits from class with default visibility.
 // CHECK-NOT: @_ZTV1E = {{.*}} !vcall_visibility
+// CIR-NOT: @_ZTV1E = {{.*}} !vcall_visibility
 // On MS default is hidden
 // CHECK-MS: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4E@@6B@"{{.*}} !vcall_visibility [[VIS_DSO]]
 struct __attribute__((visibility("hidden"))) E : C {
@@ -72,6 +78,7 @@ E *construct_E() {
 
 // Anonymous namespace, but inherits from class with default visibility.
 // CHECK-NOT: @_ZTVN12_GLOBAL__N_11FE = {{.*}} !vcall_visibility
+// CIR-NOT: @_ZTVN12_GLOBAL__N_11FE = {{.*}} !vcall_visibility
 // On MS default is hidden
 // CHECK-MS: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4F@?A{{.*}}@@6B@"{{.*}} !vcall_visibility [[VIS_DSO]]
 namespace {
@@ -87,6 +94,7 @@ void *construct_F() {
 
 // Anonymous namespace, but inherits from class with hidden visibility.
 // CHECK: @_ZTVN12_GLOBAL__N_11GE = {{.*}} !vcall_visibility [[VIS_DSO:![0-9]+]]
+// CIR: @_ZTVN12_GLOBAL__N_11GE = {{.*}} !vcall_visibility [[CIR_VIS_DSO]]
 // CHECK-MS: @anon.{{.*}} = private unnamed_addr constant {{.*}}@"??_R4G@?A{{.*}}@@6B@"{{.*}} !vcall_visibility [[VIS_DSO]]
 namespace {
 struct __attribute__((visibility("hidden"))) G : B {

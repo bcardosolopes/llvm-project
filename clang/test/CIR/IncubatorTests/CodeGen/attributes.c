@@ -1,0 +1,25 @@
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-cir %s -o -  | FileCheck %s -check-prefix=CIR
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fclangir -emit-llvm -fno-clangir-call-conv-lowering %s -o - | FileCheck %s -check-prefix=LLVM
+
+extern int __attribute__((section(".shared"))) ext;
+int getExt() {
+  return ext;
+}
+// CIR:   cir.global "private" external @ext : !s32i {alignment = 4 : i64, section = ".shared"}
+// LLVM:  @ext = external global i32, section ".shared"
+
+int __attribute__((section(".shared"))) glob = 42;
+// CIR:   cir.global external @glob = #cir.int<42> : !s32i {alignment = 4 : i64, section = ".shared"}
+// LLVM:   @glob = global i32 42, section ".shared"
+
+__attribute__((section(".custom_text"))) void func_with_section(void) {}
+// CIR: cir.func {{.*}} @func_with_section() section(".custom_text")
+// LLVM: define {{.*}}void @func_with_section() {{.*}}section ".custom_text"
+
+void __attribute__((__visibility__("hidden"))) foo();
+// CIR: cir.func no_proto private hidden dso_local @foo(...)
+int bah()
+{
+  foo();
+  return 1;
+}

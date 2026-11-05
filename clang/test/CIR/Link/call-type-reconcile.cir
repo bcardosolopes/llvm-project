@@ -1,0 +1,43 @@
+// RUN: cir-link %s %S/Inputs/call-type-reconcile-b.cir --warn-odr-divergence \
+// RUN:   -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// A call whose operand type disagrees with the callee's parameter type.
+//
+// Two TUs can name one type differently and both be right: on aarch64 the same
+// record is `__va_list` to libc and `std::__va_list` to libc++. A caller
+// compiled against one spelling then passes it to a callee declared with the
+// other, and after merging the module does not verify:
+//
+//   'cir.call' op operand type mismatch: expected '...struct "__va_list"...',
+//   but provided '...struct "std::__va_list"...'
+//
+// Name-based unification cannot fix this one -- it merges records that share a
+// name, and here the names differ while the bodies match. So the call goes
+// through the callee's address cast to the function type the caller was
+// compiled against. Not a record-to-record bitcast of the value: lowered, that
+// is a bitwise copy into a temporary of the other type, which a class with a
+// non-trivial copy constructor does not survive (call-record-result-sret.cpp).
+//
+// Found merging a real library; nothing hand-written would have.
+
+!s32i = !cir.int<s, 32>
+!rec_pub = !cir.record<struct "List" {!cir.ptr<!cir.void>, !s32i}>
+
+module {
+  cir.func private @consume(!rec_pub) -> !s32i
+
+  cir.func @caller(%a: !rec_pub) -> !s32i {
+    %0 = cir.call @consume(%a) : (!rec_pub) -> !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// STATS: 0 call operands retyped, 0 call results retyped, 1 calls through a cast
+
+// The callee keeps its own parameter type and the caller its value, passed as
+// it is to the callee's address viewed with the caller's parameter type.
+// CHECK: cir.func @caller(%[[A:.*]]: !rec_List)
+// CHECK:   %[[ADDR:.*]] = cir.get_global @consume : !cir.ptr<!cir.func<(!rec_impl3A3AList) -> !s32i>>
+// CHECK:   %[[FN:.*]] = cir.cast bitcast %[[ADDR]] : !cir.ptr<!cir.func<(!rec_impl3A3AList) -> !s32i>> -> !cir.ptr<!cir.func<(!rec_List) -> !s32i>>
+// CHECK:   cir.call %[[FN]](%[[A]])

@@ -1,0 +1,25 @@
+// RUN: cir-opt %s -cir-to-llvm -o %t.cir
+// RUN: FileCheck --input-file=%t.cir %s
+
+// Test that cir.llvm_compiler_used and cir.llvm_used module attributes are
+// lowered to @llvm.compiler.used and @llvm.used LLVM globals.
+
+!s32i = !cir.int<s, 32>
+
+module attributes {
+  cir.llvm_compiler_used = [@compiler_used_var],
+  cir.llvm_used = [@used_var]
+} {
+
+cir.global external @compiler_used_var = #cir.int<1> : !s32i
+cir.global external @used_var = #cir.int<2> : !s32i
+
+}
+
+// CHECK: llvm.mlir.global appending @llvm.used() {{.*}}section = "llvm.metadata"
+// CHECK:   llvm.mlir.addressof @used_var : !llvm.ptr
+// CHECK:   llvm.return
+
+// CHECK: llvm.mlir.global appending @llvm.compiler.used() {{.*}}section = "llvm.metadata"
+// CHECK:   llvm.mlir.addressof @compiler_used_var : !llvm.ptr
+// CHECK:   llvm.return

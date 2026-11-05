@@ -2,6 +2,8 @@
 
 // PR7097
 // RUN: %clang_cc1 -triple x86_64 %s -fno-use-cxa-atexit -mconstructor-aliases -emit-llvm -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64 %s -fno-use-cxa-atexit -fclangir -emit-llvm -o - | FileCheck %s --check-prefix CHECK-CIR %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64 %s -fno-use-cxa-atexit -fclangir -emit-llvm -o - -fno-builtin | FileCheck %s --check-prefix CHECK-CIR-NOBUILTIN %}
 
 // CHECK:      call void @_ZN1AC1Ev(ptr {{[^,]*}} @a)
 // CHECK-NEXT: call i32 @atexit(ptr @__dtor_a)
@@ -44,3 +46,12 @@ void func() {
 }
 
 // CHECK: attributes [[NUW]] = { noinline nounwind{{.*}} }
+// CHECK-CIR: define internal void @__dtor__ZZ4funcvE2a1() [[NUW:#[0-9]+]]
+// CHECK-CIR: call void @_ZN1AD1Ev(ptr {{.*}} @_ZZ4funcvE2a1)
+// CHECK-CIR: define internal void @__dtor__ZZ4funcvE2a2() [[NUW]]
+// CHECK-CIR: call void @_ZN1AD1Ev(ptr {{.*}} @_ZZ4funcvE2a2)
+// CHECK-CIR: call i32 @atexit(ptr @__dtor__ZZ4funcvE2a1)
+// CHECK-CIR: call i32 @atexit(ptr @__dtor__ZZ4funcvE2a2)
+// CHECK-CIR: attributes [[NUW]] = { noinline nounwind{{.*}} }
+// CHECK-CIR-NOBUILTIN: define internal void @__dtor__ZZ4funcvE2a1() [[NUW:#[0-9]+]]
+// CHECK-CIR-NOBUILTIN: attributes [[NUW]] = { noinline nounwind{{.*}}"no-builtins"{{.*}} }

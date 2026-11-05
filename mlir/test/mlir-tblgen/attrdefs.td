@@ -1,5 +1,11 @@
-// RUN: mlir-tblgen -gen-attrdef-decls -I %S/../../include %s | FileCheck %s --check-prefix=DECL
-// RUN: mlir-tblgen -gen-attrdef-defs -I %S/../../include %s | FileCheck %s --check-prefix=DEF
+// RUN: mlir-tblgen -gen-attrdef-decls -I %S/../../include %s -o %t.decl.1
+// RUN: FileCheck %s --check-prefix=DECL --input-file %t.decl.1
+// RUN: mlir-tblgen -gen-attrdef-decls -I %S/../../include %s -o %t.decl.2
+// RUN: cmp %t.decl.1 %t.decl.2
+// RUN: mlir-tblgen -gen-attrdef-defs -I %S/../../include %s -o %t.def.1
+// RUN: FileCheck %s --check-prefix=DEF --input-file %t.def.1
+// RUN: mlir-tblgen -gen-attrdef-defs -I %S/../../include %s -o %t.def.2
+// RUN: cmp %t.def.1 %t.def.2
 
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/OpBase.td"
@@ -60,6 +66,10 @@ def C_IndexAttr : TestAttr<"Index"> {
 // DECL: static ::mlir::Attribute parse(
 // DECL-SAME: ::mlir::AsmParser &odsParser, ::mlir::Type odsType);
 // DECL: void print(::mlir::AsmPrinter &odsPrinter) const;
+
+// DEF-LABEL: struct IndexAttrStorage
+// DEF: bool operator==(const KeyTy &tblgenKey) const {
+// DEF-NEXT: return (label == std::get<0>(tblgenKey));
 }
 
 def A_SimpleAttrA : TestAttr<"SimpleA"> {
@@ -133,6 +143,9 @@ def D_SingleParameterAttr : TestAttr<"SingleParameter"> {
 // DECL-LABEL: struct SingleParameterAttrStorage;
 // DECL-LABEL: class SingleParameterAttr
 // DECL-SAME:  detail::SingleParameterAttrStorage
+// DEF-LABEL: struct SingleParameterAttrStorage
+// DEF: bool operator==(const KeyTy &tblgenKey) const {
+// DEF-NEXT: return (num == std::get<0>(tblgenKey));
 }
 
 def F_ParamWithAccessorTypeAttr : TestAttr<"ParamWithAccessorType"> {

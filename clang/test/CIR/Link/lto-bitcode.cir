@@ -1,0 +1,87 @@
+// How the merged module is written depends on the kind of link it is joining,
+// and the build has to say which -- nothing here can work it out. Each kind is
+// written the way clang writes bitcode for it (BackendUtil.cpp), so the merged
+// module agrees with the objects it was merged from; a disagreement is a hard
+// error out of lld, "inconsistent LTO Unit splitting".
+//
+// The summary block is checked as well as the module flags, because it is the
+// summary the linker reads: BitcodeModule::getLTOInfo takes EnableSplitLTOUnit
+// out of the summary's flags record, so flags without a summary read as
+// unsplit.
+
+// No -lto: a plain bitcode write -- no summary, no LTO flags.
+// RUN: cir-link %s --emit-llvm --target=x86_64-unknown-linux-gnu -o %t.plain.bc
+// RUN: llvm-bcanalyzer %t.plain.bc \
+// RUN:   | FileCheck %s --check-prefix=NOSUMMARY \
+// RUN:       --implicit-check-not=GLOBALVAL_SUMMARY_BLOCK
+// RUN: llvm-dis %t.plain.bc -o - \
+// RUN:   | FileCheck %s --check-prefix=NOFLAGS \
+// RUN:       --implicit-check-not=EnableSplitLTOUnit --implicit-check-not='"ThinLTO"'
+
+// -lto=full: the regular-LTO summary, ThinLTO=0 and EnableSplitLTOUnit=1.
+// RUN: cir-link %s --emit-llvm -lto=full --target=x86_64-unknown-linux-gnu \
+// RUN:     -o %t.full.bc
+// RUN: llvm-bcanalyzer %t.full.bc | FileCheck %s --check-prefix=FULLSUMMARY
+// RUN: llvm-dis %t.full.bc -o - | FileCheck %s --check-prefix=FULL
+
+// -split-lto-unit changes nothing for regular LTO, because clang writes
+// EnableSplitLTOUnit=1 there whatever the command line said. Pinned so that
+// "fixing" the option to apply here would show up as a divergence from clang
+// rather than as an improvement.
+// RUN: cir-link %s --emit-llvm -lto=full -split-lto-unit \
+// RUN:     --target=x86_64-unknown-linux-gnu -o %t.fullsplit.bc
+// RUN: llvm-dis %t.fullsplit.bc -o - | FileCheck %s --check-prefix=FULL
+
+// -lto=thin: the ThinLTO writer, no ThinLTO flag, and EnableSplitLTOUnit from
+// -split-lto-unit -- the one kind where it is a real choice. Present and zero
+// is a different statement from absent, so both values are checked.
+// RUN: cir-link %s --emit-llvm -lto=thin --target=x86_64-unknown-linux-gnu \
+// RUN:     -o %t.thin.bc
+// RUN: llvm-bcanalyzer %t.thin.bc | FileCheck %s --check-prefix=THINSUMMARY
+// RUN: llvm-dis %t.thin.bc -o - \
+// RUN:   | FileCheck %s --check-prefix=THIN --implicit-check-not='"ThinLTO"'
+// RUN: cir-link %s --emit-llvm -lto=thin -split-lto-unit \
+// RUN:     --target=x86_64-unknown-linux-gnu -o %t.thinsplit.bc
+// RUN: llvm-dis %t.thinsplit.bc -o - \
+// RUN:   | FileCheck %s --check-prefix=THINSPLIT --implicit-check-not='"ThinLTO"'
+
+// cir-translate is the lowering half of --cir-split-lowering and writes the
+// same artifact, so it takes the same options and must agree with cir-link.
+// RUN: cir-link %s --emit-bytecode -o %t.merged.cir
+// RUN: cir-translate %t.merged.cir -cir-to-llvmir --emit-llvm-bitcode -lto=full \
+// RUN:     --target=x86_64-unknown-linux-gnu -o %t.xfull.bc
+// RUN: llvm-bcanalyzer %t.xfull.bc | FileCheck %s --check-prefix=FULLSUMMARY
+// RUN: llvm-dis %t.xfull.bc -o - | FileCheck %s --check-prefix=FULL
+// RUN: cir-translate %t.merged.cir -cir-to-llvmir --emit-llvm-bitcode -lto=thin \
+// RUN:     -split-lto-unit --target=x86_64-unknown-linux-gnu -o %t.xthin.bc
+// RUN: llvm-bcanalyzer %t.xthin.bc | FileCheck %s --check-prefix=THINSUMMARY
+// RUN: llvm-dis %t.xthin.bc -o - \
+// RUN:   | FileCheck %s --check-prefix=THINSPLIT --implicit-check-not='"ThinLTO"'
+
+// An unknown kind is rejected rather than read as some default.
+// RUN: not cir-link %s --emit-llvm -lto=fat -o %t.bad.bc 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=BADKIND
+
+!s32i = !cir.int<s, 32>
+
+module {
+  cir.func @f() -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// NOSUMMARY: (MODULE_BLOCK)
+// NOFLAGS: define
+
+// FULLSUMMARY: (FULL_LTO_GLOBALVAL_SUMMARY_BLOCK)
+// FULL: !{i32 1, !"ThinLTO", i32 0}
+// FULL: !{i32 1, !"EnableSplitLTOUnit", i32 1}
+
+// The regular-LTO block's name contains the ThinLTO one, so the parenthesis is
+// what keeps this from matching a full-LTO module.
+// THINSUMMARY: ({{GLOBALVAL_SUMMARY_BLOCK}})
+// THIN: !{i32 1, !"EnableSplitLTOUnit", i32 0}
+// THINSPLIT: !{i32 1, !"EnableSplitLTOUnit", i32 1}
+
+// BADKIND: Cannot find option named 'fat'

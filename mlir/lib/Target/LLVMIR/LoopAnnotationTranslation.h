@@ -29,6 +29,10 @@ public:
                             llvm::Module &llvmModule)
       : moduleTranslation(moduleTranslation), llvmModule(llvmModule) {}
 
+  /// Translate a loop annotation attribute into LLVM loop metadata. One
+  /// attribute yields one node for the whole module: the attribute carries its
+  /// own identity, so two equal ones describe the same loop, and every carrier
+  /// of that loop has to name the same node.
   llvm::MDNode *translateLoopAnnotation(LoopAnnotationAttr attr, Operation *op);
 
   /// Returns the LLVM metadata corresponding to an mlir LLVM dialect access
@@ -42,19 +46,14 @@ public:
   /// The ModuleTranslation owning this instance.
   ModuleTranslation &moduleTranslation;
 
+  /// Translate a loop annotation with a per-invocation cache for followup
+  /// annotations. This ensures followup annotations referencing the same
+  /// attribute within a single loop share the same metadata node.
+  llvm::MDNode *
+  translateLoopAnnotation(LoopAnnotationAttr attr, Operation *op,
+                          DenseMap<Attribute, llvm::MDNode *> &cache);
+
 private:
-  /// Returns the LLVM metadata corresponding to a llvm loop metadata attribute.
-  llvm::MDNode *lookupLoopMetadata(Attribute options) const {
-    return loopMetadataMapping.lookup(options);
-  }
-
-  void mapLoopMetadata(Attribute options, llvm::MDNode *metadata) {
-    auto result = loopMetadataMapping.try_emplace(options, metadata);
-    (void)result;
-    assert(result.second &&
-           "attempting to map loop options that was already mapped");
-  }
-
   /// Mapping from an attribute describing loop metadata to its LLVM metadata.
   /// The metadata is attached to Latch block branches with this attribute.
   DenseMap<Attribute, llvm::MDNode *> loopMetadataMapping;

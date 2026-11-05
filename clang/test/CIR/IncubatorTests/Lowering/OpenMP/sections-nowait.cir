@@ -1,0 +1,31 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @f() {
+    omp.sections nowait {
+      omp.section {
+        cir.call @a() : () -> ()
+        omp.terminator
+      }
+      omp.section {
+        cir.call @b() : () -> ()
+        omp.terminator
+      }
+      omp.terminator
+    }
+    cir.return
+  }
+
+  cir.func private @a() loc(#loc1)
+  cir.func private @b() loc(#loc1)
+}
+
+#loc1 = loc("sections-nowait.cir":1:1)
+
+// CHECK-LABEL: define void @f()
+// CHECK: call i32 @__kmpc_global_thread_num(
+// CHECK: call void @__kmpc_for_static_init_4u(
+// CHECK: call void @a()
+// CHECK: call void @b()
+// CHECK: call void @__kmpc_for_static_fini(
+// CHECK-NOT: call void @__kmpc_barrier(

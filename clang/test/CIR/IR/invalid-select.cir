@@ -1,0 +1,10 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+// Verify SelectOp: vector condition requires vector operands
+!s32i = !cir.int<s, 32>
+
+cir.func @select_vec_cond_scalar_ops(%arg0: !cir.vector<4 x !cir.bool>, %arg1: !s32i, %arg2: !s32i) {
+  // expected-error@+1 {{expected both true and false operands to be vector types when the condition is a vector boolean type}}
+  %0 = cir.select if %arg0 then %arg1 else %arg2 : (!cir.vector<4 x !cir.bool>, !s32i, !s32i) -> !s32i
+  cir.return
+}

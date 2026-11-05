@@ -1,7 +1,9 @@
 // REQUIRES: aarch64-registered-target
 
 // RUN: %clang_cc1 -triple aarch64 -target-feature +sme -mllvm -aarch64-new-sme-abi=false -Rpass-analysis=sme -verify=expected-sdag %s -S -o /dev/null
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64 -target-feature +sme -mllvm -aarch64-new-sme-abi=false -Rpass-analysis=sme -fclangir -verify=expected-sdag %s -S -o /dev/null %}
 // RUN: %clang_cc1 -triple aarch64 -target-feature +sme -Rpass-analysis=sme -verify %s -S -o /dev/null %s
+// RUN: %if cir-support %{ %clang_cc1 -triple aarch64 -target-feature +sme -Rpass-analysis=sme -fclangir -verify %s -S -o /dev/null %s %}
 
 void private_za_callee_a();
 void private_za_callee_b();

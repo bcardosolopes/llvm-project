@@ -71,14 +71,14 @@ public:
 
   void emitDecl(raw_ostream &os) const {
     if (storageCls && def.genStorageClass()) {
-      llvm::NamespaceEmitter ns(os, def.getStorageNamespace());
-      os << "struct " << def.getStorageClassName() << ";\n";
+      llvm::NamespaceEmitter ns(os, storageNamespace);
+      os << "struct " << storageClassName << ";\n";
     }
     defCls.writeDeclTo(os);
   }
   void emitDef(raw_ostream &os) const {
     if (storageCls && def.genStorageClass()) {
-      llvm::NamespaceEmitter ns(os, def.getStorageNamespace());
+      llvm::NamespaceEmitter ns(os, storageNamespace);
       storageCls->writeDeclTo(os); // everything is inline
     }
     defCls.writeDefTo(os);
@@ -174,6 +174,10 @@ private:
   /// An optional attribute or type storage class. The storage class will
   /// exist if and only if the def has more than zero parameters.
   std::optional<Class> storageCls;
+  /// Keep computed storage names stable across later emission steps.
+  std::string storageNamespace;
+  std::string storageClassName;
+  std::string qualifiedStorageClassName;
 
   /// The C++ base value of the def, either "Attribute" or "Type".
   StringRef valueType;
@@ -187,6 +191,12 @@ private:
 
 DefGen::DefGen(const AttrOrTypeDef &def)
     : def(def), params(def.getParameters()), defCls(def.getCppClassName()),
+      storageNamespace(def.getStorageNamespace()),
+      storageClassName(def.getStorageClassName()),
+      qualifiedStorageClassName(storageNamespace.empty()
+                                    ? storageClassName
+                                    : storageNamespace + "::" +
+                                          storageClassName),
       valueType(isa<AttrDef>(def) ? "Attribute" : "Type"),
       defType(isa<AttrDef>(def) ? "Attr" : "Type") {
   // Check that all parameters have names.
@@ -196,7 +206,7 @@ DefGen::DefGen(const AttrOrTypeDef &def)
 
   // If a storage class is needed, create one.
   if (def.getNumParameters() > 0)
-    storageCls.emplace(def.getStorageClassName(), /*isStruct=*/true);
+    storageCls.emplace(storageClassName, /*isStruct=*/true);
 
   // Create the parent class with any indicated traits.
   createParentWithTraits();
@@ -238,21 +248,18 @@ DefGen::DefGen(const AttrOrTypeDef &def)
 }
 
 void DefGen::createParentWithTraits() {
-  ParentClass defParent(strfmt("::mlir::{0}::{1}Base", valueType, defType));
-  defParent.addTemplateParam(def.getCppClassName());
-  defParent.addTemplateParam(def.getCppBaseClassName());
-  defParent.addTemplateParam(storageCls
-                                 ? strfmt("{0}::{1}", def.getStorageNamespace(),
-                                          def.getStorageClassName())
-                                 : strfmt("::mlir::{0}Storage", valueType));
+  SmallVector<std::string> templateArgs;
+  templateArgs.push_back(def.getCppClassName().str());
+  templateArgs.push_back(def.getCppBaseClassName().str());
+  templateArgs.push_back(storageCls ? qualifiedStorageClassName
+                                    : strfmt("::mlir::{0}Storage", valueType));
   SmallVector<std::string> traitNames =
       llvm::to_vector(llvm::map_range(def.getTraits(), [](auto &trait) {
         return isa<NativeTrait>(&trait)
                    ? cast<NativeTrait>(&trait)->getFullyQualifiedTraitName()
                    : cast<InterfaceTrait>(&trait)->getFullyQualifiedTraitName();
       }));
-  for (auto &traitName : traitNames)
-    defParent.addTemplateParam(traitName);
+  llvm::append_range(templateArgs, traitNames);
 
   // Add OpAsmInterface::Trait if we automatically generate mnemonic alias
   // method.
@@ -260,9 +267,17 @@ void DefGen::createParentWithTraits() {
       strfmt("::mlir::OpAsm{0}Interface::Trait", defType);
   if (def.genMnemonicAlias() &&
       !llvm::is_contained(traitNames, opAsmInterfaceTraitName)) {
-    defParent.addTemplateParam(opAsmInterfaceTraitName);
+    templateArgs.push_back(opAsmInterfaceTraitName);
   }
-  defCls.addParent(std::move(defParent));
+  std::string parentName =
+      "::mlir::" + valueType.str() + "::" + defType.str() + "Base<";
+  for (auto [index, arg] : llvm::enumerate(templateArgs)) {
+    if (index != 0)
+      parentName += ", ";
+    parentName += arg;
+  }
+  parentName += ">";
+  defCls.addParent(ParentClass(parentName));
 }
 
 /// Include declarations specified on NativeTrait
@@ -719,9 +734,12 @@ void DefGen::emitEquals() {
   auto &body = eq->body().indent();
   auto scope = body.scope("return (", ");");
   const auto eachFn = [&](auto it) {
-    FmtContext ctx({{"_lhs", it.value().getName()},
-                    {"_rhs", strfmt("std::get<{0}>(tblgenKey)", it.index())}});
-    body << tgfmt(it.value().getComparator(), &ctx);
+    std::string lhs = it.value().getName().str();
+    std::string rhs = llvm::formatv("std::get<{0}>(tblgenKey)", it.index()).str();
+    std::string comparatorFmt = it.value().getComparator().str();
+    FmtContext ctx;
+    ctx.addSubst("_lhs", lhs).addSubst("_rhs", rhs);
+    body << tgfmt(comparatorFmt, &ctx).str();
   };
   llvm::interleave(llvm::enumerate(params), body, eachFn, ") && (");
 }
@@ -738,8 +756,9 @@ void DefGen::emitHashKey() {
 }
 
 void DefGen::emitConstruct() {
+  std::string storageClassPointerType = storageClassName + " *";
   Method *construct = storageCls->addMethod(
-      strfmt("{0} *", def.getStorageClassName()), "construct",
+      storageClassPointerType, "construct",
       def.hasStorageCustomConstructor() ? Method::StaticDeclaration
                                         : Method::StaticInline,
       MethodParameter(strfmt("::mlir::{0}StorageAllocator &", valueType),
@@ -759,10 +778,10 @@ void DefGen::emitConstruct() {
         body << tgfmt(*allocCode, &ctx) << '\n';
       }
     }
-    auto scope =
-        body.scope(strfmt("return new (allocator.allocate<{0}>()) {0}(",
-                          def.getStorageClassName()),
-                   ");");
+    std::string constructExpr = "return new (allocator.allocate<" +
+                                storageClassName + ">()) " +
+                                storageClassName + "(";
+    auto scope = body.scope(constructExpr, ");");
     llvm::interleaveComma(params, body, [&](auto &param) {
       body << "std::move(" << param.getName() << ")";
     });

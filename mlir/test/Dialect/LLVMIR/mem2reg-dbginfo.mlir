@@ -50,6 +50,26 @@ llvm.func @multiple_store_load(%arg0: i64) -> i64 {
   llvm.return %2 : i64
 }
 
+// CHECK-LABEL: llvm.func @self_assign
+// CHECK-SAME: (%[[ARG0:.*]]: i64)
+llvm.func @self_assign(%arg0: i64) -> i64 {
+  %0 = llvm.mlir.constant(1 : i32) : i32
+  // CHECK-NOT: = llvm.alloca
+  %1 = llvm.alloca %0 x i64 {alignment = 8 : i64} : (i32) -> !llvm.ptr
+  // CHECK-NOT: llvm.intr.dbg.declare
+  llvm.intr.dbg.declare #di_local_variable = %1 : !llvm.ptr
+  // CHECK: llvm.intr.dbg.value #[[$VAR]] = %[[ARG0]] : i64
+  llvm.store %arg0, %1 {alignment = 4 : i64} : i64, !llvm.ptr
+  %2 = llvm.load %1 {alignment = 4 : i64} : !llvm.ptr -> i64
+  // CHECK: llvm.intr.dbg.value #[[$VAR]] = %[[ARG0]] : i64
+  // CHECK-NOT: llvm.intr.dbg.declare
+  // CHECK-NOT: llvm.load
+  // CHECK-NOT: llvm.store
+  llvm.store %2, %1 {alignment = 4 : i64} : i64, !llvm.ptr
+  // CHECK: llvm.return %[[ARG0]] : i64
+  llvm.return %arg0 : i64
+}
+
 // CHECK-LABEL: llvm.func @block_argument_value
 // CHECK-SAME: (%[[ARG0:.*]]: i64, {{.*}})
 llvm.func @block_argument_value(%arg0: i64, %arg1: i1) -> i64 {

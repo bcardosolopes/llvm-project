@@ -1,0 +1,10 @@
+// RUN: not cir-opt %s -cir-to-llvm -o /dev/null 2>&1 | FileCheck %s
+// CHECK: error: loc("A"): unsupported function location kind in direct lowering: loc("A")
+// CHECK-NOT: expected single location or unknown location here
+// CHECK-NOT: Stack dump:
+
+module {
+  cir.func @f() {
+    cir.return
+  } loc("A")
+}

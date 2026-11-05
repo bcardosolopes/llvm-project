@@ -30,6 +30,23 @@ getAttrKindToNameMapping() {
        LLVMDialect::getAllocatedPointerAttrName()},
       {llvm::Attribute::AttrKind::ByVal, LLVMDialect::getByValAttrName()},
       {llvm::Attribute::AttrKind::ByRef, LLVMDialect::getByRefAttrName()},
+      // One name per kind. The import walks this list and builds a
+      // `DictionaryAttr`, which rejects duplicate keys, so a kind listed twice
+      // is an assertion failure rather than a harmless redundancy -- and a kind
+      // listed twice under *different* names silently puts both on the
+      // parameter. `Captures` is the one that bites: LLVM 21 folded `nocapture`
+      // into `captures(none)`, so the kind that carried the old spelling is
+      // gone and only the entry below may name it.
+      {llvm::Attribute::AttrKind::ImmArg, LLVMDialect::getImmArgAttrName()},
+      {llvm::Attribute::AttrKind::Initializes,
+       LLVMDialect::getInitializesAttrName()},
+      {llvm::Attribute::AttrKind::NoExt, LLVMDialect::getNoExtAttrName()},
+      {llvm::Attribute::AttrKind::SwiftAsync,
+       LLVMDialect::getSwiftAsyncAttrName()},
+      {llvm::Attribute::AttrKind::SwiftError,
+       LLVMDialect::getSwiftErrorAttrName()},
+      {llvm::Attribute::AttrKind::SwiftSelf,
+       LLVMDialect::getSwiftSelfAttrName()},
       {llvm::Attribute::AttrKind::NoUndef, LLVMDialect::getNoUndefAttrName()},
       {llvm::Attribute::AttrKind::Dereferenceable,
        LLVMDialect::getDereferenceableAttrName()},
@@ -43,6 +60,8 @@ getAttrKindToNameMapping() {
       {llvm::Attribute::AttrKind::NoAlias, LLVMDialect::getNoAliasAttrName()},
       {llvm::Attribute::AttrKind::Captures,
        LLVMDialect::getNoCaptureAttrName()},
+      {llvm::Attribute::AttrKind::NoFPClass,
+       LLVMDialect::getNoFPClassAttrName()},
       {llvm::Attribute::AttrKind::NoFree, LLVMDialect::getNoFreeAttrName()},
       {llvm::Attribute::AttrKind::NonNull, LLVMDialect::getNonNullAttrName()},
       {llvm::Attribute::AttrKind::Preallocated,
@@ -58,6 +77,11 @@ getAttrKindToNameMapping() {
        LLVMDialect::getStructRetAttrName()},
       {llvm::Attribute::AttrKind::WriteOnly,
        LLVMDialect::getWriteOnlyAttrName()},
+      {llvm::Attribute::AttrKind::Writable, LLVMDialect::getWritableAttrName()},
+      {llvm::Attribute::AttrKind::DeadOnUnwind,
+       LLVMDialect::getDeadOnUnwindAttrName()},
+      {llvm::Attribute::AttrKind::DeadOnReturn,
+       LLVMDialect::getDeadOnReturnAttrName()},
       {llvm::Attribute::AttrKind::ZExt, LLVMDialect::getZExtAttrName()}};
   return kindNamePairs;
 }

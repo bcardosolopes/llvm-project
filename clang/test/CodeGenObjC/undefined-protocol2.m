@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-macosx -emit-llvm %s -o - | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-apple-macosx -fclangir -emit-llvm %s -o - | FileCheck %s %}
 
 // Test that we produce a declaration for the protocol. It must be matched
 // by a definition in another TU, so external is the correct linkage

@@ -54,8 +54,8 @@ struct LoopMetadataConversion {
   FailureOr<LoopPeeledAttr> convertPeeledAttr();
   FailureOr<LoopUnswitchAttr> convertUnswitchAttr();
   FailureOr<SmallVector<AccessGroupAttr>> convertParallelAccesses();
-  FusedLoc convertStartLoc();
-  FailureOr<FusedLoc> convertEndLoc();
+  LocationAttr convertStartLoc();
+  FailureOr<LocationAttr> convertEndLoc();
 
   llvm::SmallVector<llvm::DILocation *, 2> locations;
   llvm::StringMap<const llvm::MDNode *> propertyMap;
@@ -284,6 +284,25 @@ static T createIfNonNull(MLIRContext *ctx, const P &...args) {
   return T::get(ctx, *args...);
 }
 
+/// As `createIfNonNull`, but with a trailing identity that does not count
+/// towards "is anything set" and is only made once something is. An id is
+/// minted per node, so letting it count would turn an annotation with no
+/// recognised options into a non-empty one, and making one for a node that is
+/// then thrown away is wasted.
+template <typename T, typename IdFn, typename... P>
+static T createWithIdIfNonNull(MLIRContext *ctx, IdFn makeId,
+                               const P &...args) {
+  bool anyFailed = (failed(args) || ...);
+  if (anyFailed)
+    return {};
+
+  bool allEmpty = (isEmptyOrNull(*args) && ...);
+  if (allEmpty)
+    return {};
+
+  return T::get(ctx, *args..., makeId());
+}
+
 FailureOr<LoopVectorizeAttr> LoopMetadataConversion::convertVectorizeAttr() {
   FailureOr<BoolAttr> enable =
       lookupBoolNode("llvm.loop.vectorize.enable", true);
@@ -388,7 +407,10 @@ FailureOr<LoopPeeledAttr> LoopMetadataConversion::convertPeeledAttr() {
 FailureOr<LoopUnswitchAttr> LoopMetadataConversion::convertUnswitchAttr() {
   FailureOr<BoolAttr> partialDisable =
       lookupUnitNode("llvm.loop.unswitch.partial.disable");
-  return createIfNonNull<LoopUnswitchAttr>(ctx, partialDisable);
+  FailureOr<BoolAttr> injectionDisable =
+      lookupUnitNode("llvm.loop.unswitch.injection.disable");
+  return createIfNonNull<LoopUnswitchAttr>(ctx, partialDisable,
+                                           injectionDisable);
 }
 
 FailureOr<SmallVector<AccessGroupAttr>>
@@ -410,20 +432,24 @@ LoopMetadataConversion::convertParallelAccesses() {
   return refs;
 }
 
-FusedLoc LoopMetadataConversion::convertStartLoc() {
+// The start and end locations are held as LocationAttr, not FusedLoc: an
+// inlined DILocation translates to a CallSiteLoc, and after LTO nearly every
+// surviving loop has one. Narrowing to FusedLoc turned both into null, which
+// left the annotation with nothing non-null in it, so `createIfNonNull`
+// discarded the whole thing -- properties included.
+LocationAttr LoopMetadataConversion::convertStartLoc() {
   if (locations.empty())
     return {};
-  return dyn_cast<FusedLoc>(
-      loopAnnotationImporter.moduleImport.translateLoc(locations[0]));
+  return loopAnnotationImporter.moduleImport.translateLoc(locations[0]);
 }
 
-FailureOr<FusedLoc> LoopMetadataConversion::convertEndLoc() {
+FailureOr<LocationAttr> LoopMetadataConversion::convertEndLoc() {
   if (locations.size() < 2)
-    return FusedLoc();
+    return LocationAttr();
   if (locations.size() > 2)
     return emitError(loc)
            << "expected loop metadata to have at most two DILocations";
-  return dyn_cast<FusedLoc>(
+  return LocationAttr(
       loopAnnotationImporter.moduleImport.translateLoc(locations[1]));
 }
 
@@ -445,6 +471,7 @@ LoopAnnotationAttr LoopMetadataConversion::convert() {
   FailureOr<BoolAttr> mustProgress = lookupUnitNode("llvm.loop.mustprogress");
   FailureOr<BoolAttr> isVectorized =
       lookupIntNodeAsBoolAttr("llvm.loop.isvectorized");
+  FailureOr<IntegerAttr> codeAlign = lookupIntNode("llvm.loop.align");
   FailureOr<SmallVector<AccessGroupAttr>> parallelAccesses =
       convertParallelAccesses();
 
@@ -455,13 +482,17 @@ LoopAnnotationAttr LoopMetadataConversion::convert() {
     return {};
   }
 
-  FailureOr<FusedLoc> startLoc = convertStartLoc();
-  FailureOr<FusedLoc> endLoc = convertEndLoc();
+  FailureOr<LocationAttr> startLoc = convertStartLoc();
+  FailureOr<LocationAttr> endLoc = convertEndLoc();
 
-  return createIfNonNull<LoopAnnotationAttr>(
-      ctx, disableNonForced, vecAttr, interleaveAttr, unrollAttr,
-      unrollAndJamAttr, licmAttr, distributeAttr, pipelineAttr, peeledAttr,
-      unswitchAttr, mustProgress, isVectorized, startLoc, endLoc,
+  // One identity per `!llvm.loop` node, so two loops that carry the same
+  // options do not collapse into one on the way back out. The caller memoises
+  // by node, so a loop with several latches still gets a single attribute.
+  return createWithIdIfNonNull<LoopAnnotationAttr>(
+      ctx, [&] { return DistinctAttr::create(UnitAttr::get(ctx)); },
+      disableNonForced, vecAttr, interleaveAttr, unrollAttr, unrollAndJamAttr,
+      licmAttr, distributeAttr, pipelineAttr, peeledAttr, unswitchAttr,
+      mustProgress, isVectorized, codeAlign, startLoc, endLoc,
       parallelAccesses);
 }
 

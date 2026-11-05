@@ -1002,7 +1002,7 @@ llvm::GlobalVariable *CodeGenVTables::GenerateConstructionVTable(
 
   if (UsingRelativeLayout) {
     RemoveHwasanMetadata(VTable);
-    if (!VTable->isDSOLocal())
+    if (!VTable->isDSOLocal() || VTable->hasComdat())
       GenerateRelativeVTableAlias(VTable, OutName);
   }
 
@@ -1037,8 +1037,9 @@ void CodeGenVTables::GenerateRelativeVTableAlias(llvm::GlobalVariable *VTable,
                                                  llvm::StringRef AliasNameRef) {
   assert(getItaniumVTableContext().isRelativeLayout() &&
          "Can only use this if the relative vtable ABI is used");
-  assert(!VTable->isDSOLocal() && "This should be called only if the vtable is "
-                                  "not guaranteed to be dso_local");
+  assert((!VTable->isDSOLocal() || VTable->hasComdat()) &&
+         "This should only be called if the vtable is not dso_local or if it "
+         "is in a COMDAT group");
 
   // If the vtable is available_externally, we shouldn't (or need to) generate
   // an alias for it in the first place since the vtable won't actually by

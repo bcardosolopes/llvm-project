@@ -1,0 +1,28 @@
+// RUN: cir-translate %s -cir-to-llvmir --disable-cc-lowering | FileCheck %s
+
+module {
+  cir.func @omp_taskloop_simd_1() {
+    %c0_i32 = llvm.mlir.constant(0 : i32) : i32
+    %c8_i32 = llvm.mlir.constant(8 : i32) : i32
+    %c1_i32 = llvm.mlir.constant(1 : i32) : i32
+    omp.taskloop {
+      omp.simd {
+        omp.loop_nest (%i) : i32 = (%c0_i32) to (%c8_i32) step (%c1_i32) {
+          cir.call @work() : () -> ()
+          omp.yield
+        }
+      } {omp.composite}
+    } {omp.composite}
+    cir.return
+  }
+
+  cir.func private @work() loc(#loc1)
+}
+
+#loc1 = loc("taskloop-simd.cir":1:1)
+
+// CHECK-LABEL: define void @omp_taskloop_simd_1()
+// CHECK: call i32 @__kmpc_global_thread_num(ptr {{.*}})
+// CHECK: call ptr @__kmpc_omp_task_alloc(
+// CHECK: call void @__kmpc_taskloop(
+// CHECK: ret void

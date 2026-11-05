@@ -1,0 +1,18 @@
+// Second input for ../global-type-reconcile.cir. Not a test on its own.
+//
+// The referencing TU. It declares @g with the *declared* record type, which is
+// what CIRGen emits on this side, and disagrees with the defining TU's
+// layout type.
+
+!s32i = !cir.int<s, 32>
+!rec_Base = !cir.record<struct "Base" {!s32i}>
+!rec_D = !cir.record<struct "D" {!rec_Base}>
+
+module {
+  cir.global "private" external @g : !rec_D
+
+  cir.func @reader() -> !cir.ptr<!rec_D> {
+    %0 = cir.get_global @g : !cir.ptr<!rec_D>
+    cir.return %0 : !cir.ptr<!rec_D>
+  }
+}

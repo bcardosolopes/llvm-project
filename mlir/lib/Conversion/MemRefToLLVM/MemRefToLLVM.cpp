@@ -411,7 +411,10 @@ struct AllocaScopeOpLowering
 
     // Save stack and then branch into the body of the region.
     rewriter.setInsertionPointToEnd(currentBlock);
-    auto stackSaveOp = LLVM::StackSaveOp::create(rewriter, loc, getPtrType());
+    auto stackSaveOp = LLVM::StackSaveOp::create(
+        rewriter, loc, getPtrType(), /*alias_scopes=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
     LLVM::BrOp::create(rewriter, loc, ValueRange(), beforeBody);
 
     // Replace the alloca_scope return with a branch that jumps out of the body.
@@ -424,7 +427,10 @@ struct AllocaScopeOpLowering
 
     // Insert stack restore before jumping out the body of the region.
     rewriter.setInsertionPoint(branchOp);
-    LLVM::StackRestoreOp::create(rewriter, loc, stackSaveOp);
+    LLVM::StackRestoreOp::create(rewriter, loc, stackSaveOp,
+                                 /*alias_scopes=*/nullptr,
+                                 /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+                                 /*annotations=*/nullptr);
 
     // Replace the op with values return from the body region.
     rewriter.replaceOp(allocaScopeOp, continueBlock->getArguments());
@@ -993,8 +999,10 @@ struct PrefetchOpLowering : public LoadStoreOpLowering<memref::PrefetchOp> {
     IntegerAttr localityHint = prefetchOp.getLocalityHintAttr();
     IntegerAttr isData =
         rewriter.getI32IntegerAttr(prefetchOp.getIsDataCache());
-    rewriter.replaceOpWithNewOp<LLVM::Prefetch>(prefetchOp, dataPtr, isWrite,
-                                                localityHint, isData);
+    rewriter.replaceOpWithNewOp<LLVM::Prefetch>(
+        prefetchOp, dataPtr, isWrite, localityHint, isData,
+        /*alias_scopes=*/nullptr, /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
     return success();
   }
 };
@@ -1175,7 +1183,10 @@ public:
     };
 
     // Save stack position before promoting descriptors
-    auto stackSaveOp = LLVM::StackSaveOp::create(rewriter, loc, getPtrType());
+    auto stackSaveOp = LLVM::StackSaveOp::create(
+        rewriter, loc, getPtrType(), /*alias_scopes=*/nullptr,
+        /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+        /*annotations=*/nullptr);
 
     auto srcMemRefType = dyn_cast<MemRefType>(srcType);
     Value unrankedSource =
@@ -1212,7 +1223,10 @@ public:
                          ValueRange{elemSize, sourcePtr, targetPtr});
 
     // Restore stack used for descriptors
-    LLVM::StackRestoreOp::create(rewriter, loc, stackSaveOp);
+    LLVM::StackRestoreOp::create(rewriter, loc, stackSaveOp,
+                                 /*alias_scopes=*/nullptr,
+                                 /*noalias_scopes=*/nullptr, /*tbaa=*/nullptr,
+                                 /*annotations=*/nullptr);
 
     rewriter.eraseOp(op);
 

@@ -1,6 +1,8 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -std=c++11 -fsanitize=cfi-derived-cast -fsanitize-trap=cfi-derived-cast -emit-llvm -o - %s | FileCheck -check-prefix=CHECK-DCAST %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -std=c++11 -fsanitize=cfi-unrelated-cast -fsanitize-trap=cfi-unrelated-cast -emit-llvm -o - %s | FileCheck -check-prefix=CHECK-UCAST %s
 // RUN: %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -std=c++11 -fsanitize=cfi-unrelated-cast,cfi-cast-strict -fsanitize-trap=cfi-unrelated-cast,cfi-cast-strict -emit-llvm -o - %s | FileCheck -check-prefix=CHECK-UCAST-STRICT %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -std=c++11 -fsanitize=cfi-derived-cast -fsanitize-trap=cfi-derived-cast -emit-llvm -fclangir -o - %s | FileCheck -check-prefix=CHECK-CIR-DCAST %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-linux -fvisibility=hidden -std=c++11 -fsanitize=cfi-unrelated-cast -fsanitize-trap=cfi-unrelated-cast -emit-llvm -fclangir -o - %s | FileCheck -check-prefix=CHECK-CIR-UCAST %s %}
 
 // In this test the main thing we are searching for is something like
 // 'metadata !"1B"' where "1B" is the mangled name of the class we are
@@ -18,16 +20,24 @@ struct B : A {
 struct C : A {};
 
 // CHECK-DCAST-LABEL: define hidden void @_Z3abpP1A
+// CHECK-CIR-DCAST-LABEL: define hidden void @_Z3abpP1A
 void abp(A *a) {
   // CHECK-DCAST: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"_ZTS1B")
   // CHECK-DCAST-NEXT: br i1 [[P]], label %[[CONTBB:[^ ]*]], label %[[TRAPBB:[^ ,]*]]
+  // CHECK-CIR-DCAST: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"_ZTS1B")
+  // CHECK-CIR-DCAST-NEXT: br i1 [[P]], label %[[CONTBB:[^ ]*]], label %[[TRAPBB:[^ ,]*]]
 
   // CHECK-DCAST: [[TRAPBB]]
   // CHECK-DCAST-NEXT: call void @llvm.ubsantrap(i8 2)
   // CHECK-DCAST-NEXT: unreachable
+  // CHECK-CIR-DCAST: [[TRAPBB]]
+  // CHECK-CIR-DCAST-NEXT: call void @llvm.ubsantrap(i8 2) #[[ATTR:[0-9]+]]
+  // CHECK-CIR-DCAST-NEXT: unreachable
 
   // CHECK-DCAST: [[CONTBB]]
   // CHECK-DCAST: ret
+  // CHECK-CIR-DCAST: [[CONTBB]]
+  // CHECK-CIR-DCAST: ret
   (void)static_cast<B*>(a);
 }
 
@@ -60,16 +70,24 @@ void abrr(A &&a) {
 }
 
 // CHECK-UCAST-LABEL: define hidden void @_Z3vbpPv
+// CHECK-CIR-UCAST-LABEL: define hidden void @_Z3vbpPv
 void vbp(void *p) {
   // CHECK-UCAST: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"_ZTS1B")
   // CHECK-UCAST-NEXT: br i1 [[P]], label %[[CONTBB:[^ ]*]], label %[[TRAPBB:[^ ,]*]]
+  // CHECK-CIR-UCAST: [[P:%[^ ]*]] = call i1 @llvm.type.test(ptr {{%[^ ]*}}, metadata !"_ZTS1B")
+  // CHECK-CIR-UCAST-NEXT: br i1 [[P]], label %[[CONTBB:[^ ]*]], label %[[TRAPBB:[^ ,]*]]
 
   // CHECK-UCAST: [[TRAPBB]]
   // CHECK-UCAST-NEXT: call void @llvm.ubsantrap(i8 2)
   // CHECK-UCAST-NEXT: unreachable
+  // CHECK-CIR-UCAST: [[TRAPBB]]
+  // CHECK-CIR-UCAST-NEXT: call void @llvm.ubsantrap(i8 2) #[[ATTR:[0-9]+]]
+  // CHECK-CIR-UCAST-NEXT: unreachable
 
   // CHECK-UCAST: [[CONTBB]]
   // CHECK-UCAST: ret
+  // CHECK-CIR-UCAST: [[CONTBB]]
+  // CHECK-CIR-UCAST: ret
   (void)static_cast<B*>(p);
 }
 
@@ -132,3 +150,6 @@ int a_call(A *a) {
   // CHECK-UCAST-STRICT-NOT: @llvm.type.test
   return a->i();
 }
+
+// CHECK-CIR-DCAST: attributes #[[ATTR]] = { nomerge noreturn nounwind }
+// CHECK-CIR-UCAST: attributes #[[ATTR]] = { nomerge noreturn nounwind }

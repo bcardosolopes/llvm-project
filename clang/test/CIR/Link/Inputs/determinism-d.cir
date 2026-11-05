@@ -1,0 +1,13 @@
+// Input for ../determinism.cir. Not a test on its own.
+
+!s32i = !cir.int<s, 32>
+!m = !cir.float
+!rec_Alpha = !cir.record<struct "Alpha" {!m}>
+!rec_Wrap = !cir.record<struct "Wrap" {!rec_Alpha}>
+
+module {
+  cir.func @d_use(%a: !cir.ptr<!rec_Wrap>) -> !s32i {
+    %0 = cir.const #cir.int<1> : !s32i
+    cir.return %0 : !s32i
+  }
+}

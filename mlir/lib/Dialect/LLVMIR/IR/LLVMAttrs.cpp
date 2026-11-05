@@ -153,6 +153,28 @@ AliasScopeAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 }
 
 //===----------------------------------------------------------------------===//
+// DIAnnotationAttr
+//===----------------------------------------------------------------------===//
+
+LogicalResult
+DIAnnotationAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                         StringAttr name, Attribute value) {
+  (void)name;
+  // These are the two kinds DwarfUnit::addAnnotation knows how to emit, and
+  // the two the debug info importer knows how to read back.
+  if (auto intValue = llvm::dyn_cast<IntegerAttr>(value)) {
+    if (!intValue.getType().isSignlessInteger())
+      return emitError() << "integer value of a debug info annotation must "
+                            "have a signless integer type";
+    return success();
+  }
+  if (!llvm::isa<StringAttr>(value))
+    return emitError() << "value of a debug info annotation must be a "
+                          "StringAttr or an IntegerAttr";
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // DINodeAttr
 //===----------------------------------------------------------------------===//
 
@@ -210,6 +232,34 @@ bool DITypeAttr::classof(Attribute attr) {
 
 bool TBAANodeAttr::classof(Attribute attr) {
   return llvm::isa<TBAATypeDescriptorAttr, TBAARootAttr>(attr);
+}
+
+//===----------------------------------------------------------------------===//
+// MemProfMIBAttr
+//===----------------------------------------------------------------------===//
+
+LogicalResult
+MemProfMIBAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                       DenseI64ArrayAttr callStack, ArrayAttr tags,
+                       ArrayAttr contextSizes) {
+  // The shape LLVM's `Verifier::visitMemProfMetadata` accepts: a non-empty
+  // call stack, then at least one allocation-type tag, then any number of
+  // `(context id, total size)` pairs. Rejecting the other shapes here is what
+  // lets the export path read the elements without re-checking them.
+  if (callStack.empty())
+    return emitError() << "call stack of a memprof MemInfoBlock must not be "
+                          "empty";
+  if (tags.empty())
+    return emitError() << "a memprof MemInfoBlock must have at least one "
+                          "allocation type tag";
+  if (!llvm::all_of(tags, llvm::IsaPred<StringAttr>))
+    return emitError() << "allocation type tags of a memprof MemInfoBlock must "
+                          "be StringAttrs";
+  if (contextSizes &&
+      !llvm::all_of(contextSizes, llvm::IsaPred<MemProfContextSizeAttr>))
+    return emitError() << "context sizes of a memprof MemInfoBlock must be "
+                          "memprof_context_size attributes";
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -320,14 +370,14 @@ DICompositeTypeAttr::withRecId(DistinctAttr recId) {
       getContext(), recId, getIsRecSelf(), getTag(), getName(), getFile(),
       getLine(), getScope(), getBaseType(), getFlags(), getSizeInBits(),
       getAlignInBits(), getDataLocation(), getRank(), getAllocated(),
-      getAssociated(), getElements());
+      getAssociated(), getAnnotations(), getElements());
 }
 
 DIRecursiveTypeAttrInterface
 DICompositeTypeAttr::getRecSelf(DistinctAttr recId) {
   return DICompositeTypeAttr::get(recId.getContext(), recId, /*isRecSelf=*/true,
                                   0, {}, {}, 0, {}, {}, DIFlags(), 0, 0, {}, {},
-                                  {}, {}, {});
+                                  {}, {}, {}, {});
 }
 
 //===----------------------------------------------------------------------===//
@@ -338,13 +388,16 @@ DIRecursiveTypeAttrInterface DISubprogramAttr::withRecId(DistinctAttr recId) {
   return DISubprogramAttr::get(getContext(), recId, getIsRecSelf(), getId(),
                                getCompileUnit(), getScope(), getName(),
                                getLinkageName(), getFile(), getLine(),
-                               getScopeLine(), getSubprogramFlags(), getType(),
-                               getRetainedNodes(), getAnnotations());
+                               getScopeLine(), getFlags(),
+                               getSubprogramFlags(), getType(),
+                               getRetainedNodes(), getAnnotations(),
+                               getKeyInstructions());
 }
 
 DIRecursiveTypeAttrInterface DISubprogramAttr::getRecSelf(DistinctAttr recId) {
   return DISubprogramAttr::get(recId.getContext(), recId, /*isRecSelf=*/true,
-                               {}, {}, {}, {}, {}, {}, 0, 0, {}, {}, {}, {});
+                               {}, {}, {}, {}, {}, {}, 0, 0,
+                               DIFlags::Zero, {}, {}, {}, {}, false);
 }
 
 //===----------------------------------------------------------------------===//

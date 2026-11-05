@@ -25,10 +25,22 @@ class Operation;
 /// registered implementation of the LLVMTranslationDialectInterface. Returns
 /// nullptr when the translation fails.
 /// Verifies the produced LLVM module, except when `disableVerification` is set.
+///
+/// When `useStrictGEPFolderForGlobals` is true, global initializer
+/// constant-folding preserves the explicit `getelementptr` no-wrap flags
+/// that the source dialect emitted, instead of letting
+/// `llvm::TargetFolder` infer additional flags (e.g. inferring `inbounds`
+/// for GEPs into globals with known sizes, or promoting `nusw+nneg` to
+/// `nuw`). This matches the behaviour of direct `ConstantExpr` creation
+/// in traditional codegen (e.g. Clang/CIR), which never goes through
+/// constant folding for these GEPs. Defaults to false to preserve
+/// upstream behaviour for all other consumers (Flang, Toy, mlir-runner,
+/// GPU `ModuleToObject`, etc.).
 std::unique_ptr<llvm::Module>
 translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
                         llvm::StringRef name = "LLVMDialectModule",
-                        bool disableVerification = false);
+                        bool disableVerification = false,
+                        bool useStrictGEPFolderForGlobals = false);
 } // namespace mlir
 
 #endif // MLIR_TARGET_LLVMIR_EXPORT_H

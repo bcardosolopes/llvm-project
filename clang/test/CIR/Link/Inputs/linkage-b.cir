@@ -1,0 +1,23 @@
+// Second input for ../linkage.cir. Not a test on its own.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // Same inline function the other TU also got from the shared header.
+  cir.func linkonce_odr @inline_fn() -> !s32i {
+    %0 = cir.const #cir.int<11> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // The out-of-line definition. It must displace A's weak copy.
+  cir.func @has_strong_def() -> !s32i {
+    %0 = cir.const #cir.int<222> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // A real conflict: both TUs define this with external linkage.
+  cir.func @genuinely_conflicting() -> !s32i {
+    %0 = cir.const #cir.int<20> : !s32i
+    cir.return %0 : !s32i
+  }
+}

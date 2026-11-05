@@ -1,0 +1,13 @@
+// RUN: not cir-opt %s -cir-goto-solver -o /dev/null 2>&1 | FileCheck %s
+
+cir.func @missing_asm_goto_label() {
+  cir.asm.goto(x86_att,
+    out = [],
+    in = [],
+    in_out = [],
+    {"jmp ${0:l}" "!i"}) side_effects labels ["missing"]
+^bb1:
+  cir.return
+}
+
+// CHECK: error: 'cir.asm.goto' op asm.goto label not found: missing

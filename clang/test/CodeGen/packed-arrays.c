@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -triple x86_64-unk-unk -emit-llvm -Os -o %t %s
 // RUN: FileCheck < %t %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unk-unk -fsanitize=array-bounds -fclangir -emit-llvm -o - %s | FileCheck %s --check-prefix=CIR-UBSAN %}
 
 struct s0 {
   unsigned int x[2] __attribute__((packed));
@@ -89,6 +90,8 @@ int f1_a(struct s1 *a) {
 int f1_b(struct s1 *a) {
   return *(a->x + 1);
 }
+// CIR-UBSAN-LABEL: define dso_local i32 @f1_b
+// CIR-UBSAN: call void @__ubsan_handle_out_of_bounds_abort(ptr @{{[0-9]+}}, i64 1)
 int f1_c(struct s1 *a) {
   return a->y;
 }
@@ -114,6 +117,8 @@ int f2_a(struct s2 *a) {
 int f2_b(struct s2 *a) {
   return *(a->x + 1);
 }
+// CIR-UBSAN-LABEL: define dso_local i32 @f2_b
+// CIR-UBSAN: call void @__ubsan_handle_out_of_bounds_abort(ptr @{{[0-9]+}}, i64 1)
 int f2_c(struct s2 *a) {
   return a->y;
 }
@@ -139,6 +144,8 @@ int f3_a(struct s3 *a) {
 int f3_b(struct s3 *a) {
   return *(a->x + 1);
 }
+// CIR-UBSAN-LABEL: define dso_local i32 @f3_b
+// CIR-UBSAN: call void @__ubsan_handle_out_of_bounds_abort(ptr @{{[0-9]+}}, i64 1)
 int f3_c(struct s3 *a) {
   return a->y;
 }

@@ -178,15 +178,33 @@ public:
   cir::RecordType getBaseSubobjectCIRType() const { return baseSubobjectType; }
 
   /// Return cir::RecordType element number that corresponds to the field FD.
+  bool hasCIRFieldNo(const clang::FieldDecl *fd) const {
+    fd = fd->getCanonicalDecl();
+    return fieldIdxMap.count(fd);
+  }
+
+  /// Return cir::RecordType element number that corresponds to the field FD.
   unsigned getCIRFieldNo(const clang::FieldDecl *fd) const {
     fd = fd->getCanonicalDecl();
     assert(fieldIdxMap.count(fd) && "Invalid field for record!");
     return fieldIdxMap.lookup(fd);
   }
 
+  /// Whether the non-virtual base RD has an element: an empty base does not.
+  bool hasNonVirtualBaseCIRFieldNo(const CXXRecordDecl *rd) const {
+    return nonVirtualBases.count(rd);
+  }
+
   unsigned getNonVirtualBaseCIRFieldNo(const CXXRecordDecl *rd) const {
     assert(nonVirtualBases.count(rd) && "Invalid non-virtual base!");
     return nonVirtualBases.lookup(rd);
+  }
+
+  /// Return the CIR field index corresponding to the given
+  /// virtual base. Only valid when operating on the complete object.
+  unsigned getVirtualBaseIndex(const CXXRecordDecl *base) const {
+    assert(completeObjectVirtualBases.count(base) && "Invalid virtual base!");
+    return completeObjectVirtualBases.lookup(base);
   }
 
   /// Check whether this struct can be C++ zero-initialized

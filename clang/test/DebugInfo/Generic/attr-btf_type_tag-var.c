@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple %itanium_abi_triple -debug-info-kind=limited -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple %itanium_abi_triple -DDOUBLE_BRACKET_ATTRS=1 -debug-info-kind=limited -emit-llvm -o - %s | FileCheck %s
+// RUN: %if cir-support %{ %clang_cc1 -triple %itanium_abi_triple -debug-info-kind=limited -emit-llvm -fclangir -o - %s | FileCheck %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple %itanium_abi_triple -DDOUBLE_BRACKET_ATTRS=1 -debug-info-kind=limited -emit-llvm -fclangir -o - %s | FileCheck %s %}
 
 #if DOUBLE_BRACKET_ATTRS
 #define __tag1 [[clang::btf_type_tag("tag1")]]

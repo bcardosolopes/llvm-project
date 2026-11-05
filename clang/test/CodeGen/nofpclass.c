@@ -5,6 +5,9 @@
 
 // RUN: %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -menable-no-nans -emit-llvm -o - %s | FileCheck -check-prefixes=NONANS %s
 // RUN: %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -menable-no-infs -emit-llvm -o - %s | FileCheck -check-prefixes=NOINFS %s
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -menable-no-infs -menable-no-nans -emit-llvm -fclangir -o - %s | FileCheck -check-prefixes=CIRCFINITEONLY %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -menable-no-nans -emit-llvm -fclangir -o - %s | FileCheck -check-prefixes=CIRNONANS %s %}
+// RUN: %if cir-support %{ %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -menable-no-infs -emit-llvm -fclangir -o - %s | FileCheck -check-prefixes=CIRNOINFS %s %}
 
 // XUN: %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -fsignaling-nans -emit-llvm -o - %s | FileCheck -check-prefixes=SNANS %s
 // XUN: %clang_cc1 -triple x86_64-unknown-unknown -target-feature +avx -fenable-matrix -fno-signaling-nans -emit-llvm -o - %s | FileCheck -check-prefixes=NO-SNANS %s
@@ -147,6 +150,13 @@ float defined_func_f32(float a, float b, float c) {
 // NOINFS-NEXT:    [[TMP3:%.*]] = call ninf <2 x double> @llvm.fma.v2f64(<2 x double> [[TMP0]], <2 x double> [[TMP1]], <2 x double> [[TMP2]])
 // NOINFS-NEXT:    [[ADD:%.*]] = fadd ninf <2 x double> [[TMP3]], splat (double 4.000000e+00)
 // NOINFS-NEXT:    ret <2 x double> [[ADD]]
+//
+// CIRCFINITEONLY-LABEL: define dso_local nofpclass(nan inf) <2 x double> @defined_func_v2f64
+// CIRCFINITEONLY-SAME: (<2 x double> noundef nofpclass(nan inf)
+// CIRNONANS-LABEL: define dso_local nofpclass(nan) <2 x double> @defined_func_v2f64
+// CIRNONANS-SAME: (<2 x double> noundef nofpclass(nan)
+// CIRNOINFS-LABEL: define dso_local nofpclass(inf) <2 x double> @defined_func_v2f64
+// CIRNOINFS-SAME: (<2 x double> noundef nofpclass(inf)
 //
 double2 defined_func_v2f64(double2 a, double2 b, double2 c) {
   return __builtin_elementwise_fma(a, b, c) + 4.0;
@@ -319,6 +329,19 @@ float call_extern_func(float a, double b, _Float16 c) {
 // NOINFS-NEXT:    store <2 x float> [[TMP5]], ptr [[RETVAL]], align 8
 // NOINFS-NEXT:    [[TMP6:%.*]] = load double, ptr [[RETVAL]], align 8
 // NOINFS-NEXT:    ret double [[TMP6]]
+//
+// CIRCFINITEONLY-LABEL: define dso_local nofpclass(nan inf) double @call_extern_func_vec
+// CIRCFINITEONLY-SAME: (double noundef nofpclass(nan inf) {{.*}}, <2 x double> noundef nofpclass(nan inf) {{.*}}, i32 noundef {{.*}})
+// CIRCFINITEONLY: call nnan ninf nofpclass(nan inf) double @extern_func_vec(double noundef nofpclass(nan inf) {{.*}}, <2 x double> noundef nofpclass(nan inf) {{.*}}, i32 noundef {{.*}})
+// CIRCFINITEONLY: declare nofpclass(nan inf) double @extern_func_vec(double noundef nofpclass(nan inf), <2 x double> noundef nofpclass(nan inf), i32 noundef)
+// CIRNONANS-LABEL: define dso_local nofpclass(nan) double @call_extern_func_vec
+// CIRNONANS-SAME: (double noundef nofpclass(nan) {{.*}}, <2 x double> noundef nofpclass(nan) {{.*}}, i32 noundef {{.*}})
+// CIRNONANS: call nnan nofpclass(nan) double @extern_func_vec(double noundef nofpclass(nan) {{.*}}, <2 x double> noundef nofpclass(nan) {{.*}}, i32 noundef {{.*}})
+// CIRNONANS: declare nofpclass(nan) double @extern_func_vec(double noundef nofpclass(nan), <2 x double> noundef nofpclass(nan), i32 noundef)
+// CIRNOINFS-LABEL: define dso_local nofpclass(inf) double @call_extern_func_vec
+// CIRNOINFS-SAME: (double noundef nofpclass(inf) {{.*}}, <2 x double> noundef nofpclass(inf) {{.*}}, i32 noundef {{.*}})
+// CIRNOINFS: call ninf nofpclass(inf) double @extern_func_vec(double noundef nofpclass(inf) {{.*}}, <2 x double> noundef nofpclass(inf) {{.*}}, i32 noundef {{.*}})
+// CIRNOINFS: declare nofpclass(inf) double @extern_func_vec(double noundef nofpclass(inf), <2 x double> noundef nofpclass(inf), i32 noundef)
 //
 float2 call_extern_func_vec(float2 a, double2 b, half2 c) {
   return extern_func_vec(a, b, c);
@@ -1086,6 +1109,9 @@ _Complex _Float16 defined_complex_func_f16_ret(_Complex _Float16 c) {
 // NOINFS-NEXT:    [[TMP12:%.*]] = load <2 x half>, ptr [[COERCE5]], align 2
 // NOINFS-NEXT:    [[CALL:%.*]] = call ninf nofpclass(inf) float (float, ...) @variadic(float noundef nofpclass(inf) [[TMP2]], double noundef nofpclass(inf) [[CONV]], double noundef nofpclass(inf) [[TMP4]], half noundef nofpclass(inf) [[TMP5]], double noundef nofpclass(inf) [[TMP9]], <2 x double> noundef nofpclass(inf) [[TMP7]], i32 noundef [[TMP10]], <2 x float> noundef nofpclass(inf) [[TMP11]], ptr noundef byval({ double, double }) align 8 [[BYVAL_TEMP]], <2 x half> noundef nofpclass(inf) [[TMP12]])
 // NOINFS-NEXT:    ret float [[CALL]]
+// CIRCFINITEONLY-LABEL: define dso_local nofpclass(nan inf) float @call_variadic
+// CIRCFINITEONLY: call nnan ninf nofpclass(nan inf) float (float, ...) @variadic(
+// CIRCFINITEONLY-SAME: <2 x double> noundef nofpclass(nan inf)
 //
 float call_variadic(float f32, double f64, _Float16 f16,
                     float2 v2f32, double2 v2f64, half2 v2f16,
@@ -1189,6 +1215,10 @@ float call_variadic(float f32, double f64, _Float16 f16,
 // CLFINITEONLY-NEXT:    [[CALL:%.*]] = tail call nnan ninf nofpclass(nan inf) float (float, ...) [[FPTR]](float noundef nofpclass(nan inf) [[F32]], double noundef nofpclass(nan inf) [[CONV]], double noundef nofpclass(nan inf) [[F64]], half noundef nofpclass(nan inf) [[F16]], double noundef nofpclass(nan inf) [[V2F32_COERCE]], <2 x double> noundef nofpclass(nan inf) [[V2F64]], i32 noundef [[V2F16_COERCE]], <2 x float> noundef nofpclass(nan inf) [[CF32_COERCE]], ptr noundef nonnull byval({ double, double }) align 8 [[BYVAL_TEMP]], <2 x half> noundef nofpclass(nan inf) [[COERCE5_SROA_0_2_VEC_INSERT]]) #[[ATTR11]]
 // CLFINITEONLY-NEXT:    call void @llvm.lifetime.end.p0(ptr nonnull [[BYVAL_TEMP]]) #[[ATTR12]]
 // CLFINITEONLY-NEXT:    ret float [[CALL]]
+//
+// CIRCFINITEONLY-LABEL: define dso_local nofpclass(nan inf) float @call_variadic_indirect
+// CIRCFINITEONLY: call nnan ninf nofpclass(nan inf) float (float, ...) {{%[^ (]+}}(
+// CIRCFINITEONLY-SAME: <2 x double> noundef nofpclass(nan inf)
 //
 // NONANS: Function Attrs: noinline nounwind optnone
 // NONANS-LABEL: define dso_local nofpclass(nan) float @call_variadic_indirect

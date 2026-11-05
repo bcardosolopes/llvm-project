@@ -76,148 +76,184 @@ llvm.func @sectionsreduction_(%arg0: !llvm.ptr {fir.bindc_name = "x"}) attribute
   llvm.return
 }
 
-// CHECK-LABEL: define internal void @sectionsreduction_..omp_par
-// CHECK:       [[PAR_ENTRY:omp.par.entry]]:
-// CHECK:         %[[VAL_6:.*]] = alloca i32, align 4
-// CHECK:         %[[VAL_7:.*]] = alloca i32, align 4
-// CHECK:         %[[VAL_8:.*]] = alloca i32, align 4
-// CHECK:         %[[VAL_9:.*]] = alloca i32, align 4
-// CHECK:         %[[VAL_10:.*]] = alloca i32, align 4
-// CHECK:         %[[VAL_11:.*]] = load i32, ptr %[[VAL_12:.*]], align 4
-// CHECK:         store i32 %[[VAL_11]], ptr %[[VAL_10]], align 4
-// CHECK:         %[[VAL_13:.*]] = load i32, ptr %[[VAL_10]], align 4
-// CHECK:         %[[VAL_20:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8, [1 x [3 x i64]] }, i64 1, align 8
-// CHECK:         %[[VAL_21:.*]] = alloca ptr, align 8
-// CHECK:         %[[VAL_14:.*]] = alloca [1 x ptr], align 8
-// CHECK:         %[[VAL_19:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8, [1 x [3 x i64]] }, i64 1, align 8
-// CHECK:         br label %[[VAL_15:.*]]
-
-// CHECK:       [[VAL_15]]:
-// CHECK:         br label %[[PAR_REG:omp.par.region]]
-
-// CHECK:       [[PAR_REG]]:                                   ; preds = %[[VAL_15]]
-// CHECK:         br label %[[VAL_18:.*]]
-// CHECK:       omp.par.region1:                                  ; preds = %[[PAR_REG]]
-// CHECK:         br label %[[VAL_22:.*]]
-
-// CHECK:       omp.reduction.init:                               ; preds = %[[VAL_16:.*]]
-// CHECK:         store ptr %[[VAL_20]], ptr %[[VAL_21]], align 8
-// CHECK:         br label %[[VAL_17:.*]]
-
-// CHECK:       omp_section_loop.preheader:                       ; preds = %[[VAL_22]]
-// CHECK:         store i32 0, ptr %[[VAL_7]], align 4
-// CHECK:         store i32 1, ptr %[[VAL_8]], align 4
-// CHECK:         store i32 1, ptr %[[VAL_9]], align 4
-// CHECK:         %[[VAL_23:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
-// CHECK:         call void @__kmpc_for_static_init_4u(ptr @1, i32 %[[VAL_23]], i32 34, ptr %[[VAL_6]], ptr %[[VAL_7]], ptr %[[VAL_8]], ptr %[[VAL_9]], i32 1, i32 0)
-// CHECK:         %[[VAL_24:.*]] = load i32, ptr %[[VAL_7]], align 4
-// CHECK:         %[[VAL_25:.*]] = load i32, ptr %[[VAL_8]], align 4
-// CHECK:         %[[VAL_26:.*]] = sub i32 %[[VAL_25]], %[[VAL_24]]
-// CHECK:         %[[VAL_27:.*]] = add i32 %[[VAL_26]], 1
-// CHECK:         br label %[[VAL_28:.*]]
-// CHECK:       omp_section_loop.header:                          ; preds = %[[VAL_29:.*]], %[[VAL_17]]
-// CHECK:         %[[VAL_30:.*]] = phi i32 [ 0, %[[VAL_17]] ], [ %[[VAL_31:.*]], %[[VAL_29]] ]
-// CHECK:         br label %[[VAL_32:.*]]
-// CHECK:       omp_section_loop.cond:                            ; preds = %[[VAL_28]]
-// CHECK:         %[[VAL_33:.*]] = icmp ult i32 %[[VAL_30]], %[[VAL_27]]
-// CHECK:         br i1 %[[VAL_33]], label %[[VAL_34:.*]], label %[[VAL_35:.*]]
-// CHECK:       omp_section_loop.exit:                            ; preds = %[[VAL_32]]
-// CHECK:         call void @__kmpc_for_static_fini(ptr @1, i32 %[[VAL_23]])
-// CHECK:         %[[VAL_36:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
-// CHECK:         call void @__kmpc_barrier(ptr @2, i32 %[[VAL_36]])
-// CHECK:         br label %[[VAL_37:.*]]
-// CHECK:       omp_section_loop.after:                           ; preds = %[[VAL_35]]
-// CHECK:         %[[VAL_39:.*]] = getelementptr inbounds [1 x ptr], ptr %[[VAL_14]], i64 0, i64 0
-// CHECK:         store ptr %[[VAL_21]], ptr %[[VAL_39]], align 8
-// CHECK:         %[[VAL_40:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
-// CHECK:         %[[VAL_41:.*]] = call i32 @__kmpc_reduce(ptr @1, i32 %[[VAL_40]], i32 1, i64 8, ptr %[[VAL_14]], ptr @.omp.reduction.func, ptr @.gomp_critical_user_.reduction.var)
-// CHECK:         switch i32 %[[VAL_41]], label %[[VAL_42:.*]] [
-// CHECK:           i32 1, label %[[VAL_43:.*]]
-// CHECK:           i32 2, label %[[VAL_44:.*]]
-// CHECK:         ]
-// CHECK:       reduce.switch.atomic:                             ; preds = %[[VAL_37]]
-// CHECK:         unreachable
-// CHECK:       reduce.switch.nonatomic:                          ; preds = %[[VAL_37]]
-// CHECK:         %[[VAL_45:.*]] = load ptr, ptr %[[VAL_21]], align 8
-// CHECK:         br label %[[VAL_46:.*]]
-// CHECK:       omp.reduction.nonatomic.body:                     ; preds = %[[VAL_43]]
-// CHECK:         br label %[[VAL_47:.*]]
-// CHECK:       omp.reduction.nonatomic.body16:                   ; preds = %[[VAL_48:.*]], %[[VAL_46]]
-// CHECK:         %[[VAL_49:.*]] = phi i64 [ %[[VAL_50:.*]], %[[VAL_48]] ], [ 0, %[[VAL_46]] ]
-// CHECK:         %[[VAL_51:.*]] = icmp sgt i64 %[[VAL_49]], 0
-// CHECK:         br i1 %[[VAL_51]], label %[[VAL_48]], label %[[VAL_52:.*]]
-// CHECK:       omp.reduction.nonatomic.body18:                   ; preds = %[[VAL_47]]
-// CHECK:         br label %[[VAL_53:.*]]
-// CHECK:       omp.region.cont15:                                ; preds = %[[VAL_52]]
-// CHECK:         %[[VAL_54:.*]] = phi ptr [ %[[VAL_19]], %[[VAL_52]] ]
-// CHECK:         call void @__kmpc_end_reduce(ptr @1, i32 %[[VAL_40]], ptr @.gomp_critical_user_.reduction.var)
-// CHECK:         br label %[[VAL_42]]
-// CHECK:       omp.reduction.nonatomic.body17:                   ; preds = %[[VAL_47]]
-// CHECK:         %[[VAL_50]] = sub i64 %[[VAL_49]], 1
-// CHECK:         br label %[[VAL_47]]
-// CHECK:       reduce.finalize:                                  ; preds = %[[VAL_53]], %[[VAL_37]]
-// CHECK:         %[[VAL_55:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
-// CHECK:         call void @__kmpc_barrier(ptr @2, i32 %[[VAL_55]])
-// CHECK:         %[[VAL_56:.*]] = load ptr, ptr %[[VAL_21]], align 8
-// CHECK:         br label %[[VAL_57:.*]]
-// CHECK:       omp.reduction.cleanup:                            ; preds = %[[VAL_42]]
-// CHECK:         %[[VAL_58:.*]] = ptrtoint ptr %[[VAL_56]] to i64
-// CHECK:         %[[VAL_59:.*]] = icmp ne i64 %[[VAL_58]], 0
-// CHECK:         br i1 %[[VAL_59]], label %[[VAL_60:.*]], label %[[VAL_61:.*]]
-// CHECK:       omp.reduction.cleanup22:                          ; preds = %[[VAL_60]], %[[VAL_57]]
-// CHECK:         br label %[[VAL_62:.*]]
-// CHECK:       omp.region.cont20:                                ; preds = %[[VAL_61]]
-// CHECK:         br label %[[VAL_63:.*]]
-// CHECK:       omp.region.cont:                                  ; preds = %[[VAL_62]]
-// CHECK:         br label %[[VAL_64:.*]]
-// CHECK:       omp.par.pre_finalize:                             ; preds = %[[VAL_63]]
-// CHECK:         br label %[[FINI:.fini.*]]
-// CHECK:       [[FINI]]:
-// CHECK:         br label %[[EXIT:.*]]
-// CHECK:       omp.reduction.cleanup21:                          ; preds = %[[VAL_57]]
-// CHECK:         br label %[[VAL_61]]
-// CHECK:       omp_section_loop.body:                            ; preds = %[[VAL_32]]
-// CHECK:         %[[VAL_66:.*]] = add i32 %[[VAL_30]], %[[VAL_24]]
-// CHECK:         %[[VAL_67:.*]] = mul i32 %[[VAL_66]], 1
-// CHECK:         %[[VAL_68:.*]] = add i32 %[[VAL_67]], 0
-// CHECK:         switch i32 %[[VAL_68]], label %[[VAL_69:.*]] [
-// CHECK:           i32 0, label %[[VAL_70:.*]]
-// CHECK:           i32 1, label %[[VAL_71:.*]]
-// CHECK:         ]
-// CHECK:       omp_section_loop.body.case6:                      ; preds = %[[VAL_34]]
-// CHECK:         br label %[[VAL_72:.*]]
-// CHECK:       omp.section.region8:                              ; preds = %[[VAL_71]]
-// CHECK:         br label %[[VAL_73:.*]]
-// CHECK:       omp.section.region9:                              ; preds = %[[VAL_74:.*]], %[[VAL_72]]
-// CHECK:         %[[VAL_75:.*]] = phi i64 [ %[[VAL_76:.*]], %[[VAL_74]] ], [ 1, %[[VAL_72]] ]
-// CHECK:         %[[VAL_77:.*]] = icmp sgt i64 %[[VAL_75]], 0
-// CHECK:         br i1 %[[VAL_77]], label %[[VAL_74]], label %[[VAL_78:.*]]
-// CHECK:       omp.section.region11:                             ; preds = %[[VAL_73]]
-// CHECK:         br label %[[VAL_79:.*]]
-// CHECK:       omp.region.cont7:                                 ; preds = %[[VAL_78]]
-// CHECK:         br label %[[VAL_69]]
-// CHECK:       omp.section.region10:                             ; preds = %[[VAL_73]]
-// CHECK:         %[[VAL_76]] = sub i64 %[[VAL_75]], 1
-// CHECK:         br label %[[VAL_73]]
-// CHECK:       omp_section_loop.body.case:                       ; preds = %[[VAL_34]]
-// CHECK:         br label %[[VAL_80:.*]]
-// CHECK:       omp.section.region:                               ; preds = %[[VAL_70]]
-// CHECK:         br label %[[VAL_81:.*]]
-// CHECK:       omp.section.region3:                              ; preds = %[[VAL_82:.*]], %[[VAL_80]]
-// CHECK:         %[[VAL_83:.*]] = phi i64 [ %[[VAL_84:.*]], %[[VAL_82]] ], [ 1, %[[VAL_80]] ]
-// CHECK:         %[[VAL_85:.*]] = icmp sgt i64 %[[VAL_83]], 0
-// CHECK:         br i1 %[[VAL_85]], label %[[VAL_82]], label %[[VAL_86:.*]]
-// CHECK:       omp.section.region5:                              ; preds = %[[VAL_81]]
-// CHECK:         br label %[[VAL_87:.*]]
-// CHECK:       omp.region.cont2:                                 ; preds = %[[VAL_86]]
-// CHECK:         br label %[[VAL_69]]
-// CHECK:       omp.section.region4:                              ; preds = %[[VAL_81]]
-// CHECK:         %[[VAL_84]] = sub i64 %[[VAL_83]], 1
-// CHECK:         br label %[[VAL_81]]
-// CHECK:       omp_section_loop.body.sections.after:             ; preds = %[[VAL_79]], %[[VAL_87]], %[[VAL_34]]
-// CHECK:         br label %[[VAL_29]]
-// CHECK:       omp_section_loop.inc:                             ; preds = %[[VAL_69]]
-// CHECK:         %[[VAL_31]] = add nuw i32 %[[VAL_30]], 1
-// CHECK:         br label %[[VAL_28]]
-// CHECK:       omp.par.exit.exitStub:                            ; preds = %[[FINI]]
-// CHECK:         ret void
+// CHECK: @0 = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00", align 1
+// CHECK: @1 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 2, i32 0, i32 22, ptr @0 }, align 8
+// CHECK: @.gomp_critical_user_.reduction.var = common global [8 x i32] zeroinitializer, align 8
+// CHECK: @2 = private unnamed_addr constant %struct.ident_t {{[{]}} i32 0, i32 66, i32 0, i32 22, ptr @0 }, align 8
+// CHECK-LABEL: define void @sectionsreduction_(
+// CHECK:   br label %[[VAL_0:.*]]
+// CHECK: entry:
+// CHECK:   %[[VAL_1:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   br label %[[VAL_2:.*]]
+// CHECK: omp_parallel:
+// CHECK:   call void (ptr, i32, ptr, ...) @__kmpc_fork_call(ptr @1, i32 0, ptr @sectionsreduction_..omp_par)
+// CHECK:   br label %[[VAL_3:.*]]
+// CHECK: omp.par.exit:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @sectionsreduction_..omp_par(
+// CHECK: omp.par.entry:
+// CHECK:   %[[VAL_0:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_1:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_2:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_3:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_4:.*]] = alloca i32, align 4
+// CHECK:   %[[VAL_5:.*]] = load i32, ptr %[[VAL_6:.*]], align 4
+// CHECK:   store i32 %[[VAL_5]], ptr %[[VAL_4]], align 4
+// CHECK:   %[[VAL_7:.*]] = load i32, ptr %[[VAL_4]], align 4
+// CHECK:   %[[VAL_8:.*]] = alloca {{[{]}} ptr, i64, i32, i8, i8, i8, i8, [1 x [3 x i64]] }, i64 1, align 8
+// CHECK:   %[[VAL_9:.*]] = alloca ptr, align 8
+// CHECK:   %[[VAL_10:.*]] = alloca [1 x ptr], align 8
+// CHECK:   %[[VAL_11:.*]] = alloca {{[{]}} ptr, i64, i32, i8, i8, i8, i8, [1 x [3 x i64]] }, i64 1, align 8
+// CHECK:   br label %[[VAL_12:.*]]
+// CHECK: omp.region.after_alloca2:
+// CHECK:   br label %[[VAL_13:.*]]
+// CHECK: omp.region.after_alloca:
+// CHECK:   br label %[[VAL_14:.*]]
+// CHECK: omp.par.region:
+// CHECK:   br label %[[VAL_15:.*]]
+// CHECK: omp.par.region1:
+// CHECK:   br label %[[VAL_16:.*]]
+// CHECK: omp.reduction.init:
+// CHECK:   store ptr %[[VAL_8]], ptr %[[VAL_9]], align 8
+// CHECK:   store i64 1, ptr %[[VAL_8]], align 4
+// CHECK:   br label %[[VAL_17:.*]]
+// CHECK: omp_section_loop.preheader:
+// CHECK:   store i32 0, ptr %[[VAL_1]], align 4
+// CHECK:   store i32 1, ptr %[[VAL_2]], align 4
+// CHECK:   store i32 1, ptr %[[VAL_3]], align 4
+// CHECK:   %[[VAL_18:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   call void @__kmpc_for_static_init_4u(ptr @1, i32 %[[VAL_18]], i32 34, ptr %[[VAL_0]], ptr %[[VAL_1]], ptr %[[VAL_2]], ptr %[[VAL_3]], i32 1, i32 1)
+// CHECK:   %[[VAL_19:.*]] = load i32, ptr %[[VAL_1]], align 4
+// CHECK:   %[[VAL_20:.*]] = load i32, ptr %[[VAL_2]], align 4
+// CHECK:   %[[VAL_21:.*]] = sub i32 %[[VAL_20]], %[[VAL_19]]
+// CHECK:   %[[VAL_22:.*]] = add i32 %[[VAL_21]], 1
+// CHECK:   br label %[[VAL_23:.*]]
+// CHECK: omp_section_loop.header:
+// CHECK:   %[[VAL_24:.*]] = phi i32 [ 0, %[[VAL_17]] ], [ %[[VAL_25:.*]], %[[VAL_26:.*]] ]
+// CHECK:   br label %[[VAL_27:.*]]
+// CHECK: omp_section_loop.cond:
+// CHECK:   %[[VAL_28:.*]] = icmp ult i32 %[[VAL_24]], %[[VAL_22]]
+// CHECK:   br i1 %[[VAL_28]], label %[[VAL_29:.*]], label %[[VAL_30:.*]]
+// CHECK: omp_section_loop.exit:
+// CHECK:   call void @__kmpc_for_static_fini(ptr @1, i32 %[[VAL_18]])
+// CHECK:   br label %[[VAL_31:.*]]
+// CHECK: omp_section_loop.after:
+// CHECK:   %[[VAL_32:.*]] = getelementptr inbounds [1 x ptr], ptr %[[VAL_10]], i64 0, i64 0
+// CHECK:   store ptr %[[VAL_9]], ptr %[[VAL_32]], align 8
+// CHECK:   %[[VAL_33:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   %[[VAL_34:.*]] = call i32 @__kmpc_reduce(ptr @1, i32 %[[VAL_33]], i32 1, i64 8, ptr %[[VAL_10]], ptr @.omp.reduction.func, ptr @.gomp_critical_user_.reduction.var)
+// CHECK:   switch i32 %[[VAL_34]], label %[[VAL_35:.*]] [
+// CHECK:   i32 1, label %[[VAL_36:.*]]
+// CHECK:   i32 2, label %[[VAL_37:.*]]
+// CHECK:   ]
+// CHECK: reduce.switch.atomic:
+// CHECK:   unreachable
+// CHECK: reduce.switch.nonatomic:
+// CHECK:   %[[VAL_38:.*]] = load ptr, ptr %[[VAL_9]], align 8
+// CHECK:   br label %[[VAL_39:.*]]
+// CHECK: omp.reduction.nonatomic.body:
+// CHECK:   br label %[[VAL_40:.*]]
+// CHECK: omp.reduction.nonatomic.body16:
+// CHECK:   %[[VAL_41:.*]] = phi i64 [ %[[VAL_42:.*]], %[[VAL_43:.*]] ], [ 0, %[[VAL_39]] ]
+// CHECK:   %[[VAL_44:.*]] = icmp sgt i64 %[[VAL_41]], 0
+// CHECK:   br i1 %[[VAL_44]], label %[[VAL_43]], label %[[VAL_45:.*]]
+// CHECK: omp.reduction.nonatomic.body18:
+// CHECK:   br label %[[VAL_46:.*]]
+// CHECK: omp.region.cont15:
+// CHECK:   %[[VAL_47:.*]] = phi ptr [ %[[VAL_11]], %[[VAL_45]] ]
+// CHECK:   call void @__kmpc_end_reduce(ptr @1, i32 %[[VAL_33]], ptr @.gomp_critical_user_.reduction.var)
+// CHECK:   br label %[[VAL_35]]
+// CHECK: omp.reduction.nonatomic.body17:
+// CHECK:   %[[VAL_42]] = sub i64 %[[VAL_41]], 1
+// CHECK:   br label %[[VAL_40]]
+// CHECK: reduce.finalize:
+// CHECK:   %[[VAL_48:.*]] = call i32 @__kmpc_global_thread_num(ptr @1)
+// CHECK:   call void @__kmpc_barrier(ptr @2, i32 %[[VAL_48]])
+// CHECK:   %[[VAL_49:.*]] = load ptr, ptr %[[VAL_9]], align 8
+// CHECK:   br label %[[VAL_50:.*]]
+// CHECK: omp.reduction.cleanup:
+// CHECK:   %[[VAL_51:.*]] = ptrtoint ptr %[[VAL_49]] to i64
+// CHECK:   %[[VAL_52:.*]] = icmp ne i64 %[[VAL_51]], 0
+// CHECK:   br i1 %[[VAL_52]], label %[[VAL_53:.*]], label %[[VAL_54:.*]]
+// CHECK: omp.reduction.cleanup22:
+// CHECK:   br label %[[VAL_55:.*]]
+// CHECK: omp.region.cont20:
+// CHECK:   br label %[[VAL_56:.*]]
+// CHECK: omp.region.cont:
+// CHECK:   br label %[[VAL_57:.*]]
+// CHECK: omp.par.pre_finalize:
+// CHECK:   br label %[[VAL_58:.*]]
+// CHECK: .fini:
+// CHECK:   br label %[[VAL_59:.*]]
+// CHECK: omp.reduction.cleanup21:
+// CHECK:   br label %[[VAL_54]]
+// CHECK: omp_section_loop.body:
+// CHECK:   %[[VAL_60:.*]] = add i32 %[[VAL_24]], %[[VAL_19]]
+// CHECK:   %[[VAL_61:.*]] = mul i32 %[[VAL_60]], 1
+// CHECK:   %[[VAL_62:.*]] = add i32 %[[VAL_61]], 0
+// CHECK:   switch i32 %[[VAL_62]], label %[[VAL_63:.*]] [
+// CHECK:   i32 0, label %[[VAL_64:.*]]
+// CHECK:   i32 1, label %[[VAL_65:.*]]
+// CHECK:   ]
+// CHECK: omp_section_loop.body.case7:
+// CHECK:   br label %[[VAL_66:.*]]
+// CHECK: omp.section.region9:
+// CHECK:   br label %[[VAL_67:.*]]
+// CHECK: omp.section.region10:
+// CHECK:   %[[VAL_68:.*]] = phi i64 [ %[[VAL_69:.*]], %[[VAL_70:.*]] ], [ 1, %[[VAL_66]] ]
+// CHECK:   %[[VAL_71:.*]] = icmp sgt i64 %[[VAL_68]], 0
+// CHECK:   br i1 %[[VAL_71]], label %[[VAL_70]], label %[[VAL_72:.*]]
+// CHECK: omp.section.region12:
+// CHECK:   br label %[[VAL_73:.*]]
+// CHECK: omp.region.cont8:
+// CHECK:   br label %[[VAL_63]]
+// CHECK: omp.section.region11:
+// CHECK:   %[[VAL_69]] = sub i64 %[[VAL_68]], 1
+// CHECK:   br label %[[VAL_67]]
+// CHECK: omp_section_loop.body.case:
+// CHECK:   br label %[[VAL_74:.*]]
+// CHECK: omp.section.region:
+// CHECK:   br label %[[VAL_75:.*]]
+// CHECK: omp.section.region4:
+// CHECK:   %[[VAL_76:.*]] = phi i64 [ %[[VAL_77:.*]], %[[VAL_78:.*]] ], [ 1, %[[VAL_74]] ]
+// CHECK:   %[[VAL_79:.*]] = icmp sgt i64 %[[VAL_76]], 0
+// CHECK:   br i1 %[[VAL_79]], label %[[VAL_78]], label %[[VAL_80:.*]]
+// CHECK: omp.section.region6:
+// CHECK:   br label %[[VAL_81:.*]]
+// CHECK: omp.region.cont3:
+// CHECK:   br label %[[VAL_63]]
+// CHECK: omp.section.region5:
+// CHECK:   %[[VAL_77]] = sub i64 %[[VAL_76]], 1
+// CHECK:   br label %[[VAL_75]]
+// CHECK: omp_section_loop.body.sections.after:
+// CHECK:   br label %[[VAL_26]]
+// CHECK: omp_section_loop.inc:
+// CHECK:   %[[VAL_25]] = add nuw i32 %[[VAL_24]], 1
+// CHECK:   br label %[[VAL_23]]
+// CHECK: omp.par.exit.exitStub:
+// CHECK:   ret void
+// CHECK: }
+// CHECK-LABEL: define internal void @.omp.reduction.func(
+// CHECK:   %[[VAL_0:.*]] = getelementptr inbounds [1 x ptr], ptr %[[VAL_1:.*]], i64 0, i64 0
+// CHECK:   %[[VAL_2:.*]] = load ptr, ptr %[[VAL_0]], align 8
+// CHECK:   %[[VAL_3:.*]] = load ptr, ptr %[[VAL_2]], align 8
+// CHECK:   %[[VAL_4:.*]] = getelementptr inbounds [1 x ptr], ptr %[[VAL_5:.*]], i64 0, i64 0
+// CHECK:   %[[VAL_6:.*]] = load ptr, ptr %[[VAL_4]], align 8
+// CHECK:   %[[VAL_7:.*]] = load ptr, ptr %[[VAL_6]], align 8
+// CHECK:   br label %[[VAL_8:.*]]
+// CHECK: omp.reduction.nonatomic.body3:
+// CHECK:   br label %[[VAL_9:.*]]
+// CHECK: omp.reduction.nonatomic.body2:
+// CHECK:   %[[VAL_10:.*]] = sub i64 %[[VAL_11:.*]], 1
+// CHECK:   br label %[[VAL_12:.*]]
+// CHECK: omp.reduction.nonatomic.body1:
+// CHECK:   %[[VAL_11]] = phi i64 [ %[[VAL_10]], %[[VAL_13:.*]] ], [ 0, %[[VAL_8]] ]
+// CHECK:   %[[VAL_14:.*]] = icmp sgt i64 %[[VAL_11]], 0
+// CHECK:   br i1 %[[VAL_14]], label %[[VAL_13]], label %[[VAL_15:.*]]
+// CHECK: omp.reduction.nonatomic.body:
+// CHECK:   br label %[[VAL_12]]
+// CHECK: omp.region.cont:
+// CHECK:   %[[VAL_16:.*]] = phi ptr [ %[[VAL_3]], %[[VAL_15]] ]
+// CHECK:   ret void
+// CHECK: }

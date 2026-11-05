@@ -1,0 +1,41 @@
+// RUN: cir-link %s %S/Inputs/available-externally-b.cir --warn-odr-divergence \
+// RUN:   -o %t.cir 2>&1 | FileCheck %s --check-prefix=STATS
+// RUN: cir-opt %t.cir | FileCheck %s
+
+// available_externally is a body supplied purely so the inliner can see it.
+// The real definition lives elsewhere and the backend drops this one, so for
+// linking purposes it is a *declaration*, not a definition.
+//
+// Treating it as a definition is not merely noisy. On a 31-TU program it
+// produced **842 "ODR divergences"** -- 28 available_externally functions per
+// TU, mostly libstdc++ header inlines -- which would bury any genuine finding
+// under noise. Worse, first-wins could let one of these bodies beat the real
+// definition, and it is then dropped at lowering, leaving an undefined symbol.
+//
+// So: it must never be reported as a divergence, and a real definition must
+// displace it.
+
+!s32i = !cir.int<s, 32>
+
+module {
+  // Also defined for real in B. B's definition must win.
+  cir.func available_externally @inlinable() -> !s32i {
+    %0 = cir.const #cir.int<111> : !s32i
+    cir.return %0 : !s32i
+  }
+
+  // Only available_externally here and in B: nothing to displace it, but it
+  // still must not be called a divergence.
+  cir.func available_externally @only_ae() -> !s32i {
+    %0 = cir.const #cir.int<7> : !s32i
+    cir.return %0 : !s32i
+  }
+}
+
+// Not one divergence between them.
+// STATS: 0 ODR divergences
+// STATS-NOT: warning:
+
+// B's real definition (222) replaced the available_externally body (111).
+// CHECK-DAG: cir.func @inlinable
+// CHECK-DAG: cir.const #cir.int<222>
