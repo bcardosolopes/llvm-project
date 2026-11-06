@@ -27,22 +27,79 @@ namespace direct {
 namespace {
 
 std::optional<int64_t> getConstantInt(mlir::Value value) {
-  auto constOp = value.getDefiningOp<cir::ConstantOp>();
-  auto intAttr =
-      constOp ? mlir::dyn_cast<cir::IntAttr>(constOp.getValue()) : nullptr;
-  if (!intAttr)
+  // Evaluate the extension chain as an APInt, inside out. A single
+  // unsigned flag cannot do this: a zext of a sext must keep the sign
+  // extended bits, not re-read the narrow constant as unsigned. Trunc
+  // is not peeled: the narrowed value is lost to this walk.
+  mlir::Type origTy = value.getType();
+  bool isUnsigned = false;
+  if (auto intTy = mlir::dyn_cast<cir::IntType>(origTy))
+    isUnsigned = !intTy.isSigned();
+  llvm::SmallVector<std::pair<mlir::Operation *, unsigned>, 4> casts;
+  while (mlir::Operation *def = value.getDefiningOp()) {
+    unsigned width = 0;
+    if (auto intTy = mlir::dyn_cast<cir::IntType>(value.getType())) {
+      width = intTy.getWidth();
+    } else if (auto intTy =
+                   mlir::dyn_cast<mlir::IntegerType>(value.getType())) {
+      width = intTy.getWidth();
+    } else {
+      return std::nullopt;
+    }
+    if (width > 64)
+      return std::nullopt;
+    if (auto cast = mlir::dyn_cast<mlir::UnrealizedConversionCastOp>(def)) {
+      if (cast.getNumOperands() != 1)
+        return std::nullopt;
+      casts.emplace_back(def, width);
+      value = cast.getOperand(0);
+    } else if (mlir::isa<mlir::LLVM::SExtOp, mlir::LLVM::ZExtOp>(def)) {
+      casts.emplace_back(def, width);
+      value = def->getOperand(0);
+    } else {
+      break;
+    }
+  }
+  llvm::APInt result;
+  if (auto constOp = value.getDefiningOp<cir::ConstantOp>()) {
+    auto intAttr = mlir::dyn_cast<cir::IntAttr>(constOp.getValue());
+    if (!intAttr)
+      return std::nullopt;
+    result = intAttr.getValue();
+  } else if (auto constOp = value.getDefiningOp<mlir::LLVM::ConstantOp>()) {
+    auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue());
+    if (!intAttr)
+      return std::nullopt;
+    result = intAttr.getValue();
+  } else {
     return std::nullopt;
-  const llvm::APInt &v = intAttr.getValue();
-  if (mlir::cast<cir::IntType>(intAttr.getType()).isSigned()
-          ? v.getSignificantBits() > 64
-          : v.getActiveBits() > 63)
+  }
+  if (result.getBitWidth() > 64)
     return std::nullopt;
-  return v.getSExtValue();
+  for (auto [cast, width] : llvm::reverse(casts)) {
+    if (mlir::isa<mlir::LLVM::SExtOp>(cast)) {
+      result = result.sextOrTrunc(width);
+    } else if (mlir::isa<mlir::LLVM::ZExtOp>(cast)) {
+      result = result.zextOrTrunc(width);
+    } else {
+      // An unrealized cast only retypes: a resize means an unexpected
+      // shape, so decline rather than guess the extension.
+      if (width != result.getBitWidth())
+        return std::nullopt;
+    }
+  }
+  // An unsigned value past INT64_MAX cannot be a byte offset here:
+  // returning it would wrap negative in the signed offset below.
+  if (isUnsigned ? result.getActiveBits() > 63
+                 : result.getSignificantBits() > 64)
+    return std::nullopt;
+  return isUnsigned ? result.getZExtValue() : result.getSExtValue();
 }
 
 bool isByteType(mlir::Type ty) {
-  auto intTy = mlir::dyn_cast<cir::IntType>(ty);
-  return intTy && intTy.getWidth() == 8;
+  if (auto intTy = mlir::dyn_cast<cir::IntType>(ty))
+    return intTy.getWidth() == 8;
+  return ty.isInteger(8);
 }
 
 bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
@@ -50,7 +107,13 @@ bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
                            std::string &str) {
   int64_t offset = 0;
   while (mlir::Operation *def = ptr.getDefiningOp()) {
-    if (auto cast = mlir::dyn_cast<cir::CastOp>(def)) {
+    if (auto cast = mlir::dyn_cast<mlir::UnrealizedConversionCastOp>(def)) {
+      // Without pattern rollback the producers are already converted and
+      // the operand arrives wrapped in a cast back to the CIR type.
+      if (cast.getNumOperands() != 1)
+        break;
+      ptr = cast.getOperand(0);
+    } else if (auto cast = mlir::dyn_cast<cir::CastOp>(def)) {
       if (cast.getKind() != cir::CastKind::array_to_ptrdecay &&
           cast.getKind() != cir::CastKind::bitcast &&
           cast.getKind() != cir::CastKind::address_space)
@@ -68,19 +131,83 @@ bool getConstantStringInfo(mlir::Value ptr, mlir::ModuleOp mod,
           llvm::AddOverflow(offset, *index, offset))
         return false;
       ptr = stride.getBase();
+    } else if (mlir::isa<mlir::LLVM::AddrSpaceCastOp, mlir::LLVM::BitcastOp>(
+                   def)) {
+      // Converted address_space / bitcast / decay pieces add no offset.
+      ptr = def->getOperand(0);
+    } else if (auto gep = mlir::dyn_cast<mlir::LLVM::GEPOp>(def)) {
+      // Converted array_to_ptrdecay ({0}), GetElement ({0, k}) or PtrStride
+      // ({k}). Dynamic indices resolve like the CIR index operands they
+      // converted from. Only accept steps whose byte offset is exact: the
+      // pointer-level index must be zero unless the element is i8, array
+      // levels must be zero, and the final index must land in i8.
+      auto raw = gep.getRawConstantIndices();
+      if (raw.empty())
+        return false;
+      auto dynamicIt = gep.getDynamicIndices().begin();
+      auto getIndex = [&](size_t i, int64_t &idx) {
+        if (raw[i] == mlir::LLVM::GEPOp::kDynamicIndex) {
+          std::optional<int64_t> c = getConstantInt(*dynamicIt++);
+          if (!c)
+            return false;
+          idx = *c;
+        } else {
+          idx = raw[i];
+        }
+        return true;
+      };
+      mlir::Type elemTy = gep.getElemType();
+      if (raw.size() == 1) {
+        int64_t idx;
+        if (!getIndex(0, idx))
+          return false;
+        if (elemTy.isInteger(8)) {
+          if (llvm::AddOverflow(offset, idx, offset))
+            return false;
+        } else if (idx != 0) {
+          return false;
+        }
+      } else {
+        int64_t first;
+        if (!getIndex(0, first) || first != 0)
+          return false;
+        mlir::Type ty = elemTy;
+        for (size_t i = 1; i < raw.size(); ++i) {
+          auto arrTy = mlir::dyn_cast<mlir::LLVM::LLVMArrayType>(ty);
+          if (!arrTy)
+            return false;
+          int64_t idx;
+          if (!getIndex(i, idx))
+            return false;
+          if (i + 1 == raw.size()) {
+            if (!arrTy.getElementType().isInteger(8))
+              return false;
+            if (llvm::AddOverflow(offset, idx, offset))
+              return false;
+          } else if (idx != 0) {
+            return false;
+          }
+          ty = arrTy.getElementType();
+        }
+      }
+      ptr = gep.getBase();
     } else {
       break;
     }
   }
 
-  auto getGlobal = ptr.getDefiningOp<cir::GetGlobalOp>();
-  if (!getGlobal)
+  mlir::FlatSymbolRefAttr symName;
+  if (auto getGlobal = ptr.getDefiningOp<cir::GetGlobalOp>())
+    symName = getGlobal.getNameAttr();
+  else if (auto addrOf = ptr.getDefiningOp<mlir::LLVM::AddressOfOp>())
+    symName =
+        mlir::FlatSymbolRefAttr::get(mod.getContext(), addrOf.getGlobalName());
+  else
     return false;
+  mlir::Operation *symbol = symbolTables.lookupSymbolIn(mod, symName);
 
   // The global may or may not have been converted already.
   std::string data;
-  mlir::Operation *symbol =
-      symbolTables.lookupSymbolIn(mod, getGlobal.getNameAttr());
   if (auto global = mlir::dyn_cast_if_present<cir::GlobalOp>(symbol)) {
     std::optional<mlir::Attribute> init = global.getInitialValue();
     auto arrayTy = mlir::dyn_cast<cir::ArrayType>(global.getSymType());

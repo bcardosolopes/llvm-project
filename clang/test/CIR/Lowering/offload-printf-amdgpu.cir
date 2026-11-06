@@ -132,3 +132,134 @@ module attributes {cir.amdgpu_printf_kind = "buffered"} {
 // BUFFERED: [[P3:%.*]] = getelementptr inbounds i8, ptr addrspace(1) [[P2]], i32 8
 // BUFFERED: [[ARG:%.*]] = zext i32 %1 to i64
 // BUFFERED: store i64 [[ARG]], ptr addrspace(1) [[P3]], align 8
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!s8i = !cir.int<s, 8>
+!u8i = !cir.int<u, 8>
+
+module attributes {cir.amdgpu_printf_kind = "buffered"} {
+  cir.global "private" constant cir_private @".str" = #cir.const_array<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIGHT!BBBBBBBBBBBBBB" : !cir.array<!s8i x 320>, trailing_zeros> : !cir.array<!s8i x 321>
+  cir.func @buffered_unsigned_stride() -> !s32i {
+    %0 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 321>>
+    %1 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!s8i x 321>> -> !cir.ptr<!s8i>
+    %2 = cir.const #cir.int<100> : !s32i
+    %3 = cir.ptr_stride %1, %2 : (!cir.ptr<!s8i>, !s32i) -> !cir.ptr<!s8i>
+    %4 = cir.const #cir.int<200> : !u8i
+    %5 = cir.ptr_stride %3, %4 : (!cir.ptr<!s8i>, !u8i) -> !cir.ptr<!s8i>
+    %6 = cir.offload.printf(%5) : (!cir.ptr<!s8i>) -> !s32i
+    cir.return %6 : !s32i
+  }
+}
+
+// An unsigned narrow index stays unsigned through the converted zext: the
+// combined offset is 100 + 200 = 300, so the folded format is the string at
+// byte 300, not byte 44 as a sign-extended -56 would give.
+// BUFFERED-LABEL: define{{.*}} i32 @buffered_unsigned_stride()
+// BUFFERED: call ptr addrspace(1) @__printf_alloc(i32 12)
+// BUFFERED: store i64 9221577133949085482, ptr addrspace(1) %{{.*}}, align 8
+// BUFFERED: !llvm.printf.fmts = !{[[FMT:![0-9]+]]}
+// BUFFERED: [[FMT]] = !{!"0:0:7ff99f8b99e6672a,RIGHT!BBBBBBBBBBBBBB"}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!s8i = !cir.int<s, 8>
+
+module attributes {cir.amdgpu_printf_kind = "buffered"} {
+  cir.func @buffered_late_global(%v: !s32i, %str: !cir.ptr<!s8i>) -> !s32i {
+    %0 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 7>>
+    %1 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!s8i x 7>> -> !cir.ptr<!s8i>
+    %2 = cir.offload.printf(%1, %v, %str) : (!cir.ptr<!s8i>, !s32i, !cir.ptr<!s8i>) -> !s32i
+    cir.return %2 : !s32i
+  }
+  cir.global "private" constant cir_private @".str" = #cir.const_array<"%d %s\0A" : !cir.array<!s8i x 6>, trailing_zeros> : !cir.array<!s8i x 7>
+}
+
+// The global is defined after the function, so the format walk reads it
+// while it is still a CIR global, not a converted LLVM global.
+// BUFFERED-LABEL: define{{.*}} i32 @buffered_late_global(i32 %0, ptr %1)
+// BUFFERED: !llvm.printf.fmts = !{[[FMT:![0-9]+]]}
+// BUFFERED: [[FMT]] = !{!"0:0:d3e1b03bc04075f4,%d %s\0A"}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!s8i = !cir.int<s, 8>
+
+module attributes {cir.amdgpu_printf_kind = "buffered"} {
+  cir.global "private" constant cir_private @".str" = #cir.const_array<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIGHT!BBBBBBBBBBBBBB" : !cir.array<!s8i x 320>, trailing_zeros> : !cir.array<!s8i x 321>
+  cir.func @buffered_negative_stride() -> !s32i {
+    %0 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 321>>
+    %1 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!s8i x 321>> -> !cir.ptr<!s8i>
+    %2 = cir.const #cir.int<300> : !s32i
+    %3 = cir.ptr_stride %1, %2 : (!cir.ptr<!s8i>, !s32i) -> !cir.ptr<!s8i>
+    %4 = cir.const #cir.int<-56> : !s8i
+    %5 = cir.ptr_stride %3, %4 : (!cir.ptr<!s8i>, !s8i) -> !cir.ptr<!s8i>
+    %6 = cir.offload.printf(%5) : (!cir.ptr<!s8i>) -> !s32i
+    cir.return %6 : !s32i
+  }
+}
+
+// A negative signed stride subtracts: the folded format is the string at
+// byte 300 - 56 = 244.
+// BUFFERED-LABEL: define{{.*}} i32 @buffered_negative_stride()
+// BUFFERED: call ptr addrspace(1) @__printf_alloc(i32 12)
+// BUFFERED: store i64 -3648738882537044841, ptr addrspace(1) %{{.*}}, align 8
+// BUFFERED: !llvm.printf.fmts = !{[[FMT:![0-9]+]]}
+// BUFFERED: [[FMT]] = !{!"0:0:cd5d135174394497,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIGHT!BBBBBBBBBBBBBB"}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!s8i = !cir.int<s, 8>
+
+module attributes {cir.amdgpu_printf_kind = "buffered"} {
+  cir.global "private" constant cir_private @".str" = #cir.const_array<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIGHT!BBBBBBBBBBBBBB" : !cir.array<!s8i x 320>, trailing_zeros> : !cir.array<!s8i x 321>
+  cir.func @buffered_get_element() -> !s32i {
+    %0 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 321>>
+    %idx = cir.const #cir.int<300> : !s32i
+    %1 = cir.get_element %0[%idx : !s32i] : !cir.ptr<!cir.array<!s8i x 321>> -> !cir.ptr<!s8i>
+    %2 = cir.offload.printf(%1) : (!cir.ptr<!s8i>) -> !s32i
+    cir.return %2 : !s32i
+  }
+}
+
+// A nonzero get_element index folds like the equivalent stride.
+// BUFFERED-LABEL: define{{.*}} i32 @buffered_get_element()
+// BUFFERED: call ptr addrspace(1) @__printf_alloc(i32 12)
+// BUFFERED: store i64 9221577133949085482, ptr addrspace(1) %{{.*}}, align 8
+// BUFFERED: !llvm.printf.fmts = !{[[FMT:![0-9]+]]}
+// BUFFERED: [[FMT]] = !{!"0:0:7ff99f8b99e6672a,RIGHT!BBBBBBBBBBBBBB"}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+!s8i = !cir.int<s, 8>
+!s16i = !cir.int<s, 16>
+!u16i = !cir.int<u, 16>
+
+module attributes {cir.amdgpu_printf_kind = "buffered"} {
+  cir.global "private" constant cir_private @".str" = #cir.const_array<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIGHT!BBBBBBBBBBBBBB" : !cir.array<!s8i x 320>, trailing_zeros> : !cir.array<!s8i x 321>
+  cir.func @buffered_zext_sext() -> !s32i {
+    %0 = cir.get_global @".str" : !cir.ptr<!cir.array<!s8i x 321>>
+    %1 = cir.cast array_to_ptrdecay %0 : !cir.ptr<!cir.array<!s8i x 321>> -> !cir.ptr<!s8i>
+    %2 = cir.const #cir.int<-56> : !s8i
+    %3 = cir.cast integral %2 : !s8i -> !s16i
+    %4 = cir.cast integral %3 : !s16i -> !u16i
+    %5 = cir.ptr_stride %1, %4 : (!cir.ptr<!s8i>, !u16i) -> !cir.ptr<!s8i>
+    %6 = cir.const #cir.int<-65180> : !s32i
+    %7 = cir.ptr_stride %5, %6 : (!cir.ptr<!s8i>, !s32i) -> !cir.ptr<!s8i>
+    %8 = cir.offload.printf(%7) : (!cir.ptr<!s8i>) -> !s32i
+    cir.return %8 : !s32i
+  }
+}
+
+// A zext of a sext keeps the sign extended bits: -56 widens to 65480,
+// and 65480 - 65180 = 300, the same folded string as the plain stride.
+// BUFFERED-LABEL: define{{.*}} i32 @buffered_zext_sext()
+// BUFFERED: call ptr addrspace(1) @__printf_alloc(i32 12)
+// BUFFERED: store i64 9221577133949085482, ptr addrspace(1) %{{.*}}, align 8
+// BUFFERED: !llvm.printf.fmts = !{[[FMT:![0-9]+]]}
+// BUFFERED: [[FMT]] = !{!"0:0:7ff99f8b99e6672a,RIGHT!BBBBBBBBBBBBBB"}
