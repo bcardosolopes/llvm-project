@@ -163,7 +163,15 @@ bool cir::CopyOp::canUsesBeRemoved(
     const MemorySlot &slot, const SmallPtrSetImpl<OpOperand *> &blockingUses,
     SmallVectorImpl<OpOperand *> &newBlockingUses,
     const DataLayout &dataLayout) {
-  if (getDst() == getSrc())
+  // Like loads and stores, a copy is promotable only when exactly one
+  // operand names the slot: a copy between the slot and a pointer
+  // derived from it that no alias exposes would otherwise be removed
+  // while the removal still uses the derived pointer.
+  if (blockingUses.size() != 1 || (*blockingUses.begin())->get() != slot.ptr)
+    return false;
+
+  // Volatile copies must stay in memory, like volatile loads and stores.
+  if (getIsVolatile())
     return false;
 
   return getCopySizeInBytes(dataLayout) ==
@@ -271,4 +279,89 @@ bool cir::CastOp::canUsesBeRemoved(
 DeletionKind cir::CastOp::removeBlockingUses(
     const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
   return DeletionKind::Delete;
+}
+
+//===----------------------------------------------------------------------===//
+// Interfaces for GetMemberOp
+//===----------------------------------------------------------------------===//
+
+// Returns the type of the member this `get_member` addresses when it can be
+// exposed as a promotable alias of its enclosing slot: a plain data member
+// of a struct, addressed in bounds, whose result points at the member type.
+// Only data members alias. Unions are not structs; pad members hold no
+// value; empty members can share storage with other members; and a
+// bit-field member points at a storage unit shared with sibling
+// bit-fields, so none of them can be projected as an independent SSA
+// member value.
+static std::optional<mlir::Type>
+getPromotableMemberType(cir::GetMemberOp getMember) {
+  auto addrPtrTy = dyn_cast<cir::PointerType>(getMember.getAddr().getType());
+  if (!addrPtrTy)
+    return std::nullopt;
+  auto recordTy = dyn_cast<cir::StructType>(addrPtrTy.getPointee());
+  if (!recordTy)
+    return std::nullopt;
+  uint64_t index = static_cast<uint64_t>(getMember.getIndex());
+  if (index >= recordTy.getMembers().size())
+    return std::nullopt;
+  llvm::ArrayRef<cir::RecordMemberKind> kinds = recordTy.getMemberKinds();
+  if (index >= kinds.size() || kinds[index] != cir::RecordMemberKind::Data)
+    return std::nullopt;
+  mlir::Type memberTy = recordTy.getElementType(index);
+  auto resultPtrTy =
+      dyn_cast<cir::PointerType>(getMember.getResult().getType());
+  if (!resultPtrTy || resultPtrTy.getPointee() != memberTy)
+    return std::nullopt;
+  return memberTy;
+}
+
+bool cir::GetMemberOp::canUsesBeRemoved(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses,
+    SmallVectorImpl<OpOperand *> &newBlockingUses,
+    const DataLayout &dataLayout) {
+  // Only forward uses when the op exposes a promotable alias. Forwarding a
+  // refused alias lets Mem2Reg judge downstream memory ops against the
+  // root slot and delete copies it should keep.
+  if (!getPromotableMemberType(*this))
+    return false;
+  return forwardToUsers(*this, newBlockingUses);
+}
+
+DeletionKind cir::GetMemberOp::removeBlockingUses(
+    const SmallPtrSetImpl<OpOperand *> &blockingUses, OpBuilder &builder) {
+  return DeletionKind::Delete;
+}
+
+void cir::GetMemberOp::getPromotableSlotAliases(
+    mlir::OpOperand &aliasedSlotPointerOperand,
+    const mlir::MemorySlot &parentSlot,
+    llvm::SmallVectorImpl<mlir::MemorySlot> &newMemorySlots) {
+  if (aliasedSlotPointerOperand.get() != getAddr())
+    return;
+  std::optional<mlir::Type> memberTy = getPromotableMemberType(*this);
+  if (!memberTy)
+    return;
+  auto addrPtrTy = cast<cir::PointerType>(getAddr().getType());
+  if (addrPtrTy.getPointee() != parentSlot.valueType)
+    return;
+  newMemorySlots.push_back(MemorySlot{getResult(), *memberTy});
+}
+
+mlir::Value cir::GetMemberOp::projectSlotValueToAliasValue(
+    mlir::OpOperand &aliasedSlotPointerOperand,
+    const mlir::MemorySlot &parentSlot, const mlir::MemorySlot &aliasSlot,
+    mlir::Value slotValue, mlir::OpBuilder &builder) {
+  return cir::ExtractMemberOp::create(builder, getLoc(), aliasSlot.valueType,
+                                      slotValue,
+                                      static_cast<uint64_t>(getIndex()));
+}
+
+mlir::Value cir::GetMemberOp::projectAliasValueToSlotValue(
+    mlir::OpOperand &aliasedSlotPointerOperand,
+    const mlir::MemorySlot &parentSlot, const mlir::MemorySlot &aliasSlot,
+    mlir::Value aliasValue, mlir::Value reachingDef,
+    mlir::OpBuilder &builder) {
+  return cir::InsertMemberOp::create(builder, getLoc(), reachingDef,
+                                     static_cast<uint64_t>(getIndex()),
+                                     aliasValue);
 }

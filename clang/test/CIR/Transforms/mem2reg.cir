@@ -5,6 +5,13 @@
 !u16i = !cir.int<u, 16>
 !rec_Whole = !cir.struct<"Whole" {data !u16i, data !u16i}>
 !rec_AllPad = !cir.struct<"AllPad" {pad !u8i}>
+!rec_Pair = !cir.struct<"Pair" {data !s32i, data !s32i}>
+!rec_Nested = !cir.struct<"Nested" {data !rec_Pair, data !s32i}>
+!rec_U = !cir.union<"U" {data !s32i, data !s32i}>
+!u32i = !cir.int<u, 32>
+!rec_S1 = !cir.struct<"S1" {data !s32i}>
+!rec_S2 = !cir.struct<"S2" {data !rec_S1}>
+!rec_BF = !cir.struct<"BF" {data !s32i, bitfield !cir.bitfield<!u8i, [#cir.bitfield_decl<!s32i, 4>]>}>
 
 module {
   // Promote CIR stack slots through the generic mem2reg pass after CFG flattening.
@@ -93,5 +100,266 @@ module {
     cir.copy %src to %slot skip_tail_padding : !cir.ptr<!rec_AllPad>
     %v = cir.load %slot : !cir.ptr<!rec_AllPad>, !rec_AllPad
     cir.return %v : !rec_AllPad
+  }
+
+  // Struct slots accessed through get_member promote: the member access
+  // aliases the enclosing slot, with extract/insert member projecting
+  // values across the alias.
+  // CHECK-LABEL: cir.func @promote_member_access
+  // CHECK-NOT: cir.alloca
+  // CHECK-NOT: cir.get_member
+  // CHECK: %[[INS:.*]] = cir.insert_member %{{.*}}[0], %arg0 : !rec_Pair, !s32i
+  // CHECK: %[[V:.*]] = cir.extract_member %[[INS]][0] : !rec_Pair -> !s32i
+  // CHECK: cir.return %[[V]] : !s32i
+  cir.func @promote_member_access(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %arg0, %m0 : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %m0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // Independent members of one slot promote independently.
+  // CHECK-LABEL: cir.func @promote_two_members
+  // CHECK-NOT: cir.alloca
+  // CHECK-NOT: cir.get_member
+  // CHECK: %[[INS0:.*]] = cir.insert_member %{{.*}}[0], %arg0 : !rec_Pair, !s32i
+  // CHECK: %[[INS1:.*]] = cir.insert_member %[[INS0]][1], %arg1 : !rec_Pair, !s32i
+  // CHECK: %[[V:.*]] = cir.extract_member %[[INS1]][1] : !rec_Pair -> !s32i
+  // CHECK: cir.return %[[V]] : !s32i
+  cir.func @promote_two_members(%a: !s32i, %b: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    %m1 = cir.get_member %slot[1] {name = "b"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %a, %m0 : !s32i, !cir.ptr<!s32i>
+    cir.store %b, %m1 : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %m1 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // Chained member accesses (through an alias of an alias) promote.
+  // CHECK-LABEL: cir.func @promote_nested_member
+  // CHECK-NOT: cir.alloca
+  // CHECK-NOT: cir.get_member
+  // CHECK: %[[PAIR:.*]] = cir.insert_member %{{.*}}[1], %arg0 : !rec_Pair, !s32i
+  // CHECK: %[[NESTED:.*]] = cir.insert_member %{{.*}}[0], %[[PAIR]] : !rec_Nested, !rec_Pair
+  // CHECK: %[[EXT0:.*]] = cir.extract_member %[[NESTED]][0] : !rec_Nested -> !rec_Pair
+  // CHECK: %[[V:.*]] = cir.extract_member %[[EXT0]][1] : !rec_Pair -> !s32i
+  // CHECK: cir.return %[[V]] : !s32i
+  cir.func @promote_nested_member(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Nested>
+    %outer = cir.get_member %slot[0] {name = "pair"} : !cir.ptr<!rec_Nested> -> !cir.ptr<!rec_Pair>
+    %inner = cir.get_member %outer[1] {name = "b"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %arg0, %inner : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %inner : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // Member stores on both sides of a diamond promote, with the member
+  // value threaded through the merge as a block argument.
+  // CHECK-LABEL: cir.func @promote_member_diamond
+  // CHECK-NOT: cir.alloca
+  // CHECK-NOT: cir.get_member
+  // CHECK: cir.insert_member %{{.*}}[0], %arg1 : !rec_Pair, !s32i
+  // CHECK: cir.insert_member %{{.*}}[0], %arg2 : !rec_Pair, !s32i
+  // CHECK: (%[[MERGED:.*]]: !rec_Pair):  // 2 preds
+  // CHECK: %[[V:.*]] = cir.extract_member %[[MERGED]][0] : !rec_Pair -> !s32i
+  // CHECK: cir.return %[[V]] : !s32i
+  cir.func @promote_member_diamond(%cond: !cir.bool, %a: !s32i, %b: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.brcond %cond ^store_a, ^store_b
+  ^store_a:
+    cir.store %a, %m0 : !s32i, !cir.ptr<!s32i>
+    cir.br ^merge
+  ^store_b:
+    cir.store %b, %m0 : !s32i, !cir.ptr<!s32i>
+    cir.br ^merge
+  ^merge:
+    %v = cir.load %m0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // Unions expose no alias: extract/insert member do not work on them.
+  // CHECK-LABEL: cir.func @no_promote_union_member
+  // CHECK: cir.alloca
+  // CHECK: cir.get_member
+  // CHECK-NOT: cir.extract_member
+  // CHECK-NOT: cir.insert_member
+  cir.func @no_promote_union_member(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "u" align(4) : !cir.ptr<!rec_U>
+    %m = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_U> -> !cir.ptr<!s32i>
+    cir.store %arg0, %m : !s32i, !cir.ptr<!s32i>
+    %v = cir.load %m : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // Bit-field members expose no alias: extract/insert member do not work
+  // on them.
+  // CHECK-LABEL: cir.func @no_promote_bitfield_member
+  // CHECK: cir.alloca
+  // CHECK: cir.get_member
+  // CHECK-NOT: cir.extract_member
+  // CHECK-NOT: cir.insert_member
+  cir.func @no_promote_bitfield_member(%arg0: !u8i) -> !u8i {
+    %slot = cir.alloca "b" align(1) : !cir.ptr<!rec_BF>
+    %m = cir.get_member %slot[1] {name = "bf"} : !cir.ptr<!rec_BF> -> !cir.ptr<!u8i>
+    cir.store %arg0, %m : !u8i, !cir.ptr<!u8i>
+    %v = cir.load %m : !cir.ptr<!u8i>, !u8i
+    cir.return %v : !u8i
+  }
+
+  // A volatile load through a member blocks promotion of the slot.
+  // CHECK-LABEL: cir.func @no_promote_volatile_member
+  // CHECK: cir.alloca
+  // CHECK: cir.load volatile
+  cir.func @no_promote_volatile_member(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %arg0, %m0 : !s32i, !cir.ptr<!s32i>
+    %v = cir.load volatile %m0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // A member pointer that escapes to a call blocks promotion of the slot.
+  // CHECK-LABEL: cir.func @no_promote_escaped_member
+  // CHECK: cir.alloca
+  // CHECK: cir.call @use
+  cir.func private @use(!cir.ptr<!s32i>)
+  cir.func @no_promote_escaped_member(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %arg0, %m0 : !s32i, !cir.ptr<!s32i>
+    cir.call @use(%m0) : (!cir.ptr<!s32i>) -> ()
+    %v = cir.load %m0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // A copy through a union member must not promote: the member exposes no
+  // alias, so the copy is judged against the root slot and must be kept.
+  // CHECK-LABEL: cir.func @no_promote_union_member_copy
+  // CHECK: cir.alloca
+  // CHECK: cir.copy
+  // CHECK: cir.get_member
+  // CHECK: cir.copy
+  // CHECK: cir.load
+  cir.func @no_promote_union_member_copy(%src: !cir.ptr<!rec_U>, %q: !cir.ptr<!s32i>) -> !s32i {
+    %slot = cir.alloca "u" align(4) : !cir.ptr<!rec_U>
+    cir.copy %src to %slot : !cir.ptr<!rec_U>
+    %m = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_U> -> !cir.ptr<!s32i>
+    cir.copy %m to %q : !cir.ptr<!s32i>
+    %v = cir.load %m : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // A copy through a bitcast must not promote away: the copy touches
+  // neither the root slot nor an exposed alias, so deleting it would
+  // drop the copied value.
+  // CHECK-LABEL: cir.func @no_promote_copy_through_bitcast
+  // CHECK: cir.alloca
+  // CHECK: cir.copy
+  // CHECK: cir.cast bitcast
+  // CHECK: cir.copy
+  // CHECK: cir.load
+  cir.func @no_promote_copy_through_bitcast(%src: !cir.ptr<!s32i>, %q: !cir.ptr<!u32i>) -> !u32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!s32i>
+    cir.copy %src to %slot : !cir.ptr<!s32i>
+    %b = cir.cast bitcast %slot : !cir.ptr<!s32i> -> !cir.ptr<!u32i>
+    cir.copy %b to %q : !cir.ptr<!u32i>
+    %v = cir.load %q : !cir.ptr<!u32i>, !u32i
+    cir.return %v : !u32i
+  }
+
+  // A member store after a whole-struct store promotes into the
+  // reaching struct value, not into undef.
+  // CHECK-LABEL: cir.func @promote_partial_update
+  // CHECK-NOT: cir.alloca
+  // CHECK-NOT: cir.get_member
+  // CHECK: %[[INS:.*]] = cir.insert_member %arg0[0], %arg1 : !rec_Pair, !s32i
+  // CHECK: cir.return %[[INS]] : !rec_Pair
+  cir.func @promote_partial_update(%whole: !rec_Pair, %v: !s32i) -> !rec_Pair {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    cir.store %whole, %slot : !rec_Pair, !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %v, %m0 : !s32i, !cir.ptr<!s32i>
+    %r = cir.load %slot : !cir.ptr<!rec_Pair>, !rec_Pair
+    cir.return %r : !rec_Pair
+  }
+
+  // An atomic load through a member blocks promotion of the slot.
+  // CHECK-LABEL: cir.func @no_promote_atomic_member
+  // CHECK: cir.alloca
+  // CHECK: cir.load atomic
+  cir.func @no_promote_atomic_member(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %arg0, %m0 : !s32i, !cir.ptr<!s32i>
+    %v = cir.load atomic(acquire) %m0 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // A copy between two member aliases at once blocks promotion:
+  // one memory op cannot be judged against a single slot.
+  // CHECK-LABEL: cir.func @no_promote_two_aliases
+  // CHECK: cir.alloca
+  // CHECK: cir.get_member
+  // CHECK: cir.copy
+  // CHECK: cir.load
+  cir.func @no_promote_two_aliases(%arg0: !s32i) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    %m1 = cir.get_member %slot[1] {name = "b"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.copy %m0 to %m1 : !cir.ptr<!s32i>
+    %v = cir.load %m1 : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // A copy from the root slot to a member reached through a bitcast
+  // must not promote: the derived pointer names no exposed alias, so
+  // removing the copy would leave a store through a destroyed op.
+  // CHECK-LABEL: cir.func @no_promote_root_to_derived_copy
+  // CHECK: cir.alloca
+  // CHECK: cir.cast bitcast
+  // CHECK: cir.get_member
+  // CHECK: cir.copy
+  cir.func @no_promote_root_to_derived_copy() {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_S1>
+    %b = cir.cast bitcast %slot : !cir.ptr<!rec_S1> -> !cir.ptr<!rec_S2>
+    %m = cir.get_member %b[0] {name = "s"} : !cir.ptr<!rec_S2> -> !cir.ptr<!rec_S1>
+    cir.copy %slot to %m : !cir.ptr<!rec_S1>
+    cir.return
+  }
+
+  // A copy from a member alias out of the slot promotes: the copy
+  // becomes a store of the extracted member value.
+  // CHECK-LABEL: cir.func @promote_copy_through_member
+  // CHECK-NOT: cir.alloca
+  // CHECK-NOT: cir.get_member
+  // CHECK: %[[WHOLE:.*]] = cir.load %arg0 : !cir.ptr<!rec_Pair>, !rec_Pair
+  // CHECK: %[[V:.*]] = cir.extract_member %[[WHOLE]][0] : !rec_Pair -> !s32i
+  // CHECK: cir.store %[[V]], %arg1 : !s32i, !cir.ptr<!s32i>
+  cir.func @promote_copy_through_member(%src: !cir.ptr<!rec_Pair>, %q: !cir.ptr<!s32i>) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    cir.copy %src to %slot : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.copy %m0 to %q : !cir.ptr<!s32i>
+    %v = cir.load %q : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
+  }
+
+  // A volatile copy through a member blocks promotion of the slot.
+  // CHECK-LABEL: cir.func @no_promote_volatile_member_copy
+  // CHECK: cir.alloca
+  // CHECK: cir.get_member
+  // CHECK: cir.store
+  // CHECK: cir.copy {{.*}} volatile : !cir.ptr<!s32i>
+  // CHECK: cir.load
+  cir.func @no_promote_volatile_member_copy(%arg0: !s32i, %q: !cir.ptr<!s32i>) -> !s32i {
+    %slot = cir.alloca "s" align(4) : !cir.ptr<!rec_Pair>
+    %m0 = cir.get_member %slot[0] {name = "a"} : !cir.ptr<!rec_Pair> -> !cir.ptr<!s32i>
+    cir.store %arg0, %m0 : !s32i, !cir.ptr<!s32i>
+    cir.copy %m0 to %q volatile : !cir.ptr<!s32i>
+    %v = cir.load %q : !cir.ptr<!s32i>, !s32i
+    cir.return %v : !s32i
   }
 }
