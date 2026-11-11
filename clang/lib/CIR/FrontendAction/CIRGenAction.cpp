@@ -25,6 +25,7 @@
 #include "clang/CodeGen/ModuleLinker.h"
 #include "clang/CodeGenUtils/BackendDiagnosticHandler.h"
 #include "clang/Frontend/CompilerInstance.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
@@ -37,7 +38,9 @@
 #include "llvm/Support/LibraryOptionsContext.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace cir;
 using namespace clang;
@@ -187,6 +190,29 @@ static void emitCIRModuleOutput(
     }
 
     LLVMModule->setDataLayout(CI.getTarget().getDataLayoutString());
+
+    // CIR lowering flattens structured control flow into blocks with a
+    // unique predecessor, inflating the CFG the LLVM optimizer sees.
+    // Merge those blocks into their predecessors before any LLVM pass
+    // runs, at -O1+ even with -disable-llvm-passes, so the emitted IR
+    // matches what a normal compile hands the optimizer.
+    // MergeBlockIntoPredecessor refuses anything unsafe to merge, so
+    // this is purely CFG compaction with no semantic effect. One pass
+    // is enough: merging a block never creates a merge opportunity in
+    // a block the pass already visited. SimplifyCFG would merge these
+    // blocks too, but it also rewrites terminators and switches, and
+    // no MLIR pass merges an LLVM dialect block into its unique
+    // predecessor, so call the shared utility directly, as
+    // CodeGenPrepare and WinEHPrepare do.
+    if (CGO.OptimizationLevel > 0) {
+      llvm::TimeTraceScope MergeScope("Merge CIR forwarding blocks");
+      for (llvm::Function &F : *LLVMModule) {
+        if (F.isDeclaration() || F.hasOptNone())
+          continue;
+        for (llvm::BasicBlock &BB : llvm::make_early_inc_range(F))
+          llvm::MergeBlockIntoPredecessor(&BB);
+      }
+    }
 
     if (AddFunctionSourceLocations)
       AddFunctionSourceLocations(*LLVMModule);

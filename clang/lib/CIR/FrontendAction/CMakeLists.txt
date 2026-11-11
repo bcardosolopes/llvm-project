@@ -4,6 +4,7 @@ set(LLVM_LINK_COMPONENTS
   ipo
   Linker
   Support
+  TransformUtils
   )
 
 add_clang_library(clangCIRFrontendAction
