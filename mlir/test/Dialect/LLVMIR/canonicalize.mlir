@@ -654,3 +654,30 @@ llvm.func @br_no_merge_blocktag() {
   llvm.blocktag <id = 1>
   llvm.return
 }
+
+// -----
+
+// Block arguments of the merged block are replaced by the branch
+// operands, one per argument.
+// CHECK-LABEL: llvm.func @br_merge_multiple_block_args
+// CHECK-NOT: llvm.br
+// CHECK: %[[V:.*]] = llvm.add %arg0, %arg1 : i32
+// CHECK: llvm.return %[[V]] : i32
+llvm.func @br_merge_multiple_block_args(%arg0 : i32, %arg1 : i32) -> i32 {
+  llvm.br ^bb1(%arg0, %arg1 : i32, i32)
+^bb1(%x : i32, %y : i32):
+  %0 = llvm.add %x, %y : i32
+  llvm.return %0 : i32
+}
+
+// -----
+
+// A successor holding only its terminator still merges.
+// CHECK-LABEL: llvm.func @br_merge_empty_successor
+// CHECK-NOT: llvm.br
+// CHECK: llvm.return %arg0 : i32
+llvm.func @br_merge_empty_successor(%arg0 : i32) -> i32 {
+  llvm.br ^bb1
+^bb1:
+  llvm.return %arg0 : i32
+}

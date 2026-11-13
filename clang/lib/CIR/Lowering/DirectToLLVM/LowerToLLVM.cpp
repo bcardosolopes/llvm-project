@@ -24,6 +24,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "mlir/Dialect/LLVMIR/Transforms/Passes.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/OpenMP/Transforms/Passes.h"
 #include "mlir/Dialect/Ptr/IR/MemorySpaceInterfaces.h"
@@ -6970,7 +6971,8 @@ std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass() {
   return std::make_unique<ConvertCIRToLLVMPass>();
 }
 
-void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP) {
+void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP,
+                              bool mergeBranchBlocks) {
   mlir::populateCIRPreLoweringPasses(pm);
   if (enableOpenMP)
     pm.addPass(mlir::omp::createMarkDeclareTargetPass());
@@ -6980,18 +6982,22 @@ void populateCIRToLLVMPasses(mlir::OpPassManager &pm, bool enableOpenMP) {
     pm.nest<mlir::LLVM::LLVMFuncOp>().addPass(
         mlir::omp::createStackToSharedPass());
   }
+  if (mergeBranchBlocks)
+    pm.nest<mlir::LLVM::LLVMFuncOp>().addPass(
+        mlir::LLVM::createLLVMMergeBranchBlocksPass());
 }
 
 std::unique_ptr<llvm::Module>
 lowerDirectlyFromCIRToLLVMIR(mlir::ModuleOp mlirModule, LLVMContext &llvmCtx,
                              bool enableOpenMP, StringRef mlirSaveTempsOutFile,
-                             llvm::vfs::FileSystem *fs) {
+                             llvm::vfs::FileSystem *fs,
+                             bool mergeBranchBlocks) {
   llvm::TimeTraceScope scope("lower from CIR to LLVM directly");
 
   mlir::MLIRContext *mlirCtx = mlirModule.getContext();
 
   mlir::PassManager pm(mlirCtx);
-  populateCIRToLLVMPasses(pm, enableOpenMP);
+  populateCIRToLLVMPasses(pm, enableOpenMP, mergeBranchBlocks);
 
   (void)mlir::applyPassManagerCLOptions(pm);
 
