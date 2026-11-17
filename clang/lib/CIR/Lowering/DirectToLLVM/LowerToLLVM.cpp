@@ -5021,14 +5021,15 @@ void ConvertCIRToLLVMPass::collectGlobalAnnotations(mlir::ModuleOp module) {
         collectedAnnotations.emplace_back(symName, annot, loc);
   };
 
-  // Walk in IR order: GlobalOps first (they appear before functions in the
-  // module body), then FuncOps. This matches OGCG's emission order.
-  module.walk([&](cir::GlobalOp op) {
+  // Iterate the module body directly instead of walking: globals and
+  // functions are top-level symbols only, so a recursive walk would visit
+  // every op in every function body for no reason. GlobalOps first (they
+  // appear before functions in the module body), then FuncOps. This matches
+  // OGCG's emission order.
+  for (cir::GlobalOp op : module.getBody()->getOps<cir::GlobalOp>())
     handleArray(op.getSymNameAttr(), op.getAnnotationsAttr(), op.getLoc());
-  });
-  module.walk([&](cir::FuncOp op) {
+  for (cir::FuncOp op : module.getBody()->getOps<cir::FuncOp>())
     handleArray(op.getSymNameAttr(), op.getAnnotationsAttr(), op.getLoc());
-  });
 }
 
 void ConvertCIRToLLVMPass::buildGlobalAnnotationsVar(
